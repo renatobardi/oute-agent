@@ -19,6 +19,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `useradd -p '*'`: conta sem senha mas não bloqueada (sshd com `UsePAM no` recusava a chave como "invalid user").
 - ai-memory roda com `OUTE_UID` (volume compartilhado) e aceita `Host: ai-memory` (`AI_MEMORY_ALLOWED_HOSTS`).
 - `oute ssh cmd` roda em login shell (carrega `~/.oute_env`); `oute logs` sem follow, `oute follow` com.
+- Jev chamado pela Decisions API do OpenRouter (`/api/alpha/decisions`, `typesafe/jev-1.13`) — chat completions dava 400.
+- `~/.oute_env` carregado via `.profile` (o `.bashrc` retorna cedo em shell não-interativo).
 - Hook loga `chosen=… via=jev|cheapest` e o motivo quando o Jev falha.
 - Locales en_US/pt_BR gerados na imagem.
+- Host key do sshd persistida em `~/.oute/ssh` (volume `oute-home`); `oute down` não invalida mais o `known_hosts`.
 - `oute` usa o `bw` da imagem quando o host não tem node; `oute-secrets` não refaz `config server` logado e erra claro em `get`.

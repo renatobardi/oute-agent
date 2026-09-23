@@ -97,8 +97,11 @@ setup_ssh() {
   else
     log "AVISO: /etc/oute/authorized_keys ausente — ssh vai recusar tudo"
   fi
+  # host key persistida no volume oute-home: sobrevive a down/rebuild, known_hosts do cliente não quebra
+  mkdir -p "$HOME/.oute/ssh"
+  [[ -f "$HOME/.oute/ssh/ssh_host_ed25519_key" ]] || ssh-keygen -q -t ed25519 -N '' -f "$HOME/.oute/ssh/ssh_host_ed25519_key"
   sudo mkdir -p /etc/ssh/keys
-  [[ -f /etc/ssh/keys/ssh_host_ed25519_key ]] || sudo ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/keys/ssh_host_ed25519_key
+  sudo cp "$HOME/.oute/ssh/ssh_host_ed25519_key" /etc/ssh/keys/ && sudo chmod 600 /etc/ssh/keys/ssh_host_ed25519_key && sudo chown root:root /etc/ssh/keys/ssh_host_ed25519_key
 }
 
 # ---------------------------------------------------------------- run
@@ -110,7 +113,10 @@ case "$MODE" in
     # env pros logins ssh
     env | grep -E '^(OPENROUTER|TYPESAFE|GH_|OUTE_|AI_MEMORY|PI_|OPENAI|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
       | sed 's/^/export /' > "$HOME/.oute_env"
-    grep -q '.oute_env' "$HOME/.bashrc" 2>/dev/null || echo '[ -f ~/.oute_env ] && source ~/.oute_env' >> "$HOME/.bashrc"
+    # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
+    for rc in "$HOME/.profile" "$HOME/.bashrc"; do
+      grep -q '.oute_env' "$rc" 2>/dev/null || printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$(cat "$rc" 2>/dev/null)" > "$rc"
+    done
 
     log "iniciando herdr server"
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &

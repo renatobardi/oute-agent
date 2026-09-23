@@ -18,8 +18,10 @@ import yaml
 from litellm.integrations.custom_logger import CustomLogger
 
 ROUTER_YAML = Path(os.environ.get("OUTE_ROUTER_YAML", "/app/router.yaml"))
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-JEV_MODEL = os.environ.get("OUTE_JEV_MODEL", "typesafe/jev-latest")
+# Jev não é chat: usa a Decisions API (alpha) do OpenRouter. Formato = TypeSafe System One:
+# {state, model, questions:{name:{type:"choice", instructions, criteria:{opt:desc}}}} -> {answers:{name:{choice}}}
+DECISIONS_URL = os.environ.get("OUTE_DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions")
+JEV_MODEL = os.environ.get("OUTE_JEV_MODEL", "typesafe/jev-1.13")
 TRIGGER = "jev-router"
 log = logging.getLogger("oute.jev_router")
 MAX_CHARS_PER_MSG = 600
@@ -75,35 +77,44 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         return None
-    names = [c["name"] for c in cands]
-    catalog = "\n".join(
-        f"- {c['name']}: {c['desc']} (in ${c.get('cost_in',0)}/M, out ${c.get('cost_out',0)}/M)" for c in cands
-    )
-    prompt = (
-        "Você é um roteador de modelos. Escolha UM candidato para atender a tarefa abaixo, "
-        "otimizando qualidade suficiente ao menor custo. Responda apenas JSON: {\"model\": \"<name>\"}.\n\n"
-        f"Candidatos:\n{catalog}\n\n"
-        f"Sinais: tools={s['needs_tools']} vision={s['needs_vision']} "
-        f"max_tokens={s['max_tokens']} input_chars≈{s['approx_input_chars']}\n\n"
-        f"Transcript (resumido):\n{s['transcript']}"
-    )
+    names = {c["name"] for c in cands}
     body = {
         "model": JEV_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "max_tokens": 50,
-        "temperature": 0,
+        "state": {
+            "transcript": s["transcript"],
+            "signals": {
+                "tools": s["needs_tools"],
+                "image_input": s["needs_vision"],
+                "max_tokens": s["max_tokens"],
+                "input_chars": s["approx_input_chars"],
+            },
+        },
+        "questions": {
+            "model": {
+                "type": "choice",
+                "instructions": (
+                    "Escolha o único modelo que deve atender esta request. Prefira o mais barato "
+                    "que atinja a qualidade necessária; escolha um mais forte só quando a tarefa "
+                    "for difícil o bastante para justificar o custo. Todos os listados são elegíveis."
+                ),
+                "criteria": {
+                    c["name"]: f"{c['desc']} (in ${c.get('cost_in',0)}/M, out ${c.get('cost_out',0)}/M)"
+                    for c in cands
+                },
+            }
+        },
     }
     try:
         async with httpx.AsyncClient(timeout=8.0) as cli:
             r = await cli.post(
-                OPENROUTER_URL,
+                DECISIONS_URL,
                 headers={"Authorization": f"Bearer {key}", "X-Title": "oute-agent jev-router"},
                 json=body,
             )
-            r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"]
-            choice = json.loads(content).get("model")
+            if r.status_code != 200:
+                log.warning("[jev-router] jev http %s: %s", r.status_code, r.text[:300])
+                return None
+            choice = r.json()["answers"]["model"]["choice"]
             return choice if choice in names else None
     except Exception as e:  # noqa: BLE001
         log.warning("[jev-router] jev falhou (%s: %s); usando fallback", type(e).__name__, e)
