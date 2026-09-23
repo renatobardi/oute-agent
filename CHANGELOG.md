@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- Perfis publicados como **presets do OpenRouter** (`@preset/oute-reasoning`, `@preset/oute-coder`, ...) pelo `router-sync` — só quando mudam (cada publicação é uma versão). Utilizáveis fora do container com a key do OpenRouter. Preset reforça `zdr` + `data_collection: deny`. O LiteLLM passa a mandar o `@preset/...`; se a publicação falhar, volta ao `models`+`provider.sort` injetado pelo hook. `--no-presets` desliga.
+
 ## [0.2.0] - 2026-09-23
 
 ### Added

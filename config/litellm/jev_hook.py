@@ -5,6 +5,7 @@ Seleção em 2 etapas quando model == "jev-router":
   2) o OpenRouter escolhe o MODELO: a request segue com `models` = todos os modelos do perfil e
      `provider.sort = {by, partition: "none"}` (ordena endpoints de todos os modelos ao vivo, com fallback).
 Também aplica ao pedir um perfil direto (model == "coder", "reasoning", ...).
+Com presets publicados pelo router-sync, o LiteLLM já manda "@preset/oute-<perfil>" e o hook não injeta nada.
 """
 from __future__ import annotations
 
@@ -124,7 +125,10 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
 
 
 def _apply_profile(data: dict, prof: dict) -> None:
-    """Roteamento do OpenRouter dentro do perfil: lista de modelos + sort ao vivo."""
+    """Roteamento do OpenRouter dentro do perfil: lista de modelos + sort ao vivo.
+    Se o perfil tem @preset publicado, o preset já carrega models/sort/provider -> nada a injetar."""
+    if prof.get("preset"):
+        return
     models = (prof.get("models") or [])[:3]   # OpenRouter rejeita `models` com mais de 3 itens
     extra = dict(data.get("extra_body") or {})
     if len(models) > 1:
@@ -159,8 +163,8 @@ class JevRouterHandler(CustomLogger):
         prof = profiles[chosen]
         data["model"] = chosen
         _apply_profile(data, prof)
-        log.warning("[jev-router] chosen=%s via=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
-                    chosen, via, prof.get("sort"), ",".join(prof.get("models", [])),
+        log.warning("[jev-router] chosen=%s via=%s preset=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
+                    chosen, via, prof.get("preset", "-"), prof.get("sort"), ",".join(prof.get("models", [])),
                     s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
         data.setdefault("metadata", {})["oute_router"] = {
             "profile": chosen, "via": via, "sort": prof.get("sort"), "models": prof.get("models", []),

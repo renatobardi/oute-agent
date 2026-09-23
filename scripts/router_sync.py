@@ -71,6 +71,43 @@ def probe_router(model: str) -> bool:
     return False
 
 
+PRESET_PREFIX = "oute-"
+
+
+def preset_config(prof: dict) -> dict:
+    """Config do preset de um perfil (mesmo formato de uma request de chat)."""
+    provider: dict = {"data_collection": "deny", "zdr": True}   # reforço do guardrail p/ uso fora do container
+    if prof["sort"]:
+        provider["sort"] = {"by": prof["sort"], "partition": "none"}
+    cfg = {"model": prof["models"][0], "provider": provider}
+    if len(prof["models"]) > 1:
+        cfg["models"] = prof["models"]
+    return cfg
+
+
+def publish_preset(name: str, cfg: dict) -> str:
+    """Cria/atualiza @preset/oute-<name> só se mudou (cada POST vira nova versão no OpenRouter)."""
+    slug = PRESET_PREFIX + name
+    cur = get(f"/presets/{slug}", auth=True)
+    now = ((cur.get("data") or {}).get("designated_version") or {}).get("config") or {}
+    if all(now.get(k) == v for k, v in cfg.items()) and set(now) >= set(cfg):
+        return "igual"
+    body = json.dumps({**cfg, "messages": [{"role": "user", "content": "x"}]}).encode()
+    req = urllib.request.Request(
+        f"{API}/presets/{slug}/chat/completions", data=body, method="POST",
+        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
+                 "User-Agent": "oute-agent/router-sync"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            v = ((json.load(r).get("data") or {}).get("designated_version") or {}).get("version")
+            return f"publicado v{v}"
+    except urllib.error.HTTPError as e:
+        print(f"preset {slug}: HTTP {e.code} {e.read()[:200]!r}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"preset {slug}: {type(e).__name__}: {e}", file=sys.stderr)
+    return "FALHOU"
+
+
 def main() -> int:
     policy = yaml.safe_load((CFG / "policy.yaml").read_text())
     allow = set(policy["providers_allow"])
@@ -203,11 +240,26 @@ def main() -> int:
             "cost_range": f"in ${cin[0]}-{cin[1]}/M, out ${cout[0]}-{cout[1]}/M",
         })
 
+    # --- presets no OpenRouter (@preset/oute-<perfil>): perfil utilizável fora do container
+    presets_ok: dict[str, bool] = {}
+    if not DRY and KEY and "--no-presets" not in sys.argv:
+        print("\nPresets:")
+        for r in router["candidates"]:
+            st = publish_preset(r["name"], preset_config(r))
+            presets_ok[r["name"]] = st != "FALHOU"
+            if presets_ok[r["name"]]:
+                r["preset"] = f"@preset/{PRESET_PREFIX}{r['name']}"
+            print(f"  @preset/{PRESET_PREFIX}{r['name']:<13} {st}")
+
+    def target(role: str, primary: str) -> str:
+        # com preset: LiteLLM manda "@preset/oute-x" pro OpenRouter (models+sort ficam no preset)
+        return f"openrouter/@preset/{PRESET_PREFIX}{role}" if presets_ok.get(role) else f"openrouter/{primary}"
+
     fb_model = next(c["primary"]["id"] for c in chosen if c["role"] == fb)
     ml = [{"model_name": "jev-router",
-           "litellm_params": {"model": f"openrouter/{fb_model}", "api_key": "os.environ/OPENROUTER_API_KEY"}}]
+           "litellm_params": {"model": target(fb, fb_model), "api_key": "os.environ/OPENROUTER_API_KEY"}}]
     ml += [{"model_name": c["role"],
-            "litellm_params": {"model": f"openrouter/{c['primary']['id']}", "api_key": "os.environ/OPENROUTER_API_KEY"}}
+            "litellm_params": {"model": target(c["role"], c["primary"]["id"]), "api_key": "os.environ/OPENROUTER_API_KEY"}}
            for c in chosen]
     litellm = {
         "model_list": ml,
