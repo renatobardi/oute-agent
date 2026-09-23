@@ -61,7 +61,8 @@ router_files_ok() {
 schedule_sync() {
   command -v crontab >/dev/null || { echo "crontab ausente; agende router-sync manualmente" >&2; return 0; }
   local line="0 4 * * * cd $ROOT && ./scripts/oute router-sync >> $OUTE_HOME/router-sync.log 2>&1"
-  ( crontab -l 2>/dev/null | grep -v 'oute router-sync'; echo "$line" ) | crontab -
+  # sem crontab prévio, `crontab -l` e `grep -v` retornam != 0; com pipefail+errexit isso mataria o `up` em silêncio
+  { crontab -l 2>/dev/null || true; } | { grep -v 'oute router-sync' || true; } | { cat; echo "$line"; } | crontab -
 }
 
 ensure_dirs() {
