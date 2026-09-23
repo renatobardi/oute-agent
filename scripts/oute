@@ -65,6 +65,17 @@ schedule_sync() {
   { crontab -l 2>/dev/null || true; } | { grep -v 'oute router-sync' || true; } | { cat; echo "$line"; } | crontab -
 }
 
+# sshd só sobe no fim do entrypoint (segredos, configs); espera o banner SSH pra `attach` logo depois não falhar
+wait_sshd() {
+  local i banner
+  for i in $(seq 1 60); do
+    banner="$(timeout 2 bash -c "exec 3<>/dev/tcp/$SSH_HOST/$SSH_PORT && head -c 7 <&3" 2>/dev/null || true)"
+    [[ "$banner" == SSH-2.0 ]] && { echo "sshd pronto (${i}s)"; return 0; }
+    sleep 1
+  done
+  echo "sshd não respondeu em 60s; veja: oute logs agent" >&2; return 1
+}
+
 ensure_dirs() {
   mkdir -p "$OUTE_HOME/shared"
   export OUTE_SHARED_DIR="$OUTE_HOME/shared"
@@ -93,7 +104,7 @@ case "${1:-}" in
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
-    "${COMPOSE[@]}" up -d "${@:2}"; "$0" status
+    "${COMPOSE[@]}" up -d "${@:2}"; "$0" status; wait_sshd
     ;;
   down)    "${COMPOSE[@]}" down "${@:2}" ;;
   restart) "$0" down; "$0" up ;;
