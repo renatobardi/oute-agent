@@ -85,16 +85,18 @@ setup_agents() {
   }
 }
 EOF
-  [[ -f "$HOME/.pi/agent/settings.json" ]] || printf '{ "defaultProvider": "oute", "defaultModel": "jev-router" }\n' > "$HOME/.pi/agent/settings.json"
+  # força provider/model default (merge, preserva o resto do settings.json)
+  local sj="$HOME/.pi/agent/settings.json"; [[ -s "$sj" ]] || echo '{}' > "$sj"
+  jq '. + {defaultProvider:"oute", defaultModel:"jev-router"}' "$sj" > "$sj.tmp" && mv "$sj.tmp" "$sj"
 
-  # Goose -> jev-router
+  # Goose -> jev-router (OPENAI_API_KEY só no config do goose; global faria o Pi auto-detectar "openai")
   mkdir -p "$HOME/.config/goose"
   cat > "$HOME/.config/goose/config.yaml" <<EOF
 GOOSE_PROVIDER: openai
 GOOSE_MODEL: jev-router
 OPENAI_HOST: ${OUTE_ROUTER_URL%/v1}
+OPENAI_API_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
 EOF
-  export OPENAI_API_KEY="${LITELLM_MASTER_KEY:-sk-oute-local}"
 
   # ai-memory: hooks + MCP em cada agente (idempotente)
   if command -v ai-memory >/dev/null; then
@@ -130,7 +132,7 @@ case "$MODE" in
     setup_agents
     setup_ssh
     # env pros logins ssh
-    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|OPENAI|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
+    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
       | sed 's/^/export /' > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
