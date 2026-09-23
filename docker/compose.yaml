@@ -61,8 +61,12 @@ services:
     image: akitaonrails/ai-memory:latest
     container_name: oute-ai-memory
     restart: unless-stopped
+    # mesmo uid do agent: o volume oute-memory é compartilhado (/data aqui, /data/ai-memory lá)
+    user: "${OUTE_UID:-1000}:${OUTE_UID:-1000}"
     command: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--enable-web"]
     environment:
+      # o servidor rejeita Host: fora desta lista; "ai-memory" é o nome DNS na rede oute
+      AI_MEMORY_ALLOWED_HOSTS: "localhost,127.0.0.1,::1,ai-memory,oute-ai-memory"
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
       AI_MEMORY_LLM_PROVIDER: ${AI_MEMORY_LLM_PROVIDER:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

@@ -64,10 +64,11 @@ case "${1:-}" in
   up)      host_secrets; ensure_dirs; mount_shared; "${COMPOSE[@]}" up -d "${@:2}"; "$0" status ;;
   down)    "${COMPOSE[@]}" down "${@:2}" ;;
   restart) "$0" down; "$0" up ;;
-  logs)    "${COMPOSE[@]}" logs -f "${@:2}" ;;
+  logs)    "${COMPOSE[@]}" logs --tail=100 "${@:2}" ;;
+  follow)  "${COMPOSE[@]}" logs -f "${@:2}" ;;
   status)  "${COMPOSE[@]}" ps ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
-  ssh)     exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" "${@:2}" ;;
+  ssh)     if [[ $# -gt 1 ]]; then exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"; else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
   version)

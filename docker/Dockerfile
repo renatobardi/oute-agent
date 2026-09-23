@@ -21,7 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv pipx \
       jq ripgrep fd-find fzf unzip zip tmux vim less htop tzdata locales \
       fuse3 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's/^# *\(en_US.UTF-8\|pt_BR.UTF-8\)/\1/' /etc/locale.gen && locale-gen
 
 # Node (agentes npm: pi, claude-code, codex, firebase-tools, bitwarden cli)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
@@ -32,7 +33,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 # --- usuário -----------------------------------------------------------------
 RUN userdel -r ubuntu 2>/dev/null || true \
-    && useradd -m -u ${OUTE_UID} -s /bin/bash ${OUTE_USER} \
+    && useradd -m -u ${OUTE_UID} -s /bin/bash -p "*" ${OUTE_USER} \
     && echo "${OUTE_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${OUTE_USER} \
     && mkdir -p /workspace /data/shared /data/ai-memory /run/sshd \
     && chown -R ${OUTE_USER}:${OUTE_USER} /workspace /data

@@ -7,6 +7,7 @@ Sem OPENROUTER_API_KEY ou em falha: escolhe o candidato elegível mais barato.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -20,6 +21,7 @@ ROUTER_YAML = Path(os.environ.get("OUTE_ROUTER_YAML", "/app/router.yaml"))
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 JEV_MODEL = os.environ.get("OUTE_JEV_MODEL", "typesafe/jev-latest")
 TRIGGER = "jev-router"
+log = logging.getLogger("oute.jev_router")
 MAX_CHARS_PER_MSG = 600
 MAX_MSGS = 12
 
@@ -103,7 +105,8 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
             content = r.json()["choices"][0]["message"]["content"]
             choice = json.loads(content).get("model")
             return choice if choice in names else None
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("[jev-router] jev falhou (%s: %s); usando fallback", type(e).__name__, e)
         return None
 
 
@@ -114,7 +117,13 @@ class JevRouterHandler(CustomLogger):
         policy = _load_policy()
         s = _summarize(data)
         cands = _eligible(policy["candidates"], s) or policy["candidates"]
-        chosen = await _ask_jev(cands, s) or _cheapest(cands) or policy.get("fallback")
+        via = "jev"
+        chosen = await _ask_jev(cands, s)
+        if not chosen:
+            via = "cheapest"
+            chosen = _cheapest(cands) or policy.get("fallback")
+        log.warning("[jev-router] chosen=%s via=%s tools=%s vision=%s in_chars=%s",
+                    chosen, via, s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
         data["model"] = chosen
         data.setdefault("metadata", {})["oute_router"] = {"chosen": chosen, "signals": {k: v for k, v in s.items() if k != "transcript"}}
         return data
