@@ -6,7 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 export OUTE_VERSION="$VERSION"
-COMPOSE=(docker compose -f "$ROOT/docker/compose.yaml")
+# --project-directory: .env e paths relativos resolvem na raiz do repo, não em docker/
+COMPOSE=(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose.yaml")
 export OUTE_HOME="${OUTE_HOME:-$HOME/.oute}"
 SSH_PORT="${OUTE_SSH_PORT:-2222}"
 SSH_HOST="${OUTE_SSH_HOST:-localhost}"

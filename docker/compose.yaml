@@ -3,7 +3,7 @@ name: oute-agent
 services:
   agent:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
       platforms: ["linux/arm64"]
       args:
@@ -52,9 +52,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
     volumes:
-      - ../config/litellm/config.yaml:/app/config.yaml:ro
-      - ../config/litellm/router.yaml:/app/router.yaml:ro
-      - ../config/litellm/jev_hook.py:/app/jev_hook.py:ro
+      - ./config/litellm/config.yaml:/app/config.yaml:ro
+      - ./config/litellm/router.yaml:/app/router.yaml:ro
+      - ./config/litellm/jev_hook.py:/app/jev_hook.py:ro
     networks: [oute]
 
   ai-memory:
