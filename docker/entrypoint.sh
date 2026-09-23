@@ -63,10 +63,29 @@ EOF
 
 # ---------------------------------------------------------------- 3. agentes
 setup_agents() {
-  # Pi -> jev-router (OpenAI-compatible). Codex/Claude Code ficam com assinatura própria.
-  mkdir -p "$HOME/.pi"
-  export PI_OPENAI_BASE_URL="${OUTE_ROUTER_URL}"
-  export PI_OPENAI_API_KEY="${LITELLM_MASTER_KEY:-sk-oute-local}"
+  # Pi -> jev-router via provider custom (~/.pi/agent/models.json). Codex/Claude Code ficam com assinatura própria.
+  mkdir -p "$HOME/.pi/agent"
+  export OUTE_ROUTER_KEY="${LITELLM_MASTER_KEY:-sk-oute-local}"
+  cat > "$HOME/.pi/agent/models.json" <<EOF
+{
+  "providers": {
+    "oute": {
+      "baseUrl": "${OUTE_ROUTER_URL}",
+      "apiKey": "\$OUTE_ROUTER_KEY",
+      "api": "openai-completions",
+      "models": [
+        { "id": "jev-router",    "name": "Jev router (auto)", "contextWindow": 200000,  "maxTokens": 32000 },
+        { "id": "claude-sonnet", "name": "Claude Sonnet",     "contextWindow": 200000,  "maxTokens": 64000 },
+        { "id": "claude-opus",   "name": "Claude Opus",       "contextWindow": 200000,  "maxTokens": 32000 },
+        { "id": "gpt-5",         "name": "GPT-5",             "contextWindow": 400000,  "maxTokens": 128000 },
+        { "id": "gemini-pro",    "name": "Gemini Pro",        "contextWindow": 1000000, "maxTokens": 65000 },
+        { "id": "qwen-coder",    "name": "Qwen Coder",        "contextWindow": 262000,  "maxTokens": 65000 }
+      ]
+    }
+  }
+}
+EOF
+  [[ -f "$HOME/.pi/agent/settings.json" ]] || printf '{ "defaultProvider": "oute", "defaultModel": "jev-router" }\n' > "$HOME/.pi/agent/settings.json"
 
   # Goose -> jev-router
   mkdir -p "$HOME/.config/goose"
@@ -111,7 +130,7 @@ case "$MODE" in
     setup_agents
     setup_ssh
     # env pros logins ssh
-    env | grep -E '^(OPENROUTER|TYPESAFE|GH_|OUTE_|AI_MEMORY|PI_|OPENAI|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
+    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|OPENAI|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
       | sed 's/^/export /' > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do

@@ -40,7 +40,7 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 
 # --- agentes e CLIs (npm) ----------------------------------------------------
 RUN npm install -g --no-fund --no-audit \
-      @mariozechner/pi-coding-agent \
+      @earendil-works/pi-coding-agent \
       @anthropic-ai/claude-code \
       @openai/codex \
       firebase-tools \

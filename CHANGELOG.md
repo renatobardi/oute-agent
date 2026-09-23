@@ -23,5 +23,6 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `~/.oute_env` carregado via `.profile` (o `.bashrc` retorna cedo em shell não-interativo).
 - Hook loga `chosen=… via=jev|cheapest` e o motivo quando o Jev falha.
 - Locales en_US/pt_BR gerados na imagem.
+- Pi: pacote `@earendil-works/pi-coding-agent` (o `@mariozechner/*` está deprecated, parado em 0.73); provider `oute` em `~/.pi/agent/models.json` apontando pro jev-router, default `jev-router`.
 - Host key do sshd persistida em `~/.oute/ssh` (volume `oute-home`); `oute down` não invalida mais o `known_hosts`.
 - `oute` usa o `bw` da imagem quando o host não tem node; `oute-secrets` não refaz `config server` logado e erra claro em `get`.
