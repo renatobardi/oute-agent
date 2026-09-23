@@ -139,31 +139,35 @@ def main() -> int:
             "providers": sorted({(e.get("tag") or "").split("/")[0] or e.get("provider_name") for e in eps}),
         }
 
-    # --- resolve candidatos
+    # --- resolve perfis: TODOS os elegíveis que casam, ordenados por (padrão, mais novo)
+    limit = int(policy.get("max_models_per_profile", 5))
     chosen, report = [], []
     for c in policy["candidates"]:
         req = c.get("requires", {})
-        pick = None
+        picked: list[dict] = []
         for pat in c["prefer"]:
-            hits = [
-                m for mid, m in eligible.items()
-                if fnmatch.fnmatch(mid, pat)
-                and (not req.get("tools") or m["tools"])
-                and (not req.get("vision") or m["vision"])
-                and m["context"] >= req.get("min_context", 0)
-            ]
-            if hits:
-                pick = max(hits, key=lambda m: m["created"])
-                break
-        if pick:
-            chosen.append({**pick, "role": c["name"], "desc": c["desc"]})
-            report.append(f"  {c['name']:<13} -> {pick['id']:<40} in ${pick['cost_in']}/M out ${pick['cost_out']}/M ctx {pick['context']} via {','.join(pick['providers'])}")
+            hits = sorted(
+                (m for mid, m in eligible.items()
+                 if fnmatch.fnmatch(mid, pat)
+                 and m not in picked
+                 and (not req.get("tools") or m["tools"])
+                 and (not req.get("vision") or m["vision"])
+                 and m["context"] >= req.get("min_context", 0)),
+                key=lambda m: -m["created"])
+            picked += hits
+        picked = picked[:limit]
+        if picked:
+            head = picked[0]
+            chosen.append({"role": c["name"], "desc": c["desc"], "sort": c.get("sort"),
+                           "models": picked, "primary": head})
+            report.append(f"  {c['name']:<13} sort={str(c.get('sort')):<10} " +
+                          ", ".join(f"{m['id']} (${m['cost_in']}/${m['cost_out']})" for m in picked))
         else:
             report.append(f"  {c['name']:<13} -> (NENHUM elegível para {c['prefer']})")
 
     rm = policy.get("router_model")
     router_ok = probe_router(rm)
-    print("Candidatos:\n" + "\n".join(report))
+    print("Perfis:\n" + "\n".join(report))
     print(f"Roteador {rm}: {'ok (Decisions API respondeu)' if router_ok else 'FALHOU na Decisions API — hook cai no fallback'}")
     if not chosen:
         print("ERRO: nenhum candidato elegível", file=sys.stderr)
@@ -175,16 +179,33 @@ def main() -> int:
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     hdr = f"# GERADO por scripts/router_sync.py em {stamp} — não editar; edite policy.yaml e rode `oute router-sync`.\n"
 
-    router = {"fallback": fb, "candidates": [
-        {"name": c["role"], "model": c["id"], "desc": c["desc"], "tools": c["tools"], "vision": c["vision"],
-         "max_output": c["max_output"], "context": c["context"], "cost_in": c["cost_in"], "cost_out": c["cost_out"]}
-        for c in chosen]}
+    def rng(ms, k):
+        v = [m[k] for m in ms]
+        return min(v), max(v)
 
-    fb_model = next(c["id"] for c in chosen if c["role"] == fb)
+    router = {"fallback": fb, "candidates": []}
+    for c in chosen:
+        ms = c["models"]
+        cin, cout = rng(ms, "cost_in"), rng(ms, "cost_out")
+        router["candidates"].append({
+            "name": c["role"],
+            "desc": c["desc"],
+            "sort": c["sort"],
+            "models": [m["id"] for m in ms],
+            # capacidades = o que TODOS os modelos do perfil garantem (fallback não pode perder tool/vision)
+            "tools": all(m["tools"] for m in ms),
+            "vision": all(m["vision"] for m in ms),
+            "context": min(m["context"] for m in ms),
+            "max_output": min(m["max_output"] or 0 for m in ms),
+            "cost_in": cin[0], "cost_out": cout[0],
+            "cost_range": f"in ${cin[0]}-{cin[1]}/M, out ${cout[0]}-{cout[1]}/M",
+        })
+
+    fb_model = next(c["primary"]["id"] for c in chosen if c["role"] == fb)
     ml = [{"model_name": "jev-router",
            "litellm_params": {"model": f"openrouter/{fb_model}", "api_key": "os.environ/OPENROUTER_API_KEY"}}]
     ml += [{"model_name": c["role"],
-            "litellm_params": {"model": f"openrouter/{c['id']}", "api_key": "os.environ/OPENROUTER_API_KEY"}}
+            "litellm_params": {"model": f"openrouter/{c['primary']['id']}", "api_key": "os.environ/OPENROUTER_API_KEY"}}
            for c in chosen]
     litellm = {
         "model_list": ml,
@@ -192,13 +213,15 @@ def main() -> int:
         "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
     }
     pi = [{"id": "jev-router", "name": "Jev router (auto)", "contextWindow": 200000, "maxTokens": 32000}] + [
-        {"id": c["role"], "name": f"{c['role']} ({c['id']})", "contextWindow": c["context"] or 128000,
-         "maxTokens": min(c["max_output"] or 32000, 64000)} for c in chosen]
+        {"id": r["name"], "name": f"{r['name']} ({len(r['models'])} modelos, {r['sort'] or 'ordem'})",
+         "contextWindow": r["context"] or 128000, "maxTokens": min(r["max_output"] or 32000, 64000)}
+        for r in router["candidates"]]
     catalog = sorted(eligible.values(), key=lambda m: (m["providers"], m["id"]))
 
     if DRY:
         print("\n--dry-run: nada gravado")
         return 0
+
     (CFG / "router.yaml").write_text(hdr + yaml.safe_dump(router, sort_keys=False, allow_unicode=True))
     (CFG / "config.yaml").write_text(hdr + yaml.safe_dump(litellm, sort_keys=False, allow_unicode=True))
     (CFG / "candidates.json").write_text(json.dumps(pi, indent=2, ensure_ascii=False) + "\n")

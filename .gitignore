@@ -4,3 +4,9 @@
 .env.*
 !.env.example
 secrets/*.env
+
+# gerados por `oute router-sync` (fonte: config/litellm/policy.yaml)
+config/litellm/router.yaml
+config/litellm/config.yaml
+config/litellm/candidates.json
+config/litellm/catalog.json

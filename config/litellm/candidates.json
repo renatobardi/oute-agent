@@ -1,8 +1,0 @@
-[
-  {
-    "id": "jev-router",
-    "name": "Jev router (auto)",
-    "contextWindow": 200000,
-    "maxTokens": 32000
-  }
-]

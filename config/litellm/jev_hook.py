@@ -1,8 +1,10 @@
 """
 jev_hook — LiteLLM pre-call hook.
-Quando model == "jev-router", pergunta ao Jev (TypeSafe, via OpenRouter) qual candidato
-de router.yaml deve atender a request e reescreve data["model"].
-Sem OPENROUTER_API_KEY ou em falha: escolhe o candidato elegível mais barato.
+Seleção em 2 etapas quando model == "jev-router":
+  1) Jev (Decisions API) escolhe o PERFIL de router.yaml pela tarefa (fallback: perfil mais barato);
+  2) o OpenRouter escolhe o MODELO: a request segue com `models` = todos os modelos do perfil e
+     `provider.sort` + `partition: none` (ordena endpoints de todos os modelos ao vivo, com fallback).
+Também aplica ao pedir um perfil direto (model == "coder", "reasoning", ...).
 """
 from __future__ import annotations
 
@@ -98,7 +100,7 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
                     "for difícil o bastante para justificar o custo. Todos os listados são elegíveis."
                 ),
                 "criteria": {
-                    c["name"]: f"{c['desc']} (in ${c.get('cost_in',0)}/M, out ${c.get('cost_out',0)}/M)"
+                    c["name"]: f"{c['desc']} Custo {c.get('cost_range', '')}. Modelos: {', '.join(c.get('models', [])[:5])}."
                     for c in cands
                 },
             }
@@ -121,11 +123,31 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
         return None
 
 
+def _apply_profile(data: dict, prof: dict) -> None:
+    """Roteamento do OpenRouter dentro do perfil: lista de modelos + sort ao vivo."""
+    models = prof.get("models") or []
+    extra = dict(data.get("extra_body") or {})
+    if len(models) > 1:
+        extra["models"] = models
+    sort = prof.get("sort")
+    if sort:
+        extra["provider"] = {**(extra.get("provider") or {}), "sort": sort, "partition": "none"}
+    if extra:
+        data["extra_body"] = extra
+
+
 class JevRouterHandler(CustomLogger):
     async def async_pre_call_hook(self, user_api_key_dict, cache, data: dict, call_type: str):
-        if data.get("model") != TRIGGER:
-            return data
         policy = _load_policy()
+        profiles = {c["name"]: c for c in policy["candidates"]}
+        requested = data.get("model")
+
+        if requested in profiles:            # perfil pedido direto (ex.: /model coder no Pi)
+            _apply_profile(data, profiles[requested])
+            return data
+        if requested != TRIGGER:
+            return data
+
         s = _summarize(data)
         cands = _eligible(policy["candidates"], s) or policy["candidates"]
         via = "jev"
@@ -133,11 +155,27 @@ class JevRouterHandler(CustomLogger):
         if not chosen:
             via = "cheapest"
             chosen = _cheapest(cands) or policy.get("fallback")
-        log.warning("[jev-router] chosen=%s via=%s tools=%s vision=%s in_chars=%s",
-                    chosen, via, s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
+        prof = profiles[chosen]
         data["model"] = chosen
-        data.setdefault("metadata", {})["oute_router"] = {"chosen": chosen, "signals": {k: v for k, v in s.items() if k != "transcript"}}
+        _apply_profile(data, prof)
+        log.warning("[jev-router] chosen=%s via=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
+                    chosen, via, prof.get("sort"), ",".join(prof.get("models", [])),
+                    s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
+        data.setdefault("metadata", {})["oute_router"] = {
+            "profile": chosen, "via": via, "sort": prof.get("sort"), "models": prof.get("models", []),
+            "signals": {k: v for k, v in s.items() if k != "transcript"},
+        }
         return data
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        # qual modelo o OpenRouter efetivamente usou dentro do perfil
+        try:
+            meta = ((kwargs.get("litellm_params") or {}).get("metadata") or {}).get("oute_router")
+            if meta:
+                log.warning("[jev-router] served profile=%s model=%s",
+                            meta.get("profile"), getattr(response_obj, "model", "?"))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 handler = JevRouterHandler()

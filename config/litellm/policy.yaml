@@ -1,12 +1,19 @@
 # Política do roteador — FONTE editada à mão.
-# `oute router-sync` consulta o OpenRouter e GERA a partir daqui:
-#   config/litellm/router.yaml      (candidatos que o Jev enxerga)
-#   config/litellm/config.yaml      (model_list do LiteLLM)
-#   config/litellm/candidates.json  (lista pro models.json do Pi)
-#   config/litellm/catalog.json     (todos os modelos elegíveis, referência)
+# `oute router-sync` (roda em todo `oute up` e diariamente via `oute schedule`) consulta o OpenRouter
+# e GERA a partir daqui (arquivos não versionados):
+#   config/litellm/router.yaml      perfis + lista de modelos de cada perfil (o que o hook usa)
+#   config/litellm/config.yaml      model_list do LiteLLM
+#   config/litellm/candidates.json  perfis pro models.json do Pi
+#   config/litellm/catalog.json     todos os modelos elegíveis consultados (referência)
+#
+# Seleção em 2 etapas por request:
+#   1) Jev (Decisions API) escolhe o PERFIL pela complexidade/tipo da tarefa;
+#   2) OpenRouter escolhe o MODELO dentro do perfil: request vai com `models: [...]` (todos do perfil)
+#      + `provider.sort` + `partition: none` -> ordena endpoints de todos os modelos por preço/latência/
+#      throughput ao vivo e faz fallback automático. `sort: null` = respeita a ordem da lista (qualidade).
 
 # Espelho do guardrail "guarda-corpo do agente externo - núcleo" (OpenRouter → Guardrails).
-# Slugs de provedor do OpenRouter (GET /api/v1/providers). Mudou o guardrail? Mude aqui e rode router-sync.
+# O guardrail é quem manda (via /models/user); esta lista só complementa o filtro local.
 providers_allow:
   - groq
   - alibaba
@@ -27,35 +34,44 @@ providers_allow:
 exclude_patterns:
   - "*:free"
 
-# Perfis que o Jev escolhe. `prefer`: padrões (fnmatch) em ordem; vence o 1º padrão com modelo
-# elegível; entre vários que casam, o mais novo (campo `created`). Requisitos filtram antes.
+# Máximo de modelos por perfil (OpenRouter aceita lista de fallback curta; mantenha <= 6).
+max_models_per_profile: 5
+
+# Perfis. `prefer`: padrões (fnmatch) em ordem de preferência; o perfil recebe TODOS os modelos
+# elegíveis que casam (ordem: padrão, depois mais novo). `requires` filtra antes.
 candidates:
   - name: reasoning
     desc: "Raciocínio profundo, arquitetura, refactors grandes, debugging difícil. Mais caro."
     requires: {tools: true}
-    prefer: ["x-ai/grok-4*", "qwen/qwen3-max*", "z-ai/glm-5*", "z-ai/glm-4.6*"]
+    sort: null            # qualidade primeiro: ordem da lista
+    prefer: ["x-ai/grok-4*", "qwen/qwen3-max*", "z-ai/glm-5*", "z-ai/glm-4.6*", "moonshotai/kimi-k2*"]
   - name: coder
     desc: "Default para coding agentic: bom equilíbrio qualidade/custo/latência."
     requires: {tools: true}
-    prefer: ["qwen/qwen3-coder-plus*", "z-ai/glm-4.6*", "z-ai/glm-4.5*", "qwen/qwen3-coder"]
+    sort: throughput
+    prefer: ["qwen/qwen3-coder-plus*", "z-ai/glm-4.6*", "z-ai/glm-4.5*", "qwen/qwen3-coder*", "mistralai/devstral-medium*"]
   - name: coder-fast
     desc: "Edits rápidos, boilerplate, testes, tarefas repetitivas. Barato e rápido."
     requires: {tools: true}
+    sort: latency
     prefer: ["x-ai/grok-code-fast*", "mistralai/devstral*", "qwen/qwen3-coder-flash*", "qwen/qwen3-coder*"]
   - name: long-context
     desc: "Contexto muito longo: repositório inteiro, documentos grandes, sumarização."
     requires: {tools: true, min_context: 500000}
-    prefer: ["x-ai/grok-4-fast*", "x-ai/grok-4.1-fast*", "minimax/minimax-*", "qwen/qwen-plus*"]
+    sort: price
+    prefer: ["x-ai/grok-4*fast*", "minimax/minimax-*", "qwen/qwen-plus*", "qwen/qwen3-coder-plus*"]
   - name: cheap
     desc: "Classificação, respostas curtas, extração simples. O mais barato possível."
     requires: {tools: true}
-    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "qwen/qwen3-*-instruct*", "xiaomi/mimo*"]
+    sort: price
+    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "qwen/qwen3-*-instruct*", "xiaomi/mimo*", "mistralai/ministral*"]
   - name: vision
     desc: "Entrada com imagem: screenshots, diagramas, UI."
     requires: {tools: true, vision: true}
-    prefer: ["qwen/qwen3-vl*", "meta-llama/llama-4-maverick*", "mistralai/pixtral*", "mistralai/mistral-medium*"]
+    sort: price
+    prefer: ["qwen/qwen3-vl*", "meta-llama/llama-4-maverick*", "mistralai/pixtral*", "mistralai/mistral-medium*", "x-ai/grok-4*"]
 
 fallback: coder
 
-# Modelo do próprio roteador (Decisions API). Só validado quanto à elegibilidade, não vira candidato.
+# Modelo do próprio roteador (Decisions API). Validado com uma decisão real, não vira candidato.
 router_model: typesafe/jev-1.13

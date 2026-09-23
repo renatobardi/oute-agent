@@ -42,6 +42,21 @@ host_secrets() {
   export OUTE_BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
 }
 
+router_sync() {
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || {
+    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+    OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
+    export OPENROUTER_API_KEY
+  }
+  docker run --rm -e OPENROUTER_API_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
+    --entrypoint python3 ghcr.io/berriai/litellm:main-latest scripts/router_sync.py "$@"
+}
+
+# gerados pelo router-sync; sem eles o compose montaria diretórios vazios
+router_files_ok() {
+  local f; for f in router.yaml config.yaml candidates.json; do [[ -s "$ROOT/config/litellm/$f" ]] || return 1; done
+}
+
 ensure_dirs() {
   mkdir -p "$OUTE_HOME/shared"
   export OUTE_SHARED_DIR="$OUTE_HOME/shared"
@@ -59,7 +74,12 @@ mount_shared() {
 
 case "${1:-}" in
   build)   "${COMPOSE[@]}" build ;;
-  up)      host_secrets; ensure_dirs; mount_shared; "${COMPOSE[@]}" up -d "${@:2}"; "$0" status ;;
+  up)
+    host_secrets; ensure_dirs; mount_shared
+    # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
+    router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
+    "${COMPOSE[@]}" up -d "${@:2}"; "$0" status
+    ;;
   down)    "${COMPOSE[@]}" down "${@:2}" ;;
   restart) "$0" down; "$0" up ;;
   logs)    "${COMPOSE[@]}" logs --tail=100 "${@:2}" ;;
@@ -71,15 +91,17 @@ case "${1:-}" in
   sync-shared) mount_shared ;;
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   router-sync)
-    # consulta OpenRouter (provedores/modelos elegíveis) e regenera config do jev-router a partir de policy.yaml
-    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-    OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
-    export OPENROUTER_API_KEY
-    docker run --rm -e OPENROUTER_API_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
-      --entrypoint python3 ghcr.io/berriai/litellm:main-latest scripts/router_sync.py "${@:2}"
+    # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
+    router_sync "${@:2}"
     if [[ " ${*:2} " != *" --dry-run "* ]] && docker ps -q -f name=oute-jev-router | grep -q .; then
       "${COMPOSE[@]}" restart jev-router agent >/dev/null && echo "jev-router e agent reiniciados"
     fi
+    ;;
+  schedule)
+    # router-sync diário às 04:00 (hora do host); idempotente
+    line="0 4 * * * cd $ROOT && ./scripts/oute router-sync >> $OUTE_HOME/router-sync.log 2>&1"
+    ( crontab -l 2>/dev/null | grep -v 'oute router-sync'; echo "$line" ) | crontab -
+    echo "agendado: $line"
     ;;
   version)
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
@@ -100,6 +122,8 @@ uso: oute <cmd>
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone
   lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
   router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
+               (roda sozinho em todo `up`)
+  schedule     agenda router-sync diário (crontab do host, 04:00)
   version      versão do repo e da imagem em execução
 EOF
     ;;
