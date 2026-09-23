@@ -6,7 +6,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       platforms: ["linux/arm64"]
-    image: ghcr.io/renatobardi/oute-agent:latest
+      args:
+        OUTE_VERSION: ${OUTE_VERSION:-0.0.0-dev}
+    image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
     container_name: oute-agent
     hostname: ${OUTE_HOSTNAME:-oute}
     restart: unless-stopped

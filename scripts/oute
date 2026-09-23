@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+export OUTE_VERSION="$VERSION"
 COMPOSE=(docker compose -f "$ROOT/docker/compose.yaml")
 OUTE_HOME="${OUTE_HOME:-$HOME/.oute}"
 SSH_PORT="${OUTE_SSH_PORT:-2222}"
@@ -56,6 +58,11 @@ case "${1:-}" in
   ssh)     exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" "${@:2}" ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
+  version)
+    echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
+    img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
+    echo "running: ${img:-não está rodando}"
+    ;;
   *)
     cat <<EOF
 uso: oute <cmd>
@@ -68,6 +75,7 @@ uso: oute <cmd>
   logs [svc]
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone
+  version      versão do repo e da imagem em execução
 EOF
     ;;
 esac

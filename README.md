@@ -33,6 +33,10 @@ cp .env.example .env            # ajuste OUTE_HOSTNAME etc.
 
 Dentro do container: `pi`, `claude`, `codex`, `goose`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `ai-memory`, `herdr`.
 
+## Versionamento
+
+SemVer, fonte única em `VERSION`. `scripts/release x.y.z` faz bump + fecha o `CHANGELOG.md` + commit + tag `vx.y.z` (push manual). A imagem recebe `org.opencontainers.image.version` e a tag `ghcr.io/renatobardi/oute-agent:x.y.z`. `oute version` mostra repo vs imagem rodando.
+
 ## Roteamento LLM (híbrido)
 
 - `claude` e `codex`: assinatura própria (login na primeira vez, persiste no volume `oute-home`).

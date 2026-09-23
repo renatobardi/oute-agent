@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# release <x.y.z> — bump VERSION, fecha seção do CHANGELOG, commit e tag anotada. Não faz push.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NEW="${1:-}"
+[[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "uso: release x.y.z" >&2; exit 2; }
+cd "$ROOT"
+[[ -z "$(git status --porcelain)" ]] || { echo "working tree sujo" >&2; exit 1; }
+git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null && { echo "tag v$NEW já existe" >&2; exit 1; }
+grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "CHANGELOG sem seção [Unreleased]" >&2; exit 1; }
+
+OLD="$(tr -d '[:space:]' < VERSION)"
+DATE="$(date +%Y-%m-%d)"
+printf '%s\n' "$NEW" > VERSION
+# [Unreleased] -> nova seção vazia + [NEW] - data
+python3 - "$NEW" "$DATE" <<'PY'
+import re,sys,pathlib
+new,date=sys.argv[1:]
+p=pathlib.Path('CHANGELOG.md'); s=p.read_text()
+s=s.replace('## [Unreleased]\n', f'## [Unreleased]\n\n## [{new}] - {date}\n',1)
+p.write_text(s)
+PY
+git add VERSION CHANGELOG.md
+git commit -q -m "chore(release): v$NEW (de $OLD)"
+git tag -a "v$NEW" -m "oute-agent v$NEW"
+echo "v$NEW criada. Publicar: git push && git push origin v$NEW"

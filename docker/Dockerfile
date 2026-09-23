@@ -3,6 +3,7 @@
 FROM ubuntu:24.04
 
 ARG TARGETARCH
+ARG OUTE_VERSION=0.0.0-dev
 ARG NODE_MAJOR=22
 ARG OUTE_USER=oute
 ARG OUTE_UID=1000
@@ -89,6 +90,12 @@ ENV HOME=/home/${OUTE_USER} \
     PATH=/home/${OUTE_USER}/.local/bin:$PATH \
     AI_MEMORY_DATA_DIR=/data/ai-memory \
     OUTE_ROUTER_URL=http://jev-router:4000/v1
+
+LABEL org.opencontainers.image.title="oute-agent" \
+      org.opencontainers.image.version="${OUTE_VERSION}" \
+      org.opencontainers.image.source="https://github.com/renatobardi/oute-agent" \
+      org.opencontainers.image.licenses="MIT"
+ENV OUTE_VERSION=${OUTE_VERSION}
 
 EXPOSE 2222
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
