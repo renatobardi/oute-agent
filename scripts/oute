@@ -81,7 +81,13 @@ mount_shared() {
 }
 
 case "${1:-}" in
-  build)   "${COMPOSE[@]}" build ;;
+  build)
+    "${COMPOSE[@]}" build "${@:2}"
+    # retenção (issue #12): build cache e imagens órfãs somem logo após o build — evita pico de disco
+    docker builder prune -af >/dev/null 2>&1 || true
+    docker image prune -f >/dev/null 2>&1 || true
+    df -h / | awk 'NR==2 {print "disco /: " $5 " usado (" $4 " livre)"}'
+    ;;
   up)
     host_secrets; ensure_dirs; mount_shared
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
