@@ -18,6 +18,7 @@ services:
     environment:
       BW_SERVER: https://vault.oute.pro
       BW_PASSWORD: ${BW_PASSWORD:-}
+      BW_SESSION: ${BW_SESSION:-}
       OUTE_VAULT_FOLDER: ${OUTE_VAULT_FOLDER:-oute-agent}
       OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex,goose}
       AI_MEMORY_SERVER_URL: http://ai-memory:49374
@@ -30,6 +31,8 @@ services:
     volumes:
       - oute-workspace:/workspace
       - oute-home:/home/oute
+      # mesmo estado do bw que o host usa no `oute up`: a BW_SESSION vale nos dois
+      - ${OUTE_HOME:-~/.oute}/bwcli:/home/oute/.config/Bitwarden CLI
       - oute-memory:/data/ai-memory
       - ${OUTE_SHARED_DIR:-~/.oute/shared}:/data/shared
       - ${OUTE_SSH_AUTHORIZED_KEYS:-~/.ssh/id_ed25519.pub}:/etc/oute/authorized_keys:ro

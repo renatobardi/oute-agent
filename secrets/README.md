@@ -19,4 +19,4 @@ No host (Mac / LXC), só dois arquivos fora do repo:
 ~/.ssh/id_ed25519.pub     # chave que entra no container
 ```
 
-Master password é pedida no `oute up` (ou `BW_PASSWORD` no ambiente).
+Master password é pedida no primeiro `oute up`; a sessão desbloqueada fica em `~/.oute/bw_session` (0600) e é reutilizada até `oute lock` ou expirar. `BW_PASSWORD` no ambiente pula o prompt.

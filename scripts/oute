@@ -30,17 +30,15 @@ export -f bw
 host_secrets() {
   need jq
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
-  if [[ -z "${BW_PASSWORD:-}" ]]; then
-    read -rsp "Vaultwarden master password: " BW_PASSWORD; echo
-    export BW_PASSWORD
-  fi
-  # OPENROUTER_API_KEY é usado pelo sidecar jev-router (não tem bw dentro dele)
+  # oute-secrets reutiliza a sessão em cache ($OUTE_HOME/bw_session) e só pede a master password se precisar
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
   OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
   export OPENROUTER_API_KEY
   # token do ai-memory (item "ai-memory", field AI_MEMORY_AUTH_TOKEN); vazio = sem auth (rede interna)
   AI_MEMORY_AUTH_TOKEN="$("$ROOT/scripts/oute-secrets.sh" get AI_MEMORY_AUTH_TOKEN 2>/dev/null || true)"
   export AI_MEMORY_AUTH_TOKEN
+  # sessão desbloqueada vai pro container (mesmo estado do bw via volume bwcli) -> sem 2º prompt
+  BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
   export OUTE_BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
 }
 
@@ -71,6 +69,7 @@ case "${1:-}" in
   ssh)     if [[ $# -gt 1 ]]; then exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"; else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
+  lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   version)
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
     img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
@@ -88,6 +87,7 @@ uso: oute <cmd>
   logs [svc]
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone
+  lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
   version      versão do repo e da imagem em execução
 EOF
     ;;

@@ -11,6 +11,7 @@ MODE="${1:-serve}"
 # Vaultwarden é mandatório. Sem ele, o container não sobe em modo serve.
 if [[ "$MODE" == "serve" ]]; then
   log "carregando segredos do Vaultwarden (${BW_SERVER:-vault.oute.pro})"
+  export BW_SESSION_FILE="$HOME/.oute/bw_session"
   SECRETS_ENV="$(oute-secrets export)" || { log "FALHA ao obter segredos do Vaultwarden"; exit 1; }
   eval "$SECRETS_ENV"; unset SECRETS_ENV
 fi

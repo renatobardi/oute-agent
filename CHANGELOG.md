@@ -11,6 +11,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - CLI de host `scripts/oute` (build/up/attach/ssh/shell/logs/status/sync-shared/version).
 - Versionamento: `VERSION`, `CHANGELOG.md`, `scripts/release`, label OCI na imagem.
 
+- Sessão do Vaultwarden em cache (`~/.oute/bw_session`, 0600) compartilhada host↔container via volume `bwcli`; master password só quando a sessão expira. `oute lock` apaga.
+
 ### Fixed
 - `oute build` não exige mais `BW_PASSWORD` (só `up`).
 - `bw` fixado em 2026.8.0 (2026.9.0 quebra com Vaultwarden 1.37.x, vaultwarden#7750).

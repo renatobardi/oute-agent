@@ -10,10 +10,11 @@
 #        item "gcp"         (Note, field GCP_SA_JSON)
 #        item "aws"         (Note, fields AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 #        item "github"      (Note, field GH_TOKEN)
-#        item "typesafe"    (Note, field TYPESAFE_API_KEY)
 #
-# uso:  source <(oute-secrets export)        # dentro do container
+# uso:  eval "$(oute-secrets export)"        # dentro do container
 #       oute-secrets get OPENROUTER_API_KEY
+#       oute-secrets lock                     # apaga sessão em cache (volta a pedir a master password)
+# sessão: cacheada em $OUTE_HOME/bw_session (0600); reutilizada enquanto `bw status` = unlocked
 set -euo pipefail
 
 BW_SERVER="${BW_SERVER:-https://vault.oute.pro}"
@@ -22,8 +23,19 @@ CLIENT_FILE="${BW_CLIENT_FILE:-/run/secrets/bw_client}"
 
 die() { printf '[oute-secrets] %s\n' "$*" >&2; exit 1; }
 
+SESSION_FILE="${BW_SESSION_FILE:-${OUTE_HOME:-$HOME/.oute}/bw_session}"
+
+session_ok() { [[ -n "${BW_SESSION:-}" ]] && bw status --session "$BW_SESSION" 2>/dev/null | grep -q '"unlocked"'; }
+
 unlock() {
-  [[ -n "${BW_SESSION:-}" ]] && bw status 2>/dev/null | grep -q '"unlocked"' && return 0
+  # 1) sessão já no ambiente ou em cache -> reutiliza
+  session_ok && return 0
+  if [[ -z "${BW_SESSION:-}" && -s "$SESSION_FILE" ]]; then
+    BW_SESSION="$(<"$SESSION_FILE")"; export BW_SESSION
+    session_ok && return 0
+    unset BW_SESSION
+  fi
+  # 2) login por API key (idempotente)
   [[ -f "$CLIENT_FILE" ]] || die "arquivo de API key não encontrado: $CLIENT_FILE"
   # shellcheck disable=SC1090
   source "$CLIENT_FILE"
@@ -31,10 +43,18 @@ unlock() {
   local st; st="$(bw status 2>/dev/null || echo '{}')"
   [[ "$(jq -r .serverUrl <<<"$st")" == "$BW_SERVER" ]] || bw config server "$BW_SERVER" >/dev/null
   [[ "$(jq -r .status <<<"$st")" == "unauthenticated" ]] && { bw login --apikey --quiet || die "bw login --apikey falhou (client_id/secret?)"; }
-  [[ -n "${BW_PASSWORD:-}" ]] || die "BW_PASSWORD não definido"
+  # 3) master password: env, ou pergunta no tty
+  if [[ -z "${BW_PASSWORD:-}" ]]; then
+    [[ -r /dev/tty ]] || die "BW_PASSWORD não definido e sem tty para perguntar"
+    read -rsp "Vaultwarden master password: " BW_PASSWORD </dev/tty; echo >/dev/tty
+    export BW_PASSWORD
+  fi
   BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)" || die "bw unlock falhou"
   export BW_SESSION
-  bw sync --quiet >/dev/null 2>&1 || true
+  # 4) cacheia a sessão (0600). `oute lock` apaga.
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  ( umask 077; printf '%s' "$BW_SESSION" > "$SESSION_FILE" )
+  bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
 }
 
 folder_id() {
@@ -60,6 +80,7 @@ export_all() {
 
 case "${1:-}" in
   export) export_all ;;
+  lock)   bw lock >/dev/null 2>&1 || true; rm -f "$SESSION_FILE"; echo "sessão apagada" ;;
   get)    [[ -n "${2:-}" ]] || die "uso: oute-secrets get VAR"; eval "$(export_all)"; [[ -n "${!2:-}" ]] || die "$2 não encontrado no vault"; printf '%s' "${!2}" ;;
-  *)      echo "uso: oute-secrets export | get VAR" >&2; exit 2 ;;
+  *)      echo "uso: oute-secrets export | get VAR | lock" >&2; exit 2 ;;
 esac
