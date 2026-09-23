@@ -1,0 +1,23 @@
+Port 2222
+AddressFamily any
+ListenAddress 0.0.0.0
+HostKey /etc/ssh/keys/ssh_host_ed25519_key
+
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile /home/oute/.ssh/authorized_keys
+AllowUsers oute
+
+UsePAM no
+X11Forwarding no
+AllowTcpForwarding yes
+AllowAgentForwarding yes
+PermitTTY yes
+PrintMotd no
+ClientAliveInterval 30
+ClientAliveCountMax 4
+AcceptEnv LANG LC_* TERM COLORTERM
+Subsystem sftp /usr/lib/openssh/sftp-server

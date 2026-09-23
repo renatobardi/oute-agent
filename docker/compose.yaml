@@ -1,0 +1,79 @@
+name: oute-agent
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      platforms: ["linux/arm64"]
+    image: ghcr.io/renatobardi/oute-agent:latest
+    container_name: oute-agent
+    hostname: ${OUTE_HOSTNAME:-oute}
+    restart: unless-stopped
+    ports:
+      - "${OUTE_SSH_PORT:-2222}:2222"
+    environment:
+      BW_SERVER: https://vault.oute.pro
+      BW_PASSWORD: ${BW_PASSWORD:?defina BW_PASSWORD (master password do Vaultwarden) no ambiente do host}
+      OUTE_VAULT_FOLDER: ${OUTE_VAULT_FOLDER:-oute-agent}
+      OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex,goose}
+      AI_MEMORY_SERVER_URL: http://ai-memory:49374
+      AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
+    secrets:
+      - bw_client
+    volumes:
+      - oute-workspace:/workspace
+      - oute-home:/home/oute
+      - oute-memory:/data/ai-memory
+      - ${OUTE_SHARED_DIR:-~/.oute/shared}:/data/shared
+      - ${OUTE_SSH_AUTHORIZED_KEYS:-~/.ssh/id_ed25519.pub}:/etc/oute/authorized_keys:ro
+    depends_on:
+      jev-router:
+        condition: service_started
+      ai-memory:
+        condition: service_started
+    networks: [oute]
+    init: true
+    tty: true
+    stdin_open: true
+
+  jev-router:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: oute-jev-router
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
+    volumes:
+      - ../config/litellm/config.yaml:/app/config.yaml:ro
+      - ../config/litellm/router.yaml:/app/router.yaml:ro
+      - ../config/litellm/jev_hook.py:/app/jev_hook.py:ro
+    networks: [oute]
+
+  ai-memory:
+    image: akitaonrails/ai-memory:latest
+    container_name: oute-ai-memory
+    restart: unless-stopped
+    command: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--enable-web"]
+    environment:
+      AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
+      AI_MEMORY_LLM_PROVIDER: ${AI_MEMORY_LLM_PROVIDER:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - oute-memory:/data
+    networks: [oute]
+
+secrets:
+  bw_client:
+    # arquivo com BW_CLIENTID=... e BW_CLIENTSECRET=... (API key do Vaultwarden), 0600
+    file: ${OUTE_BW_CLIENT_FILE:-~/.oute/bw_client.env}
+
+volumes:
+  oute-workspace:
+  oute-home:
+  oute-memory:
+
+networks:
+  oute:
+    driver: bridge

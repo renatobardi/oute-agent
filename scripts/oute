@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# oute — CLI do host (Mac ou LXC) para operar o runtime
+#   oute up | down | build | attach | shell | logs | sync-shared | status
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE=(docker compose -f "$ROOT/docker/compose.yaml")
+OUTE_HOME="${OUTE_HOME:-$HOME/.oute}"
+SSH_PORT="${OUTE_SSH_PORT:-2222}"
+SSH_HOST="${OUTE_SSH_HOST:-localhost}"
+
+die() { printf 'oute: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null || die "precisa de '$1' no host"; }
+
+# --- segredos do host: só o mínimo que o compose precisa antes do agent subir
+host_secrets() {
+  need bw; need jq
+  [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
+  if [[ -z "${BW_PASSWORD:-}" ]]; then
+    read -rsp "Vaultwarden master password: " BW_PASSWORD; echo
+    export BW_PASSWORD
+  fi
+  # OPENROUTER_API_KEY é usado pelo sidecar jev-router (não tem bw dentro dele)
+  export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+  OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
+  export OPENROUTER_API_KEY
+  # token do ai-memory (item "ai-memory", field AI_MEMORY_AUTH_TOKEN); vazio = sem auth (rede interna)
+  AI_MEMORY_AUTH_TOKEN="$("$ROOT/scripts/oute-secrets.sh" get AI_MEMORY_AUTH_TOKEN 2>/dev/null || true)"
+  export AI_MEMORY_AUTH_TOKEN
+  export OUTE_BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+}
+
+ensure_dirs() {
+  mkdir -p "$OUTE_HOME/shared"
+  export OUTE_SHARED_DIR="$OUTE_HOME/shared"
+}
+
+# --- rclone mount do bucket OCI (opcional; pula se rclone/remote ausente)
+mount_shared() {
+  command -v rclone >/dev/null || { echo "rclone ausente; /data/shared fica local"; return; }
+  rclone listremotes 2>/dev/null | grep -q '^oci:' || { echo "remote 'oci' não configurado; /data/shared fica local"; return; }
+  mountpoint -q "$OUTE_HOME/shared" 2>/dev/null && return
+  rclone mount "oci:${OUTE_BUCKET:-oute-shared}" "$OUTE_HOME/shared" \
+    --vfs-cache-mode full --dir-cache-time 30s --daemon
+  echo "montado oci:${OUTE_BUCKET:-oute-shared} em $OUTE_HOME/shared"
+}
+
+case "${1:-}" in
+  build)   "${COMPOSE[@]}" build ;;
+  up)      host_secrets; ensure_dirs; mount_shared; "${COMPOSE[@]}" up -d "${@:2}"; "$0" status ;;
+  down)    "${COMPOSE[@]}" down "${@:2}" ;;
+  restart) "$0" down; "$0" up ;;
+  logs)    "${COMPOSE[@]}" logs -f "${@:2}" ;;
+  status)  "${COMPOSE[@]}" ps ;;
+  attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
+  ssh)     exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" "${@:2}" ;;
+  shell)   exec docker exec -it oute-agent bash -l ;;
+  sync-shared) mount_shared ;;
+  *)
+    cat <<EOF
+uso: oute <cmd>
+  build        constrói a imagem (arm64)
+  up           sobe agent + jev-router + ai-memory (pede master password do Vaultwarden)
+  down|restart
+  attach       ssh -> herdr
+  ssh [cmd]    ssh direto no container
+  shell        docker exec bash
+  logs [svc]
+  status
+  sync-shared  monta bucket OCI em ~/.oute/shared via rclone
+EOF
+    ;;
+esac

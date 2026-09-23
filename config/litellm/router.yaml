@@ -1,0 +1,61 @@
+# Política de roteamento consultada pelo Jev antes de cada tarefa.
+# Ajuste descrições/custos; o hook manda isso (resumido) pro Jev junto com a request.
+fallback: claude-sonnet
+
+candidates:
+  - name: claude-opus
+    desc: "Raciocínio profundo, refactors grandes, arquitetura, debugging difícil. Caro e lento."
+    tools: true
+    vision: true
+    max_output: 32000
+    cost_in: 15.0
+    cost_out: 75.0
+  - name: claude-sonnet
+    desc: "Default para coding: bom equilíbrio qualidade/custo/latência."
+    tools: true
+    vision: true
+    max_output: 64000
+    cost_in: 3.0
+    cost_out: 15.0
+  - name: gpt-5
+    desc: "Alternativa forte para raciocínio, matemática, planejamento multi-etapas."
+    tools: true
+    vision: true
+    max_output: 128000
+    cost_in: 1.25
+    cost_out: 10.0
+  - name: gpt-5-mini
+    desc: "Tarefas simples, classificação, boilerplate, respostas curtas. Barato."
+    tools: true
+    vision: true
+    max_output: 128000
+    cost_in: 0.25
+    cost_out: 2.0
+  - name: gemini-pro
+    desc: "Contexto muito longo (1M), análise de repositórios inteiros, documentos grandes."
+    tools: true
+    vision: true
+    max_output: 65000
+    cost_in: 1.25
+    cost_out: 10.0
+  - name: gemini-flash
+    desc: "Rápido e barato com contexto longo; sumarização, extração, triagem."
+    tools: true
+    vision: true
+    max_output: 65000
+    cost_in: 0.3
+    cost_out: 2.5
+  - name: qwen-coder
+    desc: "Coding open-weight, bom custo para edits repetitivos e geração de testes."
+    tools: true
+    vision: false
+    max_output: 65000
+    cost_in: 0.2
+    cost_out: 0.8
+  - name: deepseek
+    desc: "Raciocínio barato; boa opção para tarefas longas de baixo risco."
+    tools: true
+    vision: false
+    max_output: 64000
+    cost_in: 0.2
+    cost_out: 0.8
