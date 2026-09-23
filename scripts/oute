@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 export OUTE_VERSION="$VERSION"
 COMPOSE=(docker compose -f "$ROOT/docker/compose.yaml")
-OUTE_HOME="${OUTE_HOME:-$HOME/.oute}"
+export OUTE_HOME="${OUTE_HOME:-$HOME/.oute}"
 SSH_PORT="${OUTE_SSH_PORT:-2222}"
 SSH_HOST="${OUTE_SSH_HOST:-localhost}"
 
