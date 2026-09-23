@@ -14,9 +14,20 @@ SSH_HOST="${OUTE_SSH_HOST:-localhost}"
 die() { printf 'oute: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null || die "precisa de '$1' no host"; }
 
+# sem bw nativo no host (ex.: sem node), usa o bw da própria imagem
+bw() {
+  if type -P bw >/dev/null 2>&1; then command bw "$@"; return; fi
+  mkdir -p "$OUTE_HOME/bwcli"
+  docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
+    -e BW_SESSION -e BW_CLIENTID -e BW_CLIENTSECRET -e BW_PASSWORD \
+    -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" \
+    "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" bw "$@"
+}
+export -f bw
+
 # --- segredos do host: só o mínimo que o compose precisa antes do agent subir
 host_secrets() {
-  need bw; need jq
+  need jq
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
   if [[ -z "${BW_PASSWORD:-}" ]]; then
     read -rsp "Vaultwarden master password: " BW_PASSWORD; echo

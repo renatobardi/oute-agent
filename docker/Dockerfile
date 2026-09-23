@@ -5,6 +5,8 @@ FROM ubuntu:24.04
 ARG TARGETARCH
 ARG OUTE_VERSION=0.0.0-dev
 ARG NODE_MAJOR=22
+# bw >= 2026.9.0 quebra com Vaultwarden 1.37.x (dani-garcia/vaultwarden#7750); liberar quando o fix sair
+ARG BW_CLI_VERSION=2026.8.0
 ARG OUTE_USER=oute
 ARG OUTE_UID=1000
 
@@ -41,7 +43,7 @@ RUN npm install -g --no-fund --no-audit \
       @anthropic-ai/claude-code \
       @openai/codex \
       firebase-tools \
-      @bitwarden/cli \
+      @bitwarden/cli@${BW_CLI_VERSION} \
     && npm cache clean --force
 
 # --- binários ----------------------------------------------------------------

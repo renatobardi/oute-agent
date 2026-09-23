@@ -28,8 +28,9 @@ unlock() {
   # shellcheck disable=SC1090
   source "$CLIENT_FILE"
   export BW_CLIENTID BW_CLIENTSECRET
-  bw config server "$BW_SERVER" >/dev/null
-  bw login --apikey --quiet 2>/dev/null || true
+  local st; st="$(bw status 2>/dev/null || echo '{}')"
+  [[ "$(jq -r .serverUrl <<<"$st")" == "$BW_SERVER" ]] || bw config server "$BW_SERVER" >/dev/null
+  [[ "$(jq -r .status <<<"$st")" == "unauthenticated" ]] && { bw login --apikey --quiet || die "bw login --apikey falhou (client_id/secret?)"; }
   [[ -n "${BW_PASSWORD:-}" ]] || die "BW_PASSWORD não definido"
   BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)" || die "bw unlock falhou"
   export BW_SESSION
@@ -59,6 +60,6 @@ export_all() {
 
 case "${1:-}" in
   export) export_all ;;
-  get)    eval "$(export_all)"; printf '%s' "${!2:?var}" ;;
+  get)    [[ -n "${2:-}" ]] || die "uso: oute-secrets get VAR"; eval "$(export_all)"; [[ -n "${!2:-}" ]] || die "$2 não encontrado no vault"; printf '%s' "${!2}" ;;
   *)      echo "uso: oute-secrets export | get VAR" >&2; exit 2 ;;
 esac

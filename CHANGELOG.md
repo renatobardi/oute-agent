@@ -10,3 +10,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - Segredos exclusivamente via Vaultwarden (`oute-secrets`).
 - CLI de host `scripts/oute` (build/up/attach/ssh/shell/logs/status/sync-shared/version).
 - Versionamento: `VERSION`, `CHANGELOG.md`, `scripts/release`, label OCI na imagem.
+
+### Fixed
+- `oute build` não exige mais `BW_PASSWORD` (só `up`).
+- `bw` fixado em 2026.8.0 (2026.9.0 quebra com Vaultwarden 1.37.x, vaultwarden#7750).
+- `extra_hosts` para `vault.oute.pro` (vhost só no listener Tailscale; Docker não herda /etc/hosts).
+- `OUTE_UID` como build arg (bind mounts em hosts com uid ≠ 1000).
+- `oute` usa o `bw` da imagem quando o host não tem node; `oute-secrets` não refaz `config server` logado e erra claro em `get`.

@@ -8,6 +8,7 @@ services:
       platforms: ["linux/arm64"]
       args:
         OUTE_VERSION: ${OUTE_VERSION:-0.0.0-dev}
+        OUTE_UID: ${OUTE_UID:-1000}
     image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
     container_name: oute-agent
     hostname: ${OUTE_HOSTNAME:-oute}
@@ -16,11 +17,14 @@ services:
       - "${OUTE_SSH_PORT:-2222}:2222"
     environment:
       BW_SERVER: https://vault.oute.pro
-      BW_PASSWORD: ${BW_PASSWORD:?defina BW_PASSWORD (master password do Vaultwarden) no ambiente do host}
+      BW_PASSWORD: ${BW_PASSWORD:-}
       OUTE_VAULT_FOLDER: ${OUTE_VAULT_FOLDER:-oute-agent}
       OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex,goose}
       AI_MEMORY_SERVER_URL: http://ai-memory:49374
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
+    # vault.oute.pro só existe no listener Tailscale; containers Docker não herdam /etc/hosts do host
+    extra_hosts:
+      - "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}"
     secrets:
       - bw_client
     volumes:
