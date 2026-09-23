@@ -51,12 +51,13 @@ candidates:
     desc: "Raciocínio profundo, arquitetura, refactors grandes, debugging difícil. Mais caro."
     requires: {tools: true}
     sort: null            # qualidade primeiro: ordem da lista
-    prefer: ["z-ai/glm-5*", "moonshotai/kimi-k2*", "deepseek/deepseek-v3*", "x-ai/grok-4.[0-9]", "deepseek/deepseek-r1*", "z-ai/glm-4.6", "qwen/qwen3-max*"]
+    # versões "cheias": [0-9] no fim exclui sufixos -flash/-flashx/-code/-air
+    prefer: ["z-ai/glm-5.[0-9]", "moonshotai/kimi-k2.[0-9]", "deepseek/deepseek-v3.[0-9]", "x-ai/grok-4.[0-9]", "deepseek/deepseek-r1*", "qwen/qwen3-max*"]
   - name: coder
     desc: "Default para coding agentic: bom equilíbrio qualidade/custo/latência."
     requires: {tools: true}
     sort: throughput
-    prefer: ["z-ai/glm-4.6", "moonshotai/kimi-k2*", "qwen/qwen3-coder-plus*", "deepseek/deepseek-v3*", "z-ai/glm-4.5", "qwen/qwen3-coder"]
+    prefer: ["z-ai/glm-5.[0-9]", "moonshotai/kimi-k2*-code", "qwen/qwen3-coder-plus*", "deepseek/deepseek-v3.[0-9]", "z-ai/glm-4.6", "qwen/qwen3-coder"]
   - name: coder-fast
     desc: "Edits rápidos, boilerplate, testes, tarefas repetitivas. Barato e rápido."
     requires: {tools: true}
