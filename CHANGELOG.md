@@ -4,7 +4,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-22
+### Added
+- `oute router-sync`: consulta o OpenRouter (`/providers`, `/models`, `/models/user`, `/models/{id}/endpoints`) e gera `router.yaml`, `config.yaml`, `candidates.json` e `catalog.json` a partir de `config/litellm/policy.yaml` (espelho do guardrail: allowlist de provedores, perfis com padrões de modelo). Pi lista os perfis gerados.
+
+### Changed
+- Candidatos do router viram **perfis** (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) resolvidos pra modelos elegíveis no guardrail; Anthropic/OpenAI/Google/DeepSeek saem (fora da allowlist).
 
 ### Added
 - Runtime container (Ubuntu 24.04 arm64): herdr, Pi, Claude Code, Codex, Goose, ai-memory, gh, oci, gcloud, aws, firebase-tools, rclone, bw, sshd.

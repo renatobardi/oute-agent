@@ -36,6 +36,7 @@ services:
       - oute-memory:/data/ai-memory
       - ${OUTE_SHARED_DIR:-~/.oute/shared}:/data/shared
       - ${OUTE_SSH_AUTHORIZED_KEYS:-~/.ssh/id_ed25519.pub}:/etc/oute/authorized_keys:ro
+      - ./config/litellm/candidates.json:/etc/oute/candidates.json:ro
     depends_on:
       jev-router:
         condition: service_started

@@ -70,6 +70,17 @@ case "${1:-}" in
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
+  router-sync)
+    # consulta OpenRouter (provedores/modelos elegíveis) e regenera config do jev-router a partir de policy.yaml
+    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+    OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
+    export OPENROUTER_API_KEY
+    docker run --rm -e OPENROUTER_API_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
+      --entrypoint python3 ghcr.io/berriai/litellm:main-latest scripts/router_sync.py "${@:2}"
+    if [[ " ${*:2} " != *" --dry-run "* ]] && docker ps -q -f name=oute-jev-router | grep -q .; then
+      "${COMPOSE[@]}" restart jev-router agent >/dev/null && echo "jev-router e agent reiniciados"
+    fi
+    ;;
   version)
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
     img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
@@ -88,6 +99,7 @@ uso: oute <cmd>
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone
   lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
+  router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
   version      versão do repo e da imagem em execução
 EOF
     ;;

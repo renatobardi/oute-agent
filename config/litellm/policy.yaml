@@ -1,0 +1,60 @@
+# Política do roteador — FONTE editada à mão.
+# `oute router-sync` consulta o OpenRouter e GERA a partir daqui:
+#   config/litellm/router.yaml      (candidatos que o Jev enxerga)
+#   config/litellm/config.yaml      (model_list do LiteLLM)
+#   config/litellm/candidates.json  (lista pro models.json do Pi)
+#   config/litellm/catalog.json     (todos os modelos elegíveis, referência)
+
+# Espelho do guardrail "guarda-corpo do agente externo - núcleo" (OpenRouter → Guardrails).
+# Slugs de provedor do OpenRouter (GET /api/v1/providers). Mudou o guardrail? Mude aqui e rode router-sync.
+providers_allow:
+  - groq
+  - alibaba
+  - xiaomi
+  - xai
+  - z-ai
+  - typesafe
+  - tencent
+  - sakana
+  - nvidia
+  - mistral
+  - minimax
+  - meta
+  - cerebras
+
+# Nunca usar variantes :free (guardrail proíbe endpoints gratuitos que treinam/publicam).
+exclude_patterns:
+  - "*:free"
+
+# Perfis que o Jev escolhe. `prefer`: padrões (fnmatch) em ordem; vence o 1º padrão com modelo
+# elegível; entre vários que casam, o mais novo (campo `created`). Requisitos filtram antes.
+candidates:
+  - name: reasoning
+    desc: "Raciocínio profundo, arquitetura, refactors grandes, debugging difícil. Mais caro."
+    requires: {tools: true}
+    prefer: ["x-ai/grok-4*", "qwen/qwen3-max*", "z-ai/glm-5*", "z-ai/glm-4.6*"]
+  - name: coder
+    desc: "Default para coding agentic: bom equilíbrio qualidade/custo/latência."
+    requires: {tools: true}
+    prefer: ["qwen/qwen3-coder-plus*", "z-ai/glm-4.6*", "z-ai/glm-4.5*", "qwen/qwen3-coder"]
+  - name: coder-fast
+    desc: "Edits rápidos, boilerplate, testes, tarefas repetitivas. Barato e rápido."
+    requires: {tools: true}
+    prefer: ["x-ai/grok-code-fast*", "mistralai/devstral*", "qwen/qwen3-coder-flash*", "qwen/qwen3-coder*"]
+  - name: long-context
+    desc: "Contexto muito longo: repositório inteiro, documentos grandes, sumarização."
+    requires: {tools: true, min_context: 500000}
+    prefer: ["x-ai/grok-4-fast*", "x-ai/grok-4.1-fast*", "minimax/minimax-*", "qwen/qwen-plus*"]
+  - name: cheap
+    desc: "Classificação, respostas curtas, extração simples. O mais barato possível."
+    requires: {tools: true}
+    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "qwen/qwen3-*-instruct*", "xiaomi/mimo*"]
+  - name: vision
+    desc: "Entrada com imagem: screenshots, diagramas, UI."
+    requires: {tools: true, vision: true}
+    prefer: ["qwen/qwen3-vl*", "meta-llama/llama-4-maverick*", "mistralai/pixtral*", "mistralai/mistral-medium*"]
+
+fallback: coder
+
+# Modelo do próprio roteador (Decisions API). Só validado quanto à elegibilidade, não vira candidato.
+router_model: typesafe/jev-1.13

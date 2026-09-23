@@ -67,25 +67,12 @@ setup_agents() {
   # Pi -> jev-router via provider custom (~/.pi/agent/models.json). Codex/Claude Code ficam com assinatura própria.
   mkdir -p "$HOME/.pi/agent"
   export OUTE_ROUTER_KEY="${LITELLM_MASTER_KEY:-sk-oute-local}"
-  cat > "$HOME/.pi/agent/models.json" <<EOF
-{
-  "providers": {
-    "oute": {
-      "baseUrl": "${OUTE_ROUTER_URL}",
-      "apiKey": "\$OUTE_ROUTER_KEY",
-      "api": "openai-completions",
-      "models": [
-        { "id": "jev-router",    "name": "Jev router (auto)", "contextWindow": 200000,  "maxTokens": 32000 },
-        { "id": "claude-sonnet", "name": "Claude Sonnet",     "contextWindow": 200000,  "maxTokens": 64000 },
-        { "id": "claude-opus",   "name": "Claude Opus",       "contextWindow": 200000,  "maxTokens": 32000 },
-        { "id": "gpt-5",         "name": "GPT-5",             "contextWindow": 400000,  "maxTokens": 128000 },
-        { "id": "gemini-pro",    "name": "Gemini Pro",        "contextWindow": 1000000, "maxTokens": 65000 },
-        { "id": "qwen-coder",    "name": "Qwen Coder",        "contextWindow": 262000,  "maxTokens": 65000 }
-      ]
-    }
-  }
-}
-EOF
+  # modelos = perfis gerados por `oute router-sync` (config/litellm/candidates.json)
+  local models='[{"id":"jev-router","name":"Jev router (auto)","contextWindow":200000,"maxTokens":32000}]'
+  [[ -s /etc/oute/candidates.json ]] && models="$(cat /etc/oute/candidates.json)"
+  jq -n --arg url "$OUTE_ROUTER_URL" --argjson models "$models" '{
+    providers: { oute: { baseUrl: $url, apiKey: "$OUTE_ROUTER_KEY", api: "openai-completions", models: $models } }
+  }' > "$HOME/.pi/agent/models.json"
   # força provider/model default (merge, preserva o resto do settings.json)
   local sj="$HOME/.pi/agent/settings.json"; [[ -s "$sj" ]] || echo '{}' > "$sj"
   jq '. + {defaultProvider:"oute", defaultModel:"jev-router"}' "$sj" > "$sj.tmp" && mv "$sj.tmp" "$sj"
