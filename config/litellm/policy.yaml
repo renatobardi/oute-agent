@@ -8,26 +8,30 @@
 #
 # Seleção em 2 etapas por request:
 #   1) Jev (Decisions API) escolhe o PERFIL pela complexidade/tipo da tarefa;
-#   2) OpenRouter escolhe o MODELO dentro do perfil: request vai com `models: [...]` (todos do perfil)
-#      + `provider.sort` + `partition: none` -> ordena endpoints de todos os modelos por preço/latência/
-#      throughput ao vivo e faz fallback automático. `sort: null` = respeita a ordem da lista (qualidade).
+#   2) OpenRouter escolhe o MODELO dentro do perfil: `models: [...]` (<= 3) + `provider.sort = {by, partition: none}`
+#      -> ordena endpoints de todos os modelos ao vivo e faz fallback. `sort: null` = respeita a ordem (qualidade).
 
-# Espelho do guardrail "guarda-corpo do agente externo - núcleo" (OpenRouter → Guardrails).
-# O guardrail é quem manda (via /models/user); esta lista só complementa o filtro local.
+# Espelho do guardrail "oute-agent guardrail - core" (OpenRouter → Guardrails), atualizado 2026-09-23.
+# Política: nada direto de criadores chineses/1st-party de terceiros; modelos abertos (Kimi, DeepSeek, GLM, Qwen,
+# gpt-oss, Llama) vêm por hosts neutros (Fireworks, Together, DeepInfra, Baseten, Groq, Cerebras).
+# O guardrail é quem manda (via /models/user, inclusive ZDR); esta lista só complementa o filtro local.
 providers_allow:
+  # hosts de inferência
   - groq
-  - alibaba
-  - xiaomi
+  - cerebras
+  - fireworks
+  - together
+  - deepinfra
+  - baseten
+  # criadores que servem os próprios modelos
   - xai
   - z-ai
-  - typesafe
-  - tencent
-  - sakana
-  - nvidia
+  - alibaba
   - mistral
   - minimax
-  - meta
-  - cerebras
+  - xiaomi
+  # roteador (Jev)
+  - typesafe
 
 # Sem variantes :free (decisão 2026-09-23): rate limit baixo quebra loop de agente e
 # endpoints gratuitos costumam reter/treinar com prompts (que levam código do repo).
@@ -38,24 +42,26 @@ exclude_patterns:
 # Máximo de modelos por perfil. Limite do OpenRouter: `models` com no máximo 3 itens (HTTP 400 acima disso).
 max_models_per_profile: 3
 
-# Perfis. `prefer`: padrões (fnmatch) em ordem de preferência; o perfil recebe TODOS os modelos
-# elegíveis que casam (ordem: padrão, depois mais novo). `requires` filtra antes.
+# Perfis. `prefer`: padrões (fnmatch) em ordem de preferência.
+# Cada padrão contribui com NO MÁXIMO 1 modelo (o mais novo elegível) -> o perfil mistura famílias
+# (fallback real entre modelos diferentes, não 3 versões do mesmo). Os 3 primeiros padrões com match vencem.
+# Preferências do Bardi: GLM, Kimi, DeepSeek, Grok.
 candidates:
   - name: reasoning
     desc: "Raciocínio profundo, arquitetura, refactors grandes, debugging difícil. Mais caro."
     requires: {tools: true}
     sort: null            # qualidade primeiro: ordem da lista
-    prefer: ["x-ai/grok-4*", "qwen/qwen3-max*", "z-ai/glm-5*", "z-ai/glm-4.6*", "moonshotai/kimi-k2*"]
+    prefer: ["z-ai/glm-5*", "moonshotai/kimi-k2*", "deepseek/deepseek-v3*", "x-ai/grok-4.[0-9]", "deepseek/deepseek-r1*", "z-ai/glm-4.6", "qwen/qwen3-max*"]
   - name: coder
     desc: "Default para coding agentic: bom equilíbrio qualidade/custo/latência."
     requires: {tools: true}
     sort: throughput
-    prefer: ["qwen/qwen3-coder-plus*", "z-ai/glm-4.6*", "z-ai/glm-4.5*", "qwen/qwen3-coder*", "mistralai/devstral-medium*"]
+    prefer: ["z-ai/glm-4.6", "moonshotai/kimi-k2*", "qwen/qwen3-coder-plus*", "deepseek/deepseek-v3*", "z-ai/glm-4.5", "qwen/qwen3-coder"]
   - name: coder-fast
     desc: "Edits rápidos, boilerplate, testes, tarefas repetitivas. Barato e rápido."
     requires: {tools: true}
     sort: latency
-    prefer: ["x-ai/grok-code-fast*", "mistralai/devstral*", "qwen/qwen3-coder-flash*", "qwen/qwen3-coder*"]
+    prefer: ["x-ai/grok-code-fast*", "openai/gpt-oss-120b", "mistralai/devstral*", "qwen/qwen3-coder-flash*", "z-ai/glm-4.5-air*"]
   - name: long-context
     desc: "Contexto muito longo: repositório inteiro, documentos grandes, sumarização."
     requires: {tools: true, min_context: 500000}
@@ -65,12 +71,12 @@ candidates:
     desc: "Classificação, respostas curtas, extração simples. O mais barato possível."
     requires: {tools: true}
     sort: price
-    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "mistralai/ministral*", "xiaomi/mimo*", "qwen/qwen3-[0-9]*b-a*b-instruct*"]
+    prefer: ["openai/gpt-oss-20b", "mistralai/mistral-small*", "deepseek/deepseek-v3*", "meta-llama/llama-4-scout*", "mistralai/ministral*", "qwen/qwen3-[0-9]*b-a*b-instruct*"]
   - name: vision
     desc: "Entrada com imagem: screenshots, diagramas, UI."
     requires: {tools: true, vision: true}
     sort: price
-    prefer: ["qwen/qwen3-vl*", "meta-llama/llama-4-maverick*", "mistralai/pixtral*", "mistralai/mistral-medium*", "x-ai/grok-4*"]
+    prefer: ["qwen/qwen3-vl*", "z-ai/glm-4.*v", "meta-llama/llama-4-maverick*", "mistralai/pixtral*", "x-ai/grok-4*"]
 
 fallback: coder
 

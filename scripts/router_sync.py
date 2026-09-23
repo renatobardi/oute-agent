@@ -139,7 +139,7 @@ def main() -> int:
             "providers": sorted({(e.get("tag") or "").split("/")[0] or e.get("provider_name") for e in eps}),
         }
 
-    # --- resolve perfis: TODOS os elegíveis que casam, ordenados por (padrão, mais novo)
+    # --- resolve perfis: por padrão (em ordem), o modelo elegível mais novo; até `limit`
     limit = min(int(policy.get("max_models_per_profile", 3)), 3)  # OpenRouter: `models` <= 3
     chosen, report = [], []
     for c in policy["candidates"]:
@@ -154,8 +154,10 @@ def main() -> int:
                  and (not req.get("vision") or m["vision"])
                  and m["context"] >= req.get("min_context", 0)),
                 key=lambda m: -m["created"])
-            picked += hits
-        picked = picked[:limit]
+            if hits:
+                picked.append(hits[0])        # 1 por padrão: o mais novo -> perfil mistura famílias
+            if len(picked) >= limit:
+                break
         if picked:
             head = picked[0]
             chosen.append({"role": c["name"], "desc": c["desc"], "sort": c.get("sort"),

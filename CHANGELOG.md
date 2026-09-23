@@ -11,6 +11,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `router-sync` roda em todo `oute up` (se falhar, mantém o último catálogo) e diariamente via `oute schedule` (crontab 04:00).
 
 ### Changed
+- Allowlist do guardrail revista: modelos abertos (Kimi, DeepSeek, GLM, Qwen, gpt-oss, Llama) via hosts neutros (Fireworks, Together, DeepInfra, Baseten, Groq, Cerebras); saem Tencent, Sakana, NVIDIA, Meta. Perfis priorizam GLM, Kimi, DeepSeek e Grok; cada padrão contribui com 1 modelo (perfil mistura famílias).
 - Arquivos gerados do router (`router.yaml`, `config.yaml`, `candidates.json`, `catalog.json`) saem do git; fonte única é `policy.yaml`.
 - Candidatos do router viram **perfis** (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) resolvidos pra modelos elegíveis no guardrail; Anthropic/OpenAI/Google/DeepSeek saem (fora da allowlist).
 
