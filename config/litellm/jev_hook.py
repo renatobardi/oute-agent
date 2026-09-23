@@ -3,7 +3,7 @@ jev_hook — LiteLLM pre-call hook.
 Seleção em 2 etapas quando model == "jev-router":
   1) Jev (Decisions API) escolhe o PERFIL de router.yaml pela tarefa (fallback: perfil mais barato);
   2) o OpenRouter escolhe o MODELO: a request segue com `models` = todos os modelos do perfil e
-     `provider.sort` + `partition: none` (ordena endpoints de todos os modelos ao vivo, com fallback).
+     `provider.sort = {by, partition: "none"}` (ordena endpoints de todos os modelos ao vivo, com fallback).
 Também aplica ao pedir um perfil direto (model == "coder", "reasoning", ...).
 """
 from __future__ import annotations
@@ -131,7 +131,8 @@ def _apply_profile(data: dict, prof: dict) -> None:
         extra["models"] = models
     sort = prof.get("sort")
     if sort:
-        extra["provider"] = {**(extra.get("provider") or {}), "sort": sort, "partition": "none"}
+        # formato do OpenRouter: provider.sort = {by, partition}; partition "none" ordena entre TODOS os modelos da lista
+        extra["provider"] = {**(extra.get("provider") or {}), "sort": {"by": sort, "partition": "none"}}
     if extra:
         data["extra_body"] = extra
 
@@ -172,8 +173,12 @@ class JevRouterHandler(CustomLogger):
         try:
             meta = ((kwargs.get("litellm_params") or {}).get("metadata") or {}).get("oute_router")
             if meta:
-                log.warning("[jev-router] served profile=%s model=%s",
-                            meta.get("profile"), getattr(response_obj, "model", "?"))
+                # response_obj.model vem com o nome do grupo do LiteLLM; o modelo real está no hidden_params/raw
+                hp = getattr(response_obj, "_hidden_params", {}) or {}
+                real = (hp.get("original_response") or {}) if isinstance(hp.get("original_response"), dict) else {}
+                served = real.get("model") or (hp.get("additional_headers") or {}).get("llm_provider-x-model") \
+                    or kwargs.get("model") or getattr(response_obj, "model", "?")
+                log.warning("[jev-router] served profile=%s model=%s", meta.get("profile"), served)
         except Exception:  # noqa: BLE001
             pass
 
