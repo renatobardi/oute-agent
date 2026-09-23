@@ -14,7 +14,8 @@ services:
     hostname: ${OUTE_HOSTNAME:-oute}
     restart: unless-stopped
     ports:
-      - "${OUTE_SSH_PORT:-2222}:2222"
+      # só loopback por padrão: host tem IP público e o Docker publica portas por fora do ufw (#17)
+      - "${OUTE_SSH_BIND:-127.0.0.1}:${OUTE_SSH_PORT:-2222}:2222"
     environment:
       BW_SERVER: https://vault.oute.pro
       BW_PASSWORD: ${BW_PASSWORD:-}

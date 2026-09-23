@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Security
+- sshd do container publicado só em `127.0.0.1` por padrão (`OUTE_SSH_BIND`); antes ficava em `0.0.0.0:2222`, exposto no IP público do oute-server porque o Docker publica portas por fora do ufw (#17).
+
 ## [0.3.0] - 2026-09-23
 
 ### Added
