@@ -140,7 +140,7 @@ def main() -> int:
         }
 
     # --- resolve perfis: TODOS os elegíveis que casam, ordenados por (padrão, mais novo)
-    limit = int(policy.get("max_models_per_profile", 5))
+    limit = min(int(policy.get("max_models_per_profile", 3)), 3)  # OpenRouter: `models` <= 3
     chosen, report = [], []
     for c in policy["candidates"]:
         req = c.get("requires", {})

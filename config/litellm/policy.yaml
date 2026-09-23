@@ -33,9 +33,10 @@ providers_allow:
 # endpoints gratuitos costumam reter/treinar com prompts (que levam código do repo).
 exclude_patterns:
   - "*:free"
+  - "*:batch"          # endpoints de lote (assíncronos/lentos) — inúteis pra agente interativo
 
-# Máximo de modelos por perfil (OpenRouter aceita lista de fallback curta; mantenha <= 6).
-max_models_per_profile: 5
+# Máximo de modelos por perfil. Limite do OpenRouter: `models` com no máximo 3 itens (HTTP 400 acima disso).
+max_models_per_profile: 3
 
 # Perfis. `prefer`: padrões (fnmatch) em ordem de preferência; o perfil recebe TODOS os modelos
 # elegíveis que casam (ordem: padrão, depois mais novo). `requires` filtra antes.
@@ -64,7 +65,7 @@ candidates:
     desc: "Classificação, respostas curtas, extração simples. O mais barato possível."
     requires: {tools: true}
     sort: price
-    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "qwen/qwen3-*-instruct*", "xiaomi/mimo*", "mistralai/ministral*"]
+    prefer: ["mistralai/mistral-small*", "meta-llama/llama-4-scout*", "mistralai/ministral*", "xiaomi/mimo*", "qwen/qwen3-[0-9]*b-a*b-instruct*"]
   - name: vision
     desc: "Entrada com imagem: screenshots, diagramas, UI."
     requires: {tools: true, vision: true}

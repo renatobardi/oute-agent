@@ -125,7 +125,7 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
 
 def _apply_profile(data: dict, prof: dict) -> None:
     """Roteamento do OpenRouter dentro do perfil: lista de modelos + sort ao vivo."""
-    models = prof.get("models") or []
+    models = (prof.get("models") or [])[:3]   # OpenRouter rejeita `models` com mais de 3 itens
     extra = dict(data.get("extra_body") or {})
     if len(models) > 1:
         extra["models"] = models
