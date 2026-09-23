@@ -57,6 +57,13 @@ router_files_ok() {
   local f; for f in router.yaml config.yaml candidates.json; do [[ -s "$ROOT/config/litellm/$f" ]] || return 1; done
 }
 
+# router-sync diário às 04:00 (hora do host); idempotente, chamado em todo `up`
+schedule_sync() {
+  command -v crontab >/dev/null || { echo "crontab ausente; agende router-sync manualmente" >&2; return 0; }
+  local line="0 4 * * * cd $ROOT && ./scripts/oute router-sync >> $OUTE_HOME/router-sync.log 2>&1"
+  ( crontab -l 2>/dev/null | grep -v 'oute router-sync'; echo "$line" ) | crontab -
+}
+
 ensure_dirs() {
   mkdir -p "$OUTE_HOME/shared"
   export OUTE_SHARED_DIR="$OUTE_HOME/shared"
@@ -78,6 +85,7 @@ case "${1:-}" in
     host_secrets; ensure_dirs; mount_shared
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
+    schedule_sync
     "${COMPOSE[@]}" up -d "${@:2}"; "$0" status
     ;;
   down)    "${COMPOSE[@]}" down "${@:2}" ;;
@@ -97,12 +105,7 @@ case "${1:-}" in
       "${COMPOSE[@]}" restart jev-router agent >/dev/null && echo "jev-router e agent reiniciados"
     fi
     ;;
-  schedule)
-    # router-sync diário às 04:00 (hora do host); idempotente
-    line="0 4 * * * cd $ROOT && ./scripts/oute router-sync >> $OUTE_HOME/router-sync.log 2>&1"
-    ( crontab -l 2>/dev/null | grep -v 'oute router-sync'; echo "$line" ) | crontab -
-    echo "agendado: $line"
-    ;;
+  schedule) schedule_sync; echo "agendado: router-sync diário 04:00 (log: $OUTE_HOME/router-sync.log)" ;;
   version)
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
     img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
@@ -123,7 +126,7 @@ uso: oute <cmd>
   lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
   router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
                (roda sozinho em todo `up`)
-  schedule     agenda router-sync diário (crontab do host, 04:00)
+  schedule     agenda router-sync diário (crontab do host, 04:00) — `up` já faz isso
   version      versão do repo e da imagem em execução
 EOF
     ;;

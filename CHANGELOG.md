@@ -8,7 +8,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `oute router-sync`: consulta o OpenRouter (`/providers`, `/models`, `/models/user`, `/models/{id}/endpoints`) e gera `router.yaml`, `config.yaml`, `candidates.json` e `catalog.json` a partir de `config/litellm/policy.yaml` (espelho do guardrail: allowlist de provedores, perfis com padrões de modelo). Pi lista os perfis gerados.
 
 - Roteamento em 2 etapas: Jev escolhe o **perfil**; o OpenRouter escolhe o **modelo** dentro dele (`models` = até 3 modelos elegíveis do perfil — limite do OpenRouter, `provider.sort` por perfil, `partition: none`, fallback automático). Perfis também podem ser pedidos direto (`/model coder` no Pi).
-- `router-sync` roda em todo `oute up` (se falhar, mantém o último catálogo) e diariamente via `oute schedule` (crontab 04:00).
+- `router-sync` roda em todo `oute up` (se falhar, mantém o último catálogo) e diariamente às 04:00 (crontab do host, instalado pelo próprio `up`).
 
 ### Changed
 - Allowlist do guardrail revista: modelos abertos (Kimi, DeepSeek, GLM, Qwen, gpt-oss, Llama) via hosts neutros (Fireworks, Together, DeepInfra, Baseten, Groq, Cerebras); saem Tencent, Sakana, NVIDIA, Meta. Perfis priorizam GLM, Kimi, DeepSeek e Grok; cada padrão contribui com 1 modelo (perfil mistura famílias).
