@@ -48,6 +48,29 @@ def per_m(x) -> float:
         return 0.0
 
 
+def probe_router(model: str) -> bool:
+    """Jev é modelo da Decisions API (não aparece no catálogo de chat): testa com uma decisão real."""
+    if not KEY or not model:
+        return False
+    body = json.dumps({
+        "model": model,
+        "state": {"transcript": "user: oi"},
+        "questions": {"q": {"type": "choice", "instructions": "escolha a", "criteria": {"a": "a", "b": "b"}}},
+    }).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/alpha/decisions", data=body, method="POST",
+        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
+                 "User-Agent": "oute-agent/router-sync"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return "answers" in json.load(r)
+    except urllib.error.HTTPError as e:
+        print(f"probe {model}: HTTP {e.code} {e.read()[:200]!r}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"probe {model}: {type(e).__name__}: {e}", file=sys.stderr)
+    return False
+
+
 def main() -> int:
     policy = yaml.safe_load((CFG / "policy.yaml").read_text())
     allow = set(policy["providers_allow"])
@@ -139,9 +162,9 @@ def main() -> int:
             report.append(f"  {c['name']:<13} -> (NENHUM elegível para {c['prefer']})")
 
     rm = policy.get("router_model")
-    router_ok = rm in eligible
+    router_ok = probe_router(rm)
     print("Candidatos:\n" + "\n".join(report))
-    print(f"Roteador {rm}: {'elegível' if router_ok else 'NÃO elegível — Jev vai falhar, cai no fallback'}")
+    print(f"Roteador {rm}: {'ok (Decisions API respondeu)' if router_ok else 'FALHOU na Decisions API — hook cai no fallback'}")
     if not chosen:
         print("ERRO: nenhum candidato elegível", file=sys.stderr)
         return 1
