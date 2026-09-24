@@ -12,7 +12,20 @@ ARG OUTE_UID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
-    TZ=America/Sao_Paulo
+    TZ=America/Sao_Paulo \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    npm_config_update_notifier=false \
+    npm_config_fund=false
+
+# dieta (#11), só cortes seguros: dpkg não instala man/doc/info nem traduções além de en/pt
+# (copyright é mantido por licença). Vale pra todo apt-get daqui pra frente.
+RUN printf '%s\n' \
+      'path-exclude=/usr/share/man/*' 'path-exclude=/usr/share/info/*' \
+      'path-exclude=/usr/share/doc/*' 'path-include=/usr/share/doc/*/copyright' \
+      'path-exclude=/usr/share/locale/*' 'path-include=/usr/share/locale/en*' 'path-include=/usr/share/locale/pt*' \
+      'path-include=/usr/share/locale/locale.alias' \
+      > /etc/dpkg/dpkg.cfg.d/01-oute-slim
 
 # --- base + ferramentas ------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -39,13 +52,13 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && chown -R ${OUTE_USER}:${OUTE_USER} /workspace /data
 
 # --- agentes e CLIs (npm) ----------------------------------------------------
-RUN npm install -g --no-fund --no-audit \
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --no-fund --no-audit \
       @earendil-works/pi-coding-agent \
       @anthropic-ai/claude-code \
       @openai/codex \
       firebase-tools \
-      @bitwarden/cli@${BW_CLI_VERSION} \
-    && npm cache clean --force
+      @bitwarden/cli@${BW_CLI_VERSION}
 
 # --- binários ----------------------------------------------------------------
 # herdr
@@ -64,16 +77,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # aws cli v2
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
     && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o /tmp/awscli.zip \
-    && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip
+    && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip \
+    && rm -rf /usr/local/aws-cli/v2/*/dist/awscli/examples
 # gcloud
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm || echo x86_64) \
     && curl -fsSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-${ARCH}.tar.gz" \
       | tar -xz -C /opt \
     && /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false \
     && ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud \
-    && ln -s /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil
+    && ln -s /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil \
+    && rm -rf /opt/google-cloud-sdk/.install/.backup
 # oci cli
-RUN pipx install --global oci-cli 2>/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install oci-cli
+RUN --mount=type=cache,target=/root/.cache \
+    pipx install --global oci-cli 2>/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install oci-cli
 # ai-memory (Akita) — binário da release
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
     && curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/latest/download/ai-memory-linux-${ARCH}.tar.gz" \

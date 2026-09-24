@@ -5,6 +5,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Changed
+- Dieta da imagem, só cortes seguros (#11): dpkg sem man/doc/info e sem traduções além de en/pt; sem cache de pip/npm na imagem (`PIP_NO_CACHE_DIR`, cache mounts do BuildKit pra npm e pipx — rebuild baixa rápido, nada entra na camada); aws-cli sem `examples/`; gcloud sem `.install/.backup`. Nenhuma ferramenta removida.
 - `oute build` mantém o cache de build (teto `OUTE_BUILD_CACHE`, default 5gb) em vez de apagar tudo: rebuild que só muda entrypoint/scripts reaproveita apt/npm/oci-cli (#8). Sem attestation de proveniência (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`). Avisa se faltar `docker-buildx`.
 
 ## [0.5.0] - 2026-09-24
