@@ -154,8 +154,9 @@ case "${1:-}" in
     # retenção (#12) SEM matar o cache: prune total refazia apt/npm/oci-cli a cada build (~7 min).
     # Mantém até OUTE_BUILD_CACHE (default 5gb) de cache; imagens órfãs somem.
     cap="${OUTE_BUILD_CACHE:-5gb}"
-    docker builder prune -f --max-used-space "$cap" >/dev/null 2>&1 \
-      || docker builder prune -f --keep-storage "$cap" >/dev/null 2>&1 || true
+    # -a: sem ele o prune só olha cache "pendurado" e o teto é ignorado; com ele remove o mais antigo (LRU) até caber
+    docker builder prune -af --max-used-space "$cap" >/dev/null 2>&1 \
+      || docker builder prune -af --keep-storage "$cap" >/dev/null 2>&1 || true
     docker image prune -f >/dev/null 2>&1 || true
     docker system df --format '{{.Type}}: {{.Size}}' 2>/dev/null | grep -E '^(Images|Build Cache)' | tr '\n' ' '; echo
     df -h / | awk 'NR==2 {print "disco /: " $5 " usado (" $4 " livre)"}'
@@ -166,6 +167,8 @@ case "${1:-}" in
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
     "${COMPOSE[@]}" up -d "${@:2}"; "$0" status; wait_sshd
+    # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
+    docker image prune -f >/dev/null 2>&1 || true
     ;;
   down)    "${COMPOSE[@]}" down "${@:2}"; umount_shared ;;
   restart) "$0" down; "$0" up ;;
