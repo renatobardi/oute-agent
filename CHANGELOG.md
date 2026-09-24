@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-24
+
 ### Added
 - **Observabilidade, fase 1** (#13, ADR-04): serviço `otel-collector` (OTel Collector contrib, só rede interna). Claude Code (métricas/eventos/traces com conteúdo), Codex (`[otel]` gerenciado no `config.toml`) e jev-router (callback `otel` do LiteLLM) exportam OTLP. Tudo vai pro bucket OCI `oute-observability` (gzip, lotes de 5 min, partição por hora UTC); traces com **só metadados** (allowlist de atributos, sem span events) vão pro Langfuse Cloud quando o vault tem o item `langfuse`.
 
