@@ -167,7 +167,10 @@ case "${1:-}" in
   follow)  "${COMPOSE[@]}" logs -f "${@:2}" ;;
   status)  "${COMPOSE[@]}" ps ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
-  ssh)     if [[ $# -gt 1 ]]; then exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"; else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
+  ssh)     # com comando: -t quando há terminal (CLIs como `pi -p` leem stdin se não for TTY e ficam esperando EOF)
+           if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
+             exec ssh "${t[@]}" -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"
+           else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
   oci-bootstrap) oci_bootstrap "${@:2}" ;;
