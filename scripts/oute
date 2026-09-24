@@ -146,8 +146,11 @@ oute_pull() {
     tok="$("$ROOT/scripts/oute-secrets.sh" get GHCR_TOKEN 2>/dev/null || true)"
   fi
   [[ -n "$tok" ]] || die "GHCR_TOKEN ausente no vault (item github): token clássico com read:packages"
-  printf '%s' "$tok" | docker login ghcr.io -u "${GHCR_USER:-renatobardi}" --password-stdin >/dev/null || die "login no ghcr falhou"
-  docker pull "$IMAGE" || die "imagem $IMAGE não existe no ghcr (o CI da tag v$OUTE_VERSION terminou?)"
+  printf '%s' "$tok" | docker login ghcr.io -u "${GHCR_USER:-renatobardi}" --password-stdin >/dev/null 2>&1 || die "login no ghcr falhou"
+  local rc=0; docker pull -q "$IMAGE" || rc=$?
+  # token só vive no vault: não deixa credencial em texto puro no ~/.docker/config.json
+  docker logout ghcr.io >/dev/null 2>&1 || true
+  [[ $rc -eq 0 ]] || die "imagem $IMAGE não existe no ghcr (o CI da tag v$OUTE_VERSION terminou?)"
 }
 
 # no up: usa a imagem local; senão puxa do ghcr; build local só se OUTE_BUILD_LOCAL=1

@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Security
+- `oute pull` faz `docker logout ghcr.io` logo após o pull: o token de leitura não fica em texto puro no `~/.docker/config.json` (só no vault).
+
 ## [0.5.2] - 2026-09-24
 
 ### Added
