@@ -23,11 +23,13 @@ run() { if [[ "$DRY" == 1 ]]; then log "dry-run: $*"; else "$@"; fi; }
 
 # PEM colado num custom field do Vaultwarden perde as quebras de linha: reconstrói (64 col.)
 normalize_pem() {
-  local raw="$1" kind body
-  kind="$(grep -o 'BEGIN [A-Z ]*PRIVATE KEY' <<<"$raw" | head -1 | sed 's/^BEGIN //')"
-  [[ -n "$kind" ]] || kind="PRIVATE KEY"
-  body="$(sed -e 's/-----[A-Z ]*-----//g' <<<"$raw" | tr -d ' \n\r\t')"
-  printf -- '-----BEGIN %s-----\n%s\n-----END %s-----\n' "$kind" "$(fold -w64 <<<"$body")" "$kind"
+  local flat kind body
+  flat="$(tr '\r\n' '  ' <<<"$1")"
+  kind="$(grep -oE 'BEGIN [A-Z ]*PRIVATE KEY' <<<"$flat" | head -1 | sed 's/^BEGIN //')"
+  [[ -n "$kind" ]] || return 1
+  # só o que está entre BEGIN e END: o PEM do console da OCI traz a linha "OCI_API_KEY" depois do END
+  body="$(sed -E 's/.*-----BEGIN [A-Z ]+-----//; s/-----END [A-Z ]+-----.*//' <<<"$flat" | tr -d ' \t')"
+  printf -- '-----BEGIN %s-----\n%s\n-----END %s-----\nOCI_API_KEY\n' "$kind" "$(fold -w64 <<<"$body")" "$kind"
 }
 
 # --- credencial admin (pasta separada) -> ~/.oci temporário
@@ -39,7 +41,7 @@ for v in OCI_USER_OCID OCI_TENANCY_OCID OCI_FINGERPRINT OCI_REGION OCI_KEY_PEM; 
 done
 OCI_DIR="$(mktemp -d)"; trap 'rm -rf "$OCI_DIR"' EXIT
 ( umask 077
-  normalize_pem "$OCI_KEY_PEM" > "$OCI_DIR/key.pem"
+  normalize_pem "$OCI_KEY_PEM" > "$OCI_DIR/key.pem" || die "OCI_KEY_PEM não contém uma chave PRIVADA (colou a pública?)"
   cat > "$OCI_DIR/config" <<CFG
 [DEFAULT]
 user=$OCI_USER_OCID

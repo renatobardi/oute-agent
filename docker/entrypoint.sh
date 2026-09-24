@@ -30,11 +30,13 @@ setup_integrations() {
 
   # Oracle Cloud
   if [[ -n "${OCI_KEY_PEM:-}" ]]; then
-    # PEM colado em custom field do Vaultwarden perde as quebras de linha: reconstrói (64 col.)
-    local kind body
-    kind="$(grep -o 'BEGIN [A-Z ]*PRIVATE KEY' <<<"$OCI_KEY_PEM" | head -1 | sed 's/^BEGIN //')"; kind="${kind:-PRIVATE KEY}"
-    body="$(sed -e 's/-----[A-Z ]*-----//g' <<<"$OCI_KEY_PEM" | tr -d ' \n\r\t')"
-    ( umask 077; printf -- '-----BEGIN %s-----\n%s\n-----END %s-----\n' "$kind" "$(fold -w64 <<<"$body")" "$kind" > "$HOME/.oci/oci_api_key.pem" )
+    # PEM colado em custom field do Vaultwarden perde as quebras de linha: reconstrói (64 col.);
+    # só o trecho BEGIN..END (o PEM do console da OCI traz "OCI_API_KEY" depois do END)
+    local flat kind body
+    flat="$(tr '\r\n' '  ' <<<"$OCI_KEY_PEM")"
+    kind="$(grep -oE 'BEGIN [A-Z ]*PRIVATE KEY' <<<"$flat" | head -1 | sed 's/^BEGIN //')"; kind="${kind:-PRIVATE KEY}"
+    body="$(sed -E 's/.*-----BEGIN [A-Z ]+-----//; s/-----END [A-Z ]+-----.*//' <<<"$flat" | tr -d ' \t')"
+    ( umask 077; printf -- '-----BEGIN %s-----\n%s\n-----END %s-----\nOCI_API_KEY\n' "$kind" "$(fold -w64 <<<"$body")" "$kind" > "$HOME/.oci/oci_api_key.pem" )
     cat > "$HOME/.oci/config" <<EOF
 [DEFAULT]
 user=${OCI_USER_OCID}
