@@ -203,13 +203,13 @@ case "${1:-}" in
   *)
     cat <<EOF
 uso: oute <cmd>
-  build        constrói a imagem (arm64)
-  up           sobe agent + jev-router + ai-memory (pede master password do Vaultwarden)
+  build        constrói a imagem (arm64; mantém cache até OUTE_BUILD_CACHE)
+  up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)
   down|restart
   attach       ssh -> herdr
   ssh [cmd]    ssh direto no container
   shell        docker exec bash
-  logs [svc]
+  logs [svc] | follow [svc]
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
