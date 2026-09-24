@@ -11,6 +11,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `oute-secrets export` sempre faz `bw sync`: item criado no vault depois da sessão em cache (ex.: `langfuse`) passa a ser visto no próximo `up`.
 - otel-collector → OCI: `AWS_REQUEST_CHECKSUM_CALCULATION`/`AWS_RESPONSE_CHECKSUM_VALIDATION=when_required` (OCI rejeita `aws-chunked` do SDK AWS v2 com 501).
 
+### Added
+- Observabilidade fase 2 (#13): `jev.decision` enriquecido com o que o OpenRouter realmente fez — consulta `GET /api/v1/generation?id=gen-…` em background (retries 2/4/8/16 s) e grava modelo servido, provedor, custo (US$), latência e tokens nativos. Custo aparece no Langfuse (span tipo generation). Sem porta pública (decisão: pull via API em vez de Broadcast).
+
 ### Changed
 - jev-router emite span próprio `jev.decision` (perfil, via, preset, modelos, sinais, tokens, `gen_ai.response.id` = id da geração no OpenRouter) — o LiteLLM não repassa metadata customizada pros spans dele. Trace nomeado `jev:<perfil>` no Langfuse.
 - Langfuse: spans internos do LiteLLM (`auth`, `router`, `self`, `proxy_pre_call`, `raw_gen_ai_request`…) filtrados do painel; continuam no bucket.

@@ -9,6 +9,7 @@ Com presets publicados pelo router-sync, o LiteLLM já manda "@preset/oute-<perf
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -141,7 +142,8 @@ def _get_tracer():
                 from opentelemetry.sdk.trace import TracerProvider
                 from opentelemetry.sdk.trace.export import BatchSpanProcessor
                 tp = TracerProvider(resource=Resource.create({
-                    "service.name": os.environ.get("OTEL_SERVICE_NAME", "jev-router"), "service.namespace": "oute-agent"}))
+                    "service.name": os.environ.get("OTEL_SERVICE_NAME", "jev-router"), "service.namespace": "oute-agent",
+                    "deployment.environment": "production"}))
                 tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=ep, insecure=True)))
                 _tracer = tp.get_tracer("oute.jev_router")
             except Exception as e:  # noqa: BLE001
@@ -171,6 +173,59 @@ def _apply_profile(data: dict, prof: dict) -> None:
         extra["provider"] = {**(extra.get("provider") or {}), "sort": {"by": sort, "partition": "none"}}
     if extra:
         data["extra_body"] = extra
+
+
+_bg_tasks: set = set()   # referência forte: task sem referência pode ser coletada antes de terminar
+GENERATION_URL = os.environ.get("OUTE_GENERATION_URL", "https://openrouter.ai/api/v1/generation")
+
+
+async def _fetch_generation(gen_id: str) -> dict:
+    """Modelo real, provedor e custo vêm do OpenRouter (com preset o proxy só vê '@preset/...').
+    A geração leva alguns segundos pra ficar consultável -> retries curtos."""
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key or not gen_id:
+        return {}
+    async with httpx.AsyncClient(timeout=10.0) as cli:
+        for wait in (2, 4, 8, 16):
+            await asyncio.sleep(wait)
+            try:
+                r = await cli.get(GENERATION_URL, params={"id": gen_id}, headers={"Authorization": f"Bearer {key}"})
+                if r.status_code == 200:
+                    return r.json().get("data") or {}
+                if r.status_code != 404:
+                    log.warning("[jev-router] generation %s: http %s", gen_id, r.status_code)
+                    return {}
+            except Exception as e:  # noqa: BLE001
+                log.warning("[jev-router] generation %s falhou (%s)", gen_id, type(e).__name__)
+    return {}
+
+
+async def _emit_decision(attrs: dict, gen_id: str | None, start_ns, end_ns) -> None:
+    g = await _fetch_generation(gen_id) if gen_id else {}
+    if g:
+        attrs.update({
+            "langfuse.observation.type": "generation",
+            "gen_ai.response.model": g.get("model"),
+            "gen_ai.provider.name": g.get("provider_name"),
+            "gen_ai.usage.cost": g.get("total_cost"),
+            "gen_ai.usage.input_tokens": g.get("native_tokens_prompt") or g.get("tokens_prompt"),
+            "gen_ai.usage.output_tokens": g.get("native_tokens_completion") or g.get("tokens_completion"),
+            "gen_ai.response.finish_reasons": g.get("finish_reason"),
+            "oute.provider": g.get("provider_name"),
+            "oute.served_model": g.get("model"),
+            "oute.cost_usd": g.get("total_cost"),
+            "oute.latency_ms": g.get("latency"),
+            "oute.generation_ms": g.get("generation_time"),
+            "oute.cache_discount": g.get("cache_discount"),
+        })
+    log.warning("[jev-router] served profile=%s via=%s model=%s provider=%s cost=%s gen=%s",
+                attrs.get("oute.profile"), attrs.get("oute.via"), g.get("model", "?"),
+                g.get("provider_name", "?"), g.get("total_cost", "?"), gen_id)
+    tracer = _get_tracer()
+    if tracer:
+        span = tracer.start_span("jev.decision", start_time=start_ns,
+                                 attributes={k: v for k, v in attrs.items() if v is not None})
+        span.end(end_time=end_ns)
 
 
 class JevRouterHandler(CustomLogger):
@@ -216,10 +271,6 @@ class JevRouterHandler(CustomLogger):
                 return
             gen_id = getattr(response_obj, "id", None)
             usage = getattr(response_obj, "usage", None)
-            log.warning("[jev-router] served profile=%s via=%s gen=%s", meta.get("profile"), meta.get("via"), gen_id)
-            tracer = _get_tracer()
-            if not tracer:
-                return
             sig = meta.get("signals") or {}
             attrs = {
                 "langfuse.trace.name": f"jev:{meta.get('profile')}",
@@ -233,9 +284,10 @@ class JevRouterHandler(CustomLogger):
                 "gen_ai.usage.input_tokens": getattr(usage, "prompt_tokens", None),
                 "gen_ai.usage.output_tokens": getattr(usage, "completion_tokens", None),
             }
-            span = tracer.start_span("jev.decision", start_time=_ns(start_time),
-                                     attributes={k: v for k, v in attrs.items() if v is not None})
-            span.end(end_time=_ns(end_time))
+            # não segura a resposta: consulta o OpenRouter e emite o span em background
+            t = asyncio.get_running_loop().create_task(_emit_decision(attrs, gen_id, _ns(start_time), _ns(end_time)))
+            _bg_tasks.add(t)
+            t.add_done_callback(_bg_tasks.discard)
         except Exception as e:  # noqa: BLE001
             log.warning("[jev-router] log_success falhou (%s: %s)", type(e).__name__, e)
 
