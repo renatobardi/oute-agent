@@ -121,6 +121,11 @@ EOF
 environment = "${OUTE_HOSTNAME:-oute}"
 log_user_prompt = true
 exporter = { otlp-http = { endpoint = "http://otel-collector:4318/v1/logs", protocol = "binary" } }
+
+# traces (#19): a própria tabela escolhe o exporter — não usar trace_exporter = "otlp-http" como string
+[otel.trace_exporter.otlp-http]
+endpoint = "http://otel-collector:4318/v1/traces"
+protocol = "binary"
 # <<< oute otel
 EOF
 }

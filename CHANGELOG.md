@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- Codex exporta **traces** (`[otel.trace_exporter.otlp-http]` → collector) além dos logs (#19). No Langfuse: span events mantidos **só para o Codex** (é onde ele põe modelo/tools), com allowlist de atributos (prompt/saída nunca saem); tokens e conteúdo completos seguem no bucket (logs). Custo do Codex não existe por request (assinatura).
+
 ### Security
 - `oute pull` faz `docker logout ghcr.io` logo após o pull: o token de leitura não fica em texto puro no `~/.docker/config.json` (só no vault).
 

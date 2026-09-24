@@ -8,7 +8,9 @@ processors:
       # spans internos do LiteLLM = ruído no painel (continuam no bucket)
       span:
         - 'IsMatch(name, "^(auth|router|self|proxy_pre_call|raw_gen_ai_request|batch_write_to_db|redis|postgres)$")'
-      spanevent: ['true']
+      # span events só do Codex (é onde ele põe modelo/tools); os demais descartados
+      spanevent:
+        - 'not IsMatch(resource.attributes["service.name"], "(?i)codex")'
   transform/metadata_only:
     error_mode: ignore
     trace_statements:
@@ -17,6 +19,12 @@ processors:
           - >-
             keep_matching_keys(span.attributes,
             "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(trace\\.name|trace\\.tags|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
+      # eventos que sobraram (Codex): mesma lógica de allowlist — prompt/resposta nunca saem
+      - context: spanevent
+        statements:
+          - >-
+            keep_matching_keys(spanevent.attributes,
+            "^(event\\.name|event\\.kind|model|slug|provider|tool_name|call_id|duration_ms|success|decision|status|attempt|http\\.response\\.status_code|conversation\\.id|.*_tokens|.*token_count|.*_count)$")
       - context: resource
         statements:
           - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment)$")
