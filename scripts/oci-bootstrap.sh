@@ -166,10 +166,10 @@ else
 fi
 
 # --- budget + alertas (compartment)
-BID="$(q budgets budget list --compartment-id "$TEN" --all --query "data[?\"display-name\"=='$COMPARTMENT'].id | [0]" --raw-output)"
+BID="$(q budgets budget budget list --compartment-id "$TEN" --all --query "data[?\"display-name\"=='$COMPARTMENT'].id | [0]" --raw-output)"
 if [[ -z "$BID" ]]; then
   log "criando budget US\$$BUDGET_USD/mês"
-  BID="$(run oci budgets budget create --compartment-id "$TEN" --amount "$BUDGET_USD" --reset-period MONTHLY \
+  BID="$(run oci budgets budget budget create --compartment-id "$TEN" --amount "$BUDGET_USD" --reset-period MONTHLY \
         --target-type COMPARTMENT --targets "[\"$CID\"]" --display-name "$COMPARTMENT" \
         --description "oute-agent storage" --query data.id --raw-output)"
   if [[ -n "$BUDGET_EMAIL" && -n "$BID" ]]; then
