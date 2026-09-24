@@ -114,7 +114,15 @@ retry run oci os object-lifecycle-policy put --bucket-name "$OBS_BUCKET" --items
 GID="$(q iam group list --compartment-id "$TEN" --name "$SVC" --query 'data[0].id' --raw-output)"
 [[ -n "$GID" ]] || { log "criando grupo $SVC"; GID="$(run oci iam group create --compartment-id "$TEN" --name "$SVC" --description "oute-agent: acesso S3 aos buckets" --query data.id --raw-output)"; }
 UID_="$(q iam user list --compartment-id "$TEN" --name "$SVC" --query 'data[0].id' --raw-output)"
-[[ -n "$UID_" ]] || { log "criando usuário de serviço $SVC"; UID_="$(run oci iam user create --compartment-id "$TEN" --name "$SVC" --description "oute-agent: usuário de serviço (só S3)" --query data.id --raw-output)"; }
+if [[ -z "$UID_" ]]; then
+  # tenancy com Identity Domains exige e-mail primário (único) no usuário; default: plus-address do e-mail do budget
+  SVC_EMAIL="${OUTE_OCI_SVC_EMAIL:-}"
+  [[ -n "$SVC_EMAIL" || -z "$BUDGET_EMAIL" ]] || SVC_EMAIL="${BUDGET_EMAIL%@*}+$SVC@${BUDGET_EMAIL#*@}"
+  [[ -n "$SVC_EMAIL" ]] || die "defina OUTE_OCI_SVC_EMAIL (ou OUTE_OCI_BUDGET_EMAIL): Identity Domains exige e-mail no usuário"
+  log "criando usuário de serviço $SVC ($SVC_EMAIL)"
+  UID_="$(run oci iam user create --compartment-id "$TEN" --name "$SVC" --email "$SVC_EMAIL" \
+          --description "oute-agent: usuário de serviço (só S3)" --query data.id --raw-output)"
+fi
 if ! q iam group list-users --group-id "$GID" --query 'data[].id' --raw-output | grep -q "$UID_"; then
   run oci iam group add-user --group-id "$GID" --user-id "$UID_" >/dev/null; log "usuário no grupo"
 fi

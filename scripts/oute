@@ -131,7 +131,7 @@ oci_bootstrap() {
   "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY >/dev/null   # garante sessão desbloqueada em cache
   BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
   docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
-    -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_BUCKET \
+    -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_OCI_SVC_EMAIL -e OUTE_BUCKET \
     -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
 }
