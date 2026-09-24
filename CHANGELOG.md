@@ -7,6 +7,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ### Added
 - **Observabilidade, fase 1** (#13, ADR-04): serviço `otel-collector` (OTel Collector contrib, só rede interna). Claude Code (métricas/eventos/traces com conteúdo), Codex (`[otel]` gerenciado no `config.toml`) e jev-router (callback `otel` do LiteLLM) exportam OTLP. Tudo vai pro bucket OCI `oute-observability` (gzip, lotes de 5 min, partição por hora UTC); traces com **só metadados** (allowlist de atributos, sem span events) vão pro Langfuse Cloud quando o vault tem o item `langfuse`.
 
+### Fixed
+- otel-collector → OCI: `AWS_REQUEST_CHECKSUM_CALCULATION`/`AWS_RESPONSE_CHECKSUM_VALIDATION=when_required` (OCI rejeita `aws-chunked` do SDK AWS v2 com 501).
+
 ### Changed
 - `oute ssh <cmd>` aloca TTY quando há terminal: `pi -p` via ssh não fica mais esperando stdin.
 - `oute up` lê o vault uma vez só (`oute-secrets export`) em vez de uma chamada por variável.

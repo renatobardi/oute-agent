@@ -113,6 +113,10 @@ services:
       AWS_SECRET_ACCESS_KEY: ${OCI_S3_SECRET_KEY:-}
       OCI_S3_REGION: ${OCI_S3_REGION:-sa-saopaulo-1}
       OCI_S3_ENDPOINT: ${OCI_S3_ENDPOINT:-}
+      # SDK AWS v2 (2025+) manda checksum CRC32 com "aws-chunked" por padrão; OCI responde 501 NotImplemented.
+      # when_required = só calcula checksum quando a operação exige (comportamento antigo, compatível com S3-compat).
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
       OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
     volumes:
