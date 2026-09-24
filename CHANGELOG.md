@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-24
+
 ### Added
 - **CI da imagem** (#2): `.github/workflows/image.yml` — na tag `v*` (ou manual) builda arm64 nativo em `ubuntu-24.04-arm`, cache de camadas `type=gha`, push em `ghcr.io/renatobardi/oute-agent:x.y.z`; job de retenção mantém 2 versões no ghcr (#12). Tag precisa bater com `VERSION`.
 - `oute pull`: login no ghcr com `GHCR_TOKEN` (vault, item `github`, só `read:packages`) e pull da imagem da versão atual. `oute up` usa a imagem local ou puxa do ghcr (`--no-build`; build local só com `OUTE_BUILD_LOCAL=1`).
