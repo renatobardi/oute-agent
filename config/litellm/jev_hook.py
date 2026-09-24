@@ -20,11 +20,6 @@ import httpx
 import yaml
 from litellm.integrations.custom_logger import CustomLogger
 
-try:  # atributos oute.* no span do LiteLLM (callback "otel") -> bucket e Langfuse (allowlist "oute\..*")
-    from opentelemetry import trace as _otel_trace
-except Exception:  # noqa: BLE001
-    _otel_trace = None
-
 ROUTER_YAML = Path(os.environ.get("OUTE_ROUTER_YAML", "/app/router.yaml"))
 # Jev não é chat: usa a Decisions API (alpha) do OpenRouter. Formato = TypeSafe System One:
 # {state, model, questions:{name:{type:"choice", instructions, criteria:{opt:desc}}}} -> {answers:{name:{choice}}}
@@ -129,16 +124,36 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
         return None
 
 
-def _mark_span(**attrs: Any) -> None:
-    if _otel_trace is None:
-        return
+# Span próprio "jev.decision" (o LiteLLM não repassa metadata customizada pros spans dele).
+# Emitido no sucesso, com o id da geração do OpenRouter (gen-...) pra correlacionar com o Broadcast (fase 2).
+_tracer: Any = None
+
+
+def _get_tracer():
+    global _tracer
+    if _tracer is None:
+        _tracer = False
+        ep = os.environ.get("OTEL_ENDPOINT")
+        if ep:
+            try:
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+                from opentelemetry.sdk.resources import Resource
+                from opentelemetry.sdk.trace import TracerProvider
+                from opentelemetry.sdk.trace.export import BatchSpanProcessor
+                tp = TracerProvider(resource=Resource.create({
+                    "service.name": os.environ.get("OTEL_SERVICE_NAME", "jev-router"), "service.namespace": "oute-agent"}))
+                tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=ep, insecure=True)))
+                _tracer = tp.get_tracer("oute.jev_router")
+            except Exception as e:  # noqa: BLE001
+                log.warning("[jev-router] span de decisão desligado (%s: %s)", type(e).__name__, e)
+    return _tracer or None
+
+
+def _ns(t) -> int | None:
     try:
-        span = _otel_trace.get_current_span()
-        for k, v in attrs.items():
-            if v is not None:
-                span.set_attribute(f"oute.{k}", v if isinstance(v, (str, bool, int, float)) else json.dumps(v))
+        return int(t.timestamp() * 1e9)
     except Exception:  # noqa: BLE001
-        pass
+        return None
 
 
 def _apply_profile(data: dict, prof: dict) -> None:
@@ -166,7 +181,10 @@ class JevRouterHandler(CustomLogger):
 
         if requested in profiles:            # perfil pedido direto (ex.: /model coder no Pi)
             _apply_profile(data, profiles[requested])
-            _mark_span(profile=requested, via="direct", preset=profiles[requested].get("preset"))
+            prof = profiles[requested]
+            data.setdefault("metadata", {})["oute_router"] = {
+                "profile": requested, "via": "direct", "preset": prof.get("preset"), "sort": prof.get("sort"),
+                "models": prof.get("models", []), "signals": {}}
             return data
         if requested != TRIGGER:
             return data
@@ -184,27 +202,42 @@ class JevRouterHandler(CustomLogger):
         log.warning("[jev-router] chosen=%s via=%s preset=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
                     chosen, via, prof.get("preset", "-"), prof.get("sort"), ",".join(prof.get("models", [])),
                     s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
-        _mark_span(profile=chosen, via=via, preset=prof.get("preset"), sort=prof.get("sort"),
-                   models=",".join(prof.get("models", [])), needs_tools=s["needs_tools"], needs_vision=s["needs_vision"])
         data.setdefault("metadata", {})["oute_router"] = {
-            "profile": chosen, "via": via, "sort": prof.get("sort"), "models": prof.get("models", []),
+            "profile": chosen, "via": via, "preset": prof.get("preset"), "sort": prof.get("sort"),
+            "models": prof.get("models", []),
             "signals": {k: v for k, v in s.items() if k != "transcript"},
         }
         return data
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-        # qual modelo o OpenRouter efetivamente usou dentro do perfil
         try:
             meta = ((kwargs.get("litellm_params") or {}).get("metadata") or {}).get("oute_router")
-            if meta:
-                # response_obj.model vem com o nome do grupo do LiteLLM; o modelo real está no hidden_params/raw
-                hp = getattr(response_obj, "_hidden_params", {}) or {}
-                real = (hp.get("original_response") or {}) if isinstance(hp.get("original_response"), dict) else {}
-                served = real.get("model") or (hp.get("additional_headers") or {}).get("llm_provider-x-model") \
-                    or kwargs.get("model") or getattr(response_obj, "model", "?")
-                log.warning("[jev-router] served profile=%s model=%s", meta.get("profile"), served)
-        except Exception:  # noqa: BLE001
-            pass
+            if not meta:
+                return
+            gen_id = getattr(response_obj, "id", None)
+            usage = getattr(response_obj, "usage", None)
+            log.warning("[jev-router] served profile=%s via=%s gen=%s", meta.get("profile"), meta.get("via"), gen_id)
+            tracer = _get_tracer()
+            if not tracer:
+                return
+            sig = meta.get("signals") or {}
+            attrs = {
+                "langfuse.trace.name": f"jev:{meta.get('profile')}",
+                "oute.profile": meta.get("profile"), "oute.via": meta.get("via"),
+                "oute.preset": meta.get("preset"), "oute.sort": meta.get("sort"),
+                "oute.models": ",".join(meta.get("models") or []),
+                "oute.needs_tools": sig.get("needs_tools"), "oute.needs_vision": sig.get("needs_vision"),
+                "oute.input_chars": sig.get("approx_input_chars"),
+                "gen_ai.system": "openrouter", "gen_ai.response.id": gen_id,
+                "gen_ai.request.model": meta.get("preset") or meta.get("profile"),
+                "gen_ai.usage.input_tokens": getattr(usage, "prompt_tokens", None),
+                "gen_ai.usage.output_tokens": getattr(usage, "completion_tokens", None),
+            }
+            span = tracer.start_span("jev.decision", start_time=_ns(start_time),
+                                     attributes={k: v for k, v in attrs.items() if v is not None})
+            span.end(end_time=_ns(end_time))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[jev-router] log_success falhou (%s: %s)", type(e).__name__, e)
 
 
 handler = JevRouterHandler()

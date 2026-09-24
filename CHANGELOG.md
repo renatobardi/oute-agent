@@ -12,7 +12,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - otel-collector → OCI: `AWS_REQUEST_CHECKSUM_CALCULATION`/`AWS_RESPONSE_CHECKSUM_VALIDATION=when_required` (OCI rejeita `aws-chunked` do SDK AWS v2 com 501).
 
 ### Changed
-- jev-router grava a decisão do Jev no span OTel do LiteLLM (`oute.profile`, `oute.via`, `oute.preset`, `oute.models`…).
+- jev-router emite span próprio `jev.decision` (perfil, via, preset, modelos, sinais, tokens, `gen_ai.response.id` = id da geração no OpenRouter) — o LiteLLM não repassa metadata customizada pros spans dele. Trace nomeado `jev:<perfil>` no Langfuse.
+- Langfuse: spans internos do LiteLLM (`auth`, `router`, `self`, `proxy_pre_call`, `raw_gen_ai_request`…) filtrados do painel; continuam no bucket.
 - `oute ssh <cmd>` aloca TTY quando há terminal: `pi -p` via ssh não fica mais esperando stdin.
 - `oute up` lê o vault uma vez só (`oute-secrets export`) em vez de uma chamada por variável.
 - `.oute_env` gerado com `declare -px` (valores citados).

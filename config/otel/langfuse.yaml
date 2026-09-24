@@ -5,6 +5,9 @@ processors:
   filter/no_events:
     error_mode: ignore
     traces:
+      # spans internos do LiteLLM = ruído no painel (continuam no bucket)
+      span:
+        - 'IsMatch(name, "^(auth|router|self|proxy_pre_call|raw_gen_ai_request|batch_write_to_db|redis|postgres)$")'
       spanevent: ['true']
   transform/metadata_only:
     error_mode: ignore
