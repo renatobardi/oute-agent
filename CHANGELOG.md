@@ -4,6 +4,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- Storage comum no **OCI Object Storage** (#1, ADR-03): `oute oci-bootstrap` provisiona compartment `oute-agent`, buckets `oute-shared` (versionado, versões antigas > 30d apagadas) e `oute-observability` (Infrequent 30d → Archive 90d), usuário de serviço só-S3 com policy de menor privilégio, Customer Secret Key gravada direto no Vaultwarden (`oci-storage`) e budget US$1/mês. Credencial admin fica na pasta `oute-admin` do vault, nunca exportada pro container. `DRY_RUN=1` mostra sem executar.
+- `oute up` monta `oci:oute-shared` em `~/.oute/shared` (remote `oci` só por env, sem `rclone.conf`); `oute down` desmonta. Dentro do container, `rclone` já enxerga o remote `oci`.
+
+### Changed
+- `OCI_KEY_PEM` aceita PEM colado numa linha só (custom field do Vaultwarden perde quebras de linha); é reconstruído.
+
 ### Fixed
 - `oute up` espera o sshd do container responder (banner SSH, até 60s) antes de retornar; `attach` logo após o `up` não dá mais `Connection reset`.
 

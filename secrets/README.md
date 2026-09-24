@@ -6,11 +6,18 @@ Nenhum valor real vive neste repo. Estrutura esperada no vault, pasta `oute-agen
 |-------------|------|-------------------------------------------------------------------------------|
 | openrouter  | Note | OPENROUTER_API_KEY                                                            |
 | github      | Note | GH_TOKEN                                                                      |
-| oci         | Note | OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM     |
+| oci         | Note | OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM — opcional, usuário **restrito** p/ os agentes (nunca o admin) |
+| oci-storage | Note | OCI_S3_ACCESS_KEY, OCI_S3_SECRET_KEY, OCI_S3_ENDPOINT, OCI_S3_REGION, OCI_NAMESPACE — **criado pelo `oute oci-bootstrap`**, não à mão |
 | aws         | Note | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION                  |
 | gcp         | Note | GCP_SA_JSON (service account, cobre gcloud + firebase)                        |
 | ai-memory   | Note | AI_MEMORY_AUTH_TOKEN (opcional)                                               |
 | anthropic   | Note | ANTHROPIC_API_KEY (só se quiser ai-memory consolidando com LLM)               |
+
+Pasta **`oute-admin`** (separada, NUNCA exportada pro container; só o `oute oci-bootstrap` lê):
+
+| item      | tipo | campos |
+|-----------|------|--------|
+| oci-admin | Note | OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM (API key do seu usuário OCI; o PEM pode ser colado numa linha só — é reconstruído) |
 
 No host (Mac / LXC), só dois arquivos fora do repo:
 

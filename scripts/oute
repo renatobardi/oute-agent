@@ -81,14 +81,59 @@ ensure_dirs() {
   export OUTE_SHARED_DIR="$OUTE_HOME/shared"
 }
 
-# --- rclone mount do bucket OCI (opcional; pula se rclone/remote ausente)
+# --- storage comum: bucket OCI via rclone (ADR-03, #1)
+# remote "oci" definido só por env (credenciais do item oci-storage no vault) -> nenhum rclone.conf com segredo
+oci_remote_env() {
+  local v; for v in OCI_S3_ACCESS_KEY OCI_S3_SECRET_KEY OCI_S3_ENDPOINT OCI_S3_REGION; do
+    [[ -n "${!v:-}" ]] || { export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"; eval "$("$ROOT/scripts/oute-secrets.sh" export)"; break; }
+  done
+  [[ -n "${OCI_S3_ACCESS_KEY:-}" ]] || return 1
+  export RCLONE_CONFIG_OCI_TYPE=s3 RCLONE_CONFIG_OCI_PROVIDER=Other \
+    RCLONE_CONFIG_OCI_ACCESS_KEY_ID="$OCI_S3_ACCESS_KEY" RCLONE_CONFIG_OCI_SECRET_ACCESS_KEY="$OCI_S3_SECRET_KEY" \
+    RCLONE_CONFIG_OCI_ENDPOINT="$OCI_S3_ENDPOINT" RCLONE_CONFIG_OCI_REGION="$OCI_S3_REGION" \
+    RCLONE_CONFIG_OCI_FORCE_PATH_STYLE=true RCLONE_CONFIG_OCI_NO_CHECK_BUCKET=true
+}
+
+# mountpoint(1) não existe no macOS
+is_mounted() { mount | grep -q " on $1 "; }
+
 mount_shared() {
-  command -v rclone >/dev/null || { echo "rclone ausente; /data/shared fica local"; return; }
-  rclone listremotes 2>/dev/null | grep -q '^oci:' || { echo "remote 'oci' não configurado; /data/shared fica local"; return; }
-  mountpoint -q "$OUTE_HOME/shared" 2>/dev/null && return
-  rclone mount "oci:${OUTE_BUCKET:-oute-shared}" "$OUTE_HOME/shared" \
-    --vfs-cache-mode full --dir-cache-time 30s --daemon
-  echo "montado oci:${OUTE_BUCKET:-oute-shared} em $OUTE_HOME/shared"
+  local dir="$OUTE_HOME/shared" bucket="${OUTE_BUCKET:-oute-shared}"
+  command -v rclone >/dev/null || { echo "rclone ausente no host; /data/shared fica local"; return 0; }
+  is_mounted "$dir" && { echo "storage: $dir já montado"; return 0; }
+  oci_remote_env || { echo "item oci-storage ausente no vault (rode: oute oci-bootstrap); /data/shared fica local"; return 0; }
+  local extra=()
+  if [[ "$(uname)" == Linux ]]; then
+    # docker (root) precisa enxergar o mount FUSE do usuário
+    grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || { echo "falta 'user_allow_other' em /etc/fuse.conf (ver README); /data/shared fica local" >&2; return 0; }
+    extra+=(--allow-other)
+  fi
+  mkdir -p "$dir" "$OUTE_HOME/rclone-cache"
+  # cache longo = poucas requests (franquia Always Free: 50 mil/mês)
+  rclone mount "oci:$bucket" "$dir" --daemon "${extra[@]}" \
+    --uid "$(id -u)" --gid "$(id -g)" --umask 002 \
+    --vfs-cache-mode full --vfs-cache-max-size "${OUTE_SHARED_CACHE:-2G}" --vfs-cache-max-age 24h \
+    --dir-cache-time 5m --cache-dir "$OUTE_HOME/rclone-cache" \
+    --log-file "$OUTE_HOME/rclone.log" --log-level NOTICE \
+    || { echo "rclone mount falhou (ver $OUTE_HOME/rclone.log); /data/shared fica local" >&2; return 0; }
+  echo "storage: oci:$bucket montado em $dir"
+}
+
+umount_shared() {
+  local dir="$OUTE_HOME/shared"
+  is_mounted "$dir" || return 0
+  fusermount -u "$dir" 2>/dev/null || umount "$dir" 2>/dev/null || true
+  echo "storage: $dir desmontado"
+}
+
+oci_bootstrap() {
+  export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+  "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY >/dev/null   # garante sessão desbloqueada em cache
+  BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
+  docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
+    -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_BUCKET \
+    -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
+    --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
 }
 
 case "${1:-}" in
@@ -106,7 +151,7 @@ case "${1:-}" in
     schedule_sync
     "${COMPOSE[@]}" up -d "${@:2}"; "$0" status; wait_sshd
     ;;
-  down)    "${COMPOSE[@]}" down "${@:2}" ;;
+  down)    "${COMPOSE[@]}" down "${@:2}"; umount_shared ;;
   restart) "$0" down; "$0" up ;;
   logs)    "${COMPOSE[@]}" logs --tail=100 "${@:2}" ;;
   follow)  "${COMPOSE[@]}" logs -f "${@:2}" ;;
@@ -115,6 +160,7 @@ case "${1:-}" in
   ssh)     if [[ $# -gt 1 ]]; then exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"; else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
+  oci-bootstrap) oci_bootstrap "${@:2}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   router-sync)
     # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
@@ -140,7 +186,8 @@ uso: oute <cmd>
   shell        docker exec bash
   logs [svc]
   status
-  sync-shared  monta bucket OCI em ~/.oute/shared via rclone
+  sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
+  oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1]
   lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
   router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
                (roda sozinho em todo `up`)

@@ -30,7 +30,11 @@ setup_integrations() {
 
   # Oracle Cloud
   if [[ -n "${OCI_KEY_PEM:-}" ]]; then
-    printf '%s' "$OCI_KEY_PEM" > "$HOME/.oci/oci_api_key.pem"; chmod 600 "$HOME/.oci/oci_api_key.pem"
+    # PEM colado em custom field do Vaultwarden perde as quebras de linha: reconstrói (64 col.)
+    local kind body
+    kind="$(grep -o 'BEGIN [A-Z ]*PRIVATE KEY' <<<"$OCI_KEY_PEM" | head -1 | sed 's/^BEGIN //')"; kind="${kind:-PRIVATE KEY}"
+    body="$(sed -e 's/-----[A-Z ]*-----//g' <<<"$OCI_KEY_PEM" | tr -d ' \n\r\t')"
+    ( umask 077; printf -- '-----BEGIN %s-----\n%s\n-----END %s-----\n' "$kind" "$(fold -w64 <<<"$body")" "$kind" > "$HOME/.oci/oci_api_key.pem" )
     cat > "$HOME/.oci/config" <<EOF
 [DEFAULT]
 user=${OCI_USER_OCID}
@@ -40,6 +44,14 @@ region=${OCI_REGION:-sa-saopaulo-1}
 key_file=$HOME/.oci/oci_api_key.pem
 EOF
     chmod 600 "$HOME/.oci/config"
+  fi
+
+  # OCI Object Storage (S3): remote "oci" do rclone só por env (item oci-storage do vault; ADR-03)
+  if [[ -n "${OCI_S3_ACCESS_KEY:-}" ]]; then
+    export RCLONE_CONFIG_OCI_TYPE=s3 RCLONE_CONFIG_OCI_PROVIDER=Other \
+      RCLONE_CONFIG_OCI_ACCESS_KEY_ID="$OCI_S3_ACCESS_KEY" RCLONE_CONFIG_OCI_SECRET_ACCESS_KEY="$OCI_S3_SECRET_KEY" \
+      RCLONE_CONFIG_OCI_ENDPOINT="$OCI_S3_ENDPOINT" RCLONE_CONFIG_OCI_REGION="$OCI_S3_REGION" \
+      RCLONE_CONFIG_OCI_FORCE_PATH_STYLE=true RCLONE_CONFIG_OCI_NO_CHECK_BUCKET=true
   fi
 
   # AWS
@@ -120,7 +132,7 @@ case "$MODE" in
     setup_agents
     setup_ssh
     # env pros logins ssh
-    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION)' \
+    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION|RCLONE_CONFIG_)' \
       | sed 's/^/export /' > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do

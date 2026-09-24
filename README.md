@@ -28,7 +28,7 @@ secrets/         README com a convenção do vault (sem valores)
 - `~/.oute/bw_client.env` com `BW_CLIENTID` / `BW_CLIENTSECRET` (`chmod 600`).
 - `~/.ssh/id_ed25519.pub` (entra no container).
 - `.env` a partir de `.env.example`: `OUTE_HOSTNAME`, `OUTE_UID=$(id -u)`, `OUTE_VAULT_HOST_IP` (IP Tailscale do vault).
-- opcional: `rclone` com remote `oci` (bucket `oute-shared`).
+- storage comum (opcional, ver abaixo): `rclone` **do rclone.org** (o do Homebrew não tem `mount`) + FUSE (Linux: `fuse3` e `user_allow_other` em `/etc/fuse.conf`; Mac: FUSE-T).
 
 ## Deploy novo
 
@@ -59,9 +59,21 @@ Dentro do container: `pi`, `claude`, `codex`, `goose`, `gh`, `oci`, `gcloud`, `a
 
 `ai-memory` (akitaonrails) como serviço em `http://ai-memory:49374`; entrypoint instala hooks + MCP nos agentes de `OUTE_AGENTS`. Web UI: `/web`.
 
-## Storage comum
+## Storage comum (OCI Object Storage — ADR-03)
 
-`/data/shared` ← `~/.oute/shared` no host ← `rclone mount oci:oute-shared` (feito por `oute up` se o remote existir).
+`/data/shared` (container) ← `~/.oute/shared` (host) ← `rclone mount oci:oute-shared`, feito pelo `oute up`; `oute down` desmonta.
+Remote `oci` só por variáveis de ambiente, a partir do item `oci-storage` do vault — nenhum `rclone.conf` com segredo em disco.
+
+Provisionar (1x por tenancy):
+1. OCI Console → seu usuário → **API keys** → *Add API key* → gerar/baixar. No Vaultwarden, pasta **`oute-admin`**, item **`oci-admin`** com os campos de `secrets/README.md`.
+2. `DRY_RUN=1 ./scripts/oute oci-bootstrap` (só mostra) → `OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap`.
+   Cria compartment `oute-agent`, buckets `oute-shared` (versionado; versões antigas > 30d apagadas) e `oute-observability` (→ Infrequent 30d → Archive 90d), usuário de serviço `oute-agent-storage` só com S3 nos 2 buckets, **Customer Secret Key gravada direto no vault** (`oci-storage`), budget US$1/mês com alerta. Idempotente.
+
+Host:
+- Linux: `sudo apt install fuse3 && echo user_allow_other | sudo tee -a /etc/fuse.conf` (o docker, como root, precisa enxergar o mount).
+- Mac: `brew install macos-fuse-t/homebrew-cask/fuse-t` + rclone do rclone.org (`sudo -v; curl https://rclone.org/install.sh | sudo bash`).
+
+Custo: Always Free cobre 20 GB + 50 mil requests/mês; cache do mount (`--dir-cache-time 5m`, `OUTE_SHARED_CACHE`) segura as requests. Log: `~/.oute/rclone.log`.
 
 ## Versionamento e retenção
 
