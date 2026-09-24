@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-24
+
 ### Fixed
 - `oute build`: retenção do cache por idade (`prune -a --filter until=72h`, `OUTE_BUILD_CACHE_TTL`) — teto por tamanho (`--max-used-space`) apagava também o cache recente e o rebuild voltava a 7 min. `oute up` apaga a imagem antiga que ficou solta após recriar o container.
 
