@@ -24,7 +24,7 @@ secrets/         README com a convenção do vault (sem valores)
 - **GitHub**: chave SSH do host cadastrada (clone do repo privado).
 
 **No host**
-- Docker + Compose (Mac: Docker Desktop/OrbStack). `docker-buildx` recomendado.
+- Docker + Compose + **buildx** (Ubuntu: `apt install docker-buildx`; Mac: Docker Desktop/OrbStack já trazem). Cache de build mantido até `OUTE_BUILD_CACHE` (default 5gb).
 - `jq`, `crontab`. `bw` opcional (sem ele, usa o `bw` da própria imagem).
 - `~/.oute/bw_client.env` com `BW_CLIENTID` / `BW_CLIENTSECRET` (`chmod 600`).
 - `~/.ssh/id_ed25519.pub` (entra no container).

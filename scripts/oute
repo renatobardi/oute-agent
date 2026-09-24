@@ -148,10 +148,16 @@ oci_bootstrap() {
 
 case "${1:-}" in
   build)
-    "${COMPOSE[@]}" build "${@:2}"
-    # retenção (issue #12): build cache e imagens órfãs somem logo após o build — evita pico de disco
-    docker builder prune -af >/dev/null 2>&1 || true
+    docker buildx version >/dev/null 2>&1 || echo "aviso: sem docker-buildx (Ubuntu: apt install docker-buildx; Mac: vem no Docker Desktop/OrbStack)" >&2
+    # sem attestation de proveniência: não há registry ainda (#2) e ela só acrescenta um manifesto a cada export
+    BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build "${@:2}"
+    # retenção (#12) SEM matar o cache: prune total refazia apt/npm/oci-cli a cada build (~7 min).
+    # Mantém até OUTE_BUILD_CACHE (default 5gb) de cache; imagens órfãs somem.
+    cap="${OUTE_BUILD_CACHE:-5gb}"
+    docker builder prune -f --max-used-space "$cap" >/dev/null 2>&1 \
+      || docker builder prune -f --keep-storage "$cap" >/dev/null 2>&1 || true
     docker image prune -f >/dev/null 2>&1 || true
+    docker system df --format '{{.Type}}: {{.Size}}' 2>/dev/null | grep -E '^(Images|Build Cache)' | tr '\n' ' '; echo
     df -h / | awk 'NR==2 {print "disco /: " $5 " usado (" $4 " livre)"}'
     ;;
   up)

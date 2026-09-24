@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- `oute build` mantém o cache de build (teto `OUTE_BUILD_CACHE`, default 5gb) em vez de apagar tudo: rebuild que só muda entrypoint/scripts reaproveita apt/npm/oci-cli (#8). Sem attestation de proveniência (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`). Avisa se faltar `docker-buildx`.
+
 ## [0.5.0] - 2026-09-24
 
 ### Added
