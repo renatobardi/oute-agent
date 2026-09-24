@@ -5,7 +5,7 @@ Nenhum valor real vive neste repo. Estrutura esperada no vault, pasta `oute-agen
 | item        | tipo | campos (custom fields)                                                       |
 |-------------|------|-------------------------------------------------------------------------------|
 | openrouter  | Note | OPENROUTER_API_KEY                                                            |
-| github      | Note | GH_TOKEN                                                                      |
+| github      | Note | GH_TOKEN; GHCR_TOKEN (token clássico só `read:packages` — `oute pull` da imagem privada no ghcr) |
 | oci         | Note | OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM — opcional, usuário **restrito** p/ os agentes (nunca o admin) |
 | oci-storage | Note | OCI_S3_ACCESS_KEY, OCI_S3_SECRET_KEY, OCI_S3_ENDPOINT, OCI_S3_REGION, OCI_NAMESPACE — **criado pelo `oute oci-bootstrap`**, não à mão |
 | aws         | Note | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION                  |

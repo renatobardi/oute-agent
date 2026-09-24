@@ -48,20 +48,31 @@ secrets/         README com a convenção do vault (sem valores)
 ```bash
 git clone git@github.com:renatobardi/oute-agent.git && cd oute-agent
 cp .env.example .env && $EDITOR .env
-./scripts/oute build                                  # 1ª vez ~8 min; depois reaproveita cache
+./scripts/oute pull                                   # imagem da versão do VERSION, feita pelo CI (ou OUTE_BUILD_LOCAL=1 + oute build)
 DRY_RUN=1 ./scripts/oute oci-bootstrap                # 1x por tenancy: mostra o plano
 OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 ./scripts/oute up                                     # master password 1x
 ./scripts/oute attach                                 # ssh -> herdr (detach: Ctrl+B q)
 ```
 
-`oute up`, em ordem: lê o vault (1 leitura, `bw sync`) → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → `docker compose up` → espera o sshd → limpa imagem antiga solta.
+`oute up`, em ordem: lê o vault (1 leitura, `bw sync`) → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
+
+### Release e deploy
+
+```bash
+# Mac
+./scripts/release x.y.z && git push && git push origin vx.y.z     # tag dispara o CI (.github/workflows/image.yml)
+# oute-server, depois que o CI terminar (Actions → image)
+cd ~/oute-agent && git pull --tags && ./scripts/oute pull && ./scripts/oute down && ./scripts/oute up
+```
+CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`), push em `ghcr.io/renatobardi/oute-agent:x.y.z`, retenção de 2 versões no ghcr. `OUTE_UID` da imagem vem da variável de repositório `OUTE_UID` (default 1001, o do oute-server).
 
 ## Comandos
 
 | comando | faz |
 |---|---|
-| `oute build` | constrói a imagem; mantém o cache usado nas últimas 72h |
+| `oute pull` | baixa do ghcr a imagem da versão atual (feita pelo CI) |
+| `oute build` | build local (fallback); mantém o cache usado nas últimas 24h |
 | `oute up` / `down` / `restart` / `status` | ciclo de vida da stack |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
@@ -107,6 +118,6 @@ Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. 
 
 ## Build, versionamento e retenção
 
-SemVer, fonte única em `VERSION`. `scripts/release x.y.z` faz bump + fecha o `CHANGELOG.md` + commit + tag (push manual). Imagem `ghcr.io/renatobardi/oute-agent:x.y.z`; `oute version` mostra repo × imagem.
-Build com BuildKit: cache sem uso há mais de `OUTE_BUILD_CACHE_TTL` (72h) é apagado, o recente fica (rebuild sem mudança ~2 s), cache mounts pra npm/pip, imagem sem doc/man/locale extras. Retenção: só a versão corrente (a anterior quando houver CI/registry); `oute up` apaga imagem solta.
+SemVer, fonte única em `VERSION`. `scripts/release x.y.z` faz bump + fecha o `CHANGELOG.md` + commit + tag (push manual); a tag dispara o CI que publica `ghcr.io/renatobardi/oute-agent:x.y.z`. `oute version` mostra repo × imagem.
+Build com BuildKit (CI ou local): `ARG OUTE_VERSION` só no fim (bump não invalida cache), cache mounts pra npm/pip, imagem sem doc/man/locale extras. Retenção: ghcr com 2 versões (corrente + anterior); no host, `oute up` apaga imagem solta e o build local mantém só o cache das últimas 24h.
 Backup do host: boot volume do oute-server com policy semanal na OCI (inclui `/var/lib/docker`).

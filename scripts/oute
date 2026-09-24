@@ -136,6 +136,26 @@ umount_shared() {
   echo "storage: $dir desmontado"
 }
 
+IMAGE="ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}"
+
+# imagem vem do CI (#2): login no ghcr com token só de leitura (vault: item github, campo GHCR_TOKEN) e pull
+oute_pull() {
+  local tok="${GHCR_TOKEN:-}"
+  if [[ -z "$tok" ]]; then
+    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+    tok="$("$ROOT/scripts/oute-secrets.sh" get GHCR_TOKEN 2>/dev/null || true)"
+  fi
+  [[ -n "$tok" ]] || die "GHCR_TOKEN ausente no vault (item github): token clássico com read:packages"
+  printf '%s' "$tok" | docker login ghcr.io -u "${GHCR_USER:-renatobardi}" --password-stdin >/dev/null || die "login no ghcr falhou"
+  docker pull "$IMAGE" || die "imagem $IMAGE não existe no ghcr (o CI da tag v$OUTE_VERSION terminou?)"
+}
+
+# no up: usa a imagem local; senão puxa do ghcr; build local só se OUTE_BUILD_LOCAL=1
+ensure_image() {
+  docker image inspect "$IMAGE" >/dev/null 2>&1 && return 0
+  if [[ "${OUTE_BUILD_LOCAL:-0}" == 1 ]]; then "$0" build; else oute_pull; fi
+}
+
 oci_bootstrap() {
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
   "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY >/dev/null   # garante sessão desbloqueada em cache
@@ -153,7 +173,7 @@ case "${1:-}" in
     BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build "${@:2}"
     # retenção (#12) SEM matar o cache usado agora: remove só o que não é usado há OUTE_BUILD_CACHE_TTL (default 72h).
     # (--max-used-space com -a apagava também o cache recente -> rebuild de 7 min; sem -a não apagava nada)
-    docker builder prune -af --filter "until=${OUTE_BUILD_CACHE_TTL:-72h}" >/dev/null 2>&1 || true
+    docker builder prune -af --filter "until=${OUTE_BUILD_CACHE_TTL:-24h}" >/dev/null 2>&1 || true
     docker image prune -f >/dev/null 2>&1 || true
     docker system df --format '{{.Type}}: {{.Size}}' 2>/dev/null | grep -E '^(Images|Build Cache)' | tr '\n' ' '; echo
     df -h / | awk 'NR==2 {print "disco /: " $5 " usado (" $4 " livre)"}'
@@ -163,7 +183,8 @@ case "${1:-}" in
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
-    "${COMPOSE[@]}" up -d "${@:2}"; "$0" status; wait_sshd
+    ensure_image
+    "${COMPOSE[@]}" up -d --no-build "${@:2}"; "$0" status; wait_sshd
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
     ;;
@@ -180,6 +201,7 @@ case "${1:-}" in
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
   oci-bootstrap) oci_bootstrap "${@:2}" ;;
+  pull)    oute_pull ;;
   storage)   # acesso direto ao bucket, sem passar pelo mount: oute storage ls | lsl | about | <qualquer subcomando rclone>
     oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
     sub="${2:-ls}"; rclone "$sub" "oci:${OUTE_BUCKET:-oute-shared}${3:+/$3}" "${@:4}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
@@ -200,7 +222,8 @@ case "${1:-}" in
   *)
     cat <<EOF
 uso: oute <cmd>
-  build        constrói a imagem (arm64; mantém cache usado nas últimas 72h)
+  pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
+  build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)
   down|restart
   attach       ssh -> herdr

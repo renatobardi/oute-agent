@@ -4,6 +4,16 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **CI da imagem** (#2): `.github/workflows/image.yml` — na tag `v*` (ou manual) builda arm64 nativo em `ubuntu-24.04-arm`, cache de camadas `type=gha`, push em `ghcr.io/renatobardi/oute-agent:x.y.z`; job de retenção mantém 2 versões no ghcr (#12). Tag precisa bater com `VERSION`.
+- `oute pull`: login no ghcr com `GHCR_TOKEN` (vault, item `github`, só `read:packages`) e pull da imagem da versão atual. `oute up` usa a imagem local ou puxa do ghcr (`--no-build`; build local só com `OUTE_BUILD_LOCAL=1`).
+
+### Changed
+- Cache do build local: retenção padrão 24h (era 72h — duas gerações completas levaram o disco a 85%).
+
+### Fixed
+- Dockerfile: `ARG OUTE_VERSION` movido para o fim (antes do `LABEL`). Declarado no topo, virava env de todos os `RUN` e cada bump de versão refazia a imagem inteira (~7 min).
+
 ## [0.5.1] - 2026-09-24
 
 ### Fixed

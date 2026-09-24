@@ -3,7 +3,6 @@
 FROM ubuntu:24.04
 
 ARG TARGETARCH
-ARG OUTE_VERSION=0.0.0-dev
 ARG NODE_MAJOR=22
 # bw >= 2026.9.0 quebra com Vaultwarden 1.37.x (dani-garcia/vaultwarden#7750); liberar quando o fix sair
 ARG BW_CLI_VERSION=2026.8.0
@@ -110,6 +109,9 @@ ENV HOME=/home/${OUTE_USER} \
     AI_MEMORY_DATA_DIR=/data/ai-memory \
     OUTE_ROUTER_URL=http://jev-router:4000/v1
 
+# ARG da versão só aqui no fim: ARG declarado antes de um RUN vira env dele e o bump de versão
+# invalidava o cache de todos os passos pesados (release = rebuild completo de ~7 min)
+ARG OUTE_VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="oute-agent" \
       org.opencontainers.image.version="${OUTE_VERSION}" \
       org.opencontainers.image.source="https://github.com/renatobardi/oute-agent" \
