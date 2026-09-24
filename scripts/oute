@@ -160,7 +160,10 @@ case "${1:-}" in
   ssh)     if [[ $# -gt 1 ]]; then exec ssh -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"; else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
-  oci-bootstrap) oci_bootstrap "${@:2}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
+  oci-bootstrap) oci_bootstrap "${@:2}" ;;
+  storage)   # acesso direto ao bucket, sem passar pelo mount: oute storage ls | lsl | about | <qualquer subcomando rclone>
+    oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
+    sub="${2:-ls}"; rclone "$sub" "oci:${OUTE_BUCKET:-oute-shared}${3:+/$3}" "${@:4}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   router-sync)
     # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
@@ -187,6 +190,7 @@ uso: oute <cmd>
   logs [svc]
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
+  storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1]
   lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
   router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
