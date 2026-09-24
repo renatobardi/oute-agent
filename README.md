@@ -8,6 +8,7 @@ Arquitetura e decisões: Project "Oute Agent" no Claude (`arquitetura/01-runtime
 
 ```
 docker/          Dockerfile (multi-arch), compose.yaml, entrypoint.sh
+config/otel/     collector.yaml (bucket OCI), langfuse.yaml (metadados), none.yaml
 config/litellm/  policy.yaml (FONTE do router, editar aqui), jev_hook.py
                  router.yaml, config.yaml, candidates.json, catalog.json  <- GERADOS por `oute router-sync` (fora do git)
 config/ssh/      sshd_config
@@ -74,6 +75,13 @@ Host:
 - Mac: `brew install macos-fuse-t/homebrew-cask/fuse-t` + rclone do rclone.org (`sudo -v; curl https://rclone.org/install.sh | sudo bash`).
 
 Custo: Always Free cobre 20 GB + 50 mil requests/mês; cache do mount (`--dir-cache-time 5m`, `OUTE_SHARED_CACHE`) segura as requests. Log: `~/.oute/rclone.log`.
+
+## Observabilidade (ADR-04)
+
+Serviço `otel-collector` (sem porta publicada) recebe OTLP de **Claude Code** (métricas, eventos, traces), **Codex** (eventos) e **jev-router** (spans do LiteLLM: perfil do Jev, modelo servido, tokens, custo).
+- **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/year=…/` (gzip, lotes de 5 min).
+- **Só metadados** → Langfuse Cloud (traces), se o vault tiver o item `langfuse`. Allowlist de atributos no collector: prompt/resposta nunca saem.
+- Conferir: `docker logs oute-otel-collector`, `oute storage lsl` com `OUTE_BUCKET=oute-observability`.
 
 ## Versionamento e retenção
 

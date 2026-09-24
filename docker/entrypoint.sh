@@ -110,6 +110,19 @@ EOF
       ai-memory install-hooks --agent  "$a" --apply --server-url "$url"     "${tok[@]}" >/dev/null 2>&1 || log "ai-memory hooks: $a não suportado"
     done
   fi
+
+  # Codex -> otel-collector (#13): bloco [otel] gerenciado entre marcadores, sempre no FIM do config.toml
+  # (depois do ai-memory, pra nenhuma chave solta cair dentro da tabela [otel])
+  mkdir -p "$HOME/.codex"; local ct="$HOME/.codex/config.toml"; touch "$ct"
+  sed -i '/^# >>> oute otel/,/^# <<< oute otel/d' "$ct"
+  cat >> "$ct" <<EOF
+# >>> oute otel (gerado pelo entrypoint; não editar)
+[otel]
+environment = "${OUTE_HOSTNAME:-oute}"
+log_user_prompt = true
+exporter = { otlp-http = { endpoint = "http://otel-collector:4318/v1/logs", protocol = "binary" } }
+# <<< oute otel
+EOF
 }
 
 # ---------------------------------------------------------------- 4. ssh
@@ -134,8 +147,9 @@ case "$MODE" in
     setup_agents
     setup_ssh
     # env pros logins ssh
-    env | grep -E '^(OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION|RCLONE_CONFIG_)' \
-      | sed 's/^/export /' > "$HOME/.oute_env"
+    # declare -px cita os valores (espaços, vírgulas, '=' não quebram o source)
+    declare -px | grep -E '^declare -x (OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' \
+      > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
       grep -q '.oute_env' "$rc" 2>/dev/null || printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$(cat "$rc" 2>/dev/null)" > "$rc"

@@ -30,13 +30,22 @@ export -f bw
 host_secrets() {
   need jq
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
+  # 1 leitura do vault (pasta oute-agent) -> env do host; o compose só repassa o que cada serviço referencia
   # oute-secrets reutiliza a sessão em cache ($OUTE_HOME/bw_session) e só pede a master password se precisar
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-  OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
-  export OPENROUTER_API_KEY
-  # token do ai-memory (item "ai-memory", field AI_MEMORY_AUTH_TOKEN); vazio = sem auth (rede interna)
-  AI_MEMORY_AUTH_TOKEN="$("$ROOT/scripts/oute-secrets.sh" get AI_MEMORY_AUTH_TOKEN 2>/dev/null || true)"
-  export AI_MEMORY_AUTH_TOKEN
+  local envs; envs="$("$ROOT/scripts/oute-secrets.sh" export)" || die "não consegui ler o vault"
+  eval "$envs"
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || die "OPENROUTER_API_KEY ausente no vault"
+  export OPENROUTER_API_KEY AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
+  export OCI_S3_ACCESS_KEY="${OCI_S3_ACCESS_KEY:-}" OCI_S3_SECRET_KEY="${OCI_S3_SECRET_KEY:-}" \
+         OCI_S3_ENDPOINT="${OCI_S3_ENDPOINT:-}" OCI_S3_REGION="${OCI_S3_REGION:-}"
+  # Langfuse (item "langfuse": LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST opcional) liga o pipeline de metadados
+  if [[ -n "${LANGFUSE_PUBLIC_KEY:-}" && -n "${LANGFUSE_SECRET_KEY:-}" ]]; then
+    OUTE_LANGFUSE_AUTH="$(printf '%s:%s' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" | base64 | tr -d '\n')"
+    export OUTE_LANGFUSE_AUTH OUTE_OTEL_LANGFUSE=langfuse LANGFUSE_HOST="${LANGFUSE_HOST:-https://cloud.langfuse.com}"
+  else
+    export OUTE_OTEL_LANGFUSE=none
+  fi
   # sessão desbloqueada vai pro container (mesmo estado do bw via volume bwcli) -> sem 2º prompt
   BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
   export OUTE_BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
@@ -88,6 +97,7 @@ oci_remote_env() {
     [[ -n "${!v:-}" ]] || { export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"; eval "$("$ROOT/scripts/oute-secrets.sh" export)"; break; }
   done
   [[ -n "${OCI_S3_ACCESS_KEY:-}" ]] || return 1
+  export RCLONE_CONFIG=/dev/null   # remote só por env; evita o NOTICE "rclone.conf not found"
   export RCLONE_CONFIG_OCI_TYPE=s3 RCLONE_CONFIG_OCI_PROVIDER=Other \
     RCLONE_CONFIG_OCI_ACCESS_KEY_ID="$OCI_S3_ACCESS_KEY" RCLONE_CONFIG_OCI_SECRET_ACCESS_KEY="$OCI_S3_SECRET_KEY" \
     RCLONE_CONFIG_OCI_ENDPOINT="$OCI_S3_ENDPOINT" RCLONE_CONFIG_OCI_REGION="$OCI_S3_REGION" \

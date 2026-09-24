@@ -1,0 +1,36 @@
+# Pipeline extra: traces -> Langfuse Cloud SÓ COM METADADOS (ADR-04, opção híbrida).
+# Mesclado sobre collector.yaml quando o vault tem o item "langfuse" (oute up decide).
+# Privacidade por padrão: ALLOWLIST de atributos (o que não está aqui não sai) + span events descartados.
+processors:
+  filter/no_events:
+    error_mode: ignore
+    traces:
+      spanevent: ['true']
+  transform/metadata_only:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - >-
+            keep_matching_keys(span.attributes,
+            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(trace\\.name|trace\\.tags|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
+      - context: resource
+        statements:
+          - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment)$")
+  batch/fast:
+    timeout: 10s
+
+exporters:
+  otlphttp/langfuse:
+    endpoint: "${env:LANGFUSE_HOST}/api/public/otel"
+    headers:
+      Authorization: "Basic ${env:OUTE_LANGFUSE_AUTH}"
+      x-langfuse-ingestion-version: "4"
+    compression: gzip
+
+service:
+  pipelines:
+    traces/langfuse:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/no_events, transform/metadata_only, resource, batch/fast]
+      exporters: [otlphttp/langfuse]

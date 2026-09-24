@@ -1,0 +1,87 @@
+# OTel Collector do oute-agent (issue #13, ADR-04) — porta de entrada única de telemetria.
+# Fontes (rede docker "oute", sem porta publicada): Claude Code, Codex, jev-router (LiteLLM).
+# Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt.
+# Destino 2 (opcional, langfuse.yaml): Langfuse Cloud — só traces, só metadados (allowlist).
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc: {endpoint: 0.0.0.0:4317}
+      http: {endpoint: 0.0.0.0:4318}
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+  resource:
+    attributes:
+      - {key: service.namespace, value: oute-agent, action: upsert}
+      - {key: host.name, value: "${env:OUTE_HOSTNAME}", action: upsert}
+  # arquivo: lotes grandes = poucos objetos/requests no OCI (franquia 50 mil/mês)
+  batch/archive:
+    timeout: 5m
+    send_batch_size: 20000
+    send_batch_max_size: 50000
+
+exporters:
+  awss3/traces:
+    s3uploader:
+      region: "${env:OCI_S3_REGION}"
+      endpoint: "${env:OCI_S3_ENDPOINT}"
+      s3_force_path_style: true
+      s3_bucket: oute-observability
+      s3_prefix: otel/traces
+      s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
+      s3_partition_timezone: UTC
+      compression: gzip
+    marshaler: otlp_json
+    sending_queue: {enabled: true}
+    timeout: 30s
+  awss3/metrics:
+    s3uploader:
+      region: "${env:OCI_S3_REGION}"
+      endpoint: "${env:OCI_S3_ENDPOINT}"
+      s3_force_path_style: true
+      s3_bucket: oute-observability
+      s3_prefix: otel/metrics
+      s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
+      s3_partition_timezone: UTC
+      compression: gzip
+    marshaler: otlp_json
+    sending_queue: {enabled: true}
+    timeout: 30s
+  awss3/logs:
+    s3uploader:
+      region: "${env:OCI_S3_REGION}"
+      endpoint: "${env:OCI_S3_ENDPOINT}"
+      s3_force_path_style: true
+      s3_bucket: oute-observability
+      s3_prefix: otel/logs
+      s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
+      s3_partition_timezone: UTC
+      compression: gzip
+    marshaler: otlp_json
+    sending_queue: {enabled: true}
+    timeout: 30s
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs: {level: warn}
+  pipelines:
+    traces/archive:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch/archive]
+      exporters: [awss3/traces]
+    metrics/archive:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch/archive]
+      exporters: [awss3/metrics]
+    logs/archive:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch/archive]
+      exporters: [awss3/logs]

@@ -263,7 +263,8 @@ def main() -> int:
            for c in chosen]
     litellm = {
         "model_list": ml,
-        "litellm_settings": {"callbacks": "jev_hook.handler", "drop_params": True, "num_retries": 2, "request_timeout": 600},
+        "litellm_settings": {"callbacks": ["jev_hook.handler", "otel"],  # otel -> otel-collector (#13)
+                              "drop_params": True, "num_retries": 2, "request_timeout": 600},
         "general_settings": {"master_key": "os.environ/LITELLM_MASTER_KEY"},
     }
     pi = [{"id": "jev-router", "name": "Jev router (auto)", "contextWindow": 200000, "maxTokens": 32000}] + [
