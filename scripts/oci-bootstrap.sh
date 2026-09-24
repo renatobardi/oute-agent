@@ -87,8 +87,11 @@ bucket "$OBS_BUCKET" Disabled
 policy() { # nome descrição statements-json
   local pid; pid="$(q iam policy list --compartment-id "$TEN" --name "$1" --query 'data[0].id' --raw-output)"
   if [[ -n "$pid" ]]; then
+    local cur; cur="$(q iam policy get --policy-id "$pid" --query 'data.statements' | jq -c 'sort')"
+    if [[ "$cur" == "$(jq -c 'sort' <<<"$3")" ]]; then log "policy $1: igual"; return 0; fi
     log "policy $1: atualizando"
-    run oci iam policy update --policy-id "$pid" --statements "$3" --force >/dev/null
+    # update exige statements + version-date juntos; "" = avalia pelo comportamento atual dos serviços
+    run oci iam policy update --policy-id "$pid" --statements "$3" --version-date "" --force >/dev/null
   else
     log "criando policy $1"
     run oci iam policy create --compartment-id "$TEN" --name "$1" --description "$2" --statements "$3" >/dev/null
