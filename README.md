@@ -61,7 +61,7 @@ OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 
 | comando | faz |
 |---|---|
-| `oute build` | constrói a imagem; mantém até `OUTE_BUILD_CACHE` (5gb) de cache |
+| `oute build` | constrói a imagem; mantém o cache usado nas últimas 72h |
 | `oute up` / `down` / `restart` / `status` | ciclo de vida da stack |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
@@ -108,5 +108,5 @@ Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. 
 ## Build, versionamento e retenção
 
 SemVer, fonte única em `VERSION`. `scripts/release x.y.z` faz bump + fecha o `CHANGELOG.md` + commit + tag (push manual). Imagem `ghcr.io/renatobardi/oute-agent:x.y.z`; `oute version` mostra repo × imagem.
-Build com BuildKit: cache mantido até `OUTE_BUILD_CACHE` (rebuild sem mudança ~2 s), cache mounts pra npm/pip, imagem sem doc/man/locale extras. Retenção: só a versão corrente (a anterior quando houver CI/registry); `oute up` apaga imagem solta.
+Build com BuildKit: cache sem uso há mais de `OUTE_BUILD_CACHE_TTL` (72h) é apagado, o recente fica (rebuild sem mudança ~2 s), cache mounts pra npm/pip, imagem sem doc/man/locale extras. Retenção: só a versão corrente (a anterior quando houver CI/registry); `oute up` apaga imagem solta.
 Backup do host: boot volume do oute-server com policy semanal na OCI (inclui `/var/lib/docker`).

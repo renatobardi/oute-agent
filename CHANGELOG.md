@@ -5,11 +5,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Fixed
-- `oute build`: teto do cache de build agora vale (`prune -a --max-used-space`; sem `-a` nada era removido). `oute up` apaga a imagem antiga que ficou solta após recriar o container.
+- `oute build`: retenção do cache por idade (`prune -a --filter until=72h`, `OUTE_BUILD_CACHE_TTL`) — teto por tamanho (`--max-used-space`) apagava também o cache recente e o rebuild voltava a 7 min. `oute up` apaga a imagem antiga que ficou solta após recriar o container.
 
 ### Changed
 - Dieta da imagem, só cortes seguros (#11): dpkg sem man/doc/info e sem traduções além de en/pt; sem cache de pip/npm na imagem (`PIP_NO_CACHE_DIR`, cache mounts do BuildKit pra npm e pipx — rebuild baixa rápido, nada entra na camada); aws-cli sem `examples/`; gcloud sem `.install/.backup`. Nenhuma ferramenta removida.
-- `oute build` mantém o cache de build (teto `OUTE_BUILD_CACHE`, default 5gb) em vez de apagar tudo: rebuild que só muda entrypoint/scripts reaproveita apt/npm/oci-cli (#8). Sem attestation de proveniência (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`). Avisa se faltar `docker-buildx`.
+- `oute build` mantém o cache de build em vez de apagar tudo: rebuild que só muda entrypoint/scripts reaproveita apt/npm/oci-cli (#8). Sem attestation de proveniência (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`). Avisa se faltar `docker-buildx`.
 
 ## [0.5.0] - 2026-09-24
 
