@@ -63,6 +63,8 @@ folder_id() {
 
 export_all() {
   unlock
+  # sessão em cache não sincroniza sozinha: item/pasta criado depois fica invisível sem isto (~1s)
+  bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
   local fid; fid="$(folder_id)"
   # sessão em cache não sincroniza sozinha: pasta/item criado depois do último sync não aparece
   [[ -n "$fid" ]] || { bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true; fid="$(folder_id)"; }

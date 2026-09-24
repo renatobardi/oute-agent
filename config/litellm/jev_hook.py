@@ -20,6 +20,11 @@ import httpx
 import yaml
 from litellm.integrations.custom_logger import CustomLogger
 
+try:  # atributos oute.* no span do LiteLLM (callback "otel") -> bucket e Langfuse (allowlist "oute\..*")
+    from opentelemetry import trace as _otel_trace
+except Exception:  # noqa: BLE001
+    _otel_trace = None
+
 ROUTER_YAML = Path(os.environ.get("OUTE_ROUTER_YAML", "/app/router.yaml"))
 # Jev não é chat: usa a Decisions API (alpha) do OpenRouter. Formato = TypeSafe System One:
 # {state, model, questions:{name:{type:"choice", instructions, criteria:{opt:desc}}}} -> {answers:{name:{choice}}}
@@ -124,6 +129,18 @@ async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
         return None
 
 
+def _mark_span(**attrs: Any) -> None:
+    if _otel_trace is None:
+        return
+    try:
+        span = _otel_trace.get_current_span()
+        for k, v in attrs.items():
+            if v is not None:
+                span.set_attribute(f"oute.{k}", v if isinstance(v, (str, bool, int, float)) else json.dumps(v))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _apply_profile(data: dict, prof: dict) -> None:
     """Roteamento do OpenRouter dentro do perfil: lista de modelos + sort ao vivo.
     Se o perfil tem @preset publicado, o preset já carrega models/sort/provider -> nada a injetar."""
@@ -149,6 +166,7 @@ class JevRouterHandler(CustomLogger):
 
         if requested in profiles:            # perfil pedido direto (ex.: /model coder no Pi)
             _apply_profile(data, profiles[requested])
+            _mark_span(profile=requested, via="direct", preset=profiles[requested].get("preset"))
             return data
         if requested != TRIGGER:
             return data
@@ -166,6 +184,8 @@ class JevRouterHandler(CustomLogger):
         log.warning("[jev-router] chosen=%s via=%s preset=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
                     chosen, via, prof.get("preset", "-"), prof.get("sort"), ",".join(prof.get("models", [])),
                     s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
+        _mark_span(profile=chosen, via=via, preset=prof.get("preset"), sort=prof.get("sort"),
+                   models=",".join(prof.get("models", [])), needs_tools=s["needs_tools"], needs_vision=s["needs_vision"])
         data.setdefault("metadata", {})["oute_router"] = {
             "profile": chosen, "via": via, "sort": prof.get("sort"), "models": prof.get("models", []),
             "signals": {k: v for k, v in s.items() if k != "transcript"},
