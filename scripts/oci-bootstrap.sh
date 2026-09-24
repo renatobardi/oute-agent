@@ -53,7 +53,8 @@ CFG
 )
 export OCI_CLI_CONFIG_FILE="$OCI_DIR/config" OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
 TEN="$OCI_TENANCY_OCID"; REGION="$OCI_REGION"
-q() { oci "$@" 2>/dev/null || true; }
+# consulta tolerante: erro ou JMESPath sem resultado ("null") viram vazio
+q() { local out; out="$(oci "$@" 2>/dev/null || true)"; [[ "$out" == null ]] && out=""; printf '%s' "$out"; }
 # policy nova leva alguns segundos pra propagar no IAM
 retry() { local i; for i in 1 2 3 4 5 6; do "$@" && return 0; log "tentativa $i falhou; aguardando IAM propagar"; sleep 15; done; return 1; }
 
