@@ -165,20 +165,27 @@ else
   log "Customer Secret Key criada e gravada no vault (item oci-storage)"
 fi
 
-# --- budget + alertas (compartment)
+# --- budget + alertas (compartment) — alertas conferidos sempre, não só na criação
 BID="$(q budgets budget budget list --compartment-id "$TEN" --all --query "data[?\"display-name\"=='$COMPARTMENT'].id | [0]" --raw-output)"
 if [[ -z "$BID" ]]; then
   log "criando budget US\$$BUDGET_USD/mês"
   BID="$(run oci budgets budget budget create --compartment-id "$TEN" --amount "$BUDGET_USD" --reset-period MONTHLY \
         --target-type COMPARTMENT --targets "[\"$CID\"]" --display-name "$COMPARTMENT" \
         --description "oute-agent storage" --query data.id --raw-output)"
-  if [[ -n "$BUDGET_EMAIL" && -n "$BID" ]]; then
-    for t in ACTUAL FORECAST; do
-      run oci budgets alert-rule create --budget-id "$BID" --type "$t" --threshold 100 --threshold-type PERCENTAGE \
-        --recipients "$BUDGET_EMAIL" --display-name "oute-$t" >/dev/null
-    done
-    log "alertas ACTUAL/FORECAST 100% → $BUDGET_EMAIL"
-  else log "aviso: sem OUTE_OCI_BUDGET_EMAIL, budget criado sem alerta"; fi
 else log "budget $COMPARTMENT: existe"; fi
+if [[ -n "$BID" ]]; then
+  if [[ -z "$BUDGET_EMAIL" ]]; then
+    log "aviso: sem OUTE_OCI_BUDGET_EMAIL, budget sem alerta"
+  else
+    for t in ACTUAL FORECAST; do
+      if q budgets budget alert-rule list --budget-id "$BID" --all --query "data[?type=='$t'].id | [0]" --raw-output | grep -q .; then
+        log "alerta $t: existe"
+      else
+        run oci budgets budget alert-rule create --budget-id "$BID" --type "$t" --threshold 100 --threshold-type PERCENTAGE \
+          --recipients "$BUDGET_EMAIL" --display-name "oute-$t" >/dev/null && log "alerta $t 100% → $BUDGET_EMAIL"
+      fi
+    done
+  fi
+fi
 
 log "pronto · endpoint $ENDPOINT · buckets $SHARED_BUCKET, $OBS_BUCKET"
