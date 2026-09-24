@@ -31,7 +31,9 @@ normalize_pem() {
 }
 
 # --- credencial admin (pasta separada) -> ~/.oci temporário
-eval "$(OUTE_VAULT_FOLDER="$ADMIN_FOLDER" oute-secrets export)" || die "não li a pasta '$ADMIN_FOLDER' do vault"
+bw sync --session "${BW_SESSION:-}" --quiet >/dev/null 2>&1 || true   # itens criados agora no vault
+ADMIN_ENV="$(OUTE_VAULT_FOLDER="$ADMIN_FOLDER" oute-secrets export)" || die "não li a pasta '$ADMIN_FOLDER' do vault"
+eval "$ADMIN_ENV"; unset ADMIN_ENV
 for v in OCI_USER_OCID OCI_TENANCY_OCID OCI_FINGERPRINT OCI_REGION OCI_KEY_PEM; do
   [[ -n "${!v:-}" ]] || die "$v ausente no item oci-admin (pasta $ADMIN_FOLDER)"
 done
@@ -122,7 +124,8 @@ policy oute-agent-storage "S3 nos buckets do oute-agent (menor privilégio)" \
 
 # --- Customer Secret Key -> vault (nunca em log/argv)
 ENDPOINT="https://$NS.compat.objectstorage.$REGION.oraclecloud.com"
-eval "$(OUTE_VAULT_FOLDER="$AGENT_FOLDER" oute-secrets export)"
+AGENT_ENV="$(OUTE_VAULT_FOLDER="$AGENT_FOLDER" oute-secrets export)" || die "não li a pasta '$AGENT_FOLDER' do vault"
+eval "$AGENT_ENV"; unset AGENT_ENV
 if [[ -n "${OCI_S3_ACCESS_KEY:-}" ]]; then
   log "item oci-storage já existe no vault: chave mantida"
 elif [[ "$DRY" == 1 ]]; then
