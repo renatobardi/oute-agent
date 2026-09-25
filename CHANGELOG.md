@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- CI: cache de camadas trocado de `type=gha` para registry (`ghcr.io/renatobardi/oute-agent-cache:buildcache`). O cache do Actions é isolado por ref e cada tag é um ref novo — nunca havia hit (build sempre ~5 min).
+
 ## [0.5.3] - 2026-09-24
 
 ### Added

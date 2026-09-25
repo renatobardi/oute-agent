@@ -53,9 +53,10 @@ jobs:
             OUTE_VERSION=${{ steps.v.outputs.version }}
             OUTE_UID=${{ vars.OUTE_UID || '1001' }}
           tags: ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
-          # cache de camadas no GitHub: bump de versão só refaz o fim da imagem
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # cache de camadas no próprio ghcr, em pacote separado (a retenção do pacote da imagem não o apaga).
+          # type=gha não serve: cache do Actions é por ref, e cada tag vX.Y.Z é um ref novo -> sempre miss.
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-cache:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-cache:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: resumo
         run: |
