@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-25
+
 ### Added
 - `router-sync` detecta divergência `policy.yaml` × guardrail do OpenRouter (#16): com a Management API key (`OPENROUTER_MGMT_KEY`, pasta `oute-admin` do vault — nunca vai ao container dos agentes) compara `providers_allow` com `allowed_providers`/`ignored_providers` e ZDR do guardrail nomeado em `policy.yaml: guardrail`. Sync normal só avisa; `oute router-sync --check-guardrail` sai 2 se divergir. Sem a key, avisa que não verificou.
 - Ponte do Mac (#9): `.githooks/pre-commit` reaplica +x no índice e no disco; `scripts/fix-bridge` (+x, remove `.git/*.lock` órfão se não houver git rodando, ativa `core.hooksPath`); `scripts/exec-files` = lista única dos executáveis; `scripts/release` e o CI recusam script sem modo 100755.
