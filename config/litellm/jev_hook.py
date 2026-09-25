@@ -87,6 +87,14 @@ def _cheapest(cands: list[dict]) -> str:
     return min(cands, key=lambda c: c.get("cost_in", 0) + c.get("cost_out", 0))["name"]
 
 
+def _client_agent(data: dict[str, Any]) -> str:
+    """Qual agente chamou o router (pi, …): header X-Oute-Agent que cada cliente manda (Pi: models.json)."""
+    req = data.get("proxy_server_request") or {}
+    headers = {str(k).lower(): v for k, v in (req.get("headers") or {}).items()}
+    raw = str(headers.get("x-oute-agent") or "")
+    return re.sub(r"[^a-z0-9_-]", "", raw.lower())[:32] or "unknown"
+
+
 def _conversation_key(data: dict[str, Any]) -> str:
     """Estável entre turnos da mesma conversa: 1ª mensagem do usuário (+ system, se houver)."""
     msgs = data.get("messages") or []
@@ -258,8 +266,8 @@ async def _emit_decision(attrs: dict, gen_id: str | None, start_ns, end_ns) -> N
             "oute.generation_ms": g.get("generation_time"),
             "oute.cache_discount": g.get("cache_discount"),
         })
-    log.warning("[jev-router] served profile=%s via=%s model=%s provider=%s cost=%s gen=%s",
-                attrs.get("oute.profile"), attrs.get("oute.via"), g.get("model", "?"),
+    log.warning("[jev-router] served agent=%s profile=%s via=%s model=%s provider=%s cost=%s gen=%s",
+                attrs.get("oute.agent"), attrs.get("oute.profile"), attrs.get("oute.via"), g.get("model", "?"),
                 g.get("provider_name", "?"), g.get("total_cost", "?"), gen_id)
     tracer = _get_tracer()
     if tracer:
@@ -273,11 +281,12 @@ class JevRouterHandler(CustomLogger):
         policy = _load_policy()
         profiles = {c["name"]: c for c in policy["candidates"]}
         requested = data.get("model")
+        agent = _client_agent(data)
 
         if requested in profiles:            # perfil pedido direto (ex.: /model coder no Pi)
             _apply_profile(data, profiles[requested])
             prof = profiles[requested]
-            data.setdefault("metadata", {})["oute_router"] = {
+            data.setdefault("metadata", {})["oute_router"] = {"agent": agent,
                 "profile": requested, "via": "direct", "preset": prof.get("preset"), "sort": prof.get("sort"),
                 "models": prof.get("models", []), "signals": {}}
             return data
@@ -291,7 +300,7 @@ class JevRouterHandler(CustomLogger):
             pool = _route_auto(data, cands)
             log.warning("[jev-router] ab=auto pool=%s tools=%s vision=%s in_chars=%s",
                         ",".join(pool), s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
-            data.setdefault("metadata", {})["oute_router"] = {
+            data.setdefault("metadata", {})["oute_router"] = {"agent": agent,
                 "profile": "auto", "via": "openrouter-auto", "arm": "auto", "preset": None, "sort": None,
                 "models": pool, "signals": {k: v for k, v in s.items() if k != "transcript"},
             }
@@ -307,7 +316,7 @@ class JevRouterHandler(CustomLogger):
         log.warning("[jev-router] chosen=%s via=%s preset=%s sort=%s models=%s tools=%s vision=%s in_chars=%s",
                     chosen, via, prof.get("preset", "-"), prof.get("sort"), ",".join(prof.get("models", [])),
                     s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
-        data.setdefault("metadata", {})["oute_router"] = {
+        data.setdefault("metadata", {})["oute_router"] = {"agent": agent,
             "profile": chosen, "via": via, "arm": "jev", "preset": prof.get("preset"), "sort": prof.get("sort"),
             "models": prof.get("models", []),
             "signals": {k: v for k, v in s.items() if k != "transcript"},
@@ -324,6 +333,7 @@ class JevRouterHandler(CustomLogger):
             sig = meta.get("signals") or {}
             attrs = {
                 "langfuse.trace.name": ("ab-auto" if meta.get("arm") == "auto" else f"jev:{meta.get('profile')}"),
+                "oute.agent": meta.get("agent"),
                 "oute.ab_arm": meta.get("arm"), "oute.ab_mode": AB_MODE,
                 "oute.profile": meta.get("profile"), "oute.via": meta.get("via"),
                 "oute.preset": meta.get("preset"), "oute.sort": meta.get("sort"),

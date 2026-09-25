@@ -33,13 +33,15 @@ processors:
           - set(span.attributes["gen_ai.usage.cache_read_input_tokens"], span.attributes["codex.turn.token_usage.cached_input_tokens"]) where span.attributes["codex.turn.token_usage.cached_input_tokens"] != nil
           - set(span.attributes["gen_ai.request.model"], span.attributes["model"]) where span.name == "session_task.turn" and span.attributes["model"] != nil
           - set(span.attributes["langfuse.observation.type"], "generation") where span.name == "session_task.turn"
+          # agente (claude | codex | pi | …) -> metadata do trace, filtrável no Langfuse
+          - set(span.attributes["langfuse.trace.metadata.agent"], span.attributes["oute.agent"]) where span.attributes["oute.agent"] != nil
           # aba Sessions do Langfuse
           - set(span.attributes["langfuse.session.id"], span.attributes["session.id"]) where span.attributes["session.id"] != nil
       - context: span
         statements:
           - >-
             keep_matching_keys(span.attributes,
-            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(trace\\.name|trace\\.tags|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
+            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(trace\\.name|trace\\.tags|trace\\.metadata\\.agent|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
       # eventos que sobraram (Codex): mesma lógica de allowlist — prompt/resposta nunca saem
       - context: spanevent
         statements:
@@ -48,7 +50,7 @@ processors:
             "^(event\\.name|event\\.kind|model|slug|provider|tool_name|call_id|duration_ms|success|decision|status|attempt|http\\.response\\.status_code|conversation\\.id|.*_tokens|.*token_count|.*_count)$")
       - context: resource
         statements:
-          - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment)$")
+          - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment|oute\\.agent)$")
   batch/fast:
     timeout: 10s
 
@@ -64,5 +66,5 @@ service:
   pipelines:
     traces/langfuse:
       receivers: [otlp]
-      processors: [memory_limiter, filter/no_events, transform/metadata_only, resource, batch/fast]
+      processors: [memory_limiter, transform/agent, filter/no_events, transform/metadata_only, resource, batch/fast]
       exporters: [otlphttp/langfuse]

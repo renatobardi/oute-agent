@@ -94,7 +94,8 @@ setup_agents() {
   local models='[{"id":"jev-router","name":"Jev router (auto)","contextWindow":200000,"maxTokens":32000}]'
   [[ -s /etc/oute/candidates.json ]] && models="$(cat /etc/oute/candidates.json)"
   jq -n --arg url "$OUTE_ROUTER_URL" --argjson models "$models" '{
-    providers: { oute: { baseUrl: $url, apiKey: "$OUTE_ROUTER_KEY", api: "openai-completions", models: $models } }
+    providers: { oute: { baseUrl: $url, apiKey: "$OUTE_ROUTER_KEY", api: "openai-completions",
+                         headers: { "X-Oute-Agent": "pi" }, models: $models } }
   }' > "$HOME/.pi/agent/models.json"
   # força provider/model default (merge, preserva o resto do settings.json)
   local sj="$HOME/.pi/agent/settings.json"; [[ -s "$sj" ]] || echo '{}' > "$sj"

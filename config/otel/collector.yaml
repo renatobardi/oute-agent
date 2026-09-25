@@ -21,6 +21,25 @@ processors:
     attributes:
       - {key: service.namespace, value: oute-agent, action: upsert}
       - {key: host.name, value: "${env:OUTE_HOSTNAME}", action: upsert}
+  # oute.agent = qual agente gerou a telemetria (claude | codex | router); nos spans do jev-router o hook
+  # já grava o cliente real (pi, …) em span.attributes["oute.agent"], que tem precedência
+  transform/agent:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements: &agent_by_service
+          - set(resource.attributes["oute.agent"], "claude") where resource.attributes["service.name"] == "claude-code"
+          - set(resource.attributes["oute.agent"], "codex") where IsMatch(resource.attributes["service.name"], "(?i)^codex")
+          - set(resource.attributes["oute.agent"], "router") where resource.attributes["service.name"] == "jev-router"
+      - context: span
+        statements:
+          - set(span.attributes["oute.agent"], resource.attributes["oute.agent"]) where span.attributes["oute.agent"] == nil
+    log_statements:
+      - context: resource
+        statements: *agent_by_service
+    metric_statements:
+      - context: resource
+        statements: *agent_by_service
   # arquivo: lotes grandes = poucos objetos/requests no OCI (franquia 50 mil/mês)
   batch/archive:
     timeout: 5m
@@ -75,13 +94,13 @@ service:
   pipelines:
     traces/archive:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource, batch/archive]
       exporters: [awss3/traces]
     metrics/archive:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource, batch/archive]
       exporters: [awss3/metrics]
     logs/archive:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource, batch/archive]
       exporters: [awss3/logs]
