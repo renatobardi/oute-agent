@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- Langfuse: tokens de Claude Code e Codex apareciam zerados. Atributos crus (`input_tokens`, `cache_read_tokens`, `codex.turn.token_usage.*`) mapeados para `gen_ai.usage.*`; `session_task.turn` do Codex vira generation com modelo; `session.id` → `langfuse.session.id` (aba Sessions) (#19).
+- Langfuse: ruído do Codex — allowlist de spans (`codex.exec`, `session_*`, `run_sampling_request`, tools, hooks, `thread/start`, `turn/start`). Antes 1 exec gerava ~7 traces e milhares de spans `fs.*`/`append_items`. Tudo continua no bucket.
+
 ### Changed
 - `oute pull` aplica retenção local: mantém só a versão atual e a anterior do agent (mesma regra do ghcr) e, sem `OUTE_BUILD_LOCAL=1`, limpa todo o build cache (sobrava 5,5 GB de builds antigos sem uso).
 

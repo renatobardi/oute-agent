@@ -8,12 +8,33 @@ processors:
       # spans internos do LiteLLM = ruído no painel (continuam no bucket)
       span:
         - 'IsMatch(name, "^(auth|router|self|proxy_pre_call|raw_gen_ai_request|batch_write_to_db|redis|postgres)$")'
+        # Codex: allowlist de spans (1 exec gerava ~7 traces + milhares de fs.*/append_items/thread/*).
+        # Fica só o esqueleto útil: sessão -> turno -> amostragem -> tool/hook. Resto segue no bucket.
+        - >-
+          IsMatch(resource.attributes["service.name"], "(?i)codex") and
+          not IsMatch(name, "^(codex\\.exec|session_init|session_loop|session_task\\.turn|run_sampling_request|dispatch_tool_call_with_state|codex\\.hooks\\.command|thread/start|turn/start)$")
       # span events só do Codex (é onde ele põe modelo/tools); os demais descartados
       spanevent:
         - 'not IsMatch(resource.attributes["service.name"], "(?i)codex")'
   transform/metadata_only:
     error_mode: ignore
     trace_statements:
+      # uso -> convenção que o Langfuse soma (gen_ai.usage.*); roda ANTES da allowlist
+      - context: span
+        statements:
+          # Claude Code (claude_code.llm_request): input_tokens já exclui cache (semântica Anthropic)
+          - set(span.attributes["gen_ai.usage.input_tokens"], span.attributes["input_tokens"]) where span.attributes["input_tokens"] != nil
+          - set(span.attributes["gen_ai.usage.output_tokens"], span.attributes["output_tokens"]) where span.attributes["output_tokens"] != nil
+          - set(span.attributes["gen_ai.usage.cache_read_input_tokens"], span.attributes["cache_read_tokens"]) where span.attributes["cache_read_tokens"] != nil
+          - set(span.attributes["gen_ai.usage.cache_creation_input_tokens"], span.attributes["cache_creation_tokens"]) where span.attributes["cache_creation_tokens"] != nil
+          # Codex (session_task.turn): input = não-cacheado, cache à parte (sem contar duas vezes)
+          - set(span.attributes["gen_ai.usage.input_tokens"], span.attributes["codex.turn.token_usage.non_cached_input_tokens"]) where span.attributes["codex.turn.token_usage.non_cached_input_tokens"] != nil
+          - set(span.attributes["gen_ai.usage.output_tokens"], span.attributes["codex.turn.token_usage.output_tokens"]) where span.attributes["codex.turn.token_usage.output_tokens"] != nil
+          - set(span.attributes["gen_ai.usage.cache_read_input_tokens"], span.attributes["codex.turn.token_usage.cached_input_tokens"]) where span.attributes["codex.turn.token_usage.cached_input_tokens"] != nil
+          - set(span.attributes["gen_ai.request.model"], span.attributes["model"]) where span.name == "session_task.turn" and span.attributes["model"] != nil
+          - set(span.attributes["langfuse.observation.type"], "generation") where span.name == "session_task.turn"
+          # aba Sessions do Langfuse
+          - set(span.attributes["langfuse.session.id"], span.attributes["session.id"]) where span.attributes["session.id"] != nil
       - context: span
         statements:
           - >-
