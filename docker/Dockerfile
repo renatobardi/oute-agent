@@ -30,7 +30,7 @@ RUN printf '%s\n' \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl wget gnupg git openssh-server sudo \
       build-essential pkg-config libssl-dev \
-      python3 python3-pip python3-venv pipx \
+      python3 python3-pip python3-venv python3-tomlkit pipx \
       jq ripgrep fd-find fzf unzip zip tmux vim less htop tzdata locales \
       fuse3 \
     && rm -rf /var/lib/apt/lists/* \
@@ -97,6 +97,7 @@ COPY config/ssh/sshd_config /etc/ssh/sshd_config
 
 # --- entrypoint --------------------------------------------------------------
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/codex_config.py /usr/local/lib/oute/codex_config.py
 COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets
 

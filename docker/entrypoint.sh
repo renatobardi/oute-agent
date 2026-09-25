@@ -102,28 +102,15 @@ setup_agents() {
     done
   fi
 
-  # Codex -> otel-collector (#13): bloco [otel] gerenciado entre marcadores, sempre no FIM do config.toml
-  # (depois do ai-memory, pra nenhuma chave solta cair dentro da tabela [otel])
-  mkdir -p "$HOME/.codex"; local ct="$HOME/.codex/config.toml"; touch "$ct"
-  sed -i '/^# >>> oute otel/,/^# <<< oute otel/d;/^# >>> oute sandbox/,/^# <<< oute sandbox/d' "$ct"
-  # Sandbox (#5): bwrap precisa de user namespace, que o container não tem. O isolamento é o
-  # próprio container (uid 1001, só /workspace, sem admin OCI) — mesmo regime do Claude Code.
-  # Chave de topo: tem que vir ANTES de qualquer tabela, por isso vai no início do arquivo.
-  { printf '%s\n' '# >>> oute sandbox (gerado pelo entrypoint; não editar)' \
-      'sandbox_mode = "danger-full-access"' '# <<< oute sandbox'; cat "$ct"; } > "$ct.tmp" && mv "$ct.tmp" "$ct"
-  cat >> "$ct" <<EOF
-# >>> oute otel (gerado pelo entrypoint; não editar)
-[otel]
-environment = "${OUTE_HOSTNAME:-oute}"
-log_user_prompt = true
-exporter = { otlp-http = { endpoint = "http://otel-collector:4318/v1/logs", protocol = "binary" } }
-
-# traces (#19): a própria tabela escolhe o exporter — não usar trace_exporter = "otlp-http" como string
-[otel.trace_exporter.otlp-http]
-endpoint = "http://otel-collector:4318/v1/traces"
-protocol = "binary"
-# <<< oute otel
-EOF
+  # Codex: sandbox_mode + [otel] mesclados de forma ESTRUTURAL (tomlkit), preservando o que o ai-memory
+  # escreve (mcp_servers). Antes era sed entre marcadores e apagava a seção do ai-memory (0.5.3–0.5.7).
+  mkdir -p "$HOME/.codex"
+  python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOSTNAME:-oute}" \
+    || log "AVISO: falha ao mesclar ~/.codex/config.toml"
+  # o ai-memory deixa um .bak-<ts> a cada --apply; retenção do projeto = atual + anterior (#12)
+  local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do
+    ls -1t "$base".bak-* 2>/dev/null | tail -n +3 | xargs -r rm -f
+  done
 }
 
 # ---------------------------------------------------------------- 4. ssh
