@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- Compose: rotação do stdout dos containers (`json-file`, 10 MB × 3). Telemetria não muda — vai inteira ao bucket, sem expiração.
+- CI (#20): actions nas majors Node 24 — `checkout@v7`, `setup-buildx-action@v4`, `login-action@v4`, `build-push-action@v7`. Retenção do ghcr reescrita com `gh api` (o `delete-package-versions@v5`, última versão, ainda é Node 20) e runner fixo em `ubuntu-24.04` (o `ubuntu-latest` migra para 26 em 19/10).
+
 ### Fixed
 - Langfuse: tokens de Claude Code e Codex apareciam zerados. Atributos crus (`input_tokens`, `cache_read_tokens`, `codex.turn.token_usage.*`) mapeados para `gen_ai.usage.*`; `session_task.turn` do Codex vira generation com modelo; `session.id` → `langfuse.session.id` (aba Sessions) (#19).
 - Langfuse: ruído do Codex — allowlist de spans (`codex.exec`, `session_*`, `run_sampling_request`, tools, hooks, `thread/start`, `turn/start`). Antes 1 exec gerava ~7 traces e milhares de spans `fs.*`/`append_items`. Tudo continua no bucket.

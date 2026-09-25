@@ -1,5 +1,11 @@
 name: oute-agent
 
+# stdout dos containers: rotação (sem isso o json-file do Docker cresce sem limite no disco do host).
+# Não é a telemetria — essa vai inteira para o bucket (ADR-04) e não é apagada.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
 services:
   agent:
     build:
@@ -11,6 +17,7 @@ services:
         OUTE_UID: ${OUTE_UID:-1000}
     image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
     container_name: oute-agent
+    logging: *logging
     hostname: ${OUTE_HOSTNAME:-oute}
     restart: unless-stopped
     ports:
@@ -66,6 +73,7 @@ services:
   jev-router:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: oute-jev-router
+    logging: *logging
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
@@ -84,6 +92,7 @@ services:
   ai-memory:
     image: akitaonrails/ai-memory:latest
     container_name: oute-ai-memory
+    logging: *logging
     restart: unless-stopped
     # mesmo uid do agent: o volume oute-memory é compartilhado (/data aqui, /data/ai-memory lá)
     user: "${OUTE_UID:-1000}:${OUTE_UID:-1000}"
@@ -101,6 +110,7 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
     container_name: oute-otel-collector
+    logging: *logging
     restart: unless-stopped
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:

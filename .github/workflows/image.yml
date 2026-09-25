@@ -22,7 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: v
         name: versão (VERSION; na tag, precisa bater)
@@ -33,15 +33,15 @@ jobs:
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
@@ -66,12 +66,22 @@ jobs:
           echo "tamanho comprimido: $(numfmt --to=iec "$SIZE")" >> "$GITHUB_STEP_SUMMARY"
 
   retention:
-    # regra do projeto: só a versão corrente e a anterior no registry
+    # regra do projeto: só a versão corrente e a anterior no registry.
+    # gh api direto: actions/delete-package-versions (v5, a última) ainda é Node 20 (#20).
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      PKG: oute-agent
+      KEEP: 2
     steps:
-      - uses: actions/delete-package-versions@v5
-        with:
-          package-name: oute-agent
-          package-type: container
-          min-versions-to-keep: 2
+      - name: apagar versões além das ${{ env.KEEP }} mais novas
+        run: |
+          set -euo pipefail
+          base="/users/$OWNER/packages/container/$PKG/versions"
+          gh api --paginate "$base" --jq '.[] | "\(.created_at) \(.id) \(.metadata.container.tags | join(","))"' | sort -r > versions.txt
+          echo "versões no ghcr:"; cat versions.txt
+          tail -n +"$((KEEP + 1))" versions.txt | while read -r _ id tags; do
+            gh api -X DELETE "$base/$id" && echo "apagada $id (${tags:-sem tag})"
+          done
