@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-09-24
+
 ### Changed
 - Compose: rotação do stdout dos containers (`json-file`, 10 MB × 3). Telemetria não muda — vai inteira ao bucket, sem expiração.
 - CI (#20): actions nas majors Node 24 — `checkout@v7`, `setup-buildx-action@v4`, `login-action@v4`, `build-push-action@v7`. Retenção do ghcr reescrita com `gh api` (o `delete-package-versions@v5`, última versão, ainda é Node 20) e runner fixo em `ubuntu-24.04` (o `ubuntu-latest` migra para 26 em 19/10).
