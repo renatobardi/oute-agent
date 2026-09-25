@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-09-24
+
 ### Changed
 - Imagens de terceiros com versão fixa (antes `:latest`/`:main-latest`): LiteLLM por digest (`1.103.0`, o que já rodava — `OUTE_LITELLM_IMAGE`), servidor ai-memory `2.4.0` (`OUTE_AI_MEMORY_VERSION`) e cliente ai-memory no Dockerfile `ARG AI_MEMORY_VERSION=2.4.0` (baixava `releases/latest`). Upgrade passa a ser deliberado.
 
