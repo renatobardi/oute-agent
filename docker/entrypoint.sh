@@ -105,8 +105,18 @@ setup_agents() {
   # Codex: sandbox_mode + [otel] mesclados de forma ESTRUTURAL (tomlkit), preservando o que o ai-memory
   # escreve (mcp_servers). Antes era sed entre marcadores e apagava a seção do ai-memory (0.5.3–0.5.7).
   mkdir -p "$HOME/.codex"
-  python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOSTNAME:-oute}" \
+  python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOSTNAME:-oute}" "${OUTE_AGENT_YOLO:-1}" \
     || log "AVISO: falha ao mesclar ~/.codex/config.toml"
+  # Claude Code yolo (ADR-01): sem prompts de permissão DENTRO do container (fronteira = container).
+  # Merge via jq: preserva hooks do ai-memory e o resto do settings.json. OUTE_AGENT_YOLO=0 desliga.
+  mkdir -p "$HOME/.claude"; local cs="$HOME/.claude/settings.json"; [[ -s "$cs" ]] || echo '{}' > "$cs"
+  if [[ "${OUTE_AGENT_YOLO:-1}" == 1 ]]; then
+    jq '.permissions = ((.permissions // {}) + {defaultMode:"bypassPermissions"}) | .skipDangerousModePermissionPrompt = true' "$cs" > "$cs.tmp"
+  else
+    jq 'del(.permissions.defaultMode) | del(.skipDangerousModePermissionPrompt)' "$cs" > "$cs.tmp"
+  fi
+  mv "$cs.tmp" "$cs"
+
   # o ai-memory deixa um .bak-<ts> a cada --apply: fica o MAIS ANTIGO (original, única cópia do que
   # havia antes de qualquer edição automática) + os 2 mais recentes (atual + anterior, #12)
   local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do
