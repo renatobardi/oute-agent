@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-25
+
 ### Security
 - **Container dos agentes sem acesso ao Vaultwarden** (#6, passo 1). Antes recebia `BW_SESSION` (+ `BW_PASSWORD` se definida), o estado do `bw` (`~/.oute/bwcli`) e a API key (`bw_client`) — com agentes em yolo, qualquer um podia ler o cofre inteiro (segredos de todos os projetos e a pasta `oute-admin`). Agora o `oute up` resolve só a pasta `oute-agent` no host e monta os valores como docker secret (`~/.oute/agent.env`, 0600, read-only em `/run/secrets/agent_env`). Saem do agent: `BW_*`, volume `bwcli`, secret `bw_client`, `extra_hosts` do vault; `BW_SESSION` sai do `.oute_env`; resíduos do bw no volume home são apagados no boot. O `bw` continua na imagem só para o host usar via `docker run`.
 
