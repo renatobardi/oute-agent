@@ -8,7 +8,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ### Fixed
 - **Codex sem ai-memory desde a 0.5.3/0.5.4** (sem MCP e sem captura de sessões): o entrypoint editava `~/.codex/config.toml` com `sed` apagando intervalos entre marcadores, e a seção `[mcp_servers.ai-memory]` gravada pelo ai-memory caía dentro do intervalo. Agora `docker/codex_config.py` mescla só `sandbox_mode` e `[otel]` via `tomlkit` (pacote `python3-tomlkit`) e preserva o resto; migra os blocos antigos no primeiro boot.
-- Backups `.bak-*` que o ai-memory cria a cada boot no `~/.codex`: mantém só os 2 mais recentes.
+- Backups `.bak-*` que o ai-memory cria a cada boot no `~/.codex`: mantém o mais antigo (original) + os 2 mais recentes.
+- Codex só roda hooks com aprovação persistida (`[hooks.state]…trusted_hash` no `config.toml`); o `sed` antigo apagou a aprovação e os hooks pararam em silêncio desde a 0.5.4. Reaprovado via TUI; agora preservado pelo merge estrutural.
 
 ## [0.5.7] - 2026-09-24
 

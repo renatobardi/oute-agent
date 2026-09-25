@@ -107,9 +107,10 @@ setup_agents() {
   mkdir -p "$HOME/.codex"
   python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOSTNAME:-oute}" \
     || log "AVISO: falha ao mesclar ~/.codex/config.toml"
-  # o ai-memory deixa um .bak-<ts> a cada --apply; retenção do projeto = atual + anterior (#12)
+  # o ai-memory deixa um .bak-<ts> a cada --apply: fica o MAIS ANTIGO (original, única cópia do que
+  # havia antes de qualquer edição automática) + os 2 mais recentes (atual + anterior, #12)
   local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do
-    ls -1t "$base".bak-* 2>/dev/null | tail -n +3 | xargs -r rm -f
+    ls -1t "$base".bak-* 2>/dev/null | sed '1,2d;$d' | xargs -r rm -f
   done
 }
 
