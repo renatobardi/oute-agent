@@ -91,20 +91,11 @@ setup_agents() {
   local sj="$HOME/.pi/agent/settings.json"; [[ -s "$sj" ]] || echo '{}' > "$sj"
   jq '. + {defaultProvider:"oute", defaultModel:"jev-router"}' "$sj" > "$sj.tmp" && mv "$sj.tmp" "$sj"
 
-  # Goose -> jev-router (OPENAI_API_KEY só no config do goose; global faria o Pi auto-detectar "openai")
-  mkdir -p "$HOME/.config/goose"
-  cat > "$HOME/.config/goose/config.yaml" <<EOF
-GOOSE_PROVIDER: openai
-GOOSE_MODEL: jev-router
-OPENAI_HOST: ${OUTE_ROUTER_URL%/v1}
-OPENAI_API_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
-EOF
-
   # ai-memory: hooks + MCP em cada agente (idempotente)
   if command -v ai-memory >/dev/null; then
     local url="${AI_MEMORY_SERVER_URL:-http://ai-memory:49374}"
     local tok=(); [[ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]] && tok=(--auth-token "$AI_MEMORY_AUTH_TOKEN")
-    IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-pi,claude-code,codex,goose}"
+    IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-pi,claude-code,codex}"
     for a in "${AGENTS[@]}"; do
       ai-memory install-mcp   --client "$a" --apply --server-url "$url/mcp" "${tok[@]}" >/dev/null 2>&1 || log "ai-memory mcp: $a não suportado"
       ai-memory install-hooks --agent  "$a" --apply --server-url "$url"     "${tok[@]}" >/dev/null 2>&1 || log "ai-memory hooks: $a não suportado"

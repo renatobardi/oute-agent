@@ -28,7 +28,7 @@ services:
       BW_PASSWORD: ${BW_PASSWORD:-}
       BW_SESSION: ${BW_SESSION:-}
       OUTE_VAULT_FOLDER: ${OUTE_VAULT_FOLDER:-oute-agent}
-      OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex,goose}
+      OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex}
       AI_MEMORY_SERVER_URL: http://ai-memory:49374
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
       # observabilidade (#13, ADR-04): Claude Code -> otel-collector (conteúdo vai só pro bucket OCI)

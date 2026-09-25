@@ -62,9 +62,6 @@ RUN --mount=type=cache,target=/root/.npm \
 # --- binários ----------------------------------------------------------------
 # herdr
 RUN curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh
-# goose (Block)
-RUN curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh \
-      | GOOSE_BIN_DIR=/usr/local/bin CONFIGURE=false bash
 # rclone
 RUN curl -fsSL https://rclone.org/install.sh | bash
 # gh

@@ -1,6 +1,6 @@
 # oute-agent
 
-Runtime em container para agentes de código — **herdr + Pi + Claude Code + Codex + Goose** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
+Runtime em container para agentes de código — **herdr + Pi + Claude Code + Codex** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
 
 Decisões de arquitetura (ADRs) ficam no Project "Oute Agent" no Claude: `arquitetura/01-runtime-container.md`, `02-roteamento-modelos.md`, `03-storage-oci.md`, `04-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
 
@@ -82,12 +82,12 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute sync-shared` | (re)monta o bucket |
 | `oute lock` / `version` | apaga sessão do vault / versão repo × imagem |
 
-Dentro do container: `pi`, `claude`, `codex`, `goose`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
+Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
 
 ## Roteamento de modelos (ADR-02)
 
 - `claude` e `codex`: assinatura própria (login 1x, persiste no volume `oute-home`). Fora do OpenRouter.
-- `pi`, `goose` e qualquer cliente OpenAI-compatible → `http://jev-router:4000/v1`:
+- `pi` e qualquer cliente OpenAI-compatible → `http://jev-router:4000/v1`:
   - `model: jev-router` → **Jev** (Decisions API) escolhe o perfil (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) → preset **`@preset/oute-<perfil>`** no OpenRouter escolhe o modelo (até 3 + `provider.sort`, com fallback, ZDR).
   - `model: <perfil>` → pula o Jev.
 - Editar perfis/provedores: `config/litellm/policy.yaml` → `oute router-sync --dry-run` → `oute router-sync`.
