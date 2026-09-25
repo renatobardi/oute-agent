@@ -146,6 +146,29 @@ setup_ssh() {
   [[ -f "$HOME/.oute/ssh/ssh_host_ed25519_key" ]] || ssh-keygen -q -t ed25519 -N '' -f "$HOME/.oute/ssh/ssh_host_ed25519_key"
   sudo mkdir -p /etc/ssh/keys
   sudo cp "$HOME/.oute/ssh/ssh_host_ed25519_key" /etc/ssh/keys/ && sudo chmod 600 /etc/ssh/keys/ssh_host_ed25519_key && sudo chown root:root /etc/ssh/keys/ssh_host_ed25519_key
+
+  # Acesso ao HOST (lab#178): usuário oute-ops (sem lxd/docker/sudo; sudo só p/ allowlist), chave própria
+  # do container, aceita no host só vindo de 172.19.0.5. Pública -> lab: servers/oute-server/access/oute-ops.pub
+  local key="$HOME/.ssh/oute-ops_ed25519"
+  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N '' -C "oute-agent-container@${OUTE_HOSTNAME:-oute}" -f "$key"
+  mkdir -p "$HOME/.ssh/config.d"; chmod 700 "$HOME/.ssh"
+  cat > "$HOME/.ssh/config.d/oute-host.conf" <<EOF
+# gerado pelo entrypoint (lab#178) — não editar
+Host oute-server oute-host
+  HostName ${OUTE_NET_GATEWAY:-172.19.0.1}
+  HostKeyAlias oute-server
+  User oute-ops
+  IdentityFile $key
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+EOF
+  # Include no topo: no ssh_config vale o primeiro valor encontrado -> este bloco ganha de qualquer Host antigo
+  touch "$HOME/.ssh/config"
+  grep -qxF 'Include ~/.ssh/config.d/*.conf' "$HOME/.ssh/config" \
+    || { printf '%s\n\n' 'Include ~/.ssh/config.d/*.conf'; cat "$HOME/.ssh/config"; } > "$HOME/.ssh/config.tmp"
+  [[ -f "$HOME/.ssh/config.tmp" ]] && mv "$HOME/.ssh/config.tmp" "$HOME/.ssh/config"
+  chmod 600 "$HOME/.ssh/config" "$HOME/.ssh/config.d/oute-host.conf"
+  log "chave do container p/ o host (oute-ops): $(cat "$key.pub")"
 }
 
 # ---------------------------------------------------------------- run

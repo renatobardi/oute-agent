@@ -59,7 +59,10 @@ services:
         condition: service_started
       otel-collector:
         condition: service_started
-    networks: [oute]
+    networks:
+      oute:
+        # IP fixo: o host só aceita o usuário oute-ops vindo daqui (lab#178, from="172.19.0.5/32")
+        ipv4_address: ${OUTE_AGENT_IP:-172.19.0.5}
     init: true
     tty: true
     stdin_open: true
@@ -145,3 +148,8 @@ volumes:
 networks:
   oute:
     driver: bridge
+    # subnet fixa (lab#178): o sshd do host restringe o oute-ops ao IP do agent
+    ipam:
+      config:
+        - subnet: ${OUTE_NET_SUBNET:-172.19.0.0/16}
+          gateway: ${OUTE_NET_GATEWAY:-172.19.0.1}

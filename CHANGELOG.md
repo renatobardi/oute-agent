@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Security
+- Acesso do container ao host como **`oute-ops`** (lab#178): rede `oute` com subnet fixa `172.19.0.0/16` e agent em `172.19.0.5` (o sshd do host só aceita o oute-ops desse IP); chave própria `~/.ssh/oute-ops_ed25519` gerada no boot; `~/.ssh/config.d/oute-host.conf` (incluído no topo do `~/.ssh/config`) faz `ssh oute-server` entrar como oute-ops via gateway `172.19.0.1`. A pública sai no log do boot.
+
 ## [0.7.0] - 2026-09-25
 
 ### Security
