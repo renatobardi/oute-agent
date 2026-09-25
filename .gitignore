@@ -10,3 +10,7 @@ config/litellm/router.yaml
 config/litellm/config.yaml
 config/litellm/candidates.json
 config/litellm/catalog.json
+
+# python
+__pycache__/
+*.pyc

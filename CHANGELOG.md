@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- `oute router-sync --check-guardrail` reiniciava jev-router e agent; agora só checa e devolve o código (0 alinhado, 2 divergente, 1 não verificado).
+- `.gitignore`: `__pycache__/` e `*.pyc` (um `.pyc` entrou por engano na 0.6.1).
+
 ## [0.6.1] - 2026-09-25
 
 ### Added

@@ -224,7 +224,10 @@ case "${1:-}" in
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   router-sync)
     # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
-    router_sync "${@:2}"
+    rc=0; router_sync "${@:2}" || rc=$?
+    # só a checagem do guardrail (#16): nada foi gravado, não reinicia; devolve 0/2/1
+    [[ " ${*:2} " == *" --check-guardrail "* ]] && exit "$rc"
+    (( rc == 0 )) || exit "$rc"
     if [[ " ${*:2} " != *" --dry-run "* ]] && docker ps -q -f name=oute-jev-router | grep -q .; then
       "${COMPOSE[@]}" restart jev-router agent >/dev/null && echo "jev-router e agent reiniciados"
     fi
