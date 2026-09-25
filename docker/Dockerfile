@@ -89,9 +89,10 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm || echo x86_64) \
 # oci cli
 RUN --mount=type=cache,target=/root/.cache \
     pipx install --global oci-cli 2>/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install oci-cli
-# ai-memory (Akita) — binário da release
+# ai-memory (Akita) — binário da release, versão fixa (igual à imagem do servidor no compose)
+ARG AI_MEMORY_VERSION=2.4.0
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
-    && curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/latest/download/ai-memory-linux-${ARCH}.tar.gz" \
+    && curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/download/v${AI_MEMORY_VERSION}/ai-memory-linux-${ARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin && chmod +x /usr/local/bin/ai-memory
 
 # --- ssh ---------------------------------------------------------------------

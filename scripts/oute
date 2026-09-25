@@ -58,7 +58,7 @@ router_sync() {
     export OPENROUTER_API_KEY
   }
   docker run --rm -e OPENROUTER_API_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
-    --entrypoint python3 ghcr.io/berriai/litellm:main-latest scripts/router_sync.py "$@"
+    --entrypoint python3 "${OUTE_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest@sha256:114aca7726c311915c8ea5120fcc44d32a0648c3ae3aec41a1014f0e846b16d1}" scripts/router_sync.py "$@"
 }
 
 # gerados pelo router-sync; sem eles o compose montaria diretórios vazios
