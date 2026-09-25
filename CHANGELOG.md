@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-09-24
+
 ### Removed
 - **Goose** fora do stack (#4): não funciona com o ai-memory (sem hooks, não está nos harnesses suportados). Regra do projeto: agente só entra se atender memória (ai-memory hooks + MCP) e telemetria (bucket + Langfuse). Removidos binário, config do entrypoint e `goose` de `OUTE_AGENTS`.
 
