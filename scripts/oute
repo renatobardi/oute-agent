@@ -19,10 +19,15 @@ need() { command -v "$1" >/dev/null || die "precisa de '$1' no host"; }
 bw() {
   if type -P bw >/dev/null 2>&1; then command bw "$@"; return; fi
   mkdir -p "$OUTE_HOME/bwcli"
-  docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
+  # imagem LOCAL: a da versão atual se já existir, senão a mais nova que houver. Nunca a que ainda não foi
+  # baixada — o `oute pull` precisa do bw (token do ghcr no vault) justamente para baixá-la (ovo e galinha).
+  local img="ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}"
+  docker image inspect "$img" >/dev/null 2>&1 || img="$(docker images ghcr.io/renatobardi/oute-agent --format '{{.Repository}}:{{.Tag}}' | sort -t: -k2 -rV | head -1)"
+  [[ -n "$img" ]] || { echo "oute: nenhuma imagem oute-agent local para rodar o bw (instale o bw no host ou rode OUTE_BUILD_LOCAL=1 oute build)" >&2; return 1; }
+  docker run --rm -i --pull never --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
     -e BW_SESSION -e BW_CLIENTID -e BW_CLIENTSECRET -e BW_PASSWORD \
     -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" \
-    "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" bw "$@"
+    "$img" bw "$@"
 }
 export -f bw
 

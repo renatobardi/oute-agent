@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- `oute pull` travava: sem `bw` nativo no host, o `bw` roda via `docker run` da imagem da versão ATUAL — que ainda não foi baixada (o pull precisa do bw para ler o token do ghcr). Agora usa a imagem local da versão atual ou a mais nova disponível, com `--pull never`.
+
 ## [0.7.1] - 2026-09-25
 
 ### Security
