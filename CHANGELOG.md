@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-25
+
 ### Added
 - **Identificador do agente na telemetria** (`oute.agent`): o collector marca `claude` (service `claude-code`), `codex` (`codex_*`) e `router` (`jev-router`) no resource de traces, logs e métricas (bucket e Langfuse). No jev-router o hook grava o **cliente real** no span `jev.decision` a partir do header `X-Oute-Agent` — o Pi manda `pi` (header no `models.json`); sem header = `unknown`. No Langfuse vira `metadata.agent` do trace. Log do router: `served agent=… profile=…`.
 
