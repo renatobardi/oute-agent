@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-09-24
+
 ## [0.5.8] - 2026-09-24
 
 ### Fixed
