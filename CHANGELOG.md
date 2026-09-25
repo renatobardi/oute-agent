@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-25
+
 ### Added
 - **Agentes em modo yolo dentro do container por padrão** (`OUTE_AGENT_YOLO=1`): Claude Code com `permissions.defaultMode=bypassPermissions` (+ `skipDangerousModePermissionPrompt`), Codex com `approval_policy="never"` (já tinha `sandbox_mode=danger-full-access`). Merge estrutural, preserva hooks do ai-memory. A fronteira é o container; acesso ao host segue restrito (ver ADR-01).
 
