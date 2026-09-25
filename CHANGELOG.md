@@ -5,6 +5,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Fixed
+- Codex não executava nada no container (`bwrap: No permissions to create a new namespace`): entrypoint grava `sandbox_mode = "danger-full-access"` no topo do `~/.codex/config.toml`. O container já é a fronteira de isolamento; liberar user namespaces enfraqueceria o container inteiro (#5).
 - CI: cache de camadas trocado de `type=gha` para registry (`ghcr.io/renatobardi/oute-agent-cache:buildcache`). O cache do Actions é isolado por ref e cada tag é um ref novo — nunca havia hit (build sempre ~5 min).
 
 ## [0.5.3] - 2026-09-24

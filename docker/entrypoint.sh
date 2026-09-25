@@ -114,7 +114,12 @@ EOF
   # Codex -> otel-collector (#13): bloco [otel] gerenciado entre marcadores, sempre no FIM do config.toml
   # (depois do ai-memory, pra nenhuma chave solta cair dentro da tabela [otel])
   mkdir -p "$HOME/.codex"; local ct="$HOME/.codex/config.toml"; touch "$ct"
-  sed -i '/^# >>> oute otel/,/^# <<< oute otel/d' "$ct"
+  sed -i '/^# >>> oute otel/,/^# <<< oute otel/d;/^# >>> oute sandbox/,/^# <<< oute sandbox/d' "$ct"
+  # Sandbox (#5): bwrap precisa de user namespace, que o container não tem. O isolamento é o
+  # próprio container (uid 1001, só /workspace, sem admin OCI) — mesmo regime do Claude Code.
+  # Chave de topo: tem que vir ANTES de qualquer tabela, por isso vai no início do arquivo.
+  { printf '%s\n' '# >>> oute sandbox (gerado pelo entrypoint; não editar)' \
+      'sandbox_mode = "danger-full-access"' '# <<< oute sandbox'; cat "$ct"; } > "$ct.tmp" && mv "$ct.tmp" "$ct"
   cat >> "$ct" <<EOF
 # >>> oute otel (gerado pelo entrypoint; não editar)
 [otel]
