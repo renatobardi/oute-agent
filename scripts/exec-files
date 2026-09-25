@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# lista única dos arquivos que PRECISAM ser executáveis (usada pelo pre-commit, fix-bridge e CI) — #9
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+git ls-files -- 'scripts/*' 'docker/entrypoint.sh' '.githooks/*' | grep -v '\.md$'

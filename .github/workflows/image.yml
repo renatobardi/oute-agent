@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: scripts executáveis (#9)
+        run: |
+          bad="$(bash scripts/exec-files | while read -r f; do [[ "$(git ls-files -s -- "$f" | cut -d' ' -f1)" == 100755 ]] || echo "$f"; done)"
+          [[ -z "$bad" ]] || { echo "::error::sem +x no git: $bad (rode ./scripts/fix-bridge)"; exit 1; }
+
       - id: v
         name: versão (VERSION; na tag, precisa bater)
         run: |

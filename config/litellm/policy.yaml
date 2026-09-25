@@ -15,6 +15,8 @@
 # Política: nada direto de criadores chineses/1st-party de terceiros; modelos abertos (Kimi, DeepSeek, GLM, Qwen,
 # gpt-oss, Llama) vêm por hosts neutros (Fireworks, Together, DeepInfra, Baseten, Groq, Cerebras).
 # O guardrail é quem manda (via /models/user, inclusive ZDR); esta lista só complementa o filtro local.
+# Nome exato do guardrail no OpenRouter: `oute router-sync` compara providers_allow com ele (#16).
+guardrail: "oute-agent guardrail - core"
 providers_allow:
   # hosts de inferência
   - groq

@@ -7,7 +7,11 @@ Elegibilidade (em ordem de autoridade):
   2. senão: GET /api/v1/models/{id}/endpoints e filtra por providers_allow do policy.yaml.
 Um modelo só é elegível se tiver >=1 endpoint em provedor permitido e não casar exclude_patterns.
 
-Uso: python3 scripts/router_sync.py [--dry-run]   (OPENROUTER_API_KEY no ambiente; recomendado)
+Uso: python3 scripts/router_sync.py [--dry-run] [--check-guardrail]   (OPENROUTER_API_KEY no ambiente; recomendado)
+
+Divergência policy.yaml × guardrail (#16): com OPENROUTER_MGMT_KEY (Management API key, vault `oute-admin`,
+nunca no container dos agentes) compara `providers_allow` com o `allowed_providers` do guardrail nomeado em
+`policy.yaml: guardrail`. No sync normal só avisa; `--check-guardrail` faz só a checagem e sai 2 se divergir.
 Rodado por `oute router-sync` dentro da imagem do LiteLLM (tem pyyaml + rede).
 """
 from __future__ import annotations
@@ -28,12 +32,15 @@ CFG = ROOT / "config" / "litellm"
 API = "https://openrouter.ai/api/v1"
 KEY = os.environ.get("OPENROUTER_API_KEY", "")
 DRY = "--dry-run" in sys.argv
+MGMT = os.environ.get("OPENROUTER_MGMT_KEY", "")
+CHECK_ONLY = "--check-guardrail" in sys.argv
 
 
-def get(path: str, auth: bool = False):
+def get(path: str, auth: bool = False, key: str | None = None):
     req = urllib.request.Request(API + path, headers={"User-Agent": "oute-agent/router-sync"})
-    if auth and KEY:
-        req.add_header("Authorization", f"Bearer {KEY}")
+    tok = key if key is not None else (KEY if auth else "")
+    if tok:
+        req.add_header("Authorization", f"Bearer {tok}")
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.load(r)
@@ -108,8 +115,55 @@ def publish_preset(name: str, cfg: dict) -> str:
     return "FALHOU"
 
 
+def check_guardrail(policy: dict) -> int:
+    """#16: policy.yaml (espelho) × guardrail real. 0 = igual, 2 = divergente, 1 = não deu para checar."""
+    name = policy.get("guardrail")
+    if not name:
+        print("guardrail: policy.yaml sem `guardrail:` — divergência não verificada", file=sys.stderr)
+        return 1
+    if not MGMT:
+        print("guardrail: sem OPENROUTER_MGMT_KEY (vault oute-admin) — divergência não verificada", file=sys.stderr)
+        return 1
+    r = get("/guardrails?limit=100", key=MGMT)
+    if "data" not in r:
+        print(f"guardrail: GET /guardrails falhou ({r.get('_error')}) — divergência não verificada", file=sys.stderr)
+        return 1
+    g = next((x for x in r["data"] if x.get("name") == name), None)
+    if g is None:
+        print(f"DIVERGÊNCIA guardrail: '{name}' não existe no OpenRouter "
+              f"(existentes: {[x.get('name') for x in r['data']]})", file=sys.stderr)
+        return 2
+    local = {s.lower() for s in policy["providers_allow"]}
+    remote = {s.lower() for s in (g.get("allowed_providers") or [])}
+    problems = []
+    if not remote:
+        problems.append("guardrail sem allowed_providers (libera todos os provedores)")
+    if local - remote:
+        problems.append(f"só no policy.yaml (o guardrail bloqueia): {sorted(local - remote)}")
+    if remote - local:
+        problems.append(f"só no guardrail (o policy.yaml não usa): {sorted(remote - local)}")
+    ign = {s.lower() for s in (g.get("ignored_providers") or [])} & local
+    if ign:
+        problems.append(f"no policy.yaml mas ignorados pelo guardrail: {sorted(ign)}")
+    zdr = [k for k in ("enforce_zdr", "enforce_zdr_other") if g.get(k) is False]
+    if zdr:
+        problems.append(f"ZDR desligado no guardrail ({', '.join(zdr)}); o projeto assume ZDR")
+    if problems:
+        print(f"DIVERGÊNCIA policy.yaml × guardrail '{name}':", file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        print("  → alinhe config/litellm/policy.yaml ao guardrail (ele é a fonte de verdade) ou o guardrail no painel",
+              file=sys.stderr)
+        return 2
+    print(f"guardrail '{name}': policy.yaml alinhado ({len(local)} provedores)")
+    return 0
+
+
 def main() -> int:
     policy = yaml.safe_load((CFG / "policy.yaml").read_text())
+    gstatus = check_guardrail(policy)
+    if CHECK_ONLY:
+        return gstatus
     allow = set(policy["providers_allow"])
     excl = policy.get("exclude_patterns", [])
 

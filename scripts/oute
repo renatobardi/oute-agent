@@ -57,7 +57,10 @@ router_sync() {
     OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
     export OPENROUTER_API_KEY
   }
-  docker run --rm -e OPENROUTER_API_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
+  # #16: Management key (pasta oute-admin do vault) só para ler o guardrail; opcional, nunca vai ao container dos agentes
+  [[ -n "${OPENROUTER_MGMT_KEY:-}" ]] || OPENROUTER_MGMT_KEY="$(OUTE_VAULT_FOLDER=oute-admin "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_MGMT_KEY 2>/dev/null || true)"
+  export OPENROUTER_MGMT_KEY
+  docker run --rm -e OPENROUTER_API_KEY -e OPENROUTER_MGMT_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
     --entrypoint python3 "${OUTE_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest@sha256:114aca7726c311915c8ea5120fcc44d32a0648c3ae3aec41a1014f0e846b16d1}" scripts/router_sync.py "$@"
 }
 

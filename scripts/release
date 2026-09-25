@@ -5,6 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NEW="${1:-}"
 [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "uso: release x.y.z" >&2; exit 2; }
 cd "$ROOT"
+# #9: hooks do repo ativos (pre-commit reaplica +x) e nenhum script sem +x no git
+[[ "$(git config core.hooksPath || true)" == .githooks ]] || git config core.hooksPath .githooks
+bad="$(bash scripts/exec-files | while read -r f; do [[ "$(git ls-files -s -- "$f" | cut -d' ' -f1)" == 100755 ]] || echo "$f"; done)"
+[[ -z "$bad" ]] || { echo "sem +x no git: $bad — rode ./scripts/fix-bridge e commite" >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo "working tree sujo" >&2; exit 1; }
 git rev-parse -q --verify "refs/tags/v$NEW" >/dev/null && { echo "tag v$NEW já existe" >&2; exit 1; }
 grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "CHANGELOG sem seção [Unreleased]" >&2; exit 1; }

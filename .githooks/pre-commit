@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# pre-commit (#9): scripts que perderam +x (arquivo gravado via ponte do Mac sai 0644) são corrigidos
+# no índice e no disco antes do commit, para o modo 100755 nunca se perder no git.
+# Ativar uma vez por clone:  git config core.hooksPath .githooks   (o scripts/release faz sozinho)
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+fixed=0
+while IFS= read -r f; do
+  [[ -f "$f" ]] || continue
+  mode="$(git ls-files -s -- "$f" | cut -d' ' -f1)"
+  if [[ "$mode" != 100755 || ! -x "$f" ]]; then
+    chmod +x "$f"; git update-index --chmod=+x -- "$f"; echo "pre-commit: +x em $f"; fixed=1
+  fi
+done < <(scripts/exec-files)
+exit 0

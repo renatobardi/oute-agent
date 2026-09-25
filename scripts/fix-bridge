@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# fix-bridge (#9): conserta o que a ponte do Mac (Claude editando arquivos) costuma deixar pra trás:
+#   1. scripts sem +x (arquivos gravados pela ponte saem 0644)
+#   2. .git/*.lock órfão (git rodado pela ponte, que não pode apagar arquivos) — só se nenhum git estiver rodando
+# Uso: ./scripts/fix-bridge   (idempotente; rode antes de commitar se algo reclamar)
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$ROOT"
+bash scripts/exec-files | while IFS= read -r f; do
+  [[ -x "$f" ]] || { chmod +x "$f"; echo "+x $f"; }
+done
+chmod +x .githooks/* scripts/exec-files scripts/fix-bridge 2>/dev/null || true
+locks=$(find .git -maxdepth 2 -name '*.lock' 2>/dev/null || true)
+if [[ -n "$locks" ]]; then
+  if pgrep -x git >/dev/null; then
+    echo "há git rodando; não mexo nos locks:"; echo "$locks"
+  else
+    echo "$locks" | while IFS= read -r l; do rm -f "$l"; echo "removido $l"; done
+  fi
+fi
+[[ "$(git config core.hooksPath || true)" == .githooks ]] || { git config core.hooksPath .githooks; echo "core.hooksPath=.githooks"; }
+echo "ok"
