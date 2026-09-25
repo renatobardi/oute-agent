@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- `oute up`/`pull` falhavam na 0.7.3 com `EACCES ... Bitwarden CLI/data.json.lock`: o `bw` do host roda via `docker run` da imagem, agora com uid 10001, mas o estado em `~/.oute/bwcli` é do usuário do host. O `bw` (e o `oci-bootstrap`) passam a rodar com `--user` do host, `HOME=/tmp` e `BITWARDENCLI_APPDATA_DIR=/bwcli`. Só script do host — a imagem 0.7.3 não muda.
+
 ## [0.7.3] - 2026-09-25
 
 ### Security

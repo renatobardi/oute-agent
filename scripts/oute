@@ -24,9 +24,11 @@ bw() {
   local img="ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}"
   docker image inspect "$img" >/dev/null 2>&1 || img="$(docker images ghcr.io/renatobardi/oute-agent --format '{{.Repository}}:{{.Tag}}' | sort -t: -k2 -rV | head -1)"
   [[ -n "$img" ]] || { echo "oute: nenhuma imagem oute-agent local para rodar o bw (instale o bw no host ou rode OUTE_BUILD_LOCAL=1 oute build)" >&2; return 1; }
+  # roda com o uid do HOST (não o 10001 da imagem, lab#181): o estado do bw em $OUTE_HOME/bwcli é do usuário do host
   docker run --rm -i --pull never --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp -e BITWARDENCLI_APPDATA_DIR=/bwcli \
     -e BW_SESSION -e BW_CLIENTID -e BW_CLIENTSECRET -e BW_PASSWORD \
-    -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" \
+    -v "$OUTE_HOME/bwcli:/bwcli" \
     "$img" bw "$@"
 }
 export -f bw
@@ -205,8 +207,9 @@ oci_bootstrap() {
   "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY >/dev/null   # garante sessão desbloqueada em cache
   BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
   docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp -e BITWARDENCLI_APPDATA_DIR=/bwcli \
     -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_OCI_SVC_EMAIL -e OUTE_BUCKET \
-    -v "$OUTE_HOME/bwcli:/home/oute/.config/Bitwarden CLI" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
+    -v "$OUTE_HOME/bwcli:/bwcli" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
 }
 
