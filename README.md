@@ -55,7 +55,7 @@ OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 ./scripts/oute attach                                 # ssh -> herdr (detach: Ctrl+B q)
 ```
 
-`oute up`, em ordem: lê o vault (1 leitura, `bw sync`) → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
+`oute up`, em ordem: lê o vault (1 leitura, `bw sync`) e grava `~/.oute/agent.env` → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
 
 ### Release e deploy
 
@@ -113,7 +113,7 @@ Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. 
 ## Segurança
 
 - Nenhuma porta de container em `0.0.0.0` (Docker ignora ufw): sshd do container em `127.0.0.1:2222` (`OUTE_SSH_BIND`).
-- Segredos só no Vaultwarden; credencial admin da OCI numa pasta que nunca vai pro container; usuário de serviço OCI só com S3 nos 2 buckets.
+- Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado pelo `oute up` em `~/.oute/agent.env`, 0600). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
 - OpenRouter: guardrail com ZDR e sem treino; presets reforçam `zdr` + `data_collection: deny`.
 
 ## Build, versionamento e retenção

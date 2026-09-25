@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Security
+- **Container dos agentes sem acesso ao Vaultwarden** (#6, passo 1). Antes recebia `BW_SESSION` (+ `BW_PASSWORD` se definida), o estado do `bw` (`~/.oute/bwcli`) e a API key (`bw_client`) — com agentes em yolo, qualquer um podia ler o cofre inteiro (segredos de todos os projetos e a pasta `oute-admin`). Agora o `oute up` resolve só a pasta `oute-agent` no host e monta os valores como docker secret (`~/.oute/agent.env`, 0600, read-only em `/run/secrets/agent_env`). Saem do agent: `BW_*`, volume `bwcli`, secret `bw_client`, `extra_hosts` do vault; `BW_SESSION` sai do `.oute_env`; resíduos do bw no volume home são apagados no boot. O `bw` continua na imagem só para o host usar via `docker run`.
+
 ### Added
 - **A/B Jev × `openrouter/auto`** (#15): `OUTE_AB_MODE=off|split|auto` no jev-router. No `split`, cada conversa (hash da 1ª mensagem) cai num braço de forma estável; o braço `auto` usa `openrouter/auto` com `allowed_models` = mesmo pool de modelos dos perfis elegíveis (tools/vision/max_tokens), ZDR e `data_collection: deny`, `session_id` por conversa. Span `jev.decision` ganha `oute.ab_arm`/`oute.ab_mode`; trace `ab-auto` no Langfuse. `router-sync` gera o modelo `or-auto`.
 

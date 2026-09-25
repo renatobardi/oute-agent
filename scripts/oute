@@ -46,9 +46,15 @@ host_secrets() {
   else
     export OUTE_OTEL_LANGFUSE=none
   fi
-  # sessão desbloqueada vai pro container (mesmo estado do bw via volume bwcli) -> sem 2º prompt
-  BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
-  export OUTE_BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+  # #6: o container dos agentes NÃO recebe acesso ao cofre (sem BW_SESSION, estado do bw ou API key).
+  # Recebe só os VALORES da pasta oute-agent, num arquivo 0600 montado como docker secret (read-only).
+  # Em disco (não tmpfs) para o container voltar sozinho depois de reboot do host.
+  export OUTE_AGENT_ENV_FILE="$OUTE_HOME/agent.env"
+  # 1 linha por variável (%q escapa quebras de linha de PEM/JSON) -> o entrypoint valida linha a linha
+  local n; ( umask 077
+    for n in $(grep -oE '^export [A-Za-z_][A-Za-z0-9_]*' <<<"$envs" | cut -d' ' -f2 | grep -v '^BW_' | sort -u); do
+      printf 'export %s=%q\n' "$n" "${!n}"
+    done > "$OUTE_AGENT_ENV_FILE.tmp" && mv "$OUTE_AGENT_ENV_FILE.tmp" "$OUTE_AGENT_ENV_FILE" )
 }
 
 router_sync() {

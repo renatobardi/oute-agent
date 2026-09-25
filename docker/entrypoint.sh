@@ -8,12 +8,21 @@ log() { printf '[oute] %s\n' "$*" >&2; }
 MODE="${1:-serve}"
 
 # ---------------------------------------------------------------- 1. segredos
-# Vaultwarden é mandatório. Sem ele, o container não sobe em modo serve.
+# Vaultwarden é mandatório, mas quem fala com ele é o HOST (`oute up`). O container recebe só os valores
+# da pasta oute-agent em /run/secrets/agent_env — nenhum acesso ao cofre (#6: agentes em yolo + injeção de
+# prompt não podem ler segredos de outros projetos nem do oute-admin).
+SECRETS_FILE=/run/secrets/agent_env
 if [[ "$MODE" == "serve" ]]; then
-  log "carregando segredos do Vaultwarden (${BW_SERVER:-vault.oute.pro})"
-  export BW_SESSION_FILE="$HOME/.oute/bw_session"
-  SECRETS_ENV="$(oute-secrets export)" || { log "FALHA ao obter segredos do Vaultwarden"; exit 1; }
-  eval "$SECRETS_ENV"; unset SECRETS_ENV
+  [[ -s "$SECRETS_FILE" ]] || { log "FALHA: $SECRETS_FILE ausente (rode ./scripts/oute up no host)"; exit 1; }
+  # só linhas `export NOME=...` (formato do oute-secrets export); qualquer outra coisa é recusada
+  if grep -qvE '^export [A-Za-z_][A-Za-z0-9_]*=' "$SECRETS_FILE"; then
+    log "FALHA: $SECRETS_FILE com formato inesperado"; exit 1
+  fi
+  # shellcheck disable=SC1090
+  . "$SECRETS_FILE"
+  log "segredos carregados ($(grep -c . "$SECRETS_FILE") variáveis da pasta oute-agent)"
+  # resíduo das versões <= 0.6.x: sessão/estado do bw no volume home
+  rm -rf "$HOME/.oute/bw_session" "$HOME/.config/Bitwarden CLI" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------- 2. integrações
@@ -147,7 +156,7 @@ case "$MODE" in
     setup_ssh
     # env pros logins ssh
     # declare -px cita os valores (espaços, vírgulas, '=' não quebram o source)
-    declare -px | grep -E '^declare -x (OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|BW_SESSION|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' \
+    declare -px | grep -E '^declare -x (OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' \
       > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
