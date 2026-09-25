@@ -92,16 +92,29 @@ schedule_sync() {
 wait_sshd() {
   local i banner
   for i in $(seq 1 60); do
-    banner="$(timeout 2 bash -c "exec 3<>/dev/tcp/$SSH_HOST/$SSH_PORT && head -c 7 <&3" 2>/dev/null || true)"
+    # sem timeout(1) (não existe no macOS, #3): read -t limita a espera pelo banner
+    banner="$(bash -c "exec 3<>/dev/tcp/$SSH_HOST/$SSH_PORT && read -r -t 2 -n 7 b <&3 && printf %s \"\$b\"" 2>/dev/null || true)"
     [[ "$banner" == SSH-2.0 ]] && { echo "sshd pronto (${i}s)"; return 0; }
     sleep 1
   done
   echo "sshd não respondeu em 60s; veja: oute logs agent" >&2; return 1
 }
 
+# uid/gid do usuário do container (fixo na imagem, lab#181)
+CONTAINER_UID=10001
+
 ensure_dirs() {
   mkdir -p "$OUTE_HOME/shared"
-  export OUTE_SHARED_DIR="$OUTE_HOME/shared"
+  # lab#181: o container só recebe um caminho do host se for o mount rclone (mount_shared exporta).
+  # Sem mount: volume docker "oute-shared" (compose), nada gravável pelo container na home do host.
+  # (export explícito: a env do shell vence o .env, que em hosts antigos ainda tem OUTE_SHARED_DIR=~/.oute/shared)
+  export OUTE_SHARED_DIR=oute-shared
+  # .env antigo: variáveis que não são mais usadas
+  local v; for v in OUTE_UID OUTE_SHARED_DIR; do
+    grep -qE "^[[:space:]]*$v=" "$ROOT/.env" 2>/dev/null \
+      && echo "aviso: $v no .env é ignorado desde a 0.7.3 (lab#181); pode remover a linha" >&2
+  done
+  return 0
 }
 
 # --- storage comum: bucket OCI via rclone (ADR-03, #1)
@@ -124,7 +137,7 @@ is_mounted() { mount | grep -q " on $1 "; }
 mount_shared() {
   local dir="$OUTE_HOME/shared" bucket="${OUTE_BUCKET:-oute-shared}"
   command -v rclone >/dev/null || { echo "rclone ausente no host; /data/shared fica local"; return 0; }
-  is_mounted "$dir" && { echo "storage: $dir já montado"; return 0; }
+  is_mounted "$dir" && { export OUTE_SHARED_DIR="$dir"; echo "storage: $dir já montado"; return 0; }
   oci_remote_env || { echo "item oci-storage ausente no vault (rode: oute oci-bootstrap); /data/shared fica local"; return 0; }
   local extra=()
   if [[ "$(uname)" == Linux ]]; then
@@ -134,12 +147,16 @@ mount_shared() {
   fi
   mkdir -p "$dir" "$OUTE_HOME/rclone-cache"
   # cache longo = poucas requests (franquia Always Free: 50 mil/mês)
-  rclone mount "oci:$bucket" "$dir" --daemon "${extra[@]}" \
-    --uid "$(id -u)" --gid "$(id -g)" --umask 002 \
+  # dono = usuário do container (grava); grupo = usuário do host (também grava, umask 002). FUSE de usuário
+  # já é nosuid/nodev e o rclone não cria symlink -> o container não planta nada executável no host (lab#181)
+  # ${extra[@]+...}: array vazio + set -u quebra no bash 3.2 do macOS (#3)
+  rclone mount "oci:$bucket" "$dir" --daemon ${extra[@]+"${extra[@]}"} \
+    --uid "$CONTAINER_UID" --gid "$(id -g)" --umask 002 \
     --vfs-cache-mode full --vfs-cache-max-size "${OUTE_SHARED_CACHE:-2G}" --vfs-cache-max-age 24h \
     --dir-cache-time 5m --cache-dir "$OUTE_HOME/rclone-cache" \
     --log-file "$OUTE_HOME/rclone.log" --log-level NOTICE \
     || { echo "rclone mount falhou (ver $OUTE_HOME/rclone.log); /data/shared fica local" >&2; return 0; }
+  export OUTE_SHARED_DIR="$dir"
   echo "storage: oci:$bucket montado em $dir"
 }
 
@@ -223,7 +240,7 @@ case "${1:-}" in
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
   ssh)     # com comando: -t quando há terminal (CLIs como `pi -p` leem stdin se não for TTY e ficam esperando EOF)
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
-             exec ssh "${t[@]}" -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"
+             exec ssh ${t[@]+"${t[@]}"} -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"
            else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;

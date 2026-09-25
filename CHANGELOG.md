@@ -4,6 +4,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Security
+- **Container com uid/gid próprios (10001)** (lab#181). Antes o usuário do container tinha o uid do host (1001 = `ubuntu` no oute-server): tudo que um agente gravava em bind mount virava arquivo do `ubuntu`. Agora o uid é fixo na imagem e não existe no host; `OUTE_UID` sai do `.env`, do compose e do CI (`oute up` avisa se a linha ainda existir). Serviço one-shot **`volume-init`** migra os volumes `oute-home`, `oute-workspace` e `oute-memory` (chown só quando a raiz ainda não é 10001). O entrypoint lê `/run/secrets/agent_env` (0600 do host) via `sudo`.
+- **`/data/shared` sem diretório do host gravável** (lab#181): só o mount rclone do bucket vem do host (dono 10001, grupo do usuário do host, umask 002; FUSE de usuário é nosuid/nodev). Sem mount, vira o volume docker `oute-shared` em vez de `~/.oute/shared`.
+
+### Fixed
+- **Mac** (#3): `oute` quebrava no bash 3.2 do macOS com array vazio + `set -u` (`rclone mount` sem `--allow-other`, `oute ssh` sem tty) e o `wait_sshd` dependia de `timeout(1)`, que o macOS não tem. A mesma imagem do ghcr serve no Mac, sem rebuild por uid.
+
 ## [0.7.2] - 2026-09-25
 
 ### Added

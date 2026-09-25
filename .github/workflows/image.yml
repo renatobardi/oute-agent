@@ -56,7 +56,6 @@ jobs:
           sbom: false
           build-args: |
             OUTE_VERSION=${{ steps.v.outputs.version }}
-            OUTE_UID=${{ vars.OUTE_UID || '1001' }}
           tags: ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}
           # cache de camadas no próprio ghcr, em pacote separado (a retenção do pacote da imagem não o apaga).
           # type=gha não serve: cache do Actions é por ref, e cada tag vX.Y.Z é um ref novo -> sempre miss.

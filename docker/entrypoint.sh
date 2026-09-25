@@ -14,13 +14,17 @@ MODE="${1:-serve}"
 SECRETS_FILE=/run/secrets/agent_env
 if [[ "$MODE" == "serve" ]]; then
   [[ -s "$SECRETS_FILE" ]] || { log "FALHA: $SECRETS_FILE ausente (rode ./scripts/oute up no host)"; exit 1; }
+  # o arquivo é 0600 do usuário do host e o container tem uid próprio (lab#181): lê via sudo, uma vez
+  secrets="$(cat "$SECRETS_FILE" 2>/dev/null || sudo cat "$SECRETS_FILE")" \
+    || { log "FALHA: não consegui ler $SECRETS_FILE"; exit 1; }
   # só linhas `export NOME=...` (formato do oute-secrets export); qualquer outra coisa é recusada
-  if grep -qvE '^export [A-Za-z_][A-Za-z0-9_]*=' "$SECRETS_FILE"; then
+  if grep -qvE '^export [A-Za-z_][A-Za-z0-9_]*=' <<<"$secrets"; then
     log "FALHA: $SECRETS_FILE com formato inesperado"; exit 1
   fi
   # shellcheck disable=SC1090
-  . "$SECRETS_FILE"
-  log "segredos carregados ($(grep -c . "$SECRETS_FILE") variáveis da pasta oute-agent)"
+  . <(printf '%s\n' "$secrets")
+  log "segredos carregados ($(grep -c . <<<"$secrets") variáveis da pasta oute-agent)"
+  unset secrets
   # resíduo das versões <= 0.6.x: sessão/estado do bw no volume home
   rm -rf "$HOME/.oute/bw_session" "$HOME/.config/Bitwarden CLI" 2>/dev/null || true
 fi

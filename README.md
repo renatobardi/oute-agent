@@ -38,10 +38,15 @@ secrets/         README com a convenção do vault (sem valores)
 
 **No host**
 - Docker + Compose + **buildx** (Ubuntu: `apt install docker-buildx`; Mac: Docker Desktop/OrbStack).
-- `jq`, `crontab`; `bw` opcional (sem ele, usa o da imagem).
+- `jq`, `crontab`; `bw` opcional (sem ele, usa o da imagem). Se instalar nativo, **`@bitwarden/cli@2026.8.0`** — ≥ 2026.9.0 não desbloqueia no Vaultwarden 1.37.x (#7).
 - `~/.oute/bw_client.env` com `BW_CLIENTID` / `BW_CLIENTSECRET` (`chmod 600`); `~/.ssh/id_ed25519.pub`.
-- `.env` a partir de `.env.example` (`OUTE_HOSTNAME`, `OUTE_UID=$(id -u)`, `OUTE_VAULT_HOST_IP`…).
-- Storage: `rclone` **do rclone.org** + FUSE (Linux: `fuse3` + `user_allow_other` em `/etc/fuse.conf`; Mac: FUSE-T).
+- `.env` a partir de `.env.example` (`OUTE_HOSTNAME`, `OUTE_VAULT_HOST_IP`…).
+- Storage: `rclone` **do rclone.org** + FUSE (Linux: `fuse3` + `user_allow_other` em `/etc/fuse.conf`; Mac: FUSE-T ou macFUSE). Opcional: sem mount, `/data/shared` é um volume docker local.
+
+**Mac (Apple Silicon)** — mesma imagem do ghcr (arm64), sem rebuild:
+- Docker Desktop ou OrbStack; Mac na tailnet (o `bw` da imagem acha o vault via `OUTE_VAULT_HOST_IP`, IP Tailscale do oute-server).
+- `.env`: `OUTE_HOSTNAME=oute-mac`. Nada de uid: o do container é fixo (10001) e o Docker do Mac mapeia os bind mounts.
+- Diferenças × oute-server: sem FUSE instalado o bucket não é montado (fica o volume local); `ssh oute-server` de dentro do container não se aplica (o gateway é a VM do Docker, não o servidor); crontab do router-sync depende do Mac estar ligado às 04:00.
 
 ## Deploy novo
 
@@ -65,7 +70,7 @@ OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 # oute-server, depois que o CI terminar (Actions → image)
 cd ~/oute-agent && git pull --tags && ./scripts/oute pull && ./scripts/oute down && ./scripts/oute up
 ```
-CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`), push em `ghcr.io/renatobardi/oute-agent:x.y.z`, retenção de 2 versões no ghcr. `OUTE_UID` da imagem vem da variável de repositório `OUTE_UID` (default 1001, o do oute-server).
+CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`), push em `ghcr.io/renatobardi/oute-agent:x.y.z`, retenção de 2 versões no ghcr. A imagem é a mesma para todos os hosts (uid do container fixo em 10001).
 
 ## Comandos
 
@@ -104,6 +109,7 @@ Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `a
 ## Storage comum (ADR-03)
 
 `/data/shared` (container) ← `~/.oute/shared` (host) ← `rclone mount oci:oute-shared` (`oute up` monta, `oute down` desmonta). Remote `oci` só por env (item `oci-storage`), sem `rclone.conf` com segredo.
+No mount, dono = usuário do container (10001) e grupo = usuário do host (os dois gravam). Sem mount (sem rclone/FUSE/credencial), `/data/shared` vira o volume docker `oute-shared` — o container nunca recebe um diretório comum da home do host (lab#181).
 Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. Log: `~/.oute/rclone.log`.
 
 ## Memória
@@ -113,6 +119,7 @@ Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. 
 ## Segurança
 
 - Nenhuma porta de container em `0.0.0.0` (Docker ignora ufw): sshd do container em `127.0.0.1:2222` (`OUTE_SSH_BIND`).
+- Usuário do container com **uid/gid próprios (10001)**, que não existem no host (lab#181): arquivo criado pelo container não vira arquivo do `ubuntu`. Do host, o container só grava no mount do bucket; o resto é volume docker ou bind read-only.
 - Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado pelo `oute up` em `~/.oute/agent.env`, 0600). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
 - OpenRouter: guardrail com ZDR e sem treino; presets reforçam `zdr` + `data_collection: deny`.
 

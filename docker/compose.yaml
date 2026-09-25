@@ -14,7 +14,6 @@ services:
       platforms: ["linux/arm64"]
       args:
         OUTE_VERSION: ${OUTE_VERSION:-0.0.0-dev}
-        OUTE_UID: ${OUTE_UID:-1000}
     image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
     container_name: oute-agent
     logging: *logging
@@ -49,10 +48,14 @@ services:
       - oute-workspace:/workspace
       - oute-home:/home/oute
       - oute-memory:/data/ai-memory
-      - ${OUTE_SHARED_DIR:-~/.oute/shared}:/data/shared
+      # lab#181: só o mount rclone do bucket vem do host (`oute up` exporta o caminho); sem mount, volume docker —
+      # nunca um diretório comum na home do host gravável pelo container
+      - ${OUTE_SHARED_DIR:-oute-shared}:/data/shared
       - ${OUTE_SSH_AUTHORIZED_KEYS:-~/.ssh/id_ed25519.pub}:/etc/oute/authorized_keys:ro
       - ./config/litellm/candidates.json:/etc/oute/candidates.json:ro
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       jev-router:
         condition: service_started
       ai-memory:
@@ -96,8 +99,8 @@ services:
     container_name: oute-ai-memory
     logging: *logging
     restart: unless-stopped
-    # mesmo uid do agent: o volume oute-memory é compartilhado (/data aqui, /data/ai-memory lá)
-    user: "${OUTE_UID:-1000}:${OUTE_UID:-1000}"
+    # mesmo uid do agent (10001, fixo na imagem): o volume oute-memory é compartilhado (/data aqui, /data/ai-memory lá)
+    user: "10001:10001"
     command: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--enable-web"]
     environment:
       # o servidor rejeita Host: fora desta lista; "ai-memory" é o nome DNS na rede oute
@@ -107,7 +110,32 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - oute-memory:/data
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     networks: [oute]
+
+  volume-init:
+    # lab#181: migração one-shot do uid antigo (1001 = ubuntu do host) para o 10001 do container.
+    # Só troca o dono quando a raiz do volume ainda não é 10001; nas próximas subidas não faz nada.
+    image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
+    container_name: oute-volume-init
+    logging: *logging
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for d in /v/*; do
+          [ "$$(stat -c %u:%g "$$d")" = 10001:10001 ] && continue
+          echo "volume-init: chown 10001:10001 $$d (era $$(stat -c %u:%g "$$d"))"
+          chown -R 10001:10001 "$$d"
+        done
+    volumes:
+      - oute-workspace:/v/workspace
+      - oute-home:/v/home
+      - oute-memory:/v/memory
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
@@ -144,6 +172,7 @@ volumes:
   oute-workspace:
   oute-home:
   oute-memory:
+  oute-shared:
 
 networks:
   oute:

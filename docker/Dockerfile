@@ -7,7 +7,9 @@ ARG NODE_MAJOR=22
 # bw >= 2026.9.0 quebra com Vaultwarden 1.37.x (dani-garcia/vaultwarden#7750); liberar quando o fix sair
 ARG BW_CLI_VERSION=2026.8.0
 ARG OUTE_USER=oute
-ARG OUTE_UID=1000
+# uid/gid próprios do container (lab#181): não coincidem com nenhum usuário do host (ubuntu=1001, oute-ops=992).
+# Fixo em todos os hosts -> a mesma imagem do ghcr serve no oute-server e no Mac (#3), sem rebuild por uid.
+ARG OUTE_UID=10001
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -45,7 +47,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 # --- usuário -----------------------------------------------------------------
 RUN userdel -r ubuntu 2>/dev/null || true \
-    && useradd -m -u ${OUTE_UID} -s /bin/bash -p "*" ${OUTE_USER} \
+    && groupadd -g ${OUTE_UID} ${OUTE_USER} \
+    && useradd -m -u ${OUTE_UID} -g ${OUTE_UID} -s /bin/bash -p "*" ${OUTE_USER} \
     && echo "${OUTE_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${OUTE_USER} \
     && mkdir -p /workspace /data/shared /data/ai-memory /run/sshd \
     && chown -R ${OUTE_USER}:${OUTE_USER} /workspace /data
