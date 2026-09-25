@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **A/B Jev × `openrouter/auto`** (#15): `OUTE_AB_MODE=off|split|auto` no jev-router. No `split`, cada conversa (hash da 1ª mensagem) cai num braço de forma estável; o braço `auto` usa `openrouter/auto` com `allowed_models` = mesmo pool de modelos dos perfis elegíveis (tools/vision/max_tokens), ZDR e `data_collection: deny`, `session_id` por conversa. Span `jev.decision` ganha `oute.ab_arm`/`oute.ab_mode`; trace `ab-auto` no Langfuse. `router-sync` gera o modelo `or-auto`.
+
 ### Fixed
 - `oute router-sync --check-guardrail` reiniciava jev-router e agent; agora só checa e devolve o código (0 alinhado, 2 divergente, 1 não verificado).
 - `.gitignore`: `__pycache__/` e `*.pyc` (um `.pyc` entrou por engano na 0.6.1).

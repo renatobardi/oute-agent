@@ -6,10 +6,17 @@ Seleção em 2 etapas quando model == "jev-router":
      `provider.sort = {by, partition: "none"}` (ordena endpoints de todos os modelos ao vivo, com fallback).
 Também aplica ao pedir um perfil direto (model == "coder", "reasoning", ...).
 Com presets publicados pelo router-sync, o LiteLLM já manda "@preset/oute-<perfil>" e o hook não injeta nada.
+
+A/B (#15) — OUTE_AB_MODE: off (só Jev) | split (sorteio por conversa) | auto (só openrouter/auto).
+Braço "auto": openrouter/auto restrito (plugin auto-router, allowed_models) ao MESMO pool que o Jev teria
+(modelos dos perfis elegíveis p/ a request: tools/vision/max_tokens) + ZDR/data_collection deny.
+O sorteio é estável por conversa (hash da 1ª mensagem do usuário): um loop de agente não troca de braço no meio.
+Cada request leva `oute.ab_arm` no span jev.decision -> comparação no Langfuse (custo, latência, modelo).
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -27,6 +34,9 @@ ROUTER_YAML = Path(os.environ.get("OUTE_ROUTER_YAML", "/app/router.yaml"))
 DECISIONS_URL = os.environ.get("OUTE_DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions")
 JEV_MODEL = os.environ.get("OUTE_JEV_MODEL", "typesafe/jev-1.13")
 TRIGGER = "jev-router"
+AB_MODE = os.environ.get("OUTE_AB_MODE", "off").strip().lower()
+AB_AUTO_SHARE = float(os.environ.get("OUTE_AB_AUTO_SHARE", "0.5"))
+AUTO_MODEL = "or-auto"          # model_name no config.yaml gerado -> openrouter/openrouter/auto
 log = logging.getLogger("oute.jev_router")
 MAX_CHARS_PER_MSG = 600
 MAX_MSGS = 12
@@ -75,6 +85,36 @@ def _eligible(cands: list[dict], s: dict[str, Any]) -> list[dict]:
 
 def _cheapest(cands: list[dict]) -> str:
     return min(cands, key=lambda c: c.get("cost_in", 0) + c.get("cost_out", 0))["name"]
+
+
+def _conversation_key(data: dict[str, Any]) -> str:
+    """Estável entre turnos da mesma conversa: 1ª mensagem do usuário (+ system, se houver)."""
+    msgs = data.get("messages") or []
+    first = next((m for m in msgs if m.get("role") == "user"), {})
+    sysm = next((m for m in msgs if m.get("role") == "system"), {})
+    raw = json.dumps([sysm.get("content"), first.get("content")], ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _ab_arm(data: dict[str, Any]) -> str:
+    if AB_MODE == "auto":
+        return "auto"
+    if AB_MODE == "split":
+        bucket = int(_conversation_key(data)[:8], 16) / 0xFFFFFFFF
+        return "auto" if bucket < AB_AUTO_SHARE else "jev"
+    return "jev"
+
+
+def _route_auto(data: dict[str, Any], cands: list[dict]) -> list[str]:
+    """openrouter/auto limitado ao mesmo pool de modelos que o Jev poderia escolher."""
+    pool = list(dict.fromkeys(m for c in cands for m in (c.get("models") or [])))
+    extra = dict(data.get("extra_body") or {})
+    extra["plugins"] = [{"id": "auto-router", "allowed_models": pool}]
+    extra["provider"] = {**(extra.get("provider") or {}), "zdr": True, "data_collection": "deny"}
+    extra["session_id"] = _conversation_key(data)[:32]      # stickiness do auto-router por conversa
+    data["extra_body"] = extra
+    data["model"] = AUTO_MODEL
+    return pool
 
 
 async def _ask_jev(cands: list[dict], s: dict[str, Any]) -> str | None:
@@ -246,6 +286,16 @@ class JevRouterHandler(CustomLogger):
 
         s = _summarize(data)
         cands = _eligible(policy["candidates"], s) or policy["candidates"]
+        arm = _ab_arm(data)
+        if arm == "auto":
+            pool = _route_auto(data, cands)
+            log.warning("[jev-router] ab=auto pool=%s tools=%s vision=%s in_chars=%s",
+                        ",".join(pool), s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
+            data.setdefault("metadata", {})["oute_router"] = {
+                "profile": "auto", "via": "openrouter-auto", "arm": "auto", "preset": None, "sort": None,
+                "models": pool, "signals": {k: v for k, v in s.items() if k != "transcript"},
+            }
+            return data
         via = "jev"
         chosen = await _ask_jev(cands, s)
         if not chosen:
@@ -258,7 +308,7 @@ class JevRouterHandler(CustomLogger):
                     chosen, via, prof.get("preset", "-"), prof.get("sort"), ",".join(prof.get("models", [])),
                     s["needs_tools"], s["needs_vision"], s["approx_input_chars"])
         data.setdefault("metadata", {})["oute_router"] = {
-            "profile": chosen, "via": via, "preset": prof.get("preset"), "sort": prof.get("sort"),
+            "profile": chosen, "via": via, "arm": "jev", "preset": prof.get("preset"), "sort": prof.get("sort"),
             "models": prof.get("models", []),
             "signals": {k: v for k, v in s.items() if k != "transcript"},
         }
@@ -273,7 +323,8 @@ class JevRouterHandler(CustomLogger):
             usage = getattr(response_obj, "usage", None)
             sig = meta.get("signals") or {}
             attrs = {
-                "langfuse.trace.name": f"jev:{meta.get('profile')}",
+                "langfuse.trace.name": ("ab-auto" if meta.get("arm") == "auto" else f"jev:{meta.get('profile')}"),
+                "oute.ab_arm": meta.get("arm"), "oute.ab_mode": AB_MODE,
                 "oute.profile": meta.get("profile"), "oute.via": meta.get("via"),
                 "oute.preset": meta.get("preset"), "oute.sort": meta.get("sort"),
                 "oute.models": ",".join(meta.get("models") or []),

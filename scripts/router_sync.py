@@ -312,6 +312,9 @@ def main() -> int:
     fb_model = next(c["primary"]["id"] for c in chosen if c["role"] == fb)
     ml = [{"model_name": "jev-router",
            "litellm_params": {"model": target(fb, fb_model), "api_key": "os.environ/OPENROUTER_API_KEY"}}]
+    # A/B (#15): braço openrouter/auto; o hook restringe allowed_models ao pool dos perfis
+    ml.append({"model_name": "or-auto",
+               "litellm_params": {"model": "openrouter/openrouter/auto", "api_key": "os.environ/OPENROUTER_API_KEY"}})
     ml += [{"model_name": c["role"],
             "litellm_params": {"model": target(c["role"], c["primary"]["id"]), "api_key": "os.environ/OPENROUTER_API_KEY"}}
            for c in chosen]

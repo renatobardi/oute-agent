@@ -82,6 +82,9 @@ services:
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
+      # A/B Jev × openrouter/auto (#15): off | split | auto ; share = fração das conversas no braço auto
+      OUTE_AB_MODE: ${OUTE_AB_MODE:-off}
+      OUTE_AB_AUTO_SHARE: ${OUTE_AB_AUTO_SHARE:-0.5}
       # callback "otel" (config.yaml gerado): spans com modelo servido, tokens, custo e metadata do Jev
       OTEL_EXPORTER: otlp_grpc
       OTEL_ENDPOINT: http://otel-collector:4317
