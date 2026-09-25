@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- `oute pull` aplica retenção local: mantém só a versão atual e a anterior do agent (mesma regra do ghcr) e, sem `OUTE_BUILD_LOCAL=1`, limpa todo o build cache (sobrava 5,5 GB de builds antigos sem uso).
+
 ## [0.5.4] - 2026-09-24
 
 ### Fixed

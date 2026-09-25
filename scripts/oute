@@ -151,6 +151,16 @@ oute_pull() {
   # token só vive no vault: não deixa credencial em texto puro no ~/.docker/config.json
   docker logout ghcr.io >/dev/null 2>&1 || true
   [[ $rc -eq 0 ]] || die "imagem $IMAGE não existe no ghcr (o CI da tag v$OUTE_VERSION terminou?)"
+  prune_local
+}
+
+# retenção local (mesma regra do ghcr): só a versão atual + a anterior do agent.
+# Sem build local, o build cache é lixo puro (chegou a 5,5 GB) — limpa tudo.
+prune_local() {
+  local repo="${IMAGE%:*}" old
+  old="$(docker images "$repo" --format '{{.Tag}}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -rV | tail -n +3)"
+  for t in $old; do [[ "$t" == "$OUTE_VERSION" ]] || docker rmi "$repo:$t" >/dev/null 2>&1 || true; done
+  [[ "${OUTE_BUILD_LOCAL:-0}" == 1 ]] || docker builder prune -af >/dev/null 2>&1 || true
 }
 
 # no up: usa a imagem local; senão puxa do ghcr; build local só se OUTE_BUILD_LOCAL=1
