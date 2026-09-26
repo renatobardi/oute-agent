@@ -1,6 +1,6 @@
 # ADR-06 — Addons: pasta do monorepo montada read-only (issue #53)
 
-Status: **proposto** (2026-09-26). Rascunho saído do grilling da #53; falta validação do Bardi.
+Status: **aceito** (2026-09-26). Saído do grilling da #53.
 
 ## Contexto
 - O ADR-01 deixava em aberto um repo separado `oute-agent-plugins` para as skills. Esse repo nunca foi criado.

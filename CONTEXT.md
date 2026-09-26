@@ -23,6 +23,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
   - Claude com MCP **session-aware** e servidor em `per_session`;
   - Codex e Pi passam `workspace`/`project` explícitos;
   - repo com `.ai-memory.toml`.
+- **ADR-06, addons:** `addons/<tipo>/` deste repo, montado read-only; o entrypoint linka cada addon em `~/.claude/skills` e `~/.agents/skills`. Primitivo fica na imagem e só cita addon com plano B.
 - **Plugins herdr:** próprios (`oute-*`), nada do marketplace em runtime (ADR-05, em estudo).
 
 ## Glossário
