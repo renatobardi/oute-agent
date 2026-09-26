@@ -1,6 +1,6 @@
 # ADR-01 — Runtime container do Oute Agent
 
-Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, pendente de implementação)
+Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda)
 
 ## Contexto
 Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) MacBook (Apple Silicon), servindo de "casa" para agentes de código operados via terminal.
@@ -48,7 +48,7 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 
 ## Fluxo de boot
 **Host (`oute up`):**
-1. Lê o vault uma vez, com a sessão em cache `~/.oute/bw_session` ou a master password digitada. Sem `bw` nativo, o `bw` roda via `docker run` da imagem oute-agent **local** (a atual ou a mais nova, `--pull never`), com o uid do host. *(Muda com a #21: com `agent.env` presente, o vault não é aberto; só com `--refresh-secrets`.)*
+1. Com `~/.oute/agent.env` presente, **não abre o vault** (#21). Sem ele, ou com `--refresh-secrets` / `oute secrets refresh`, lê o vault com a master password digitada; a sessão fica só no processo e é trancada (`bw lock`) em seguida. Sem `bw` nativo, o `bw` roda via `docker run` da imagem oute-agent **local** (a atual ou a mais nova, `--pull never`), com o uid do host.
 2. Grava `~/.oute/agent.env`: uma linha `export NOME=<%q>` por variável da pasta `oute-agent`, sem `BW_*`.
 3. Exporta para o compose só o que jev-router e otel-collector usam, mais a origem (`OUTE_HOST`, `OUTE_INSTANCE`).
 4. `router-sync` → `compose up`.
@@ -79,7 +79,7 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 - **Resíduo aceito:** `vault.oute.pro` ainda resolve no container (DNS split do host); sem credenciais, não serve para nada.
 - **Próximo:** #21 — ver adendo 2026-09-26. OpenBao só se surgir necessidade de auditoria, credenciais dinâmicas ou vários hosts.
 
-## Adendo 2026-09-26 — sessão do cofre não fica no host (#21, passo 2; decisão, implementação pendente)
+## Adendo 2026-09-26 — sessão do cofre não fica no host (#21, passo 2; implementado no PR #43)
 - **Problema real:** `~/.oute/bw_session` + `~/.oute/bwcli/` = chave viva para o cofre inteiro (todos os projetos + `oute-admin`), em disco permanentemente e copiada nos backups (restic → Google Drive, boot volume OCI). Alcançável por root/ubuntu no host e por quem restaurar backup; o agente não (oute-ops). A sessão só era cacheada por conveniência (cron `router-sync`, `oute pull`, rclone) — e tudo que esses caminhos precisam já está em `agent.env`.
 - **Conta de máquina no Vaultwarden (ideia original) descartada:** encolhe o que a chave abre, mas mantém chave viva + master password em arquivo, adiciona org/coleção/usuário/migração de itens, e a coleção teria exatamente o conteúdo de `agent.env` — ganho ≈ zero para esses segredos.
 - **Decisão:** eliminar a chave, não encolher. `agent.env` é o cache do host. Vault aberto só em `oute up --refresh-secrets` (ou 1º `up`), `oci-bootstrap` e `router-sync --check-guardrail`, com master password digitada e sessão descartada em seguida (`bw lock`, nada gravado). Cron/pull/rclone lêem só de `agent.env`. Reboot do host não depende disso (`restart: unless-stopped` + `agent.env` em disco).
