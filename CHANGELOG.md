@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Workflows de CI só pelo Bardi** (regra em `AGENTS.md` e no prompt da coordenadora, `swarm.md`). O token dos agentes não tem o escopo `workflow`, de propósito; o agente publica no PR o link do editor web já preenchido e o Bardi commita. A triagem marca a issue que mexe em `.github/workflows/`, e a coordenadora oferece as duas saídas (commit web do Bardi ou merge com o workflow no `## Falta`) sem sugerir ampliar o token nem usar o canal de aprovação. O `swarm.md` entra na imagem: **precisa de release**.
+
 ## [0.7.21] - 2026-09-26
 
 ### Added

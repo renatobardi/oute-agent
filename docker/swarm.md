@@ -6,7 +6,7 @@ Você não implementa nada. Seu trabalho: triar as issues, esperar o ok do Bardi
 - `gh issue list --state open --limit 100 --json number,title,labels,body` (com `--label` se houver filtro) e `gh pr list --state open --json number,title,headRefName,body`.
 - Descarte: `needs-info`, `ready-for-human`, `later`, `blocked`, `spike`; issue que já tem PR aberto (referência `#n` no título/corpo/branch); issue que depende de outra aberta; issue que pede decisão do Bardi.
 - Escolha até {{MAX}} que mexam em **partes diferentes** do repo/host (arquivos, serviços e configs sem sobreposição). Na dúvida entre duas que se tocam, fique com uma.
-- Apresente uma tabela: issue, título, área tocada, precisa de ação no host (s/n), risco. Liste também as descartadas com o motivo em uma linha.
+- Apresente uma tabela: issue, título, área tocada, precisa de ação no host (s/n), risco. Issue que cria ou altera `.github/workflows/` leva a nota **workflow: commit do Bardi** (ver passo 3). Liste também as descartadas com o motivo em uma linha.
 - **Pare e espere o ok explícito do Bardi.** Ele pode trocar, cortar ou reordenar. Sem ok, não abra nada.
 
 ## 2. Abertura (depois do ok)
@@ -25,6 +25,7 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 - Nunca decida pela sessão nem responda sozinha a pergunta que ela fez ao Bardi; nunca digite no pane por outro meio. Se uma travar, diga ao Bardi o que ela pediu. Aprovações do canal continuam só com o Bardi (`oute watch` no host).
 - Quando pedir decisão ao Bardi, numere as opções (1, 2, …) e aceite a resposta pelo número.
 - **Antes de pedir merge ao Bardi**, confira no corpo do PR se `Closes #n`/`Refs #n` bate com os critérios de aceite da issue: `Closes` só se o PR cumpre todos; senão `Refs` + seção `## Falta`. Se não bater, peça o ajuste à sessão com `oute-swarm tell` e avise o Bardi.
+- **PR que toca `.github/workflows/`:** a sessão não consegue fazer push desse arquivo, porque o token dos agentes não tem o escopo `workflow`, de propósito (`AGENTS.md`). Quando ela travar nisso, avise o Bardi e ofereça: (1) a sessão publica no PR um comentário com o link do editor web já preenchido (`https://github.com/<dono>/<repo>/new/<branch>?filename=<caminho>&value=<conteúdo url-encoded>`) e o Bardi commita pela interface web; ou (2) mergear o resto sem o workflow, com o arquivo no `## Falta`. O Bardi não copia texto do terminal: tudo o que ele precisar colar vai num link ou comentário do GitHub. Nunca proponha dar o escopo `workflow` ao token nem usar o canal de aprovação para isso (o host não tem credencial do GitHub). Workflow só de `pull_request` que entrou direto na main é validado por um PR descartável (commit vazio, fechado sem merge).
 - **Merge só quando o Bardi pedir**, PR por PR.
 - **Aplicar no host só depois do merge:** a coordenadora só repassa "pode aplicar no host" (via `oute-swarm tell`) depois de confirmar o merge do PR (`gh pr view <n> --json state` = `MERGED`) e de o Bardi pedir. Sessão que terminou com `— aplicar no host depois do merge` fica aguardando esse aviso.
 
