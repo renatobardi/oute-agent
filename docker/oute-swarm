@@ -96,6 +96,15 @@ tab_by_label() {
   herdr tab list 2>/dev/null | jq -r --arg l "$1" '.. | objects | select((.label? // .name? // "") == $l) | (.tab_id? // .id? // empty)' 2>/dev/null | head -1
 }
 
+# o id (ex.: o gravado no spawn) ainda existe em `herdr tab list`?
+tab_exists() {
+  herdr tab list 2>/dev/null | jq -e --arg t "$1" 'any(.. | objects; (.tab_id? // "") == $t)' >/dev/null 2>&1
+}
+
+# abas fechadas da rodada ficam em $state/closed (spawned é histórico e não muda)
+is_closed() { grep -qsxF -- "$2" "$1/closed"; }
+mark_closed() { is_closed "$1" "$2" || printf '%s\n' "$2" >> "$1/closed"; }
+
 # rodada: a da coordenadora (OUTE_SWARM_ID) ou, fora dela, a mais recente
 round_dir() {
   local d
@@ -114,6 +123,7 @@ cmd_tell() {
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   read -r slug spane _ _ tab <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
+  ! is_closed "$state" "$slug" || die "aba $label já fechada (oute-swarm close); nada enviado"
   tab="$(tab_by_label "$label")"
   if [[ -n "$tab" ]]; then
     # pane da aba com agente (ids mudam no restore; o gravado no spawn é só fallback)
@@ -129,7 +139,7 @@ cmd_tell() {
 }
 
 cmd_close() {
-  local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 state
+  local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 pending=0 found=0 state
   while [[ $# -gt 0 ]]; do
     case "$1" in --yes) yes=1 ;; --all) all=1 ;; -*) die "opção desconhecida: $1" ;; *) want="$(slugify "$1")" ;; esac; shift
   done
@@ -140,23 +150,38 @@ cmd_close() {
   while read -r slug pane agent ts tab; do
     [[ -n "$slug" ]] || continue
     (( all )) || [[ "$slug" == "$want" ]] || continue
+    found=1
     label="#${slug%%-*} ${slug#*-}"
-    id="$(tab_by_label "$label")"; [[ -n "$id" ]] || { [[ "${tab:--}" != - ]] && id="$tab"; }
-    if [[ -z "$id" ]]; then echo "já fechada ou não encontrada: $label"; continue; fi
+    if is_closed "$state" "$slug"; then (( all )) || echo "já fechada: $label"; continue; fi
+    # label primeiro; o id gravado no spawn só vale se ainda existir (senão é stale)
+    id="$(tab_by_label "$label")"
+    if [[ -z "$id" && "${tab:--}" != - ]] && tab_exists "$tab"; then id="$tab"; fi
+    if [[ -z "$id" ]]; then
+      echo "já fechada: $label"
+      (( ! yes )) || mark_closed "$state" "$slug"
+      continue
+    fi
+    pending=1
     if (( yes )); then
-      if herdr tab close "$id" >/dev/null 2>&1; then echo "fechada: $label ($id)"; closed=1
+      if herdr tab close "$id" >/dev/null 2>&1; then echo "fechada: $label ($id)"; closed=1; mark_closed "$state" "$slug"
       else echo "falhou fechar $label ($id); feche manualmente" >&2; fi
     else echo "fechar: $label ($id)"; fi
   done < "$state/spawned"
+  (( all || found )) || die "$want não é desta rodada ($(basename "$state"))"
+  if (( ! pending )); then (( ! all )) || echo "nada a fechar"; return 0; fi
   (( yes )) || echo "(simulação — rode com --yes para fechar)"
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
 }
 
 cmd_list() {
-  local d
+  local d line
   for d in "$STATE_ROOT"/*/; do
     [[ -f "$d/spawned" ]] || continue
-    echo "== $(basename "$d")"; sed 's/^/  /' "$d/spawned"
+    echo "== $(basename "$d")"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      if is_closed "${d%/}" "${line%% *}"; then echo "  $line (fechada)"; else echo "  $line"; fi
+    done < "$d/spawned"
   done
   echo "== worktrees"; oute-task list
 }

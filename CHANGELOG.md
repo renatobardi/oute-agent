@@ -10,6 +10,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ### Fixed
 - `oute-task clean` passa a considerar worktrees em **detached HEAD** (sessões que voltaram a `origin/<base>` depois do merge, com o branch do PR já apagado). Limpa e contida em `origin/<base>` → `remover` (com `--yes`, só `git worktree remove`, sem `branch -D`); com mudanças locais ou commits fora de `origin/<base>` → `mantém` com o motivo. Worktrees com branch: sem mudança. Antes elas nem eram listadas e a coordenadora removia à mão (#26).
+- `oute-swarm close` tentava fechar abas já fechadas pelo id gravado no spawn (stale) e respondia `falhou fechar … feche manualmente`; `close --all` listava de novo as abas já fechadas. Agora o id gravado só é usado se ainda existir em `herdr tab list`; senão `já fechada: #n slug`, exit 0. Fechamentos (e abas constatadas fechadas com `--yes`) ficam em `~/.oute/swarm/<rodada>/closed` (o `spawned` segue como histórico): `close` os ignora, `close --all` sem pendentes imprime `nada a fechar`, `tell` recusa com `aba … já fechada` e `list` marca `(fechada)`. `close <slug>` de fora da rodada agora dá erro. (#27)
 
 ## [0.7.17] - 2026-09-26
 
