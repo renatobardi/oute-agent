@@ -111,6 +111,11 @@ ensure_dirs() {
   # Sem mount: volume docker "oute-shared" (compose), nada gravável pelo container na home do host.
   # (export explícito: a env do shell vence o .env, que em hosts antigos ainda tem OUTE_SHARED_DIR=~/.oute/shared)
   export OUTE_SHARED_DIR=oute-shared
+  # chave pública do host para o sshd do container: se não existir, o Docker cria um DIRETÓRIO vazio no lugar
+  # e o entrypoint entra em loop de restart (visto no Mac, #3)
+  local pub="${OUTE_SSH_AUTHORIZED_KEYS:-$(sed -n 's/^[[:space:]]*OUTE_SSH_AUTHORIZED_KEYS=//p' "$ROOT/.env" 2>/dev/null | sed 's/[[:space:]]*#.*//' | tail -1)}"
+  pub="${pub:-$HOME/.ssh/id_ed25519.pub}"; pub="${pub/#\~/$HOME}"
+  [[ -f "$pub" ]] || die "chave pública $pub não existe (ou virou diretório vazio criado pelo Docker: rmdir). Gere com ssh-keygen -t ed25519 ou aponte OUTE_SSH_AUTHORIZED_KEYS no .env"
   # .env antigo: variáveis que não são mais usadas
   local v; for v in OUTE_UID OUTE_SHARED_DIR; do
     grep -qE "^[[:space:]]*$v=" "$ROOT/.env" 2>/dev/null \
@@ -176,9 +181,10 @@ oute_pull() {
   local tok="${GHCR_TOKEN:-}"
   if [[ -z "$tok" ]]; then
     export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-    tok="$("$ROOT/scripts/oute-secrets.sh" get GHCR_TOKEN 2>/dev/null || true)"
+    # stderr visível: num host novo o motivo costuma ser outro (sem bw_client.env, sem bw/imagem local, vault fora da tailnet)
+    tok="$("$ROOT/scripts/oute-secrets.sh" get GHCR_TOKEN || true)"
   fi
-  [[ -n "$tok" ]] || die "GHCR_TOKEN ausente no vault (item github): token clássico com read:packages"
+  [[ -n "$tok" ]] || die "não consegui o GHCR_TOKEN do vault (item github, token clássico com read:packages); veja o erro acima"
   printf '%s' "$tok" | docker login ghcr.io -u "${GHCR_USER:-renatobardi}" --password-stdin >/dev/null 2>&1 || die "login no ghcr falhou"
   local rc=0; docker pull -q "$IMAGE" || rc=$?
   # token só vive no vault: não deixa credencial em texto puro no ~/.docker/config.json

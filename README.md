@@ -46,6 +46,9 @@ secrets/         README com a convenção do vault (sem valores)
 **Mac (Apple Silicon)** — mesma imagem do ghcr (arm64), sem rebuild:
 - Docker Desktop ou OrbStack; Mac na tailnet (o `bw` da imagem acha o vault via `OUTE_VAULT_HOST_IP`, IP Tailscale do oute-server).
 - `.env`: `OUTE_HOSTNAME=oute-mac`. Nada de uid: o do container é fixo (10001) e o Docker do Mac mapeia os bind mounts.
+- `~/.oute/bw_client.env` (API key do Vaultwarden) e uma chave pública em `OUTE_SSH_AUTHORIZED_KEYS` (default `~/.ssh/id_ed25519.pub`).
+- Se `172.19.0.0/16` já estiver em uso por outra rede docker: `OUTE_NET_SUBNET=172.29.0.0/16`, `OUTE_NET_GATEWAY=172.29.0.1`, `OUTE_AGENT_IP=172.29.0.5` no `.env` (o IP fixo só importa no oute-server).
+- Bucket: rclone **do rclone.org** + FUSE-T; o do Homebrew não faz `mount` no macOS.
 - Diferenças × oute-server: sem FUSE instalado o bucket não é montado (fica o volume local); `ssh oute-server` de dentro do container não se aplica (o gateway é a VM do Docker, não o servidor); crontab do router-sync depende do Mac estar ligado às 04:00.
 
 ## Deploy novo

@@ -5,6 +5,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Fixed
+- **Entrypoint em loop de restart num home novo** (1ª subida em host novo, visto no Mac, #3): a retenção dos `.bak` do ai-memory fazia `ls` de glob sem match, que sai 2; com `pipefail` + `set -e` o entrypoint morria antes do sshd. No oute-server não aparecia porque os `.bak` já existiam.
+- `oute up` para com mensagem clara se a chave pública de `OUTE_SSH_AUTHORIZED_KEYS` (default `~/.ssh/id_ed25519.pub`) não existir — antes o Docker criava um diretório vazio no lugar.
+- `oute pull` mostra o erro real do vault (antes dizia só "GHCR_TOKEN ausente", mesmo quando faltava o `bw_client.env`).
+- Mac: README com rede alternativa (`OUTE_NET_SUBNET`/`OUTE_NET_GATEWAY`/`OUTE_AGENT_IP`) quando `172.19.0.0/16` já está em uso, e rclone do rclone.org (o do Homebrew não faz `mount` no macOS).
 - `oute up`/`pull` falhavam na 0.7.3 com `EACCES ... Bitwarden CLI/data.json.lock`: o `bw` do host roda via `docker run` da imagem, agora com uid 10001, mas o estado em `~/.oute/bwcli` é do usuário do host. O `bw` (e o `oci-bootstrap`) passam a rodar com `--user` do host, `HOME=/tmp` e `BITWARDENCLI_APPDATA_DIR=/bwcli`. Só script do host — a imagem 0.7.3 não muda.
 
 ## [0.7.3] - 2026-09-25

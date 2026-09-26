@@ -134,7 +134,8 @@ setup_agents() {
   # o ai-memory deixa um .bak-<ts> a cada --apply: fica o MAIS ANTIGO (original, única cópia do que
   # havia antes de qualquer edição automática) + os 2 mais recentes (atual + anterior, #12)
   local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do
-    ls -1t "$base".bak-* 2>/dev/null | sed '1,2d;$d' | xargs -r rm -f
+    # `|| true`: home novo (sem .bak) -> ls sai 2 e, com pipefail + set -e, derrubava o entrypoint (loop de restart, #3)
+    { ls -1t "$base".bak-* 2>/dev/null || true; } | sed '1,2d;$d' | xargs -r rm -f
   done
 }
 
