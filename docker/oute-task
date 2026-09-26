@@ -56,6 +56,7 @@ cmd_open() {
     echo "reabrindo $wt ($(git -C "$wt" branch --show-current))" >&2
   else
     mkdir -p "$WT_ROOT"
+    git -C "$main" worktree prune   # registro de worktree cuja pasta sumiu não pode bloquear o add
     git -C "$main" fetch -q origin --prune || echo "aviso: fetch falhou; usando o que há localmente" >&2
     base="$(default_branch "$main")"; base="${base:-main}"
     if git -C "$main" show-ref -q --verify "refs/heads/$br"; then git -C "$main" worktree add -q "$wt" "$br"
@@ -64,7 +65,7 @@ cmd_open() {
   fi
   cd "$wt"
   case "$agent" in
-    claude|codex|pi) OUTE_NO_WORKTREE=1 exec "$agent" "$@" ;;
+    claude|codex|pi) OUTE_NO_WORKTREE=1 exec "$agent" "$@" ;;   # passa pelo shim, que deixa seguir
     shell) exec bash -i ;;
     *) die "agente desconhecido: $agent (claude|codex|pi|shell)" ;;
   esac

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Shim de claude/codex/pi (vem antes dos binários reais no PATH): abrir o agente no CHECKOUT PRINCIPAL de um
+# repo git cria uma worktree própria (oute-task) e abre a sessão lá. Vale para shell, herdr (new/restore) etc.
+# Passa direto: worktree, fora de repo, headless (-p/--print/exec…), resume/continue, subcomandos, sem terminal,
+# OUTE_NO_WORKTREE=1.
+set -uo pipefail
+a="$(basename "$0")"
+shims="$(cd "$(dirname "$0")" && pwd)"
+clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
+real="$(PATH="$clean_path" command -v "$a")" || { echo "oute: $a não encontrado" >&2; exit 127; }
+pass() { exec "$real" "$@"; }
+
+[[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
+[[ -t 0 && -t 1 ]] || pass "$@"
+for x in "$@"; do
+  case "$x" in
+    -p|--print|-h|--help|-v|--version|-r|--resume|-c|--continue) pass "$@" ;;
+  esac
+done
+case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)
+  exec|e|resume|login|logout|mcp|config|doctor|update|install|plugin|completion|apply|app-server|sandbox|debug|setup-token|migrate-installer) pass "$@" ;;
+esac
+gd="$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" || pass "$@"
+cd_="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || pass "$@"
+[[ "$gd" == "$cd_" ]] || pass "$@"     # já é uma worktree
+
+def="sessao-$(date +%m%d-%H%M)"
+printf 'oute: %s no checkout principal de %s — a sessão vai para uma worktree própria.\n' "$a" "$(basename "$(dirname "$cd_")")" >/dev/tty
+read -r -p "nome da tarefa [$def]: " s </dev/tty || exit 130
+exec oute-task "${s:-$def}" "$a" "$@"

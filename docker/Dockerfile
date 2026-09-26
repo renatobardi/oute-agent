@@ -108,12 +108,15 @@ COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
 # uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex/pi)
 COPY docker/oute-task /usr/local/bin/
 COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
+COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
+RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
+    && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task
 
 USER ${OUTE_USER}
 WORKDIR /workspace
 ENV HOME=/home/${OUTE_USER} \
-    PATH=/home/${OUTE_USER}/.local/bin:$PATH \
+    PATH=/usr/local/lib/oute/shims:/home/${OUTE_USER}/.local/bin:$PATH \
     AI_MEMORY_DATA_DIR=/data/ai-memory \
     OUTE_ROUTER_URL=http://jev-router:4000/v1
 
