@@ -69,7 +69,7 @@ cmd_spawn() {
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
   n="${slug%%-*}"
   main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"
-  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned"
+  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
   count="$(wc -l < "$state/spawned")"
   if (( ! force )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
@@ -242,7 +242,7 @@ cmd_tell() {
 }
 
 cmd_close() {
-  local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 pending=0 found=0 state
+  local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 pending=0 found=0 failed=0 state
   while [[ $# -gt 0 ]]; do
     case "$1" in --yes) yes=1 ;; --all) all=1 ;; -*) die "opção desconhecida: $1" ;; *) want="$(slugify "$1")" ;; esac; shift
   done
@@ -267,13 +267,192 @@ cmd_close() {
     pending=1
     if (( yes )); then
       if herdr tab close "$id" >/dev/null 2>&1; then echo "fechada: $label ($id)"; closed=1; mark_closed "$state" "$slug"
-      else echo "falhou fechar $label ($id); feche manualmente" >&2; fi
+      else echo "falhou fechar $label ($id); feche manualmente" >&2; failed=1; fi
     else echo "fechar: $label ($id)"; fi
   done < "$state/spawned"
   (( all || found )) || die "$want não é desta rodada ($(basename "$state"))"
+  # rodada fechada: o `oute-swarm watch` vê a marca e sai sozinho
+  if (( all && yes && ! failed )); then date -u +%FT%TZ > "$state/fechada"; fi
   if (( ! pending )); then (( ! all )) || echo "nada a fechar"; return 0; fi
   (( yes )) || echo "(simulação — rode com --yes para fechar)"
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
+}
+
+# ---- watch: monitor da coordenadora (#45) ----
+# Cada passada monta um retrato normalizado da rodada (chave<TAB>valor) e compara com o anterior; só imprime linha
+# para mudança real. O retrato fica em $state/watch.state: a 1ª passada da rodada só grava a linha de base (silêncio)
+# e um watch reiniciado (monitor expirou) compara com o último retrato, sem perder o que mudou no intervalo.
+# Falha de herdr/gh numa passada não vira evento: o estado anterior daquela fonte é mantido (e sai um aviso só).
+W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
+declare -A W_PREV=() W_CUR=()
+
+w_ev() { [[ -n "$2" ]] || return 0; printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"; }
+w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
+w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }
+w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
+
+w_snapshot() {
+  local state="$1" main="$2" since="$3" slug _p _a _ts tab label tabs line kind num n st mg url name res ns f id rc
+  W_CUR=()
+  # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
+  if tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs"; then
+    while read -r slug _p _a _ts tab; do
+      [[ -n "$slug" ]] || continue
+      if is_closed "$state" "$slug"; then W_CUR["tab|$slug"]=closed; continue; fi
+      label="$(w_label "$slug")"
+      # a aba pelo id gravado no spawn (se ainda tem o label) ou pelo label (ids mudam no restore do herdr)
+      st="$(jq -r --arg l "$label" --arg t "${tab:--}" '[.. | objects | select(.tab_id? != null and (.label? // "") == $l)]
+             | (map(select(.tab_id == $t)) + .)[0] // empty | .agent_status // "unknown"' <<<"$tabs" 2>/dev/null || true)"
+      if [[ -z "$st" ]]; then W_CUR["tab|$slug"]=closed; continue; fi
+      W_CUR["tab|$slug"]=open
+      case "$st" in working|idle|done|blocked) ;; *) st=none ;; esac
+      W_CUR["agent|$slug"]="$st"
+    done < <(cat "$state/spawned" 2>/dev/null)
+  else
+    w_keep "tab|"; w_keep "agent|"; W_CUR["falha|herdr"]=1
+  fi
+  # PRs da rodada: criados depois do início, branch <tipo>/<n>-… (ou sessao/<n>-…) de uma issue aberta nela
+  ns="$(awk '{split($1, a, "-"); print a[1]}' "$state/spawned" 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != ""))')" || ns="[]"
+  if [[ "$ns" != "[]" && -n "$ns" ]]; then
+    if res="$(cd "$main" && gh pr list --state all --limit 100 --json number,headRefName,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
+       && res="$(jq -r --arg since "$since" --argjson ns "$ns" '
+          def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
+                 | if test("^(SUCCESS|NEUTRAL|SKIPPED)$") then "pass"
+                   elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail"
+                   else "pending" end;
+          .[] | select((.createdAt // "") >= $since) | . as $p
+          | ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) as $n
+          | select(any($ns[]; . == $n))
+          | "pr\t\($p.number)\t\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)",
+            ([$p.statusCheckRollup[]? | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")),
+                                           t: (.completedAt // .startedAt // ""), r: r}]
+             | group_by(.name)[] | max_by(.t) | "ci\t\($p.number)\t\(.name)\t\(.r)")' <<<"$res" 2>/dev/null)"; then
+      while IFS=$'\t' read -r kind num n st mg url; do
+        case "$kind" in
+          pr)
+            W_CUR["pr|$num|$n"]="$st"; W_CUR["url|$num"]="$url"
+            case "$mg" in
+              CONFLICTING) W_CUR["merge|$num"]=conflict ;;
+              MERGEABLE) W_CUR["merge|$num"]=ok ;;
+              *) [[ -z "${W_PREV[merge|$num]:-}" ]] || W_CUR["merge|$num"]="${W_PREV[merge|$num]}" ;;   # UNKNOWN: recalculando
+            esac ;;
+          ci) name="$n"; W_CUR["ci|$num|$name"]="$st" ;;
+        esac
+      done <<<"$res"
+    else
+      w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; W_CUR["falha|gh"]=1
+    fi
+  fi
+  # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
+  for f in "$W_OUTBOX"/*.sh; do
+    [[ -f "$f" ]] || continue
+    id="$(basename "$f" .sh)"; W_CUR["ask|$id"]=pending
+  done
+  for f in "$W_INBOX"/*.out; do
+    [[ -f "$f" ]] || continue
+    rc="$(w_hdr "$f" rc)"; W_CUR["res|$(basename "$f" .out)"]="${rc:-?}"
+  done
+}
+
+w_diff() {
+  local k new old kind a b slug num pr f t
+  while IFS= read -r k; do
+    [[ -n "$k" ]] || continue
+    new="${W_CUR[$k]:-}" old="${W_PREV[$k]:-}"
+    [[ "$new" != "$old" ]] || continue
+    IFS='|' read -r kind a b <<<"$k"
+    case "$kind" in
+      tab)
+        case "$old>$new" in
+          ">open") w_ev aba "$(w_label "$a"): aberta" ;;
+          "closed>open") w_ev aba "$(w_label "$a"): reaberta" ;;
+          "open>closed") w_ev aba "$(w_label "$a"): fechada$(is_closed "$W_STATE" "$a" || echo ' (sumiu do herdr, sem oute-swarm close)')" ;;
+        esac ;;
+      agent)
+        [[ -n "$new" ]] || continue   # aba fechada: a sessão sai junto (o evento é o da aba)
+        slug="$a" pr=""
+        for t in "${!W_CUR[@]}"; do
+          [[ "$t" == "pr|"*"|${slug%%-*}" ]] || continue
+          num="${t#pr|}"; num="${num%%|*}"; pr="${pr:+$pr, }PR #$num ${W_CUR[$t],,}"
+        done
+        case "$new" in
+          idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new${pr:+ ($pr)}${pr:- (sem PR)}" ;;
+          working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)"; fi ;;
+          none) if [[ "$old" =~ ^(working|idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): sem agente na aba (o agente saiu?)"; fi ;;
+        esac ;;
+      pr)
+        [[ -n "$new" ]] || continue
+        case "$new" in
+          OPEN) w_ev pr "PR #$a aberto (issue #$b) ${W_CUR[url|$a]:-}" ;;
+          MERGED) w_ev pr "PR #$a mergeado (issue #$b)" ;;
+          CLOSED) w_ev pr "PR #$a fechado sem merge (issue #$b)" ;;
+          *) w_ev pr "PR #$a: $new (issue #$b)" ;;
+        esac ;;
+      ci)
+        [[ "$new" == pass || "$new" == fail ]] || continue
+        w_ev ci "PR #$a · $b: $new" ;;
+      merge)
+        case "$old>$new" in
+          *">conflict") w_ev conflito "PR #$a em conflito com a base (mergeable=CONFLICTING)" ;;
+          "conflict>ok") w_ev conflito "PR #$a sem conflito de novo" ;;
+        esac ;;
+      ask)
+        [[ "$new" == pending ]] || continue
+        f="$W_OUTBOX/$a.sh"
+        w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como)) — aprovação no host: oute watch" ;;
+      res)
+        [[ -n "$new" && "$new" != 0 ]] || continue
+        if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
+        else w_ev canal "resultado $a: rc=$new (oute-inbox $a)"; fi ;;
+      falha)
+        if [[ -n "$new" ]]; then w_ev aviso "$a falhou nesta passada; mantendo o último estado conhecido"
+        else w_ev aviso "$a respondendo de novo"; fi ;;
+    esac
+  done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
+             | awk -F'|' 'BEGIN { split("falha tab agent pr ci merge ask res", o, " "); for (i in o) p[o[i]] = i }
+                          { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
+}
+
+cmd_watch() {
+  local interval=60 round="" main since sfile tmp k v first=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --interval) interval="${2:?}"; shift 2 ;;
+      --round) round="${2:?}"; shift 2 ;;
+      *) die "uso: oute-swarm watch [--interval s] [--round <rodada>]" ;;
+    esac
+  done
+  [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 10 )) || die "--interval inválido: $interval (mínimo 10 s)"
+  round="${round:-${OUTE_SWARM_ID:-}}"
+  if [[ -n "$round" ]]; then W_STATE="$STATE_ROOT/$round"
+  else W_STATE="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; W_STATE="${W_STATE%/}"; fi
+  [[ -n "$W_STATE" && -f "$W_STATE/meta" ]] || die "rodada não encontrada: ${W_STATE:-$STATE_ROOT}"
+  main="$(sed -n 's/^repo=//p' "$W_STATE/meta")"; since="$(sed -n 's/^started=//p' "$W_STATE/meta")"
+  [[ -d "$main" ]] || die "repo da rodada não encontrado: $main"
+  command -v herdr >/dev/null && command -v gh >/dev/null && command -v jq >/dev/null || die "precisa de herdr, gh e jq"
+  sfile="$W_STATE/watch.state"
+  # um watch por rodada: o mais novo assume, e o antigo (monitor que expirou sem matar o processo) sai na próxima passada
+  printf '%s\n' "$$" > "$W_STATE/watch.pid"
+  if [[ -s "$sfile" ]]; then
+    while IFS=$'\t' read -r k v; do [[ -n "$k" ]] && W_PREV[$k]="$v"; done < "$sfile"
+    first=0
+  fi
+  echo "oute-swarm watch: rodada $(basename "$W_STATE") · a cada ${interval}s · $( (( first )) && echo 'linha de base nesta passada' || echo 'comparando com o último estado salvo')" >&2
+  while :; do
+    [[ "$(cat "$W_STATE/watch.pid" 2>/dev/null)" == "$$" ]] || { echo "oute-swarm watch: outro watch assumiu a rodada; saindo" >&2; exit 0; }
+    if [[ -f "$W_STATE/fechada" ]]; then
+      w_ev rodada "$(basename "$W_STATE") fechada (oute-swarm close --all); watch encerrado"
+      rm -f "$W_STATE/watch.pid"; exit 0
+    fi
+    w_snapshot "$W_STATE" "$main" "$since"
+    (( first )) || w_diff
+    first=0
+    tmp="$(mktemp "$W_STATE/.watch.XXXXXX")"
+    for k in "${!W_CUR[@]}"; do printf '%s\t%s\n' "$k" "${W_CUR[$k]}"; done | sort > "$tmp"
+    mv "$tmp" "$sfile"
+    W_PREV=(); for k in "${!W_CUR[@]}"; do W_PREV[$k]="${W_CUR[$k]}"; done
+    sleep "$interval"
+  done
 }
 
 cmd_list() {
@@ -290,10 +469,11 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;
+  watch) shift; cmd_watch "$@" ;;
   list) cmd_list ;;
   *) cmd_start "$@" ;;
 esac

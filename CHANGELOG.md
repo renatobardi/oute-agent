@@ -4,6 +4,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **`oute-swarm watch [--interval s] [--round ID]`**: monitor pronto para a coordenadora, no lugar do laço que cada rodada reescrevia (e que soltava aviso vazio `[ci]` a cada ciclo, despejava o estado inteiro na primeira passada, vigiava panes fixos e não via conflito de merge) (#45). Uma linha por mudança real (`HH:MM [tipo] texto`):
+  - `[sessao]`: sessão da rodada `idle`/`done`/`blocked` (com o PR dela, ou `sem PR`), voltou a `working`, agente saiu da aba;
+  - `[aba]`: aba aberta/fechada/reaberta, relida de `~/.oute/swarm/<rodada>/` a cada passada (spawn/close depois de iniciado entram sem reiniciar);
+  - `[pr]` aberto/mergeado/fechado sem merge, `[ci]` por check (`pass`/`fail`), `[conflito]` `mergeable=CONFLICTING` (e quando volta a ficar sem conflito). PRs da rodada = criados depois do início, branch `<tipo>/<n>-…` de uma issue dela;
+  - `[canal]`: pedido novo pendente em `~/outbox`, resultado com rc≠0 (ou recusado) em `~/inbox`;
+  - `[aviso]`: `herdr`/`gh` falhou numa passada (o estado anterior daquela fonte é mantido, sem evento falso) e quando volta.
+  - Estado normalizado em `~/.oute/swarm/<rodada>/watch.state`: a primeira passada da rodada só grava a linha de base; um watch reiniciado (monitor expirou) compara com o último estado salvo. Um watch por rodada: o mais novo assume e o antigo sai. Default a cada 60 s (mínimo 10).
+  - `oute-swarm close --all --yes` grava `~/.oute/swarm/<rodada>/fechada` quando não sobra aba aberta, e o watch sai sozinho.
+- `swarm.md` §3: a coordenadora roda `oute-swarm watch --round <rodada>` como monitor e o reinicia ao expirar; `comandos.md` com o subcomando.
+
 ### Changed
 - **Sem sessão do Vaultwarden em cache no host** (#21). `~/.oute/bw_session` era uma chave viva para o cofre inteiro (todos os projetos + `oute-admin`), em disco o tempo todo e dentro dos backups. Agora `~/.oute/agent.env` é o cache do host, e o vault só é aberto com a master password digitada. A sessão fica só no processo e é trancada (`bw lock`) logo em seguida, inclusive em erro/Ctrl+C.
   - `oute up` com `agent.env` presente **não pede senha** e não toca no vault. `oute up --refresh-secrets` e o novo `oute secrets refresh` releem a pasta `oute-agent` e regravam `agent.env` (sem `agent.env`, o `up` também lê o vault).
