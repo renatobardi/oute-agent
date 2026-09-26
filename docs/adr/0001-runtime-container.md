@@ -25,7 +25,7 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Aprovações dos agentes | **Yolo dentro do container por padrão** (`OUTE_AGENT_YOLO=1`): Claude Code `bypassPermissions`, Codex `approval_policy = "never"`, Pi sem prompts | Ver adendo 2026-09-25 |
 | Config dos agentes | Edição **estrutural** apenas (tomlkit para `~/.codex/config.toml`, jq para JSON; `~/.ssh/config` só ganha um `Include` no topo; notas dos agentes num bloco gerenciado entre marcadores). Nunca `sed`/texto | ai-memory e os próprios agentes escrevem nos mesmos arquivos (bug 0.5.3–0.5.8) |
 | Versões de terceiros | Fixadas: LiteLLM por digest, ai-memory `2.4.0` (servidor e cliente), otel-collector `0.161.0`; upgrade deliberado | Reprodutibilidade |
-| Repo | Monorepo `renatobardi/oute-agent`; skills/plugins em repo separado (fora de escopo agora) | |
+| Repo | Monorepo `renatobardi/oute-agent`; addons (skills etc.) em `addons/`, montado read-only (ADR-06) | |
 
 ## Topologia (compose)
 
@@ -129,5 +129,5 @@ Container LXC precisa `security.nesting=true` e `security.syscalls.intercept.mkn
 
 ## Não decidido / próximos temas
 - Layout do `/data/shared` e políticas de sync (rclone mount vs bisync)
-- Repo `oute-agent-plugins` (taxonomia de skills)
+- ~~Repo `oute-agent-plugins` (taxonomia de skills)~~ → decidido no ADR-06 (addons em `addons/`, sem repo separado)
 - Várias instâncias por máquina (#22)
