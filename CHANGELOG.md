@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Auto memory do Claude Code desligada**: `autoMemoryEnabled: false` no `~/.claude/settings.json` (entrypoint, via jq) e `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` no compose. A memória dos agentes é uma só, o ai-memory, compartilhado por Claude, Codex e Pi. Notas já gravadas em `~/.claude/projects/*/memory/` não são apagadas; só deixam de ser carregadas e escritas.
+
 ## [0.7.11] - 2026-09-26
 
 ## [0.7.10] - 2026-09-26

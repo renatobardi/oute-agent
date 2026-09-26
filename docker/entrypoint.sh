@@ -139,6 +139,9 @@ setup_agents() {
     jq 'del(.permissions.defaultMode) | del(.skipDangerousModePermissionPrompt)' "$cs" > "$cs.tmp"
   fi
   mv "$cs.tmp" "$cs"
+  # memória única = ai-memory (Bardi, 2026-09-26): auto memory nativa do Claude desligada (também via env no compose).
+  # Arquivos já gravados em ~/.claude/projects/*/memory ficam onde estão (não são apagados, só deixam de ser usados).
+  jq '.autoMemoryEnabled = false' "$cs" > "$cs.tmp" && mv "$cs.tmp" "$cs"
 
   # canal de aprovação (oute-propose / oute approve): instrução para os agentes, num bloco gerenciado —
   # o resto de cada arquivo (do usuário ou de outras ferramentas) não é tocado
