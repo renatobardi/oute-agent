@@ -27,3 +27,17 @@ Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex),
 - `bash -n` em todo script alterado; `docker compose --project-directory . -f docker/compose.yaml config` com as envs necessárias.
 - Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml`.
 - Script do host: pensar no caminho do Mac (bash 3.2, sem `timeout`, Docker Desktop).
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues de `renatobardi/oute-agent`, via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Defaults, exceto ready-for-agent → `ready` (label já existente). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` na raiz. See `docs/agents/domain.md`.
