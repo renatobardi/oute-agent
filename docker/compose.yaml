@@ -108,6 +108,9 @@ services:
     environment:
       # o servidor rejeita Host: fora desta lista; "ai-memory" é o nome DNS na rede oute
       AI_MEMORY_ALLOWED_HOSTS: "localhost,127.0.0.1,::1,ai-memory,oute-ai-memory"
+      # escopo das chamadas MCP sem workspace/project: por sessão (Claude manda o id via bridge session-aware);
+      # cliente sem id (Codex, Pi) cai no slot compartilhado, como antes — por isso as notas pedem escopo explícito
+      AI_MEMORY_AUTO_SCOPE__MODE: per_session
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
       AI_MEMORY_LLM_PROVIDER: ${AI_MEMORY_LLM_PROVIDER:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

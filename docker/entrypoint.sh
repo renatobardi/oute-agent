@@ -111,7 +111,9 @@ setup_agents() {
     local tok=(); [[ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]] && tok=(--auth-token "$AI_MEMORY_AUTH_TOKEN")
     IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-pi,claude-code,codex}"
     for a in "${AGENTS[@]}"; do
-      ai-memory install-mcp   --client "$a" --apply --server-url "$url/mcp" "${tok[@]}" >/dev/null 2>&1 || log "ai-memory mcp: $a não suportado"
+      # Claude: bridge stdio "session-aware" (manda o id da sessão em cada chamada MCP; servidor em auto_scope per_session)
+      local sa=(); [[ "$a" == claude-code ]] && sa=(--session-aware)
+      ai-memory install-mcp   --client "$a" --apply --server-url "$url/mcp" "${sa[@]}" "${tok[@]}" >/dev/null 2>&1 || log "ai-memory mcp: $a não suportado"
       # repo-root: projeto = repo principal (subdiretórios e git worktrees caem no mesmo projeto; ver estudo ai-memory × worktrees)
       ai-memory install-hooks --agent  "$a" --apply --server-url "$url" --project-strategy repo-root "${tok[@]}" >/dev/null 2>&1 || log "ai-memory hooks: $a não suportado"
     done

@@ -18,3 +18,12 @@ Quando algo precisar rodar no host como o usuário dele ou com **sudo/root**:
 
 Regras do script: bash, `set -euo pipefail`, idempotente, um objetivo por pedido, `echo` antes de cada passo, sem segredos no texto, nada interativo. Leia o estado antes (via `ssh oute-server`) e proponha só o necessário.
 Mudança **permanente** na configuração do oute-server segue o fluxo do repositório `lab` (issue → inventário → script → PR). O canal de aprovação serve para diagnóstico, ajustes pontuais e para rodar o deploy de um PR já mergeado.
+
+## Memória (ai-memory) — sempre com escopo explícito
+
+Nas ferramentas de memória do ai-memory (`memory_query`, `memory_recent`, `memory_write_page`, `memory_status`, handoffs…), **passe sempre `workspace` e `project`**:
+- valores do `.ai-memory.toml` na raiz do repositório em que você está trabalhando (vale também dentro de uma git worktree);
+- sem esse arquivo: `workspace = "default"` e `project` = nome do repositório principal (`basename` de `git rev-parse --path-format=absolute --git-common-dir` sem o `/.git`);
+- fora de um repositório, pergunte ao usuário antes de gravar.
+Motivo: sem escopo, o servidor usa o "projeto ativo" compartilhado, que pode ser o de outra sessão em outro repo.
+

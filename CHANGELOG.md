@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Escopo da memória por sessão:** o Claude passa a usar o bridge MCP **session-aware** do ai-memory (`install-mcp --session-aware`), que manda o id da sessão em cada chamada, e o servidor roda com `AI_MEMORY_AUTO_SCOPE__MODE=per_session`. Consultas e gravações sem `workspace`/`project` resolvem para o projeto da **própria sessão**, não para o "ativo" compartilhado (`shared_slot`), que podia ser o de outra sessão em outro repo. Codex e Pi não têm bridge: as notas gerenciadas dos agentes agora pedem `workspace`/`project` explícitos (do `.ai-memory.toml` ou do repo principal) em toda chamada de memória. Depois de um `/clear` no Claude, reabrir a sessão mantém o id exato (limite do Claude Code).
+
 ## [0.7.7] - 2026-09-25
 
 ### Changed
