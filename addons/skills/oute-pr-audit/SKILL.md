@@ -144,7 +144,7 @@ Achado de supply chain com risco de execução de código de terceiro sem contro
 
 ## 6. Execução em worktree própria
 
-Só com o trust gate `livre`. Nunca no checkout compartilhado nem na worktree da sessão que pediu a auditoria.
+Só com o trust gate `livre` (passo 4): é ele, e não o ambiente limpo, que protege o que está em disco. Nunca no checkout compartilhado nem na worktree da sessão que pediu a auditoria.
 
 ```bash
 AUD=$(mktemp -d)
@@ -163,7 +163,7 @@ git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"
 - para `scripts/oute`: o caminho do Mac (bash 3.2, sem `mapfile`, `timeout`, `${var,,}`), por leitura ou com um bash 3.2, se houver.
 
 Regras de execução:
-- **sem segredos:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>'`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente;
+- **sem segredos no ambiente:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>'`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente. O `env -i` **não isola o sistema de arquivos**: o gate roda como o mesmo usuário e lê qualquer caminho absoluto que ele lê (`~/.config`, `~/.ssh`, `/run/secrets`, o `agent_env` montado). Por isso só execute depois do passo 4 `livre`, e nunca descreva o gate como "isolado" ou "sem acesso a segredos" no relatório;
 - sem rede, quando o gate não precisa dela; nada de `push`, `release`, `oute up`, deploy ou canal de aprovação;
 - anote comando, código de saída e o trecho relevante da saída de cada gate;
 - **testes que falham na base e passam no head:** para teste novo ou alterado que o PR apresenta como prova de correção, copie o teste para a worktree da base (`git -C "$AUD/base" checkout "$HEAD_SHA" -- <arquivos de teste>`) e rode. Tem que falhar na base e passar no head. Se passa nos dois, o teste não prova a mudança (slop: teste vazio, passo 8);
@@ -303,7 +303,7 @@ Não use `gh pr review --approve` nem `--request-changes`. Cada auditoria é um 
 **Regras lidas de:** `AGENTS.md` @ base (+ <outras fontes>)
 **Achados:** CRITICAL <n> · BLOCKING <n> · SHOULD-FIX <n> · NIT <n> · UNCERTAIN <n>
 
-### Gates (worktree própria, sem segredos)
+### Gates (worktree própria, sem segredos no ambiente)
 | gate | comando | resultado |
 |---|---|---|
 | <nome> | `<comando>` | passou / falhou (rc, trecho) / não rodou: <motivo> |
