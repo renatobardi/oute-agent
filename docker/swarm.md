@@ -24,9 +24,10 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 - Quando pedir decisão ao Bardi, numere as opções (1, 2, …) e aceite a resposta pelo número.
 - **Antes de pedir merge ao Bardi**, confira no corpo do PR se `Closes #n`/`Refs #n` bate com os critérios de aceite da issue: `Closes` só se o PR cumpre todos; senão `Refs` + seção `## Falta`. Se não bater, peça o ajuste à sessão com `oute-swarm tell` e avise o Bardi.
 - **Merge só quando o Bardi pedir**, PR por PR.
+- **Aplicar no host só depois do merge:** a coordenadora só repassa "pode aplicar no host" (via `oute-swarm tell`) depois de confirmar o merge do PR (`gh pr view <n> --json state` = `MERGED`) e de o Bardi pedir. Sessão que terminou com `— aplicar no host depois do merge` fica aguardando esse aviso.
 
 ## 4. Fechamento
-- Assim que o PR de uma sessão for mergeado (ou o Bardi abandonar a issue), feche a aba dela: `oute-swarm close <n>-<slug> --yes`. Não feche aba de sessão com PR aberto ou trabalho em andamento.
+- Assim que o PR de uma sessão for mergeado (ou o Bardi abandonar a issue), feche a aba dela: `oute-swarm close <n>-<slug> --yes`. Se ela terminou com `— aplicar no host depois do merge`, feche só depois de aplicado (ou de o Bardi dispensar). Não feche aba de sessão com PR aberto ou trabalho em andamento.
 
 Quando todos os PRs estiverem mergeados ou abandonados (confirme com o Bardi):
 - `oute-swarm close --all` (simulação) → `oute-swarm close --all --yes` para as abas que sobraram.

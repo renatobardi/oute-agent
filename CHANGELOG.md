@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- `swarm-worker.md`: antes do merge do PR, o canal de aprovação serve só para **diagnóstico e dry-run** (`--dry-run`, `--check`, leitura); aplicar mudança no host só **depois do merge**, quando a coordenadora ou o Bardi pedir. Se a issue exige aplicar, a sessão termina com `PRONTO #n: <url> — aplicar no host depois do merge` e espera. Antes uma sessão aplicou no oute-server a partir do branch, antes do merge (#23).
+- `swarm.md` §3: a coordenadora só repassa "pode aplicar no host" (via `oute-swarm tell`) depois de confirmar o merge do PR; a aba dessa sessão só fecha depois de aplicado (#23).
+
 ### Fixed
 - `oute-swarm tell` saía com código 2 e sem mensagem quando achava a aba pelo label (o caso normal), então nunca funcionou desde a 0.7.16: chamava `herdr pane list --tab`, que não existe no herdr 0.9.1. Agora lê `herdr pane list` e filtra por `tab_id` no jq, preferindo o pane com agente. O id de pane gravado no spawn só entra como fallback se ainda existir. Toda falha sai com mensagem em stderr: `herdr pane list falhou: …`, resposta que não é JSON, `pane da aba … não encontrado; nada enviado`. (#34)
 
