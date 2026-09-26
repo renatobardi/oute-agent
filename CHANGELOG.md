@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-25
+
 ### Added
 - **Origem da telemetria = máquina + instância.** Todo registro (bucket e Langfuse) leva `host.name` = máquina e `oute.instance` = instância, além de `oute.agent`. A instância só precisa ser única dentro da máquina (#22).
   - `OUTE_HOST` é opcional: sem ele vale o antigo `OUTE_HOSTNAME` e, se nenhum estiver definido, o hostname da máquina.
