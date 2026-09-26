@@ -8,6 +8,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 - `swarm-worker.md`: o PR da sessão usa `Closes #n` só se cumpre todos os critérios de aceite da issue; senão `Refs #n` + seção `## Falta` com o que ficou de fora. Antes todo PR levava `Closes`, e o merge de uma entrega parcial fechava a issue.
 - `swarm.md`: antes de pedir merge, a coordenadora confere `Closes`/`Refs` contra os critérios e pede ajuste via `oute-swarm tell`; no resumo da rodada, issue com PR `Refs` aparece como **parcial**, com o que falta. Sem flag `--partial` no `spawn`.
 
+### Fixed
+- `oute-task clean` passa a considerar worktrees em **detached HEAD** (sessões que voltaram a `origin/<base>` depois do merge, com o branch do PR já apagado). Limpa e contida em `origin/<base>` → `remover` (com `--yes`, só `git worktree remove`, sem `branch -D`); com mudanças locais ou commits fora de `origin/<base>` → `mantém` com o motivo. Worktrees com branch: sem mudança. Antes elas nem eram listadas e a coordenadora removia à mão (#26).
+
 ## [0.7.17] - 2026-09-26
 
 ### Changed
