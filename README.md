@@ -56,15 +56,16 @@ secrets/         README com a convenção do vault (sem valores)
 ```bash
 git clone git@github.com:renatobardi/oute-agent.git && cd oute-agent
 cp .env.example .env && $EDITOR .env
+./scripts/oute secrets refresh                        # master password: lê o vault e grava ~/.oute/agent.env
 ./scripts/oute pull                                   # imagem da versão do VERSION, feita pelo CI (ou OUTE_BUILD_LOCAL=1 + oute build)
 DRY_RUN=1 ./scripts/oute oci-bootstrap                # 1x por tenancy: mostra o plano
 OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
-./scripts/oute up                                     # master password 1x
+./scripts/oute up                                     # usa ~/.oute/agent.env, sem senha
 ./scripts/oute attach                                 # ssh -> herdr (detach: Ctrl+B q)
 ./scripts/oute install                                # 1x por host: link no PATH -> depois é só `oute`
 ```
 
-`oute up`, em ordem: lê o vault (1 leitura, `bw sync`) e grava `~/.oute/agent.env` → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
+`oute up`, em ordem: carrega `~/.oute/agent.env` (o vault só é lido, com a master password, se o arquivo não existe ou com `--refresh-secrets`) → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
 
 ### Release e deploy
 
@@ -82,7 +83,8 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 |---|---|
 | `oute pull` | baixa do ghcr a imagem da versão atual (feita pelo CI) |
 | `oute build` | build local (fallback); mantém o cache usado nas últimas 24h |
-| `oute up` / `down` / `restart` / `status` | ciclo de vida da stack |
+| `oute up [--refresh-secrets]` / `down` / `restart` / `status` | ciclo de vida da stack |
+| `oute secrets refresh` | relê o Vaultwarden (master password), regrava `~/.oute/agent.env` e tranca a sessão |
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
 | `oute watch [host]` | atalho de `approve --watch`; com host (ex.: `oute watch oute-server`), abre a espera naquele host via ssh |
 | `oute approve [--watch]` | revisa e executa (ou recusa) os scripts propostos pelos agentes — ver **Canal de aprovação** |
@@ -93,7 +95,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute oci-bootstrap` | provisiona storage OCI (idempotente, `DRY_RUN=1`) |
 | `oute storage [ls\|lsl\|about] [path]` | lista o bucket direto no OCI (`OUTE_BUCKET=oute-observability` p/ telemetria) |
 | `oute sync-shared` | (re)monta o bucket |
-| `oute lock` / `version` | apaga sessão do vault / versão repo × imagem |
+| `oute lock` / `version` | tranca o vault e apaga a sessão em cache das versões antigas / versão repo × imagem |
 
 Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
 
@@ -145,7 +147,7 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 
 - Nenhuma porta de container em `0.0.0.0` (Docker ignora ufw): sshd do container em `127.0.0.1:2222` (`OUTE_SSH_BIND`).
 - Usuário do container com **uid/gid próprios (10001)**, que não existem no host (lab#181): arquivo criado pelo container não vira arquivo do `ubuntu`. Do host, o container só grava no mount do bucket; o resto é volume docker ou bind read-only.
-- Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado pelo `oute up` em `~/.oute/agent.env`, 0600). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
+- Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado em `~/.oute/agent.env`, 0600, que é também o cache do host). Sem sessão do Vaultwarden em disco: o vault só é aberto com a master password digitada (`oute secrets refresh`, `up --refresh-secrets`, `router-sync --check-guardrail`, `oci-bootstrap`) e trancado (`bw lock`) em seguida (#21). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
 - OpenRouter: guardrail com ZDR e sem treino; presets reforçam `zdr` + `data_collection: deny`.
 
 ## Build, versionamento e retenção

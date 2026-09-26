@@ -27,4 +27,4 @@ No host (Mac / LXC), só dois arquivos fora do repo:
 ~/.ssh/id_ed25519.pub     # chave que entra no container
 ```
 
-Master password é pedida no primeiro `oute up`; a sessão desbloqueada fica em `~/.oute/bw_session` (0600) e é reutilizada até `oute lock` ou expirar. `BW_PASSWORD` no ambiente pula o prompt.
+`~/.oute/agent.env` (0600, gerado pelo host) é o cache: `oute up`, `pull`, `sync-shared`/`storage` e o cron do `router-sync` leem só ele, sem vault e sem senha. A master password é pedida só quando o vault é aberto — `oute secrets refresh` (ou `up --refresh-secrets`, ou `up` sem `agent.env`), `oute router-sync --check-guardrail` (pasta `oute-admin`) e `oute oci-bootstrap` — e a sessão é trancada (`bw lock`) logo depois; nada de sessão em disco. Mudou um segredo no vault? `oute secrets refresh` e `oute restart`. `BW_PASSWORD` no ambiente pula o prompt.

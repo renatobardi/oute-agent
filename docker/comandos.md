@@ -26,6 +26,9 @@ Dois lugares, dois conjuntos de comandos:
   oute approve --watch fica esperando pedidos novos
   oute watch [host]    = approve --watch; com host, abre a espera nele via ssh
   oute up | down | restart | status
+  oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
+  oute secrets refresh                 relê o Vaultwarden, regrava ~/.oute/agent.env e tranca a sessão
+                                       (depois: oute restart, se a stack estiver de pé)
   oute attach          ssh → herdr
   oute ssh [cmd]       ssh no container (com cmd: roda e volta)
   oute shell           docker exec bash no container
@@ -34,10 +37,16 @@ Dois lugares, dois conjuntos de comandos:
   oute build           build local (fallback; o normal é o CI)
   oute sync-shared     monta o bucket OCI em ~/.oute/shared
   oute storage [ls|lsl|about] [path]   bucket direto no OCI
-  oute lock            apaga a sessão do Vaultwarden (próximo up pede a master password)
+  oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute router-sync [--dry-run]         regenera o catálogo do jev-router (roda em todo up)
+  oute router-sync --check-guardrail   confere policy.yaml × guardrail do OpenRouter (pede a master password)
   oute schedule        agenda o router-sync diário (04:00)
-  oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI
+  oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
+
+  Senha do Vaultwarden: ~/.oute/agent.env é o cache do host. up, pull, sync-shared, storage e o
+  router-sync diário usam só ele, sem senha. A master password só é pedida em secrets refresh,
+  up --refresh-secrets (ou up sem agent.env), router-sync --check-guardrail e oci-bootstrap; a sessão
+  é trancada logo depois, nada fica em disco. Faltou um segredo? oute secrets refresh.
 
 ## CONTAINER — sessões e worktrees
 Regra: uma sessão de agente = uma worktree + um branch. O checkout principal

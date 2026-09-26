@@ -11,10 +11,12 @@
 #        item "aws"         (Note, fields AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 #        item "github"      (Note, field GH_TOKEN)
 #
-# uso:  eval "$(oute-secrets export)"        # dentro do container
+# uso:  eval "$(oute-secrets export)"
 #       oute-secrets get OPENROUTER_API_KEY
-#       oute-secrets lock                     # apaga sessão em cache (volta a pedir a master password)
-# sessão: cacheada em $OUTE_HOME/bw_session (0600); reutilizada enquanto `bw status` = unlocked
+#       BW_SESSION="$(oute-secrets session)"  # sessão para quem chama; quem chama faz `bw lock` depois
+#       oute-secrets lock                     # bw lock + apaga resto legado ($OUTE_HOME/bw_session)
+# sessão (#21): nunca vai para disco. Com BW_SESSION válido no ambiente, usa e deixa como está (o dono tranca);
+# senão abre com a master password e, ao fim de export/get, faz `bw lock` (a chave some do estado do bw).
 set -euo pipefail
 
 BW_SERVER="${BW_SERVER:-https://vault.oute.pro}"
@@ -23,18 +25,16 @@ CLIENT_FILE="${BW_CLIENT_FILE:-/run/secrets/bw_client}"
 
 die() { printf '[oute-secrets] %s\n' "$*" >&2; exit 1; }
 
+# só para limpar o cache das versões <= 0.7.x (`lock`); nada é gravado nele
 SESSION_FILE="${BW_SESSION_FILE:-${OUTE_HOME:-$HOME/.oute}/bw_session}"
+OWN_SESSION=0
 
 session_ok() { [[ -n "${BW_SESSION:-}" ]] && bw status --session "$BW_SESSION" 2>/dev/null | grep -q '"unlocked"'; }
 
 unlock() {
-  # 1) sessão já no ambiente ou em cache -> reutiliza
+  # 1) sessão recebida do chamador (ex.: oci-bootstrap) -> usa; quem abriu é quem tranca
   session_ok && return 0
-  if [[ -z "${BW_SESSION:-}" && -s "$SESSION_FILE" ]]; then
-    BW_SESSION="$(<"$SESSION_FILE")"; export BW_SESSION
-    session_ok && return 0
-    unset BW_SESSION
-  fi
+  unset BW_SESSION
   # 2) login por API key (idempotente)
   [[ -f "$CLIENT_FILE" ]] || die "arquivo de API key não encontrado: $CLIENT_FILE"
   # shellcheck disable=SC1090
@@ -45,16 +45,22 @@ unlock() {
   [[ "$(jq -r .status <<<"$st")" == "unauthenticated" ]] && { bw login --apikey --quiet || die "bw login --apikey falhou (client_id/secret?)"; }
   # 3) master password: env, ou pergunta no tty
   if [[ -z "${BW_PASSWORD:-}" ]]; then
-    [[ -r /dev/tty ]] || die "BW_PASSWORD não definido e sem tty para perguntar"
+    { : </dev/tty; } 2>/dev/null || die "BW_PASSWORD não definido e sem tty para perguntar"   # -r passa sem terminal de controle (cron)
     read -rsp "Vaultwarden master password: " BW_PASSWORD </dev/tty; echo >/dev/tty
     export BW_PASSWORD
   fi
   BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)" || die "bw unlock falhou"
-  export BW_SESSION
-  # 4) cacheia a sessão (0600). `oute lock` apaga.
-  mkdir -p "$(dirname "$SESSION_FILE")"
-  ( umask 077; printf '%s' "$BW_SESSION" > "$SESSION_FILE" )
+  export BW_SESSION; OWN_SESSION=1
+  # 4) sessão só neste processo: se sair no meio (erro, Ctrl+C), tranca igual
+  trap relock EXIT
   bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
+}
+
+# descarta a chave da sessão que ESTE processo abriu (`bw lock` apaga a chave protegida do estado do bw)
+relock() {
+  [[ "$OWN_SESSION" == 1 ]] || return 0
+  bw lock >/dev/null 2>&1 || true
+  OWN_SESSION=0; unset BW_SESSION
 }
 
 folder_id() {
@@ -63,11 +69,9 @@ folder_id() {
 
 export_all() {
   unlock
-  # sessão em cache não sincroniza sozinha: item/pasta criado depois fica invisível sem isto (~1s)
-  bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
+  # sessão recebida pode ter estado de antes de um item novo (ex.: oci-storage criado agora)
+  [[ "$OWN_SESSION" == 1 ]] || bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
   local fid; fid="$(folder_id)"
-  # sessão em cache não sincroniza sozinha: pasta/item criado depois do último sync não aparece
-  [[ -n "$fid" ]] || { bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true; fid="$(folder_id)"; }
   [[ -n "$fid" ]] || die "pasta '$FOLDER' não existe no vault"
   bw list items --folderid "$fid" --session "$BW_SESSION" | jq -r '
     .[] as $it
@@ -79,12 +83,15 @@ export_all() {
         + ([ ($it.fields // [])[] | select(.value != null) | {k: (.name|ascii_upcase|gsub("-";"_")), v: .value} ])
       )[]
     | "export \(.k)=\(.v|@sh)"'
-  printf 'export BW_SESSION=%q\n' "$BW_SESSION"
 }
 
 case "${1:-}" in
-  export) export_all ;;
-  lock)   bw lock >/dev/null 2>&1 || true; rm -f "$SESSION_FILE"; echo "sessão apagada" ;;
-  get)    [[ -n "${2:-}" ]] || die "uso: oute-secrets get VAR"; eval "$(export_all)"; [[ -n "${!2:-}" ]] || die "$2 não encontrado no vault"; printf '%s' "${!2}" ;;
-  *)      echo "uso: oute-secrets export | get VAR | lock" >&2; exit 2 ;;
+  export)  export_all; relock ;;
+  get)     [[ -n "${2:-}" ]] || die "uso: oute-secrets get VAR"
+           # abre aqui (não no subshell do $(…)): a sessão é deste processo, que a tranca
+           unlock; envs="$(export_all)"; relock; eval "$envs"; unset envs
+           [[ -n "${!2:-}" ]] || die "$2 não encontrado no vault"; printf '%s' "${!2}" ;;
+  session) unlock; OWN_SESSION=0; printf '%s' "$BW_SESSION" ;;   # quem chama tranca (bw lock)
+  lock)    bw lock >/dev/null 2>&1 || true; rm -f "$SESSION_FILE"; echo "sessão descartada" ;;
+  *)       echo "uso: oute-secrets export | get VAR | session | lock" >&2; exit 2 ;;
 esac
