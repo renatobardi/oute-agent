@@ -23,7 +23,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
   - Claude com MCP **session-aware** e servidor em `per_session`;
   - Codex e Pi passam `workspace`/`project` explícitos;
   - repo com `.ai-memory.toml`.
-- **Plugins herdr:** próprios (`oute.*`), nada do marketplace em runtime (ADR-05, em estudo).
+- **Plugins herdr:** próprios (`oute-*`), nada do marketplace em runtime (ADR-05, em estudo).
 
 ## Glossário
 - **Jev:** roteador de perfis (`typesafe/jev-1.13`), consultado por request.
@@ -32,6 +32,15 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **canal de aprovação:** `oute-propose` → `~/outbox` → `oute approve` no host → `~/inbox`.
 - **origem:** máquina (`OUTE_HOST`, padrão = hostname) + instância (`OUTE_INSTANCE`, padrão `oute-agent`); a instância só precisa ser única dentro da máquina.
 - **lab:** repo `renatobardi/lab`, dono de tudo que muda no host oute-server.
+- **primitivo:** peça sem a qual o runtime não cumpre suas garantias: canal de aprovação, worktree por sessão, swarm e seus prompts (`oute-propose`, `oute-task`, `oute-swarm`…). Vai na imagem. Pode citar um addon, mas sempre com plano B: nunca depende dele. Pode ser promovido a addon ou rebaixado, caso a caso.
+- **addon:** tudo que é nosso e se instala por cima dos agentes/herdr: skill, persona, script, plugin herdr. Evite usar "plugin" como guarda-chuva.
+- **skill:** addon de instrução empacotada que Claude, Codex e Pi carregam sob demanda. Uma só para os três: não depende de recurso exclusivo de um harness. Pode compor outra skill citando-a pelo nome, com um plano B inline para quando ela não estiver disponível.
+- **prefixo `oute-`:** todo addon leva esse prefixo (`oute-pr-audit`), inclusive plugin herdr.
+- **skill importada:** fork sem volta de uma skill de terceiros, transformada para o nosso uso. Guarda a procedência (origem, commit, licença) e nunca sincroniza com o upstream. Se a licença não permitir, o original é só referência e o texto é todo nosso.
+- **persona:** addon com prompt de papel (revisor, arquiteto…), instalado como subagente onde a ferramenta suporta. "agente" continua sendo Claude, Codex ou Pi.
+- **script:** addon determinístico, sem LLM; o agente ou o humano o chama e o resultado é sempre o mesmo.
+- **worker:** só a sessão do swarm por issue (uma aba do herdr). Não usar para scripts.
+- **plugin:** só no sentido nativo de cada ferramenta (plugin do Claude Code, plugin herdr). Um plugin herdr é um tipo de addon.
 
 ## Backlog
 Issues em `renatobardi/oute-agent`, com os labels `tema`, `infra`, `agentes`, `seguranca`, `ci`, `bug`, `debito`, `observabilidade`, `spike` e `later`.
