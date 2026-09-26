@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- `swarm-worker.md`: o PR da sessão usa `Closes #n` só se cumpre todos os critérios de aceite da issue; senão `Refs #n` + seção `## Falta` com o que ficou de fora. Antes todo PR levava `Closes`, e o merge de uma entrega parcial fechava a issue.
+- `swarm.md`: antes de pedir merge, a coordenadora confere `Closes`/`Refs` contra os critérios e pede ajuste via `oute-swarm tell`; no resumo da rodada, issue com PR `Refs` aparece como **parcial**, com o que falta. Sem flag `--partial` no `spawn`.
+
 ## [0.7.17] - 2026-09-26
 
 ### Changed

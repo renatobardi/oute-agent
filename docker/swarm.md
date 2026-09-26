@@ -22,6 +22,7 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 - **Falar com uma sessão:** só com `oute-swarm tell <n>-<slug> "<mensagem>"`, e só para **repassar decisão ou instrução explícita do Bardi** (ex.: ele escolheu a opção 1, pediu deploy, pediu ajuste no PR). Mensagem curta e autocontida. Depois de enviar, diga ao Bardi o que foi repassado.
 - Nunca decida pela sessão nem responda sozinha a pergunta que ela fez ao Bardi; nunca digite no pane por outro meio. Se uma travar, diga ao Bardi o que ela pediu. Aprovações do canal continuam só com o Bardi (`oute watch` no host).
 - Quando pedir decisão ao Bardi, numere as opções (1, 2, …) e aceite a resposta pelo número.
+- **Antes de pedir merge ao Bardi**, confira no corpo do PR se `Closes #n`/`Refs #n` bate com os critérios de aceite da issue: `Closes` só se o PR cumpre todos; senão `Refs` + seção `## Falta`. Se não bater, peça o ajuste à sessão com `oute-swarm tell` e avise o Bardi.
 - **Merge só quando o Bardi pedir**, PR por PR.
 
 ## 4. Fechamento
@@ -31,4 +32,4 @@ Quando todos os PRs estiverem mergeados ou abandonados (confirme com o Bardi):
 - `oute-swarm close --all` (simulação) → `oute-swarm close --all --yes` para as abas que sobraram.
 - `oute-task clean` (simulação) → mostre → `oute-task clean --yes` se o Bardi concordar.
 - `memory_handoff_list` (workspace default, project {{REPO}}): cancele com `memory_handoff_cancel` os handoffs das worktrees removidas.
-- Resuma a rodada: issue → PR → estado (mergeado / aplicado no host / pendente) e achados que valem virar issue. Não crie issue sem o Bardi pedir.
+- Resuma a rodada: issue → PR → estado (mergeado / aplicado no host / pendente) e achados que valem virar issue. Issue com PR `Refs` (não `Closes`) aparece como **parcial**, com o que falta (seção `## Falta` do PR). Não crie issue sem o Bardi pedir.
