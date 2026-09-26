@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- `oute-swarm tell` saía com código 2 e sem mensagem quando achava a aba pelo label (o caso normal), então nunca funcionou desde a 0.7.16: chamava `herdr pane list --tab`, que não existe no herdr 0.9.1. Agora lê `herdr pane list` e filtra por `tab_id` no jq, preferindo o pane com agente. O id de pane gravado no spawn só entra como fallback se ainda existir. Toda falha sai com mensagem em stderr: `herdr pane list falhou: …`, resposta que não é JSON, `pane da aba … não encontrado; nada enviado`. (#34)
+
 ## [0.7.18] - 2026-09-26
 
 ### Changed
