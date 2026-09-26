@@ -4,6 +4,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- `oute-swarm tell` no **Codex e no Pi**, validado ao vivo (codex-cli 0.157.0, pi 0.87.1, herdr 0.9.1) nos casos do #37 (#38):
+  - Codex: o `tell` nunca conseguia limpar o campo sujo. O placeholder `Ask Codex to do anything` vem `ESC[2m ESC[48;2;…m texto` e o filtro só tirava o texto esmaecido até o próximo `ESC`, então o campo vazio parecia ter texto. Agora o esmaecido sai até o reset (`0`/`22`), sem confundir `38;2;r;g;b` com SGR 2. A animação braille do composer vazio (e o spinner do Pi) também sai.
+  - Pi: com o agente trabalhando, a régua de cima vira `── ⠦ Working ──` e o campo não era achado. Régua com rótulo agora conta.
+  - Diálogos: o herdr mostra o Codex como `idle` nos diálogos de confiar na pasta/hooks e no command center, e o `tell` digitava ali. No teste, o texto escolheu uma opção do diálogo de confiança; na tela de hooks, `t` = "trust all". O Pi mostra `done` com o seletor `/model` aberto. Agora `field_text` não vê campo nesses casos (opção numerada/dicas de seleção após o `›` no Codex; `Enter to select`/`to cancel` entre as réguas no Pi), e o `tell` confere o campo **antes** de digitar: sem campo, recusa com `campo de entrada … não encontrado na tela` e nada é digitado.
+  - `ctrl+c` limpa o campo sem interromper nem sair no Codex e no Pi (sem troca de tecla por agente).
+
 ## [0.7.19] - 2026-09-26
 
 ### Changed
