@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-09-25
+
 ### Added
 - **Canal de aprovação** para ações no host: o agente propõe com **`oute-propose "título" [--root]`** (script pela entrada padrão → `~/outbox/`) e lê o resultado com **`oute-inbox [--wait] <id>`**; o humano revisa e executa (ou recusa) no host com **`oute approve [--watch]`** — fora do container, então o agente não aprova a si mesmo. O script é copiado para o host antes de exibido (o que roda = o que foi visto), caracteres de controle neutralizados na tela, `--root` destacado em vermelho, registro em `~/.oute/approve/approve.log`, saída devolvida em `~/inbox/<id>.out` (`# rc:`; recusa = 126). Os agentes aprendem o canal por um bloco gerenciado em `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` e `~/.pi/agent/AGENTS.md`.
 
