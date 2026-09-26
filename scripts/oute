@@ -315,6 +315,10 @@ case "${1:-}" in
            docker ps -q -f name='^oute-agent$' -f status=running | grep -q . || "$0" up
            exec "$0" attach ;;
   install) install_link ;;
+  update)  # de qualquer diretório: repo (git pull --tags) + imagem da versão nova + restart
+           git -C "$ROOT" pull --tags --ff-only || die "git pull falhou em $ROOT (mudanças locais?)"
+           exec "$ROOT/scripts/oute" _update2 ;;
+  _update2) oute_pull && "$0" down && "$0" up && "$0" version ;;   # 2ª etapa já com o script novo
   approve) approve "${@:2}" ;;
   watch)   # atalho: aprovação em modo espera. Com host: roda no host remoto via ssh (ex.: oute watch oute-server)
            if [[ -n "${2:-}" ]]; then exec ssh -t "$2" 'bash -lc "oute approve --watch"'
@@ -380,6 +384,7 @@ case "${1:-}" in
     cat <<EOF
 uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   install      link no PATH para chamar só \`oute\` de qualquer lugar
+  update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)

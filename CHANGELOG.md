@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **`oute update`**: de qualquer diretório, faz `git pull --tags --ff-only` no repo, depois `oute pull`, `down`, `up` e `version`. A segunda etapa roda já com o script atualizado (`exec` depois do pull).
+
 ## [0.7.9] - 2026-09-26
 
 ### Added
