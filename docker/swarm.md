@@ -19,7 +19,9 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 
 ## 3. Acompanhamento
 - Rode em segundo plano um laço que a cada ~2 min verifica `herdr agent list` e `gh pr list --state open`. O monitor tem prazo (timeout): **quando ele encerrar por tempo e a rodada ainda estiver aberta, reinicie-o sozinho, sem perguntar**, e só avise o Bardi se o reinício falhar. A rodada só está fechada depois do passo 4. Avise o Bardi quando: uma sessão ficar `blocked` ou `idle` sem PR; um PR abrir; o CI de um PR falhar; houver pedido pendente no canal de aprovação (o Bardi aprova com `oute watch` no host — você nunca aprova).
-- Não responda pelas sessões nem digite nos panes delas. Se uma travar, diga ao Bardi o que ela pediu.
+- **Falar com uma sessão:** só com `oute-swarm tell <n>-<slug> "<mensagem>"`, e só para **repassar decisão ou instrução explícita do Bardi** (ex.: ele escolheu a opção 1, pediu deploy, pediu ajuste no PR). Mensagem curta e autocontida. Depois de enviar, diga ao Bardi o que foi repassado.
+- Nunca decida pela sessão nem responda sozinha a pergunta que ela fez ao Bardi; nunca digite no pane por outro meio. Se uma travar, diga ao Bardi o que ela pediu. Aprovações do canal continuam só com o Bardi (`oute watch` no host).
+- Quando pedir decisão ao Bardi, numere as opções (1, 2, …) e aceite a resposta pelo número.
 - **Merge só quando o Bardi pedir**, PR por PR.
 
 ## 4. Fechamento

@@ -4,6 +4,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.16] - 2026-09-26
+
+### Added
+- **`oute-swarm tell <n>-<slug> "<mensagem>"`**: a coordenadora repassa à sessão uma decisão/instrução explícita do Bardi (`herdr pane send-text` + `send-keys enter`), com o prefixo `[coordenadora <rodada>, repassando o Bardi]`. Acha o pane pela aba (label `#n slug` → `herdr pane list --tab`, preferindo o pane com agente), com fallback no id gravado. Registro em `~/.oute/swarm/<rodada>/log`. Antes o Bardi tinha que ir até o pane e digitar.
+
+### Changed
+- `swarm.md`: a coordenadora só usa `tell` para repassar o Bardi — nunca decide pela sessão nem responde sozinha ao que ela perguntou; aprovações continuam só no `oute watch`. Opções de decisão sempre numeradas (1, 2…).
+
 ## [0.7.15] - 2026-09-26
 
 ### Added

@@ -58,6 +58,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       Default --max 3 (teto 5). Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force]
       (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max
+  oute-swarm tell <n>-<slug> "mensagem"
+                                    repassa sua decisão à sessão (a coordenadora usa quando você decide)
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm list                   abas abertas por rodada + worktrees
