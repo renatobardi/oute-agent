@@ -116,19 +116,44 @@ round_dir() {
 }
 
 # texto do campo de entrada do agente no pane (sem a sugestão esmaecida), numa linha; exit 1 se não achar o campo.
-# claude/pi: entre as duas últimas linhas horizontais (─), sem o marcador ❯/>. codex: bloco do último "›".
+# claude/pi: entre as duas últimas linhas horizontais (─; a de cima pode trazer rótulo, ex.: "── ⠦ Working ──" do pi),
+# sem o marcador ❯/>. codex: bloco do último "›", que também marca a opção de listas/diálogos (confiar na pasta, hooks,
+# command center): aí não há campo (exit 1), porque digitar ali escolhe opções. Idem seletor do pi (/model…).
 field_text() {
   local raw
   raw="$(herdr pane read "$1" --source visible --format ansi 2>/dev/null)" || return 1
-  # ESC[2m = texto esmaecido (sugestão/placeholder): sai antes de tirar os demais códigos ANSI; NBSP (depois do ❯) vira espaço
-  printf '%s\n' "$raw" | sed -e $'s/\x1b\\[2m[^\x1b]*//g' -e $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' -e $'s/\r$//' -e $'s/\xc2\xa0/ /g' | awk -v mode="$2" '
-    function isrule(s,  t) { t = s; gsub(/─|━|═|╭|╮|╰|╯|├|┤| /, "", t); return length(s) >= 10 && t == "" }
+  # 1) tira os códigos ANSI e o texto esmaecido (SGR 2: sugestão/placeholder) até o reset (0/22), mesmo com outros
+  #    códigos no meio (o placeholder do codex vem ESC[2m ESC[48;2;…m texto ESC[0m); 38/48/58;2;r;g;b não são SGR 2
+  # 2) braille (U+2800–28FF): animação do composer vazio do codex e spinner do pi; NBSP (depois do ❯) vira espaço
+  printf '%s\n' "$raw" | LC_ALL=C awk '{
+      out = ""; s = $0
+      while ((i = index(s, "\033[")) > 0) {
+        if (!dim) out = out substr(s, 1, i - 1)
+        s = substr(s, i + 2)
+        if (!match(s, /^[0-9;?]*[@-~]/)) { s = ""; break }
+        seq = substr(s, 1, RLENGTH); s = substr(s, RLENGTH + 1)
+        if (seq !~ /m$/) continue
+        n = split(substr(seq, 1, length(seq) - 1), p, ";"); if (n == 0) dim = 0
+        for (k = 1; k <= n; k++) {
+          if (p[k] == "" || p[k] + 0 == 0 || p[k] + 0 == 22) dim = 0
+          else if (p[k] + 0 == 2) dim = 1
+          else if (p[k] ~ /^(38|48|58)$/) k += (p[k + 1] == 5 ? 2 : (p[k + 1] == 2 ? 4 : 0))
+        }
+      }
+      if (!dim) out = out s
+      print out
+    }' | LC_ALL=C sed -e $'s/\r$//' -e $'s/\xe2[\xa0-\xa3][\x80-\xbf]//g' -e $'s/\xc2\xa0/ /g' | awk -v mode="$2" '
+    function isrule(s,  t) { t = s; gsub(/─|━|═|╭|╮|╰|╯|├|┤| /, "", t); if (length(s) >= 10 && t == "") return 1
+                             t = s; gsub(/^ +| +$/, "", t); return length(t) >= 10 && t ~ /^(──|━━|══)/ && t ~ /(──|━━|══)$/ }
     function clean(s) { gsub(/│/, "", s); sub(/^ *(❯|›|>)( |$)/, "", s); gsub(/^ +| +$/, "", s); return s }
     { l[NR] = $0 }
     END {
       if (mode == "codex") {
         for (i = NR; i >= 1; i--) if (l[i] ~ /^ *(│ *)?›( |$)/) break
         if (i < 1) exit 1
+        # lista/diálogo: opção numerada ou dica de teclas de seleção abaixo do "›"
+        if (clean(l[i]) ~ /^[0-9]+\. /) exit 1
+        for (j = i + 1; j <= NR; j++) if (l[j] ~ /enter (continue|confirm|review|open|select|submit)|esc (back|skip|close|cancel)|↑\/↓/) exit 1
         out = clean(l[i])
         for (j = i + 1; j <= NR && l[j] !~ /^ *$/ && !isrule(l[j]); j++) out = out " " clean(l[j])
       } else {
@@ -136,7 +161,11 @@ field_text() {
         for (a = b - 1; a >= 1 && !isrule(l[a]); a--) ;
         if (a < 1) exit 1
         out = ""
-        for (j = a + 1; j < b; j++) out = out " " clean(l[j])
+        for (j = a + 1; j < b; j++) {
+          # pi: seletor (/model etc.) entre as réguas no lugar do editor; digitar ali filtra/escolhe
+          if (mode == "pi" && l[j] ~ /Enter to (select|confirm)|(Esc|Escape)[^ ]* to cancel/) exit 1
+          out = out " " clean(l[j])
+        }
       }
       gsub(/  +/, " ", out); gsub(/^ | $/, "", out); print out
     }'
@@ -190,6 +219,8 @@ cmd_tell() {
   text="[coordenadora $(basename "$state"), repassando o Bardi] $msg"
   # acima de 800 caracteres o Claude Code mostra "[Pasted text #n]" e o campo não dá para conferir
   (( ${#text} <= 800 )) || refuse "mensagem longa demais (${#text} caracteres com o prefixo; máx. 800); resuma"
+  # sem campo na tela (diálogo/lista; o herdr dá idle no codex nesses casos) nada é digitado: teclas ali escolhem opções
+  field_text "$pane" "$agent" >/dev/null || refuse "campo de entrada de $label não encontrado na tela (diálogo ou lista aberta?)"
   for try in 1 2; do
     herdr pane send-text "$pane" "$text" >/dev/null || refuse "send-text falhou em $pane"
     sleep 0.5
