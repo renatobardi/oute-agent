@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.17] - 2026-09-26
+
 ### Changed
 - `oute-task clean --yes` também avança o checkout principal de cada repo até `origin/<branch padrão>`, só por fast-forward, só se ele estiver na branch padrão e sem mudança local rastreada. Sem `--yes` mostra `atualizar …`. Antes a `main` local ficava para trás depois de cada merge.
 - Notas dos agentes (`agent-notes.md`): `git pull --ff-only` no checkout principal, na branch padrão e sem mudança local, é permitido sem perguntar.
