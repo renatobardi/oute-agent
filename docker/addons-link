@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Linker de addons (#66, ADR-06): um link por skill de <addons>/skills nas pastas que cada harness lê.
+#   Claude: <HOME>/.claude/skills/<nome>    Codex e Pi: <HOME>/.agents/skills/<nome>
+#
+# Uso: addons-link <pasta de addons> <HOME>
+# Avisos no stderr; sai 0 também quando a pasta de addons não existe (addon nunca derruba o boot).
+#
+# - skill válida = pasta oute-<nome> com SKILL.md cujo frontmatter tem `name: <nome da pasta>`;
+#   as demais são recusadas com aviso;
+# - nunca sobrescreve um nome que já existe e não é link nosso (skills synced do claude.ai, .system
+#   do Codex, pasta ou link de outra origem): só avisa;
+# - remove, nessas duas pastas, os links que apontam para dentro da pasta de addons e estão quebrados;
+# - idempotente: rodar de novo não muda nada.
+set -euo pipefail
+
+warn() { printf '[oute] addons: %s\n' "$*" >&2; }
+
+[[ $# -eq 2 ]] || { warn "uso: addons-link <pasta de addons> <HOME>"; exit 2; }
+ADDONS="${1%/}"; HOME_DIR="${2%/}"
+
+if [[ ! -d "$ADDONS" ]]; then
+  warn "AVISO: pasta de addons $ADDONS não existe (mount ausente?); nenhuma skill linkada"
+  exit 0
+fi
+ADDONS="$(cd "$ADDONS" && pwd)"   # absoluto: é o alvo gravado nos links
+SKILLS="$ADDONS/skills"
+DESTS=("$HOME_DIR/.claude/skills" "$HOME_DIR/.agents/skills")
+
+# valor de `name:` no frontmatter (bloco entre as duas primeiras linhas `---`), sem aspas nem espaços
+skill_name() {
+  awk 'NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
+       /^---[[:space:]]*$/ { exit }
+       /^name:/ { sub(/^name:[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); gsub(/^["\047]|["\047]$/, ""); print; exit }' "$1"
+}
+
+# link nosso = link cujo alvo está dentro da pasta de addons
+ours() { [[ -L "$1" ]] && case "$(readlink "$1")" in "$ADDONS"/*) return 0 ;; esac; return 1; }
+
+# 1. limpa links nossos quebrados (skill removida ou renomeada no repo)
+for dest in "${DESTS[@]}"; do
+  [[ -d "$dest" ]] || continue
+  for l in "$dest"/* "$dest"/.[!.]*; do
+    if ours "$l" && [[ ! -e "$l" ]]; then
+      rm -f "$l" && warn "removido link quebrado $l"
+    fi
+  done
+done
+
+# 2. um link por skill válida
+[[ -d "$SKILLS" ]] || exit 0
+for src in "$SKILLS"/*; do
+  [[ -d "$src" ]] || continue
+  name="${src##*/}"
+  case "$name" in
+    oute-*) ;;
+    *) warn "AVISO: $src recusada (sem o prefixo oute-)"; continue ;;
+  esac
+  if [[ ! -f "$src/SKILL.md" ]]; then
+    warn "AVISO: $src recusada (sem SKILL.md)"; continue
+  fi
+  fm="$(skill_name "$src/SKILL.md")"
+  if [[ "$fm" != "$name" ]]; then
+    warn "AVISO: $src recusada (name '${fm}' no SKILL.md difere da pasta)"; continue
+  fi
+  for dest in "${DESTS[@]}"; do
+    dst="$dest/$name"
+    if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
+      continue                                   # já está certo
+    elif ours "$dst"; then
+      ln -sfn "$src" "$dst"                      # link nosso com alvo antigo: corrige
+    elif [[ -e "$dst" || -L "$dst" ]]; then
+      warn "AVISO: $dst já existe e não é link para $ADDONS; não sobrescrevo"
+    else
+      mkdir -p "$dest" && ln -s "$src" "$dst"
+    fi
+  done
+done
+exit 0

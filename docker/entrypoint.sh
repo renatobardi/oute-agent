@@ -143,6 +143,11 @@ setup_agents() {
   # Arquivos já gravados em ~/.claude/projects/*/memory ficam onde estão (não são apagados, só deixam de ser usados).
   jq '.autoMemoryEnabled = false' "$cs" > "$cs.tmp" && mv "$cs.tmp" "$cs"
 
+  # addons (ADR-06, #66): um link por skill do mount read-only em ~/.claude/skills e ~/.agents/skills.
+  # Não sobrescreve nome existente (synced do claude.ai, .system do Codex); sem mount só avisa. Nunca aborta o boot.
+  /usr/local/lib/oute/addons-link "${OUTE_ADDONS_DIR:-/opt/oute/addons}" "$HOME" \
+    || log "AVISO: falha ao linkar os addons (${OUTE_ADDONS_DIR:-/opt/oute/addons})"
+
   # canal de aprovação (oute-propose / oute approve): instrução para os agentes, num bloco gerenciado —
   # o resto de cada arquivo (do usuário ou de outras ferramentas) não é tocado
   mkdir -p "$HOME/outbox" "$HOME/inbox" "$HOME/.pi/agent"

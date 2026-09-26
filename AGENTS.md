@@ -7,6 +7,8 @@ Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex),
 
 ## Mapa do repo
 - `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `comandos.md` (guia do `oute help`) + `oute-container`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`).
+- `addons/<tipo>/`: addons (ADR-06). Hoje só `addons/skills/oute-*` (`SKILL.md` com `name` = pasta). Montado read-only em `/opt/oute/addons`; o `docker/addons-link` (chamado pelo entrypoint) cria os links em `~/.claude/skills` e `~/.agents/skills`. Skill entra com `git pull` + `oute down/up`, sem release.
+- `tests/`: testes em bash puro (`tests/addons-link.test.sh`), rodados pelo workflow `pr` em todo PR.
 - `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
 - `config/litellm/`: `policy.yaml` é a fonte do roteador; os demais arquivos são gerados pelo `oute router-sync` e ficam fora do git. `config/otel/`: pipelines do collector.
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.
@@ -25,6 +27,7 @@ Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex),
 
 ## Validar antes do PR
 - `bash -n` em todo script alterado; `docker compose --project-directory . -f docker/compose.yaml config` com as envs necessárias.
+- Linker de addons: `tests/addons-link.test.sh`.
 - Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml`.
 - Script do host: pensar no caminho do Mac (bash 3.2, sem `timeout`, Docker Desktop).
 

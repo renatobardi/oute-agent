@@ -16,11 +16,13 @@ Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime
 ## Layout
 
 ```
-docker/          Dockerfile, compose.yaml, entrypoint.sh
+docker/          Dockerfile, compose.yaml, entrypoint.sh, addons-link
+addons/skills/   skills oute-* (ADR-06): montadas read-only em /opt/oute/addons e linkadas no boot; entram com git pull + oute down/up
 config/litellm/  policy.yaml (FONTE do router), jev_hook.py
                  router.yaml, config.yaml, candidates.json, catalog.json  <- GERADOS por `oute router-sync` (fora do git)
 config/otel/     collector.yaml (bucket OCI), langfuse.yaml (só metadados), none.yaml
 config/ssh/      sshd_config
+tests/           addons-link.test.sh (bash puro; roda no CI de PR)
 scripts/         oute (CLI do host), oute-secrets.sh (Vaultwarden -> env), router_sync.py, oci-bootstrap.sh, release
 secrets/         README com a convenção do vault (sem valores)
 ```

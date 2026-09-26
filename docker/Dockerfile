@@ -101,6 +101,8 @@ COPY config/ssh/sshd_config /etc/ssh/sshd_config
 # --- entrypoint --------------------------------------------------------------
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/codex_config.py /usr/local/lib/oute/codex_config.py
+# addons (ADR-06): o entrypoint linka as skills do mount read-only /opt/oute/addons nas pastas dos agentes
+COPY docker/addons-link /usr/local/lib/oute/addons-link
 COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 # canal de aprovação: o agente propõe, o humano aprova no host (`oute approve`)
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
@@ -117,7 +119,7 @@ COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
 COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
 RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
+RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
