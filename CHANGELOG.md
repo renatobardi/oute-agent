@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-09-26
+
 ### Fixed
 - **Worktree por sessão também para agentes abertos pelo herdr.** Na 0.7.9 a regra era uma função do bash, e o herdr cria e restaura agentes chamando o executável direto, sem passar pelo shell. Agora são **shims** (`claude`, `codex`, `pi`) em `/usr/local/lib/oute/shims`, na frente do PATH (Dockerfile e `.bashrc`, que garante a ordem mesmo com `~/.local/bin`). Passam direto: worktree, fora de repo, headless (`-p`, `exec`), `--resume`/`--continue`, subcomandos, sem terminal, `OUTE_NO_WORKTREE=1`.
 
