@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# oute (dentro do container) — só o guia de comandos. Os demais `oute …` rodam no host.
+guide=/usr/local/lib/oute/comandos.md
+case "${1:-help}" in
+  help|-h|--help|"") if [[ -t 1 ]] && command -v less >/dev/null; then less -FRX "$guide"; else cat "$guide"; fi ;;
+  *) echo "oute $1: roda no host (Mac/oute-server), fora do herdr. Aqui dentro: oute help" >&2; exit 2 ;;
+esac

@@ -18,7 +18,7 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 - O `spawn` recusa passar de {{MAX}}. Não use `--force` sem o Bardi pedir.
 
 ## 3. Acompanhamento
-- Rode em segundo plano um laço que a cada ~2 min verifica `herdr agent list` e `gh pr list --state open`. Avise o Bardi quando: uma sessão ficar `blocked` ou `idle` sem PR; um PR abrir; o CI de um PR falhar; houver pedido pendente no canal de aprovação (o Bardi aprova com `oute watch` no host — você nunca aprova).
+- Rode em segundo plano um laço que a cada ~2 min verifica `herdr agent list` e `gh pr list --state open`. O monitor tem prazo (timeout): **quando ele encerrar por tempo e a rodada ainda estiver aberta, reinicie-o sozinho, sem perguntar**, e só avise o Bardi se o reinício falhar. A rodada só está fechada depois do passo 4. Avise o Bardi quando: uma sessão ficar `blocked` ou `idle` sem PR; um PR abrir; o CI de um PR falhar; houver pedido pendente no canal de aprovação (o Bardi aprova com `oute watch` no host — você nunca aprova).
 - Não responda pelas sessões nem digite nos panes delas. Se uma travar, diga ao Bardi o que ela pediu.
 - **Merge só quando o Bardi pedir**, PR por PR.
 

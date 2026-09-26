@@ -379,11 +379,15 @@ case "${1:-}" in
     echo "running: ${img:-não está rodando}"
     echo "origem:  host=$OUTE_HOST instance=$OUTE_INSTANCE"
     ;;
+  help|guide)  # guia completo (host + container); o mesmo arquivo vai na imagem
+    if [[ -t 1 ]] && command -v less >/dev/null; then less -FRX "$ROOT/docker/comandos.md"; else cat "$ROOT/docker/comandos.md"; fi ;;
   *)
-    [[ "$1" == help || "$1" == -h || "$1" == --help ]] || echo "oute: comando desconhecido: $1" >&2
-    cat <<EOF
+    [[ "$1" == -h || "$1" == --help ]] || echo "oute: comando desconhecido: $1" >&2
+    echo "(guia completo com receitas e comandos do container: oute help)"
+    cat <<'EOF'
 uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
-  install      link no PATH para chamar só \`oute\` de qualquer lugar
+  help         guia completo: receitas, comandos do host e do container
+  install      link no PATH para chamar só `oute` de qualquer lugar
   update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh

@@ -4,6 +4,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.14] - 2026-09-26
+
+### Added
+- **`oute help`**: guia completo em `docker/comandos.md` (receitas rápidas, comandos do host, do container, `oute-swarm`, canal de aprovação, memória, herdr básico). Mesmo arquivo nos dois lugares: no host lê do repo; no container vai na imagem, e `oute help` ali também funciona (os outros `oute …` avisam que rodam no host). `oute -h` continua com o resumo curto.
+
+### Changed
+- `oute-swarm`: a coordenadora **reinicia sozinha** o monitor quando ele encerra por timeout e a rodada ainda está aberta; só avisa se o reinício falhar.
+
+### Fixed
+- `oute -h` imprimia "up: command not found": o heredoc do uso tinha crases sem escape (virava substituição de comando). Heredoc agora é literal.
+
 ## [0.7.13] - 2026-09-26
 
 ### Added

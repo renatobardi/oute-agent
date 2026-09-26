@@ -110,11 +110,14 @@ COPY docker/oute-task /usr/local/bin/
 # sessões paralelas coordenadas (oute-swarm; prompts da coordenadora e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
 COPY docker/swarm.md docker/swarm-worker.md /usr/local/lib/oute/
+# guia de comandos: `oute help` no container (o mesmo arquivo que o `oute help` do host)
+COPY docker/comandos.md /usr/local/lib/oute/comandos.md
+COPY docker/oute-container /usr/local/bin/oute
 COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
 COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
 RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task /usr/local/bin/oute-swarm
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace

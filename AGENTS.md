@@ -6,7 +6,7 @@ Instruções para agentes (Claude Code, Codex, Pi) trabalhando **neste repositó
 Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex), com roteamento de modelos (jev-router → OpenRouter), memória compartilhada (ai-memory), storage no OCI e observabilidade (bucket OCI + Langfuse). Roda no `oute-server` (Oracle Cloud, arm64) e no Mac (Apple Silicon).
 
 ## Mapa do repo
-- `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`).
+- `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `comandos.md` (guia do `oute help`) + `oute-container`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`).
 - `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
 - `config/litellm/`: `policy.yaml` é a fonte do roteador; os demais arquivos são gerados pelo `oute router-sync` e ficam fora do git. `config/otel/`: pipelines do collector.
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.
