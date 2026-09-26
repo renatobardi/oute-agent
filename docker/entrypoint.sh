@@ -37,6 +37,12 @@ setup_integrations() {
   if [[ -n "${GH_TOKEN:-}" ]]; then
     printf '%s' "$GH_TOKEN" | gh auth login --with-token 2>/dev/null || true
     gh auth setup-git 2>/dev/null || true
+    # explícito: com GH_TOKEN no ambiente o `gh auth login/setup-git` pode não gravar o helper, e aí o git pede
+    # usuário/senha no terminal. O helper do gh lê o GH_TOKEN do ambiente.
+    git config --global --replace-all credential.https://github.com.helper ''
+    git config --global --add credential.https://github.com.helper '!gh auth git-credential'
+    git config --global --replace-all credential.https://gist.github.com.helper ''
+    git config --global --add credential.https://gist.github.com.helper '!gh auth git-credential'
     git config --global user.name  "${GIT_USER_NAME:-Renato Bardi}"
     git config --global user.email "${GIT_USER_EMAIL:-renato.bardi@outlook.com}"
   fi

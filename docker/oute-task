@@ -12,6 +12,8 @@ set -euo pipefail
 WT_ROOT="${OUTE_WORKTREES:-/workspace/.worktrees}"
 die() { printf 'oute-task: %s\n' "$*" >&2; exit 1; }
 slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
+# git de rede sem prompt: helper do gh (GH_TOKEN) e nunca pedir usuário/senha no terminal
+gitnet() { GIT_TERMINAL_PROMPT=0 git -c credential.https://github.com.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' "$@"; }
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 default_branch() { git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true; }
 all_repos() { local d; for d in /workspace/*/; do [[ -d "$d/.git" ]] && echo "${d%/}"; done; }
@@ -27,7 +29,7 @@ cmd_clean() {
   local r wt br ahead why todo=0
   for r in $(all_repos); do
     local base; base="$(default_branch "$r")"; base="${base:-main}"
-    git -C "$r" fetch -q origin --prune 2>/dev/null || true
+    gitnet -C "$r" fetch -q origin --prune 2>/dev/null || true
     while read -r wt br; do
       [[ -n "$wt" ]] || continue
       if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then echo "mantém  $wt (mudanças locais)"; continue; fi
@@ -57,7 +59,7 @@ cmd_open() {
   else
     mkdir -p "$WT_ROOT"
     git -C "$main" worktree prune   # registro de worktree cuja pasta sumiu não pode bloquear o add
-    git -C "$main" fetch -q origin --prune || echo "aviso: fetch falhou; usando o que há localmente" >&2
+    gitnet -C "$main" fetch -q origin --prune || echo "aviso: fetch falhou; usando o que há localmente" >&2
     base="$(default_branch "$main")"; base="${base:-main}"
     if git -C "$main" show-ref -q --verify "refs/heads/$br"; then git -C "$main" worktree add -q "$wt" "$br"
     else git -C "$main" worktree add -q -b "$br" "$wt" "origin/$base"; fi
