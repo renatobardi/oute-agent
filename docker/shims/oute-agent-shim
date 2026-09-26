@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Shim de claude/codex/pi (vem antes dos binários reais no PATH): abrir o agente no CHECKOUT PRINCIPAL de um
 # repo git cria uma worktree própria (oute-task) e abre a sessão lá. Vale para shell, herdr (new/restore) etc.
-# Passa direto: worktree, fora de repo, headless (-p/--print/exec…), resume/continue, subcomandos, sem terminal,
-# OUTE_NO_WORKTREE=1.
+# Passa direto: worktree, fora de repo, headless (-p/--print/exec…), resume/continue (num resume com id, entra antes na
+# worktree da sessão), subcomandos, sem terminal, OUTE_NO_WORKTREE=1.
 set -uo pipefail
 a="$(basename "$0")"
 shims="$(cd "$(dirname "$0")" && pwd)"
@@ -10,33 +10,77 @@ clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
 real="$(PATH="$clean_path" command -v "$a")" || { echo "oute: $a não encontrado" >&2; exit 127; }
 pass() { exec "$real" "$@"; }
 
-# Restore do herdr: `claude --resume <id>` num shell novo, no cwd salvo do pane (o checkout principal), sem a env que o
-# oute-task deu à sessão do swarm. Se a worktree da sessão (cwd no transcript) tem a marca do oute-task
-# (<git-dir>/oute-swarm-worker), desliga de novo a sugestão de prompt. Sessão sem a marca: nada muda.
-swarm_resume_env() {
-  [[ "$a" == claude && -z "${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-}" ]] || return 0
-  local id="" prev="" x f cwd gd
+# Restore do herdr: relança a sessão (`claude --resume <id>`, `codex resume <id>`, `pi --session <id>`) num shell novo,
+# no cwd salvo do pane (o checkout principal, nas abas abertas por oute-task/oute-swarm), sem a env que o oute-task deu.
+# O shim acha o cwd da sessão no transcript e, se for uma worktree de tarefa do mesmo repo, faz cd para ela (#40).
+# Se a worktree tem a marca do oute-task (<git-dir>/oute-swarm-worker), desliga de novo a sugestão de prompt (#39).
+resume_id() {   # id da sessão retomada (vazio se não é resume com id)
+  local prev="" x i=0
   for x in "$@"; do
-    case "$prev" in -r|--resume) id="$x"; break ;; esac
-    case "$x" in --resume=*) id="${x#--resume=}"; break ;; esac
+    i=$((i + 1))
+    case "$a" in
+      claude)
+        case "$prev" in -r|--resume) printf '%s' "$x"; return ;; esac
+        case "$x" in --resume=*) printf '%s' "${x#--resume=}"; return ;; esac ;;
+      codex)   # codex resume [opções] <id>: primeiro argumento que não é opção
+        [[ "${1:-}" == resume ]] || return 0
+        if (( i > 1 )) && [[ "$x" != -* ]]; then
+          case "$prev" in -c|--config|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|-i|--image|--add-dir|--enable|--disable|--remote|--remote-auth-token-env|--local-provider) ;;
+            *) printf '%s' "$x"; return ;; esac
+        fi ;;
+      pi)
+        case "$prev" in --session) printf '%s' "$x"; return ;; esac
+        case "$x" in --session=*) printf '%s' "${x#--session=}"; return ;; esac ;;
+    esac
     prev="$x"
   done
-  [[ "$id" =~ ^[A-Za-z0-9-]+$ ]] || return 0
-  for f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id.jsonl"; do
-    [[ -f "$f" ]] || continue
-    cwd="$(grep -m1 -o '"cwd":"[^"]*"' "$f" | sed 's/^"cwd":"//; s/"$//')"
-    [[ -n "$cwd" && -d "$cwd" ]] || continue
-    gd="$(git -C "$cwd" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || continue
-    if [[ -f "$gd/oute-swarm-worker" ]]; then export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false; return 0; fi
-  done
 }
-swarm_resume_env "$@"
+resume_cwd() {   # cwd gravado no transcript da sessão <id>
+  local id="$1" f
+  [[ "$id" =~ ^[A-Za-z0-9-]+$ ]] || return 0
+  case "$a" in
+    claude) f="$(ls -t "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id.jsonl" 2>/dev/null | head -n1)" ;;
+    codex)  f="$(find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f -name "rollout-*$id.jsonl" 2>/dev/null | head -n1)" ;;
+    pi)     f="$(find "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions" -type f -name "*_$id*.jsonl" 2>/dev/null | head -n1)" ;;
+  esac
+  [[ -n "$f" && -f "$f" ]] || return 0
+  grep -m1 -o '"cwd":"[^"]*"' "$f" | sed 's/^"cwd":"//; s/"$//'
+}
+swarm_env() {   # sessão do swarm (marca no git-dir da worktree): sem sugestão de prompt no claude
+  local gd
+  [[ "$a" == claude && -z "${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-}" ]] || return 0
+  gd="$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 0
+  if [[ -f "$gd/oute-swarm-worker" ]]; then export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false; fi
+}
+resume_in_worktree() {
+  local id cwd real here wt_root gd cd_ my_cd
+  id="$(resume_id "$@")"; [[ -n "$id" ]] || return 0
+  cwd="$(resume_cwd "$id")"; [[ -n "$cwd" ]] || return 0
+  here="$(pwd -P)"
+  real="$(cd "$cwd" 2>/dev/null && pwd -P)" || { printf 'oute: a sessão %s era de %s, que não existe mais; retomando em %s.\n' "$id" "$cwd" "$here" >&2; return 0; }
+  if [[ "$real" == "$here" ]]; then swarm_env "$real"; return 0; fi
+  wt_root="$(cd "${OUTE_WORKTREES:-/workspace/.worktrees}" 2>/dev/null && pwd -P)" || wt_root="${OUTE_WORKTREES:-/workspace/.worktrees}"
+  local why=""
+  if [[ "$real/" != "$wt_root/"* ]]; then why="fora de $wt_root"
+  elif ! gd="$(git -C "$real" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+    || ! cd_="$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || [[ "$gd" == "$cd_" ]]; then why="não é uma worktree"
+  elif ! my_cd="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || [[ "$my_cd" != "$cd_" ]]; then why="worktree de outro repo"
+  fi
+  if [[ -n "$why" ]]; then
+    printf 'oute: a sessão %s era de %s (%s); retomando em %s, sem trocar de diretório.\n' "$id" "$cwd" "$why" "$here" >&2
+    return 0
+  fi
+  cd "$real" || return 0
+  printf 'oute: retomando a sessão %s na worktree %s.\n' "$id" "$real" >&2
+  swarm_env "$real"
+}
+resume_in_worktree "$@"
 
 [[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
 [[ -t 0 && -t 1 ]] || pass "$@"
 for x in "$@"; do
   case "$x" in
-    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue) pass "$@" ;;
+    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue|--session|--session=*) pass "$@" ;;
   esac
 done
 case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)
