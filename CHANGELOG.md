@@ -4,6 +4,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.13] - 2026-09-26
+
+### Added
+- **`oute-swarm <repo> [--max N] [--label L]`**: rodada de sessões paralelas, uma por issue, padronizando o fluxo validado na rodada 1 do lab. Abre uma coordenadora do Claude numa worktree própria (`swarm-MMDD-HHMM`) com o prompt `/usr/local/lib/oute/swarm.md`: triagem (descarta `needs-info`/`ready-for-human`/`later`/`blocked`/`spike`, issues com PR e as que se sobrepõem), **espera o ok do Bardi**, abre as sessões, acompanha agentes e PRs, e fecha com `oute-task clean` + cancelamento dos handoffs órfãos. Merge só quando pedido; host só pelo canal de aprovação. Default `--max 3`, teto 5.
+- **`oute-swarm spawn <n>-<slug> "<instrução>"`** (usado pela coordenadora): abre uma aba do herdr (`herdr tab create` + `herdr pane run`) com `oute-task` na worktree da issue e acrescenta as regras padrão da sessão (`swarm-worker.md`: branch `<tipo>/<n>-<slug>`, PR com `Closes #n`, sem merge, fim com `PRONTO`/`BLOQUEADO`). Recusa passar do `--max` da rodada e repetir issue. `oute-swarm list` mostra as abas abertas por rodada. Estado em `~/.oute/swarm/<id>/`.
+
 ## [0.7.12] - 2026-09-26
 
 ### Changed

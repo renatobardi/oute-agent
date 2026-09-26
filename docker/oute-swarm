@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# oute-swarm — várias sessões de agente em paralelo, uma por issue, coordenadas por uma sessão do Claude.
+#
+#   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
+#   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
+#              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue
+#   oute-swarm list                                 abas abertas por esta coordenadora + worktrees de tarefa
+#
+# Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
+# Triagem, espera do ok do Bardi, acompanhamento e limpeza estão no prompt (/usr/local/lib/oute/swarm.md).
+# A coordenadora nunca faz merge sem pedido explícito; ações no host só pelo canal de aprovação.
+set -euo pipefail
+LIB="${OUTE_LIB:-/usr/local/lib/oute}"
+STATE_ROOT="${HOME}/.oute/swarm"
+die() { printf 'oute-swarm: %s\n' "$*" >&2; exit 1; }
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
+main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
+
+resolve_repo() {
+  local r="$1"
+  [[ "$r" == */* ]] || r="/workspace/$r"
+  [[ -d "$r" ]] || die "repo não encontrado: $r"
+  main_root "$r" || die "$r não é um repositório git"
+}
+
+cmd_start() {
+  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L]"
+  local repo max=3 label="" main name id prompt
+  repo="$1"; shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --max) max="${2:?}"; shift 2 ;;
+      --label) label="${2:?}"; shift 2 ;;
+      *) die "opção desconhecida: $1" ;;
+    esac
+  done
+  [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "--max inválido: $max"
+  (( max <= 5 )) || die "--max acima de 5 não é permitido (quota e revisão humana)"
+  [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (a coordenadora abre abas nele)"
+  command -v gh >/dev/null || die "gh não encontrado"
+  main="$(resolve_repo "$repo")"; name="$(basename "$main")"
+  id="swarm-$(date +%m%d-%H%M)"
+  mkdir -p "$STATE_ROOT/$id"
+  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\n' "$main" "$max" "$label" "$(date -u +%FT%TZ)" > "$STATE_ROOT/$id/meta"
+  [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
+  prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
+                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" "$LIB/swarm.md")"
+  echo "coordenadora $id · repo $name · max $max${label:+ · label $label}" >&2
+  OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
+    exec oute-task -r "$main" "$id" claude "$prompt"
+}
+
+cmd_spawn() {
+  local agent=claude force=0 task="" instr="" main slug n state pane out cmd pfile count
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agent) agent="${2:?}"; shift 2 ;;
+      --force) force=1; shift ;;
+      -*) die "opção desconhecida: $1" ;;
+      *) if [[ -z "$task" ]]; then task="$1"; elif [[ -z "$instr" ]]; then instr="$1"; else die "argumento a mais: $1"; fi; shift ;;
+    esac
+  done
+  [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex|pi]'
+  case "$agent" in claude|codex|pi) ;; *) die "agente inválido: $agent" ;; esac
+  [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
+  slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
+  n="${slug%%-*}"
+  main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"
+  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned"
+  if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
+  count="$(wc -l < "$state/spawned")"
+  if (( ! force )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
+    die "limite da rodada atingido ($count/$OUTE_SWARM_MAX); peça ao Bardi para liberar e use --force"
+  fi
+  pfile="$state/$slug.prompt"
+  {
+    printf '%s\n\n' "$instr"
+    sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|${OUTE_SWARM_ID:-avulso}|g" "$LIB/swarm-worker.md"
+  } > "$pfile"
+  out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "#$n ${slug#*-}" --no-focus 2>&1)" \
+    || die "herdr tab create falhou: $out"
+  # o id do pane tem o formato w<N>:p<id>; o do tab é w<N>:t<id>
+  pane="$(printf '%s' "$out" | grep -oE 'w[0-9]+:p[A-Za-z0-9]+' | head -1 || true)"
+  [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
+  printf -v cmd 'oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
+  herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
+  printf '%s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" >> "$state/spawned"
+  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent"
+}
+
+cmd_list() {
+  local d
+  for d in "$STATE_ROOT"/*/; do
+    [[ -f "$d/spawned" ]] || continue
+    echo "== $(basename "$d")"; sed 's/^/  /' "$d/spawned"
+  done
+  echo "== worktrees"; oute-task list
+}
+
+case "${1:-}" in
+  ""|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+  spawn) shift; cmd_spawn "$@" ;;
+  list) cmd_list ;;
+  *) cmd_start "$@" ;;
+esac
