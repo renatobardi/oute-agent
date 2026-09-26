@@ -2,7 +2,7 @@
 
 Runtime em container para agentes de código — **herdr + Pi + Claude Code + Codex** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
 
-Decisões de arquitetura (ADRs) ficam no Project "Oute Agent" no Claude: `arquitetura/01-runtime-container.md`, `02-roteamento-modelos.md`, `03-storage-oci.md`, `04-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
+Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime-container.md`, `0002-roteamento-modelos.md`, `0003-storage-oci.md`, `0004-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
 
 ## Serviços (compose)
 
