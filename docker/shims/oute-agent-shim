@@ -10,11 +10,33 @@ clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
 real="$(PATH="$clean_path" command -v "$a")" || { echo "oute: $a não encontrado" >&2; exit 127; }
 pass() { exec "$real" "$@"; }
 
+# Restore do herdr: `claude --resume <id>` num shell novo, no cwd salvo do pane (o checkout principal), sem a env que o
+# oute-task deu à sessão do swarm. Se a worktree da sessão (cwd no transcript) tem a marca do oute-task
+# (<git-dir>/oute-swarm-worker), desliga de novo a sugestão de prompt. Sessão sem a marca: nada muda.
+swarm_resume_env() {
+  [[ "$a" == claude && -z "${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-}" ]] || return 0
+  local id="" prev="" x f cwd gd
+  for x in "$@"; do
+    case "$prev" in -r|--resume) id="$x"; break ;; esac
+    case "$x" in --resume=*) id="${x#--resume=}"; break ;; esac
+    prev="$x"
+  done
+  [[ "$id" =~ ^[A-Za-z0-9-]+$ ]] || return 0
+  for f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id.jsonl"; do
+    [[ -f "$f" ]] || continue
+    cwd="$(grep -m1 -o '"cwd":"[^"]*"' "$f" | sed 's/^"cwd":"//; s/"$//')"
+    [[ -n "$cwd" && -d "$cwd" ]] || continue
+    gd="$(git -C "$cwd" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || continue
+    if [[ -f "$gd/oute-swarm-worker" ]]; then export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false; return 0; fi
+  done
+}
+swarm_resume_env "$@"
+
 [[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
 [[ -t 0 && -t 1 ]] || pass "$@"
 for x in "$@"; do
   case "$x" in
-    -p|--print|-h|--help|-v|--version|-r|--resume|-c|--continue) pass "$@" ;;
+    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue) pass "$@" ;;
   esac
 done
 case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)

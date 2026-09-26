@@ -10,6 +10,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
   - Pi: com o agente trabalhando, a régua de cima vira `── ⠦ Working ──` e o campo não era achado. Régua com rótulo agora conta.
   - Diálogos: o herdr mostra o Codex como `idle` nos diálogos de confiar na pasta/hooks e no command center, e o `tell` digitava ali. No teste, o texto escolheu uma opção do diálogo de confiança; na tela de hooks, `t` = "trust all". O Pi mostra `done` com o seletor `/model` aberto. Agora `field_text` não vê campo nesses casos (opção numerada/dicas de seleção após o `›` no Codex; `Enter to select`/`to cancel` entre as réguas no Pi), e o `tell` confere o campo **antes** de digitar: sem campo, recusa com `campo de entrada … não encontrado na tela` e nada é digitado.
   - `ctrl+c` limpa o campo sem interromper nem sair no Codex e no Pi (sem troca de tecla por agente).
+- Sessão do Claude do swarm **restaurada pelo herdr** continua sem sugestão de prompt (#39). O restore relança `claude --resume <id>` num shell novo, no cwd salvo do pane, sem a env que o `oute-task` tinha dado (`OUTE_SWARM_WORKER` → `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`). Agora o `oute-task` grava a marca `oute-swarm-worker` no git-dir da worktree (some com a worktree), e o shim do `claude`, num `--resume`/`-r <id>`, acha o cwd da sessão no transcript (`~/.claude/projects/*/<id>.jsonl`) e, se a worktree tem a marca, exporta a env. Sessões sem a marca (fora do swarm) não mudam; um valor já definido no ambiente prevalece.
+- Shim: `--resume=<id>` passa direto, como `--resume <id>` (antes caía no prompt de worktree).
 
 ## [0.7.19] - 2026-09-26
 
