@@ -117,20 +117,26 @@ round_dir() {
 cmd_tell() {
   [[ $# -eq 2 ]] || die 'uso: oute-swarm tell <n>-<slug> "<mensagem>"'
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
-  local want msg state line slug spane tab label pane
+  local want msg state line slug spane tab label panes pane=""
   want="$(slugify "$1")"; msg="$2"; [[ -n "$msg" ]] || die "mensagem vazia"
   state="$(round_dir)"
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   read -r slug spane _ _ tab <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
   ! is_closed "$state" "$slug" || die "aba $label já fechada (oute-swarm close); nada enviado"
-  tab="$(tab_by_label "$label")"
+  # `pane list` não tem --tab (herdr 0.9.1); cada pane traz tab_id, então filtra no jq
+  panes="$(herdr pane list 2>&1)" || die "herdr pane list falhou: $panes"
+  jq -e . >/dev/null 2>&1 <<<"$panes" || die "herdr pane list devolveu algo que não é JSON: $panes"
+  tab="$(tab_by_label "$label" || true)"
   if [[ -n "$tab" ]]; then
-    # pane da aba com agente (ids mudam no restore; o gravado no spawn é só fallback)
-    pane="$(herdr pane list --tab "$tab" 2>/dev/null | jq -r '[.. | objects | select(.pane_id? != null)] | (map(select(.agent? != null and .agent != "")) + .)[0].pane_id // empty' 2>/dev/null)"
+    # pane da aba, preferindo o que tem agente (ids mudam no restore; o gravado no spawn é só fallback)
+    pane="$(jq -r --arg t "$tab" '[.. | objects | select(.pane_id? != null and .tab_id? == $t)] | (map(select((.agent? // "") != "")) + .)[0].pane_id // empty' <<<"$panes" 2>/dev/null || true)"
   fi
-  pane="${pane:-$spane}"
-  [[ -n "$pane" ]] || die "aba $label não encontrada (fechada?)"
+  # o id gravado no spawn só vale se ainda existir (senão é stale)
+  if [[ -z "$pane" && -n "$spane" ]] && jq -e --arg p "$spane" 'any(.. | objects; (.pane_id? // "") == $p)' >/dev/null 2>&1 <<<"$panes"; then
+    pane="$spane"
+  fi
+  [[ -n "$pane" ]] || die "pane da aba $label não encontrado (fechada?); nada enviado"
   herdr pane send-text "$pane" "[coordenadora $(basename "$state"), repassando o Bardi] $msg" >/dev/null || die "send-text falhou em $pane"
   sleep 0.3
   herdr pane send-keys "$pane" enter >/dev/null || die "send-keys falhou em $pane"
