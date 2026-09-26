@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.19] - 2026-09-26
+
 ### Changed
 - `swarm-worker.md`: antes do merge do PR, o canal de aprovação serve só para **diagnóstico e dry-run** (`--dry-run`, `--check`, leitura); aplicar mudança no host só **depois do merge**, quando a coordenadora ou o Bardi pedir. Se a issue exige aplicar, a sessão termina com `PRONTO #n: <url> — aplicar no host depois do merge` e espera. Antes uma sessão aplicou no oute-server a partir do branch, antes do merge (#23).
 - `swarm.md` §3: a coordenadora só repassa "pode aplicar no host" (via `oute-swarm tell`) depois de confirmar o merge do PR; a aba dessa sessão só fecha depois de aplicado (#23).
