@@ -48,16 +48,50 @@ bw() {
 }
 export -f bw
 
-# --- segredos do host: só o mínimo que o compose precisa antes do agent subir
-host_secrets() {
+# --- segredos do host (#21): ~/.oute/agent.env é o cache. O vault só é aberto quando o segredo muda
+# (`oute up --refresh-secrets` / `oute secrets refresh`) ou em comando admin, com a master password, e a
+# sessão é trancada logo depois (nada de sessão do Vaultwarden em disco).
+AGENT_ENV_FILE="$OUTE_HOME/agent.env"
+
+# fallback de quem precisa de um segredo e não o tem no ambiente: só o agent.env, nunca o vault
+load_agent_env() {
+  [[ -s "$AGENT_ENV_FILE" ]] || return 0
+  # shellcheck disable=SC1090
+  . "$AGENT_ENV_FILE"
+}
+no_secret() { die "$1 ausente em $AGENT_ENV_FILE; rode: oute secrets refresh${2:+ ($2)}"; }
+
+# 1 leitura do vault (pasta oute-agent, pede a master password) -> agent.env. oute-secrets tranca a sessão
+# ao sair; com BW_SESSION já aberta pelo chamador (oci-bootstrap), usa essa e não tranca.
+vault_to_agent_env() {
   need jq
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
-  # 1 leitura do vault (pasta oute-agent) -> env do host; o compose só repassa o que cada serviço referencia
-  # oute-secrets reutiliza a sessão em cache ($OUTE_HOME/bw_session) e só pede a master password se precisar
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
+  echo "lendo o Vaultwarden (pasta ${OUTE_VAULT_FOLDER:-oute-agent})…" >&2
   local envs; envs="$("$ROOT/scripts/oute-secrets.sh" export)" || die "não consegui ler o vault"
   eval "$envs"
   [[ -n "${OPENROUTER_API_KEY:-}" ]] || die "OPENROUTER_API_KEY ausente no vault"
+  # #6: o container dos agentes NÃO recebe acesso ao cofre (sem BW_SESSION, estado do bw ou API key).
+  # Recebe só os VALORES da pasta oute-agent, num arquivo 0600 montado como docker secret (read-only).
+  # Em disco (não tmpfs) para o container voltar sozinho depois de reboot do host.
+  # 1 linha por variável (%q escapa quebras de linha de PEM/JSON) -> o entrypoint valida linha a linha
+  local n; ( umask 077
+    for n in $(grep -oE '^export [A-Za-z_][A-Za-z0-9_]*' <<<"$envs" | cut -d' ' -f2 | grep -v '^BW_' | sort -u); do
+      printf 'export %s=%q\n' "$n" "${!n}"
+    done > "$AGENT_ENV_FILE.tmp" && mv "$AGENT_ENV_FILE.tmp" "$AGENT_ENV_FILE" )
+  echo "agent.env regravado ($AGENT_ENV_FILE)" >&2
+}
+
+# só o mínimo que o compose precisa antes do agent subir; $1=1 força a releitura do vault
+host_secrets() {
+  # resto das versões <= 0.7.x: sessão em cache em disco
+  if [[ -e "$OUTE_HOME/bw_session" ]]; then
+    "$ROOT/scripts/oute-secrets.sh" lock >/dev/null 2>&1 || true
+    rm -f "$OUTE_HOME/bw_session"
+  fi
+  if [[ "${1:-0}" == 1 || ! -s "$AGENT_ENV_FILE" ]]; then vault_to_agent_env; else load_agent_env; fi
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || no_secret OPENROUTER_API_KEY
+  export OUTE_AGENT_ENV_FILE="$AGENT_ENV_FILE"
   export OPENROUTER_API_KEY AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
   export OCI_S3_ACCESS_KEY="${OCI_S3_ACCESS_KEY:-}" OCI_S3_SECRET_KEY="${OCI_S3_SECRET_KEY:-}" \
          OCI_S3_ENDPOINT="${OCI_S3_ENDPOINT:-}" OCI_S3_REGION="${OCI_S3_REGION:-}"
@@ -68,26 +102,22 @@ host_secrets() {
   else
     export OUTE_OTEL_LANGFUSE=none
   fi
-  # #6: o container dos agentes NÃO recebe acesso ao cofre (sem BW_SESSION, estado do bw ou API key).
-  # Recebe só os VALORES da pasta oute-agent, num arquivo 0600 montado como docker secret (read-only).
-  # Em disco (não tmpfs) para o container voltar sozinho depois de reboot do host.
-  export OUTE_AGENT_ENV_FILE="$OUTE_HOME/agent.env"
-  # 1 linha por variável (%q escapa quebras de linha de PEM/JSON) -> o entrypoint valida linha a linha
-  local n; ( umask 077
-    for n in $(grep -oE '^export [A-Za-z_][A-Za-z0-9_]*' <<<"$envs" | cut -d' ' -f2 | grep -v '^BW_' | sort -u); do
-      printf 'export %s=%q\n' "$n" "${!n}"
-    done > "$OUTE_AGENT_ENV_FILE.tmp" && mv "$OUTE_AGENT_ENV_FILE.tmp" "$OUTE_AGENT_ENV_FILE" )
 }
 
 router_sync() {
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || {
+  # cron/up: só env ou agent.env, sem vault e sem tty (#21)
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || load_agent_env
+  [[ -n "${OPENROUTER_API_KEY:-}" ]] || no_secret OPENROUTER_API_KEY
+  export OPENROUTER_API_KEY
+  # #16: Management key (pasta oute-admin do vault) só para ler o guardrail; nunca vai ao container dos agentes.
+  # #21: só o --check-guardrail manual abre o vault (master password; sessão trancada ao sair). Sync normal sem ela: só avisa.
+  if [[ -z "${OPENROUTER_MGMT_KEY:-}" && " $* " == *" --check-guardrail "* ]]; then
+    need jq
     export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-    OPENROUTER_API_KEY="$("$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY)" || die "OPENROUTER_API_KEY ausente no vault"
-    export OPENROUTER_API_KEY
-  }
-  # #16: Management key (pasta oute-admin do vault) só para ler o guardrail; opcional, nunca vai ao container dos agentes
-  [[ -n "${OPENROUTER_MGMT_KEY:-}" ]] || OPENROUTER_MGMT_KEY="$(OUTE_VAULT_FOLDER=oute-admin "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_MGMT_KEY 2>/dev/null || true)"
-  export OPENROUTER_MGMT_KEY
+    OPENROUTER_MGMT_KEY="$(OUTE_VAULT_FOLDER=oute-admin "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_MGMT_KEY)" \
+      || die "não li OPENROUTER_MGMT_KEY da pasta oute-admin do vault"
+  fi
+  export OPENROUTER_MGMT_KEY="${OPENROUTER_MGMT_KEY:-}"
   docker run --rm -e OPENROUTER_API_KEY -e OPENROUTER_MGMT_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
     --entrypoint python3 "${OUTE_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest@sha256:114aca7726c311915c8ea5120fcc44d32a0648c3ae3aec41a1014f0e846b16d1}" scripts/router_sync.py "$@"
 }
@@ -140,10 +170,10 @@ ensure_dirs() {
 }
 
 # --- storage comum: bucket OCI via rclone (ADR-03, #1)
-# remote "oci" definido só por env (credenciais do item oci-storage no vault) -> nenhum rclone.conf com segredo
+# remote "oci" definido só por env (credenciais do item oci-storage, via agent.env) -> nenhum rclone.conf com segredo
 oci_remote_env() {
   local v; for v in OCI_S3_ACCESS_KEY OCI_S3_SECRET_KEY OCI_S3_ENDPOINT OCI_S3_REGION; do
-    [[ -n "${!v:-}" ]] || { export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"; eval "$("$ROOT/scripts/oute-secrets.sh" export)"; break; }
+    [[ -n "${!v:-}" ]] || { load_agent_env; break; }
   done
   [[ -n "${OCI_S3_ACCESS_KEY:-}" ]] || return 1
   export RCLONE_CONFIG=/dev/null   # remote só por env; evita o NOTICE "rclone.conf not found"
@@ -160,7 +190,7 @@ mount_shared() {
   local dir="$OUTE_HOME/shared" bucket="${OUTE_BUCKET:-oute-shared}"
   command -v rclone >/dev/null || { echo "rclone ausente no host; /data/shared fica local"; return 0; }
   is_mounted "$dir" && { export OUTE_SHARED_DIR="$dir"; echo "storage: $dir já montado"; return 0; }
-  oci_remote_env || { echo "item oci-storage ausente no vault (rode: oute oci-bootstrap); /data/shared fica local"; return 0; }
+  oci_remote_env || { echo "OCI_S3_* ausente em $AGENT_ENV_FILE (item oci-storage: oute oci-bootstrap; depois oute secrets refresh); /data/shared fica local"; return 0; }
   local extra=()
   if [[ "$(uname)" == Linux ]]; then
     # docker (root) precisa enxergar o mount FUSE do usuário
@@ -193,13 +223,10 @@ IMAGE="ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}"
 
 # imagem vem do CI (#2): login no ghcr com token só de leitura (vault: item github, campo GHCR_TOKEN) e pull
 oute_pull() {
+  # #21: só env ou agent.env, nunca o vault
+  [[ -n "${GHCR_TOKEN:-}" ]] || load_agent_env
   local tok="${GHCR_TOKEN:-}"
-  if [[ -z "$tok" ]]; then
-    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-    # stderr visível: num host novo o motivo costuma ser outro (sem bw_client.env, sem bw/imagem local, vault fora da tailnet)
-    tok="$("$ROOT/scripts/oute-secrets.sh" get GHCR_TOKEN || true)"
-  fi
-  [[ -n "$tok" ]] || die "não consegui o GHCR_TOKEN do vault (item github, token clássico com read:packages); veja o erro acima"
+  [[ -n "$tok" ]] || no_secret GHCR_TOKEN "vault: item github, token clássico com read:packages"
   printf '%s' "$tok" | docker login ghcr.io -u "${GHCR_USER:-renatobardi}" --password-stdin >/dev/null 2>&1 || die "login no ghcr falhou"
   local rc=0; docker pull -q "$IMAGE" || rc=$?
   # token só vive no vault: não deixa credencial em texto puro no ~/.docker/config.json
@@ -224,14 +251,19 @@ ensure_image() {
 }
 
 oci_bootstrap() {
+  need jq
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-  "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_API_KEY >/dev/null   # garante sessão desbloqueada em cache
-  BW_SESSION="$(<"$OUTE_HOME/bw_session")"; export BW_SESSION
+  # #21: sessão aberta agora (master password), só no env deste processo e do container; trancada ao sair
+  BW_SESSION="$("$ROOT/scripts/oute-secrets.sh" session)" || die "não consegui abrir o vault"
+  export BW_SESSION
+  trap 'bw lock >/dev/null 2>&1 || true' EXIT
   docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
     --user "$(id -u):$(id -g)" -e HOME=/tmp -e BITWARDENCLI_APPDATA_DIR=/bwcli \
     -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_OCI_SVC_EMAIL -e OUTE_BUCKET \
     -v "$OUTE_HOME/bwcli:/bwcli" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
+  # item oci-storage pode ter sido criado agora: agent.env relido com a mesma sessão (sem pedir a senha de novo)
+  [[ "${DRY_RUN:-0}" == 1 ]] || vault_to_agent_env
 }
 
 # --- canal de aprovação (`oute approve`): o agente PROPÕE (oute-propose, dentro do container), o humano
@@ -335,12 +367,14 @@ case "${1:-}" in
     df -h / | awk 'NR==2 {print "disco /: " $5 " usado (" $4 " livre)"}'
     ;;
   up)
-    host_secrets; ensure_dirs; mount_shared
+    refresh=0; up_args=()
+    for a in "${@:2}"; do if [[ "$a" == --refresh-secrets ]]; then refresh=1; else up_args+=("$a"); fi; done
+    host_secrets "$refresh"; ensure_dirs; mount_shared
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
     ensure_image
-    "${COMPOSE[@]}" up -d --no-build "${@:2}"; "$0" status; wait_sshd
+    "${COMPOSE[@]}" up -d --no-build ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
     ;;
@@ -362,6 +396,11 @@ case "${1:-}" in
     oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
     sub="${2:-ls}"; rclone "$sub" "oci:${OUTE_BUCKET:-oute-shared}${3:+/$3}" "${@:4}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
+  secrets)   # #21: relê o vault (pede a master password), regrava agent.env e tranca a sessão
+    [[ "${2:-}" == refresh ]] || { echo "uso: oute secrets refresh" >&2; exit 2; }
+    host_secrets 1
+    docker ps -q -f name='^oute-agent$' -f status=running | grep -q . && echo "o container lê agent.env ao subir: oute restart"
+    exit 0 ;;
   router-sync)
     # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
     rc=0; router_sync "${@:2}" || rc=$?
@@ -393,7 +432,9 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
-  up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)
+  up [--refresh-secrets]  sobe agent + jev-router + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
+               (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)
+  secrets refresh  relê o Vaultwarden (pede a master password), regrava ~/.oute/agent.env e tranca a sessão
   down|restart
   attach       ssh -> herdr
   ssh [cmd]    ssh direto no container
@@ -402,9 +443,10 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   status
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
-  oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1]
-  lock         apaga a sessão do Vaultwarden em cache (próximo up pede a master password)
+  oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
+  lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas
   router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
+               [--check-guardrail]: só confere o guardrail (lê oute-admin do vault, pede a senha)
                (roda sozinho em todo `up`)
   schedule     agenda router-sync diário (crontab do host, 04:00) — `up` já faz isso
   version      versão do repo e da imagem em execução

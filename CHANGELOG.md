@@ -4,6 +4,16 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Sem sessão do Vaultwarden em cache no host** (#21). `~/.oute/bw_session` era uma chave viva para o cofre inteiro (todos os projetos + `oute-admin`), em disco o tempo todo e dentro dos backups. Agora `~/.oute/agent.env` é o cache do host, e o vault só é aberto com a master password digitada. A sessão fica só no processo e é trancada (`bw lock`) logo em seguida, inclusive em erro/Ctrl+C.
+  - `oute up` com `agent.env` presente **não pede senha** e não toca no vault. `oute up --refresh-secrets` e o novo `oute secrets refresh` releem a pasta `oute-agent` e regravam `agent.env` (sem `agent.env`, o `up` também lê o vault).
+  - `oute pull`, `sync-shared`/`storage` e `router-sync` (inclusive o cron das 04:00) usam só o ambiente ou `agent.env`, sem vault e sem tty. Faltou a variável: `… ausente em ~/.oute/agent.env; rode: oute secrets refresh`.
+  - O `router-sync` normal não busca mais a `OPENROUTER_MGMT_KEY` (só avisa que o guardrail não foi verificado). `oute router-sync --check-guardrail` lê a pasta `oute-admin` com a senha e tranca.
+  - `oute oci-bootstrap` abre a sessão na hora (senha), passa ao container por env, relê `agent.env` com a mesma sessão (pega o item `oci-storage` recém-criado; não no `DRY_RUN=1`) e tranca no fim.
+  - `oute-secrets`: não grava nem reaproveita sessão em disco; `export`/`get` trancam a sessão que abriram (sessão recebida do chamador, como no `oci-bootstrap`, fica com ele); não imprime mais `BW_SESSION`; novo `oute-secrets session`. `lock` = `bw lock` + apaga o `bw_session` legado. Sem tty (cron), recusa na hora em vez de falhar abrindo `/dev/tty`.
+  - Migração: o primeiro `oute up` apaga o `~/.oute/bw_session` que tiver sobrado (e tranca o `bw`). `~/.oute/bwcli` continua (vault cifrado + login por API key; sem a master password não abre).
+  - `comandos.md`, `README.md`, `secrets/README.md`: quando a senha é pedida. O `oute` do host já funciona com `git pull`; a imagem só leva o `comandos.md` e o `oute-secrets` novos na próxima release (o `oci-bootstrap` funciona com o `oute-secrets` da imagem atual).
+
 ### Fixed
 - Sessão **restaurada pelo herdr** volta a rodar na **própria worktree**, não no checkout principal (#40). O restore relança o agente no cwd salvo do shell do pane, que nas abas do `oute-task`/`oute-swarm` é o checkout principal, e o agente retomava a sessão ali. Agora o shim, num resume com id (`claude --resume`/`-r <id>`, `claude --resume=<id>`, `codex resume <id>`, `pi --session <id>`), lê o cwd da sessão no transcript (`~/.claude/projects/*/<id>.jsonl`, `~/.codex/sessions/**/rollout-*<id>.jsonl`, `~/.pi/agent/sessions/*/*_<id>*.jsonl`) e faz `cd` para ele antes do `exec`, para todas as sessões, não só as do swarm. Só troca de diretório se o cwd está em `/workspace/.worktrees/` (`OUTE_WORKTREES`), ainda existe e é worktree do mesmo repo do diretório atual; senão retoma como antes e avisa em stderr (`oute: a sessão … era de … (motivo); retomando em …`). A marca do swarm (#39) passa a valer também quando a sessão é retomada de dentro da worktree.
 - Shim: `pi --session <id>` passa direto, como os outros resumes (antes caía no prompt de worktree quando aberto do checkout principal).
