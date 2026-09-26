@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# oute-propose — agente PROPÕE um script para rodar no HOST; quem executa é o humano, no host, com `oute approve`.
+# O container não ganha privilégio nenhum: só escreve em ~/outbox. Resultado volta em ~/inbox (veja oute-inbox).
+#
+#   oute-propose "título curto" [--root] < script.sh
+#   oute-propose "título curto" [--root] <<'SH'
+#   set -euo pipefail
+#   ...
+#   SH
+#
+# --root: o script roda com sudo no host (senão, como o usuário do host). Imprime o id do pedido.
+set -euo pipefail
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[[ $# -ge 1 && "$1" != -h && "$1" != --help ]] || usage
+title="$1"; shift
+as=user
+for a in "$@"; do case "$a" in --root) as=root ;; *) usage ;; esac; done
+[[ ! -t 0 ]] || { echo "oute-propose: mande o script pela entrada padrão (heredoc ou < arquivo)" >&2; exit 2; }
+body="$(cat)"
+[[ -n "${body//[[:space:]]/}" ]] || { echo "oute-propose: script vazio" >&2; exit 2; }
+(( ${#body} <= 65536 )) || { echo "oute-propose: script maior que 64 KiB; divida em partes" >&2; exit 2; }
+title="$(printf '%s' "$title" | tr -d '\000-\037\177' | cut -c1-120)"
+slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40)"
+id="$(date -u +%Y%m%d-%H%M%S)-${slug:-pedido}"
+mkdir -p "$HOME/outbox" "$HOME/inbox"
+tmp="$(mktemp "$HOME/outbox/.tmp.XXXXXX")"
+{ printf '# oute-propose\n# titulo: %s\n# como: %s\n# agente: %s\n# criado: %s\n\n' \
+    "$title" "$as" "${OUTE_PROPOSE_AGENT:-desconhecido}" "$(date -u +%FT%TZ)"
+  printf '%s\n' "$body"; } > "$tmp"
+mv "$tmp" "$HOME/outbox/$id.sh"   # rename atômico: o host nunca lê pedido pela metade
+echo "$id"
+echo "pedido criado; aguardando aprovação humana no host (oute approve). Resultado: oute-inbox --wait $id" >&2

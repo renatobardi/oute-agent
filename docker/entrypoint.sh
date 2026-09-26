@@ -131,6 +131,23 @@ setup_agents() {
   fi
   mv "$cs.tmp" "$cs"
 
+  # canal de aprovação (oute-propose / oute approve): instrução para os agentes, num bloco gerenciado —
+  # o resto de cada arquivo (do usuário ou de outras ferramentas) não é tocado
+  mkdir -p "$HOME/outbox" "$HOME/inbox" "$HOME/.pi/agent"
+  local notes; for notes in "$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"; do
+    python3 - "$notes" /usr/local/lib/oute/agent-notes.md <<'PY' || log "AVISO: falha ao atualizar $notes"
+import pathlib, re, sys
+path, src = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).read_text().strip()
+begin, end = "<!-- oute:managed:ops-handoff -->", "<!-- /oute:managed:ops-handoff -->"
+block = f"{begin}\n{src}\n{end}\n"
+text = path.read_text() if path.exists() else ""
+pat = re.compile(re.escape(begin) + r".*?" + re.escape(end) + r"\n?", re.S)
+new = pat.sub(lambda _: block, text) if pat.search(text) else (text.rstrip() + "\n\n" if text.strip() else "") + block
+if new != text:
+    path.write_text(new)
+PY
+  done
+
   # o ai-memory deixa um .bak-<ts> a cada --apply: fica o MAIS ANTIGO (original, única cópia do que
   # havia antes de qualquer edição automática) + os 2 mais recentes (atual + anterior, #12)
   local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do

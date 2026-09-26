@@ -234,6 +234,69 @@ oci_bootstrap() {
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
 }
 
+# --- canal de aprovação (`oute approve`): o agente PROPÕE (oute-propose, dentro do container), o humano
+# aprova AQUI, fora do alcance do container. O script é copiado para o host ANTES de ser mostrado, e o que roda
+# é exatamente o que foi mostrado (sem TOCTOU). Conteúdo vem do container = não confiável: caracteres de controle
+# (ESC, CR…) são neutralizados na exibição para nada ficar escondido.
+AGENT_CTR=oute-agent
+approve_dir="$OUTE_HOME/approve"
+ctr() { docker exec "$AGENT_CTR" "$@"; }        # leitura (sem -i: não disputa o teclado com o read)
+ctr_in() { docker exec -i "$AGENT_CTR" "$@"; }  # escrita (stdin -> container)
+approve_pending() { ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true; }
+show_safe() { LC_ALL=C perl -pe 's/[\x00-\x08\x0b-\x1f\x7f]/\xc2\xb7/g; s/\xc2[\x80-\x9f]/\xc2\xb7/g' "$1"; }
+approve_one() {
+  local id="$1" src title as sha ans rc=0 out
+  mkdir -p "$approve_dir/runs"; chmod 700 "$approve_dir"
+  src="$approve_dir/runs/$id.sh"; out="$approve_dir/runs/$id.out"
+  ctr sh -c 'head -c 65536 "$HOME/outbox/$1.sh"' _ "$id" > "$src" || { echo "não consegui ler $id" >&2; return 1; }
+  title="$(sed -n 's/^# titulo: //p' "$src" | head -1 | LC_ALL=C tr -d '\000-\037\177' | cut -c1-120)"; as="$(sed -n 's/^# como: //p' "$src" | head -1)"
+  [[ "$as" == root ]] || as=user
+  sha="$( (shasum -a 256 "$src" 2>/dev/null || sha256sum "$src") | cut -c1-12)"
+  printf '\n\033[1m━━━ pedido %s ━━━\033[0m\n' "$id"
+  printf 'título: %s\n' "$title"
+  if [[ "$as" == root ]]; then printf 'roda como: \033[1;31mROOT (sudo)\033[0m no host %s\n' "$OUTE_HOST"
+  else printf 'roda como: %s no host %s\n' "$(id -un)" "$OUTE_HOST"; fi
+  printf 'sha256: %s   linhas: %s\n\033[2m────────────────────────────────────────\033[0m\n' "$sha" "$(wc -l < "$src" | tr -d ' ')"
+  show_safe "$src"
+  printf '\033[2m────────────────────────────────────────\033[0m\n'
+  read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans </dev/tty || ans=""
+  case "$ans" in
+    s|S|sim)
+      echo "── executando…"
+      # set +e: script do agente que falha não pode derrubar o `oute` (pipefail + set -e) antes de devolver o resultado
+      set +e
+      if [[ "$as" == root ]]; then sudo bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}
+      else bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}; fi
+      set -e
+      echo "── fim (código $rc)"
+      { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n# sha256: %s\n\n' \
+          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha"; tail -c 262144 "$out"; } \
+        | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/done" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/done/"' _ "$id"
+      printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log" ;;
+    r|R)
+      printf '# id: %s\n# rc: 126\n# recusado: %s por %s@%s\n# sha256: %s\n\nrecusado pelo usuário; nada foi executado.\n' \
+          "$id" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" \
+        | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/rejected" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/rejected/"' _ "$id"
+      printf '%s\t%s\t%s\t%s\trecusado\t-\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$title" >> "$approve_dir/approve.log"
+      echo "recusado." ;;
+    *) echo "fica pendente." ;;
+  esac
+}
+approve() {
+  docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
+  local watch=0 id seen=""; [[ "${1:-}" == --watch || "${1:-}" == -w ]] && watch=1
+  while :; do
+    local ids; ids="$(approve_pending)"
+    for id in $ids; do
+      [[ " $seen " == *" $id "* ]] && continue   # 'N' = pula nesta rodada do --watch
+      printf '\a'; approve_one "$id"; seen="$seen $id"
+    done
+    (( watch )) || { [[ -n "$ids" ]] || echo "nenhum pedido pendente."; return 0; }
+    [[ -n "$ids" ]] || printf '\r\033[2maguardando pedidos em %s (%s)… Ctrl+C sai\033[0m ' "$AGENT_CTR" "$OUTE_HOST"
+    sleep 3
+  done
+}
+
 # `oute install`: link no PATH -> digitar só `oute` (Mac e oute-server)
 install_link() {
   local target="$ROOT/scripts/oute" d dest=""
@@ -252,6 +315,7 @@ case "${1:-}" in
            docker ps -q -f name='^oute-agent$' -f status=running | grep -q . || "$0" up
            exec "$0" attach ;;
   install) install_link ;;
+  approve) approve "${@:2}" ;;
   build)
     docker buildx version >/dev/null 2>&1 || echo "aviso: sem docker-buildx (Ubuntu: apt install docker-buildx; Mac: vem no Docker Desktop/OrbStack)" >&2
     # sem attestation de proveniência: não há registry ainda (#2) e ela só acrescenta um manifesto a cada export
@@ -313,6 +377,7 @@ case "${1:-}" in
     cat <<EOF
 uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   install      link no PATH para chamar só \`oute\` de qualquer lugar
+  approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)

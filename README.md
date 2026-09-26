@@ -84,6 +84,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute build` | build local (fallback); mantém o cache usado nas últimas 24h |
 | `oute up` / `down` / `restart` / `status` | ciclo de vida da stack |
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
+| `oute approve [--watch]` | revisa e executa (ou recusa) os scripts propostos pelos agentes — ver **Canal de aprovação** |
 | `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
@@ -122,6 +123,22 @@ Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. 
 ## Memória
 
 `ai-memory` em `http://ai-memory:49374`; o entrypoint instala hooks + MCP nos agentes de `OUTE_AGENTS`. Web UI: `/web`.
+
+## Canal de aprovação (ações no host)
+
+Os agentes não têm privilégio no host (`ssh oute-server` = `oute-ops`, só leitura + allowlist). Quando algo precisa rodar no host, o agente **propõe** e você **aprova** — sem copiar comando da tela.
+
+```
+container (agente)                              host (você, fora do alcance do container)
+oute-propose "título" [--root] <<'SH' … SH  ─►  oute approve [--watch]
+   → ~/outbox/<id>.sh                            mostra o script inteiro (caracteres de controle neutralizados),
+                                                 pergunta [s]im / [N]ão agora / [r]ecusar, roda (sudo se --root)
+oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox/<id>.out
+```
+- Mac: aba do terminal com `oute approve --watch` ao lado do herdr. oute-server: `ssh -t oute-server 'oute approve --watch'`. **Nunca dentro do herdr** — ele roda no container, e o agente poderia aprovar a si mesmo.
+- O que roda é exatamente o que foi mostrado (o script é copiado para o host antes de exibir). Registro em `~/.oute/approve/approve.log` e cópia de cada script/saída em `~/.oute/approve/runs/`.
+- Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` e `~/.pi/agent/AGENTS.md` (o resto desses arquivos não é tocado).
+- Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal é para diagnóstico, ajuste pontual e rodar o deploy de PR mergeado.
 
 ## Segurança
 

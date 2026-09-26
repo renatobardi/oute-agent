@@ -102,7 +102,10 @@ COPY config/ssh/sshd_config /etc/ssh/sshd_config
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/codex_config.py /usr/local/lib/oute/codex_config.py
 COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets
+# canal de aprovação: o agente propõe, o humano aprova no host (`oute approve`)
+COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
+COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox
 
 USER ${OUTE_USER}
 WORKDIR /workspace

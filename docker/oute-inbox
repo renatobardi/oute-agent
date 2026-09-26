@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# oute-inbox — resultado dos pedidos feitos com oute-propose (escrito pelo `oute approve` no host).
+#   oute-inbox                 lista pedidos pendentes e resultados
+#   oute-inbox <id>            mostra o resultado (saída + código); 3 = ainda pendente
+#   oute-inbox --wait <id> [s] espera o resultado (default 1800 s); 3 = expirou
+set -euo pipefail
+box="$HOME/outbox" inb="$HOME/inbox"
+show() {
+  local f="$inb/$1.out"
+  [[ -f "$f" ]] || { echo "pendente: $1 (aguardando oute approve no host)" >&2; return 3; }
+  cat "$f"
+  local rc; rc="$(sed -n 's/^# rc: //p' "$f" | head -1)"
+  [[ "$rc" =~ ^[0-9]+$ ]] && return "$(( rc > 255 ? 1 : rc ))" || return 0
+}
+case "${1:-}" in
+  "")
+    echo "pendentes:"; ls -1 "$box"/*.sh 2>/dev/null | sed 's|.*/||; s|\.sh$||; s|^|  |' || true
+    echo "resultados:"; ls -1t "$inb"/*.out 2>/dev/null | head -20 | sed 's|.*/||; s|\.out$||; s|^|  |' || true ;;
+  --wait)
+    [[ -n "${2:-}" ]] || { echo "uso: oute-inbox --wait <id> [segundos]" >&2; exit 2; }
+    end=$(( $(date +%s) + ${3:-1800} ))
+    until [[ -f "$inb/$2.out" ]]; do
+      (( $(date +%s) < end )) || { echo "expirou esperando $2 (continua pendente no host)" >&2; exit 3; }
+      sleep 3
+    done
+    show "$2" ;;
+  -h|--help) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) show "$1" ;;
+esac
