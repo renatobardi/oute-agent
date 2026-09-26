@@ -4,6 +4,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.15] - 2026-09-26
+
+### Added
+- **`oute-swarm close <n>-<slug>|--all [--yes]`**: fecha a aba do herdr da sessão (encerra o agente). Sem `--yes` só mostra. Acha a aba pelo label `#n slug` via `herdr tab list` (os ids mudam quando o herdr restaura a sessão, ex.: depois de `oute update`), com fallback no id gravado no spawn. Fora da coordenadora usa a rodada mais recente.
+
+### Fixed
+- A rodada terminava sem fechar as abas das sessões concluídas (o fechamento só fazia `oute-task clean` + handoffs). Agora a coordenadora fecha a aba de cada sessão quando o PR dela é mergeado e, no fim, `close --all` antes do `clean`.
+
 ## [0.7.14] - 2026-09-26
 
 ### Added

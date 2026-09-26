@@ -4,6 +4,7 @@
 #   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
 #              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue
+#   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
 #   oute-swarm list                                 abas abertas por esta coordenadora + worktrees de tarefa
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
@@ -51,7 +52,7 @@ cmd_start() {
 }
 
 cmd_spawn() {
-  local agent=claude force=0 task="" instr="" main slug n state pane out cmd pfile count
+  local agent=claude force=0 task="" instr="" main slug n state pane tab out cmd pfile count
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -81,11 +82,44 @@ cmd_spawn() {
     || die "herdr tab create falhou: $out"
   # o id do pane tem o formato w<N>:p<id>; o do tab é w<N>:t<id>
   pane="$(printf '%s' "$out" | grep -oE 'w[0-9]+:p[A-Za-z0-9]+' | head -1 || true)"
+  tab="$(printf '%s' "$out" | grep -oE 'w[0-9]+:t[A-Za-z0-9]+' | head -1 || true)"
   [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
   printf -v cmd 'oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
-  printf '%s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" >> "$state/spawned"
+  printf '%s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" >> "$state/spawned"
   echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent"
+}
+
+# id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)
+tab_by_label() {
+  herdr tab list 2>/dev/null | jq -r --arg l "$1" '.. | objects | select((.label? // .name? // "") == $l) | (.tab_id? // .id? // empty)' 2>/dev/null | head -1
+}
+
+cmd_close() {
+  local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 state
+  while [[ $# -gt 0 ]]; do
+    case "$1" in --yes) yes=1 ;; --all) all=1 ;; -*) die "opção desconhecida: $1" ;; *) want="$(slugify "$1")" ;; esac; shift
+  done
+  (( all )) || [[ -n "$want" ]] || die "uso: oute-swarm close <n>-<slug>|--all [--yes]"
+  [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
+  # rodada: a da coordenadora (OUTE_SWARM_ID) ou, fora dela, a mais recente
+  if [[ -n "${OUTE_SWARM_ID:-}" ]]; then state="$STATE_ROOT/$OUTE_SWARM_ID"
+  else state="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; state="${state%/}"; fi
+  [[ -n "$state" && -f "$state/spawned" ]] || die "nenhuma aba registrada (${state:-$STATE_ROOT})"
+  echo "rodada $(basename "$state")"
+  while read -r slug pane agent ts tab; do
+    [[ -n "$slug" ]] || continue
+    (( all )) || [[ "$slug" == "$want" ]] || continue
+    label="#${slug%%-*} ${slug#*-}"
+    id="$(tab_by_label "$label")"; [[ -n "$id" ]] || { [[ "${tab:--}" != - ]] && id="$tab"; }
+    if [[ -z "$id" ]]; then echo "já fechada ou não encontrada: $label"; continue; fi
+    if (( yes )); then
+      if herdr tab close "$id" >/dev/null 2>&1; then echo "fechada: $label ($id)"; closed=1
+      else echo "falhou fechar $label ($id); feche manualmente" >&2; fi
+    else echo "fechar: $label ($id)"; fi
+  done < "$state/spawned"
+  (( yes )) || echo "(simulação — rode com --yes para fechar)"
+  (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
 }
 
 cmd_list() {
@@ -98,8 +132,9 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
+  close) shift; cmd_close "$@" ;;
   list) cmd_list ;;
   *) cmd_start "$@" ;;
 esac

@@ -23,7 +23,10 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 - **Merge só quando o Bardi pedir**, PR por PR.
 
 ## 4. Fechamento
+- Assim que o PR de uma sessão for mergeado (ou o Bardi abandonar a issue), feche a aba dela: `oute-swarm close <n>-<slug> --yes`. Não feche aba de sessão com PR aberto ou trabalho em andamento.
+
 Quando todos os PRs estiverem mergeados ou abandonados (confirme com o Bardi):
+- `oute-swarm close --all` (simulação) → `oute-swarm close --all --yes` para as abas que sobraram.
 - `oute-task clean` (simulação) → mostre → `oute-task clean --yes` se o Bardi concordar.
 - `memory_handoff_list` (workspace default, project {{REPO}}): cancele com `memory_handoff_cancel` os handoffs das worktrees removidas.
 - Resuma a rodada: issue → PR → estado (mergeado / aplicado no host / pendente) e achados que valem virar issue. Não crie issue sem o Bardi pedir.
