@@ -14,3 +14,6 @@ config/litellm/catalog.json
 # python
 __pycache__/
 *.pyc
+
+# manual ops scripts (local only)
+scripts/ops/
