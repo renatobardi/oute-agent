@@ -4,7 +4,8 @@
 #   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
 #              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue
-#   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão (digita no pane + Enter)
+#   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
+#              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
 #   oute-swarm list                                 abas abertas por esta coordenadora + worktrees de tarefa
 #
@@ -85,7 +86,7 @@ cmd_spawn() {
   pane="$(printf '%s' "$out" | grep -oE 'w[0-9]+:p[A-Za-z0-9]+' | head -1 || true)"
   tab="$(printf '%s' "$out" | grep -oE 'w[0-9]+:t[A-Za-z0-9]+' | head -1 || true)"
   [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
-  printf -v cmd 'oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
+  printf -v cmd 'OUTE_SWARM_WORKER=1 oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
   printf '%s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" >> "$state/spawned"
   echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent"
@@ -114,19 +115,58 @@ round_dir() {
   printf '%s' "$d"
 }
 
+# texto do campo de entrada do agente no pane (sem a sugestão esmaecida), numa linha; exit 1 se não achar o campo.
+# claude/pi: entre as duas últimas linhas horizontais (─), sem o marcador ❯/>. codex: bloco do último "›".
+field_text() {
+  local raw
+  raw="$(herdr pane read "$1" --source visible --format ansi 2>/dev/null)" || return 1
+  # ESC[2m = texto esmaecido (sugestão/placeholder): sai antes de tirar os demais códigos ANSI; NBSP (depois do ❯) vira espaço
+  printf '%s\n' "$raw" | sed -e $'s/\x1b\\[2m[^\x1b]*//g' -e $'s/\x1b\\[[0-9;?]*[A-Za-z]//g' -e $'s/\r$//' -e $'s/\xc2\xa0/ /g' | awk -v mode="$2" '
+    function isrule(s,  t) { t = s; gsub(/─|━|═|╭|╮|╰|╯|├|┤| /, "", t); return length(s) >= 10 && t == "" }
+    function clean(s) { gsub(/│/, "", s); sub(/^ *(❯|›|>)( |$)/, "", s); gsub(/^ +| +$/, "", s); return s }
+    { l[NR] = $0 }
+    END {
+      if (mode == "codex") {
+        for (i = NR; i >= 1; i--) if (l[i] ~ /^ *(│ *)?›( |$)/) break
+        if (i < 1) exit 1
+        out = clean(l[i])
+        for (j = i + 1; j <= NR && l[j] !~ /^ *$/ && !isrule(l[j]); j++) out = out " " clean(l[j])
+      } else {
+        for (b = NR; b >= 1 && !isrule(l[b]); b--) ;
+        for (a = b - 1; a >= 1 && !isrule(l[a]); a--) ;
+        if (a < 1) exit 1
+        out = ""
+        for (j = a + 1; j < b; j++) out = out " " clean(l[j])
+      }
+      gsub(/  +/, " ", out); gsub(/^ | $/, "", out); print out
+    }'
+}
+
 cmd_tell() {
-  [[ $# -eq 2 ]] || die 'uso: oute-swarm tell <n>-<slug> "<mensagem>"'
+  local force=0 want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text got try
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1 ;;
+      -*) die "opção desconhecida: $1" ;;
+      *) if (( have == 0 )); then want="$1"; elif (( have == 1 )); then msg="$1"; else die "argumento a mais: $1"; fi; have=$((have + 1)) ;;
+    esac; shift
+  done
+  (( have == 2 )) || die 'uso: oute-swarm tell <n>-<slug> "<mensagem>" [--force]'
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
-  local want msg state line slug spane tab label panes pane=""
-  want="$(slugify "$1")"; msg="$2"; [[ -n "$msg" ]] || die "mensagem vazia"
+  want="$(slugify "$want")"
+  # quebra de linha no send-text viraria Enter sem conferência: a mensagem vai numa linha só, sem controles
+  msg="$(printf '%s' "$msg" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | tr -s ' ')"; msg="${msg# }"; msg="${msg% }"
+  [[ -n "$msg" ]] || die "mensagem vazia"
   state="$(round_dir)"
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   read -r slug spane _ _ tab <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
-  ! is_closed "$state" "$slug" || die "aba $label já fechada (oute-swarm close); nada enviado"
+  # a partir daqui toda recusa fica no log da rodada
+  refuse() { printf '%s tell %s recusado: %s\n' "$(date -u +%FT%TZ)" "$slug" "$1" >> "$state/log"; die "$1; ${2:-nada enviado}"; }
+  ! is_closed "$state" "$slug" || refuse "aba $label já fechada (oute-swarm close)"
   # `pane list` não tem --tab (herdr 0.9.1); cada pane traz tab_id, então filtra no jq
-  panes="$(herdr pane list 2>&1)" || die "herdr pane list falhou: $panes"
-  jq -e . >/dev/null 2>&1 <<<"$panes" || die "herdr pane list devolveu algo que não é JSON: $panes"
+  panes="$(herdr pane list 2>&1)" || refuse "herdr pane list falhou: $panes"
+  jq -e . >/dev/null 2>&1 <<<"$panes" || refuse "herdr pane list devolveu algo que não é JSON: $panes"
   tab="$(tab_by_label "$label" || true)"
   if [[ -n "$tab" ]]; then
     # pane da aba, preferindo o que tem agente (ids mudam no restore; o gravado no spawn é só fallback)
@@ -136,12 +176,38 @@ cmd_tell() {
   if [[ -z "$pane" && -n "$spane" ]] && jq -e --arg p "$spane" 'any(.. | objects; (.pane_id? // "") == $p)' >/dev/null 2>&1 <<<"$panes"; then
     pane="$spane"
   fi
-  [[ -n "$pane" ]] || die "pane da aba $label não encontrado (fechada?); nada enviado"
-  herdr pane send-text "$pane" "[coordenadora $(basename "$state"), repassando o Bardi] $msg" >/dev/null || die "send-text falhou em $pane"
-  sleep 0.3
-  herdr pane send-keys "$pane" enter >/dev/null || die "send-keys falhou em $pane"
-  printf '%s tell %s\n' "$(date -u +%FT%TZ)" "$slug" >> "$state/log"
-  echo "enviado a $label ($pane)"
+  [[ -n "$pane" ]] || refuse "pane da aba $label não encontrado (fechada?)"
+  # 1) só com a sessão parada: idle/done (pronta) ou blocked (pergunta/aprovação na tela); working/unknown = ocupada
+  agents="$(herdr agent list 2>&1)" || refuse "herdr agent list falhou: $agents"
+  read -r agent st < <(jq -r --arg p "$pane" '[.. | objects | select(.pane_id? == $p and has("agent_status"))][0] | "\(.agent // "-") \(.agent_status // "-")"' <<<"$agents" 2>/dev/null || echo "- -")
+  [[ "$agent" != - && "$agent" != null ]] || refuse "nenhum agente no pane $pane de $label"
+  case "$st" in
+    idle|done|blocked) ;;
+    *) (( force )) || refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
+       echo "aviso: sessão $label em '$st'; seguindo por --force" >&2 ;;
+  esac
+  # 2) digita, confere o campo e só então Enter. Não bateu: limpa (ctrl+c, só com a sessão pronta) e tenta uma vez
+  text="[coordenadora $(basename "$state"), repassando o Bardi] $msg"
+  # acima de 800 caracteres o Claude Code mostra "[Pasted text #n]" e o campo não dá para conferir
+  (( ${#text} <= 800 )) || refuse "mensagem longa demais (${#text} caracteres com o prefixo; máx. 800); resuma"
+  for try in 1 2; do
+    herdr pane send-text "$pane" "$text" >/dev/null || refuse "send-text falhou em $pane"
+    sleep 0.5
+    got="$(field_text "$pane" "$agent")" || got="(campo de entrada não encontrado na tela)"
+    if [[ "$(tr -d '[:space:]' <<<"$got")" == "$(tr -d '[:space:]' <<<"$text")" ]]; then
+      herdr pane send-keys "$pane" enter >/dev/null || refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter"
+      printf '%s tell %s ok%s\n' "$(date -u +%FT%TZ)" "$slug" "$( (( force )) && echo " (--force, $st)")" >> "$state/log"
+      echo "enviado a $label ($pane)"
+      return 0
+    fi
+    (( try == 1 )) || break
+    [[ "$st" == idle || "$st" == done ]] || break   # ctrl+c/esc com a sessão trabalhando ou num diálogo interromperia/responderia
+    herdr pane send-keys "$pane" ctrl+c >/dev/null 2>&1 || break
+    sleep 0.5
+    [[ -z "$(field_text "$pane" "$agent" 2>/dev/null)" ]] || break   # não limpou: não empilha outro ctrl+c
+  done
+  printf 'oute-swarm: campo de %s ficou assim (esperado a mensagem exata):\n%s\n' "$label" "$got" >&2
+  refuse "o campo de entrada não contém exatamente a mensagem" "sem Enter; confira o pane $pane"
 }
 
 cmd_close() {
@@ -193,7 +259,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;
