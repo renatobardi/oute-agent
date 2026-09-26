@@ -40,12 +40,12 @@ secrets/         README com a convenção do vault (sem valores)
 - Docker + Compose + **buildx** (Ubuntu: `apt install docker-buildx`; Mac: Docker Desktop/OrbStack).
 - `jq`, `crontab`; `bw` opcional (sem ele, usa o da imagem). Se instalar nativo, **`@bitwarden/cli@2026.8.0`** — ≥ 2026.9.0 não desbloqueia no Vaultwarden 1.37.x (#7).
 - `~/.oute/bw_client.env` com `BW_CLIENTID` / `BW_CLIENTSECRET` (`chmod 600`); `~/.ssh/id_ed25519.pub`.
-- `.env` a partir de `.env.example` (`OUTE_HOSTNAME`, `OUTE_VAULT_HOST_IP`…).
+- `.env` a partir de `.env.example` (`OUTE_HOST` opcional, `OUTE_VAULT_HOST_IP`…).
 - Storage: `rclone` **do rclone.org** + FUSE (Linux: `fuse3` + `user_allow_other` em `/etc/fuse.conf`; Mac: FUSE-T ou macFUSE). Opcional: sem mount, `/data/shared` é um volume docker local.
 
 **Mac (Apple Silicon)** — mesma imagem do ghcr (arm64), sem rebuild:
 - Docker Desktop ou OrbStack; Mac na tailnet (o `bw` da imagem acha o vault via `OUTE_VAULT_HOST_IP`, IP Tailscale do oute-server).
-- `.env`: `OUTE_HOSTNAME=oute-mac`. Nada de uid: o do container é fixo (10001) e o Docker do Mac mapeia os bind mounts.
+- `.env`: `OUTE_HOST=oute-mac` (opcional; sem ele vale o hostname do Mac). Nada de uid: o do container é fixo (10001) e o Docker do Mac mapeia os bind mounts.
 - `~/.oute/bw_client.env` (API key do Vaultwarden) e uma chave pública em `OUTE_SSH_AUTHORIZED_KEYS` (default `~/.ssh/id_ed25519.pub`).
 - Se `172.19.0.0/16` já estiver em uso por outra rede docker: `OUTE_NET_SUBNET=172.29.0.0/16`, `OUTE_NET_GATEWAY=172.29.0.1`, `OUTE_AGENT_IP=172.29.0.5` no `.env` (o IP fixo só importa no oute-server).
 - Bucket: rclone **do rclone.org** + FUSE-T; o do Homebrew não faz `mount` no macOS.
@@ -107,8 +107,9 @@ Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `a
 ## Observabilidade (ADR-04)
 
 `otel-collector` (sem porta publicada) recebe OTLP de Claude Code (métricas, eventos, traces), Codex (eventos) e jev-router.
-- **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/year=…/hour=…/` (gzip, lotes de 5 min).
-- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events, sem spans internos do LiteLLM. Prompt/resposta nunca saem.
+- **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex | pi | router). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
+- **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/host=<máquina>/instance=<instância>/year=…/hour=…/` (gzip, lotes de 5 min). Até a 0.7.4 não havia `host=/instance=` no caminho; esses objetos ficam onde estão.
+- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events, sem spans internos do LiteLLM. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
 - Span **`jev.decision`** (trace `jev:<perfil>`): perfil e via do Jev, modelos candidatos, sinais, tokens e — via `GET /api/v1/generation` do OpenRouter, em background — **modelo servido, provedor, custo (US$) e latência**.
 - Conferir: Langfuse → Tracing (`name = jev.decision`); `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`.
 

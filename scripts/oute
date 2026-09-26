@@ -16,6 +16,18 @@ SSH_PORT="${OUTE_SSH_PORT:-2222}"
 SSH_HOST="${OUTE_SSH_HOST:-localhost}"
 
 die() { printf 'oute: %s\n' "$*" >&2; exit 1; }
+
+# --- origem da telemetria = máquina + instância (#22). A instância só precisa ser única DENTRO da máquina.
+# valor do .env sem carregá-lo inteiro (o compose lê o .env; aqui só o que o script precisa decidir)
+env_get() { sed -n "s/^[[:space:]]*$1=//p" "$ROOT/.env" 2>/dev/null | sed "s/[[:space:]]*#.*//; s/^[\"']//; s/[\"']\$//" | tail -1; }
+# nome seguro para Langfuse environment / partição do bucket: minúsculo, [a-z0-9_-], até 40
+slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40; }
+# máquina: OUTE_HOST > OUTE_HOSTNAME (nome antigo, mesmo papel) > hostname da máquina
+OUTE_HOST="$(slug "${OUTE_HOST:-$(env_get OUTE_HOST)}")"
+[[ -n "$OUTE_HOST" ]] || OUTE_HOST="$(slug "${OUTE_HOSTNAME:-$(env_get OUTE_HOSTNAME)}")"
+[[ -n "$OUTE_HOST" ]] || OUTE_HOST="$(slug "$(hostname -s 2>/dev/null || hostname)")"
+OUTE_INSTANCE="$(slug "${OUTE_INSTANCE:-$(env_get OUTE_INSTANCE)}")"; OUTE_INSTANCE="${OUTE_INSTANCE:-oute-agent}"
+export OUTE_HOST OUTE_INSTANCE
 need() { command -v "$1" >/dev/null || die "precisa de '$1' no host"; }
 
 # sem bw nativo no host (ex.: sem node), usa o bw da própria imagem
@@ -294,6 +306,7 @@ case "${1:-}" in
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
     img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
     echo "running: ${img:-não está rodando}"
+    echo "origem:  host=$OUTE_HOST instance=$OUTE_INSTANCE"
     ;;
   *)
     [[ "$1" == help || "$1" == -h || "$1" == --help ]] || echo "oute: comando desconhecido: $1" >&2

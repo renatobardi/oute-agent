@@ -20,7 +20,10 @@ processors:
   resource:
     attributes:
       - {key: service.namespace, value: oute-agent, action: upsert}
-      - {key: host.name, value: "${env:OUTE_HOSTNAME}", action: upsert}
+      # origem = máquina + instância (#22: a instância só precisa ser única dentro da máquina)
+      - {key: host.name, value: "${env:OUTE_HOST}", action: upsert}
+      - {key: oute.instance, value: "${env:OUTE_INSTANCE}", action: upsert}
+      - {key: deployment.environment, value: "${env:OUTE_HOST}", action: upsert}
   # oute.agent = qual agente gerou a telemetria (claude | codex | router); nos spans do jev-router o hook
   # já grava o cliente real (pi, …) em span.attributes["oute.agent"], que tem precedência
   transform/agent:
@@ -53,7 +56,7 @@ exporters:
       endpoint: "${env:OCI_S3_ENDPOINT}"
       s3_force_path_style: true
       s3_bucket: oute-observability
-      s3_prefix: otel/traces
+      s3_prefix: "otel/traces/host=${env:OUTE_HOST}/instance=${env:OUTE_INSTANCE}"
       s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
       s3_partition_timezone: UTC
       compression: gzip
@@ -66,7 +69,7 @@ exporters:
       endpoint: "${env:OCI_S3_ENDPOINT}"
       s3_force_path_style: true
       s3_bucket: oute-observability
-      s3_prefix: otel/metrics
+      s3_prefix: "otel/metrics/host=${env:OUTE_HOST}/instance=${env:OUTE_INSTANCE}"
       s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
       s3_partition_timezone: UTC
       compression: gzip
@@ -79,7 +82,7 @@ exporters:
       endpoint: "${env:OCI_S3_ENDPOINT}"
       s3_force_path_style: true
       s3_bucket: oute-observability
-      s3_prefix: otel/logs
+      s3_prefix: "otel/logs/host=${env:OUTE_HOST}/instance=${env:OUTE_INSTANCE}"
       s3_partition_format: "year=%Y/month=%m/day=%d/hour=%H"
       s3_partition_timezone: UTC
       compression: gzip

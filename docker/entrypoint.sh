@@ -119,7 +119,7 @@ setup_agents() {
   # Codex: sandbox_mode + [otel] mesclados de forma ESTRUTURAL (tomlkit), preservando o que o ai-memory
   # escreve (mcp_servers). Antes era sed entre marcadores e apagava a seção do ai-memory (0.5.3–0.5.7).
   mkdir -p "$HOME/.codex"
-  python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOSTNAME:-oute}" "${OUTE_AGENT_YOLO:-1}" \
+  python3 /usr/local/lib/oute/codex_config.py "$HOME/.codex/config.toml" "${OUTE_HOST:-${OUTE_HOSTNAME:-oute}}" "${OUTE_AGENT_YOLO:-1}" \
     || log "AVISO: falha ao mesclar ~/.codex/config.toml"
   # Claude Code yolo (ADR-01): sem prompts de permissão DENTRO do container (fronteira = container).
   # Merge via jq: preserva hooks do ai-memory e o resto do settings.json. OUTE_AGENT_YOLO=0 desliga.
@@ -156,7 +156,7 @@ setup_ssh() {
   # Acesso ao HOST (lab#178): usuário oute-ops (sem lxd/docker/sudo; sudo só p/ allowlist), chave própria
   # do container, aceita no host só vindo de 172.19.0.5. Pública -> lab: servers/oute-server/access/oute-ops.pub
   local key="$HOME/.ssh/oute-ops_ed25519"
-  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N '' -C "oute-agent-container@${OUTE_HOSTNAME:-oute}" -f "$key"
+  [[ -f "$key" ]] || ssh-keygen -q -t ed25519 -N '' -C "${OUTE_INSTANCE:-oute-agent}@${OUTE_HOST:-${OUTE_HOSTNAME:-oute}}" -f "$key"
   mkdir -p "$HOME/.ssh/config.d"; chmod 700 "$HOME/.ssh"
   cat > "$HOME/.ssh/config.d/oute-host.conf" <<EOF
 # gerado pelo entrypoint (lab#178) — não editar

@@ -35,13 +35,17 @@ processors:
           - set(span.attributes["langfuse.observation.type"], "generation") where span.name == "session_task.turn"
           # agente (claude | codex | pi | …) -> metadata do trace, filtrável no Langfuse
           - set(span.attributes["langfuse.trace.metadata.agent"], span.attributes["oute.agent"]) where span.attributes["oute.agent"] != nil
+          # origem: máquina = Environment nativo do Langfuse (seletor no topo); máquina/instância também em metadata
+          - set(span.attributes["langfuse.environment"], resource.attributes["host.name"]) where resource.attributes["host.name"] != nil
+          - set(span.attributes["langfuse.trace.metadata.host"], resource.attributes["host.name"]) where resource.attributes["host.name"] != nil
+          - set(span.attributes["langfuse.trace.metadata.instance"], resource.attributes["oute.instance"]) where resource.attributes["oute.instance"] != nil
           # aba Sessions do Langfuse
           - set(span.attributes["langfuse.session.id"], span.attributes["session.id"]) where span.attributes["session.id"] != nil
       - context: span
         statements:
           - >-
             keep_matching_keys(span.attributes,
-            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(trace\\.name|trace\\.tags|trace\\.metadata\\.agent|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
+            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(environment|trace\\.name|trace\\.tags|trace\\.metadata\\.(agent|host|instance)|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
       # eventos que sobraram (Codex): mesma lógica de allowlist — prompt/resposta nunca saem
       - context: spanevent
         statements:
@@ -50,7 +54,7 @@ processors:
             "^(event\\.name|event\\.kind|model|slug|provider|tool_name|call_id|duration_ms|success|decision|status|attempt|http\\.response\\.status_code|conversation\\.id|.*_tokens|.*token_count|.*_count)$")
       - context: resource
         statements:
-          - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment|oute\\.agent)$")
+          - keep_matching_keys(resource.attributes, "^(service\\.(name|namespace|version)|host\\.name|deployment\\.environment|oute\\.(agent|instance))$")
   batch/fast:
     timeout: 10s
 
@@ -66,5 +70,5 @@ service:
   pipelines:
     traces/langfuse:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, filter/no_events, transform/metadata_only, resource, batch/fast]
+      processors: [memory_limiter, transform/agent, resource, filter/no_events, transform/metadata_only, batch/fast]
       exporters: [otlphttp/langfuse]

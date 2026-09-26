@@ -5,6 +5,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Added
+- **Origem da telemetria = máquina + instância.** Todo registro (bucket e Langfuse) leva `host.name` = máquina e `oute.instance` = instância, além de `oute.agent`. A instância só precisa ser única dentro da máquina (#22).
+  - `OUTE_HOST` é opcional: sem ele vale o antigo `OUTE_HOSTNAME` e, se nenhum estiver definido, o hostname da máquina.
+  - `OUTE_INSTANCE` tem default `oute-agent`.
+  - Os dois são normalizados para `[a-z0-9_-]`, até 40 caracteres.
+  - Bucket particionado: `otel/<sinal>/host=<máquina>/instance=<instância>/year=…`. Os objetos antigos, sem `host=/instance=`, ficam onde estão; nada é movido nem apagado.
+  - No Langfuse, a máquina vira o **Environment** nativo e máquina/instância vão para a metadata do trace.
+  - `oute version` mostra a origem.
 - **`oute` sem argumento** abre o herdr (sobe a stack antes, se o agent não estiver rodando). **`oute install`** cria o link no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`, o primeiro que estiver no PATH e for gravável) — no Mac e no oute-server basta digitar `oute`. O script resolve symlinks para achar a raiz do repo. `oute help` mostra o uso; comando desconhecido avisa.
 
 ## [0.7.4] - 2026-09-25
