@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- Sessão **restaurada pelo herdr** volta a rodar na **própria worktree**, não no checkout principal (#40). O restore relança o agente no cwd salvo do shell do pane, que nas abas do `oute-task`/`oute-swarm` é o checkout principal, e o agente retomava a sessão ali. Agora o shim, num resume com id (`claude --resume`/`-r <id>`, `claude --resume=<id>`, `codex resume <id>`, `pi --session <id>`), lê o cwd da sessão no transcript (`~/.claude/projects/*/<id>.jsonl`, `~/.codex/sessions/**/rollout-*<id>.jsonl`, `~/.pi/agent/sessions/*/*_<id>*.jsonl`) e faz `cd` para ele antes do `exec`, para todas as sessões, não só as do swarm. Só troca de diretório se o cwd está em `/workspace/.worktrees/` (`OUTE_WORKTREES`), ainda existe e é worktree do mesmo repo do diretório atual; senão retoma como antes e avisa em stderr (`oute: a sessão … era de … (motivo); retomando em …`). A marca do swarm (#39) passa a valer também quando a sessão é retomada de dentro da worktree.
+- Shim: `pi --session <id>` passa direto, como os outros resumes (antes caía no prompt de worktree quando aberto do checkout principal).
+
 ## [0.7.20] - 2026-09-26
 
 ### Fixed
