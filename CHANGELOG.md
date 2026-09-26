@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-09-26
+
 ### Added
 - **Uma sessão de agente = uma worktree + um branch.** `oute-task <slug> [claude|codex|pi|shell]` cria (ou reabre) `/workspace/.worktrees/<repo>-<slug>` com o branch `sessao/<slug>` a partir de `origin/<branch padrão>` e abre o agente dentro. `oute-task list` lista; `oute-task clean [--yes]` remove as já mergeadas (squash detectado via `gh`) ou vazias, preservando mudança local e commit sem PR. No shell interativo do container, digitar `claude`/`codex`/`pi` no **checkout principal** de um repo pergunta o nome da tarefa e abre a sessão numa worktree própria (headless `-p`/`exec` e worktrees passam direto; `OUTE_NO_WORKTREE=1` desliga). A sessão precisa *nascer* na worktree: o Claude devolve o shell ao diretório inicial a cada comando, e o ai-memory registra o diretório de início.
 - Notas globais dos agentes: regras de git (nunca editar o checkout principal, renomear o branch para `<tipo>/<issue>-<slug>` antes do push, entrega por PR, merge só quando pedido), issues via `gh`, leitura de `AGENTS.md`/`CONTEXT.md` do repo, nada de segredo em arquivo/issue/saída.
