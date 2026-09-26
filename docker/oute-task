@@ -4,7 +4,8 @@
 #   oute-task <slug> [claude|codex|pi|shell] [args…]   cria/reabre a worktree da tarefa e abre o agente nela
 #   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
 #   oute-task list                                       worktrees de tarefa abertas
-#   oute-task clean [--yes]                              remove as já mergeadas/vazias e sem mudança local;
+#   oute-task clean [--yes]                              remove as já mergeadas/vazias (ou detached contidas na base)
+#                                                        e sem mudança local;
 #                                                        avança (só fast-forward) o checkout principal na branch padrão
 #
 # Worktree: /workspace/.worktrees/<repo>-<slug>   Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR)
@@ -46,6 +47,15 @@ cmd_clean() {
     while read -r wt br; do
       [[ -n "$wt" ]] || continue
       if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then echo "mantém  $wt (mudanças locais)"; continue; fi
+      if [[ "$br" == - ]]; then   # detached HEAD (ex.: sessão que voltou a origin/<base> depois do merge): sem branch a apagar
+        if git -C "$wt" merge-base --is-ancestor HEAD "origin/$base" 2>/dev/null; then why="detached, contida em origin/$base"
+        else ahead="$(git -C "$wt" rev-list --count "origin/$base..HEAD" 2>/dev/null || echo '?')"
+             echo "mantém  $wt (detached com $ahead commit(s) fora de origin/$base)"; continue; fi
+        todo=1
+        if (( yes )); then git -C "$r" worktree remove "$wt" && echo "removida $wt ($why)"
+        else echo "remover $wt ($why)"; fi
+        continue
+      fi
       ahead="$(git -C "$r" rev-list --count "origin/$base..$br" 2>/dev/null || echo 1)"
       why=""
       if [[ "$ahead" == 0 ]]; then why="sem commits além de origin/$base"
@@ -55,7 +65,7 @@ cmd_clean() {
       todo=1
       if (( yes )); then git -C "$r" worktree remove "$wt" && git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"
       else echo "remover $wt ($why)"; fi
-    done < <(git -C "$r" worktree list --porcelain | awk -v root="$WT_ROOT" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2}')
+    done < <(git -C "$r" worktree list --porcelain | awk -v root="$WT_ROOT" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2} /^detached$/{if (index(w, root"/")==1) print w, "-"}')
     sync_main "$r" "$base" "$yes" || todo=1
   done
   (( yes || ! todo )) || echo "(simulação — rode 'oute-task clean --yes' para aplicar)"
@@ -88,7 +98,7 @@ cmd_open() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
