@@ -93,7 +93,11 @@ cmd_open() {
   case "$agent" in
     claude|codex|pi)
       # sessão aberta pelo `oute-swarm spawn`: sem sugestão de prompt no campo do Claude Code (um Enter na hora errada a submeteria)
-      if [[ "$agent" == claude && -n "${OUTE_SWARM_WORKER:-}" ]]; then export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-false}"; fi
+      # a marca no git-dir da worktree vale no restore do herdr (`claude --resume <id>` sem esta env): o shim a lê
+      if [[ "$agent" == claude && -n "${OUTE_SWARM_WORKER:-}" ]]; then
+        export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-false}"
+        touch "$(git rev-parse --path-format=absolute --git-dir)/oute-swarm-worker" 2>/dev/null || true
+      fi
       OUTE_NO_WORKTREE=1 exec "$agent" "$@" ;;   # passa pelo shim, que deixa seguir
     shell) exec bash -i ;;
     *) die "agente desconhecido: $agent (claude|codex|pi|shell)" ;;
