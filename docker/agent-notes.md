@@ -27,3 +27,17 @@ Nas ferramentas de memória do ai-memory (`memory_query`, `memory_recent`, `memo
 - fora de um repositório, pergunte ao usuário antes de gravar.
 Motivo: sem escopo, o servidor usa o "projeto ativo" compartilhado, que pode ser o de outra sessão em outro repo.
 
+
+## Git: uma sessão = uma worktree + um branch
+
+- Toda sessão roda numa **worktree própria** (`/workspace/.worktrees/<repo>-<slug>`, branch `sessao/<slug>`), aberta pelo `oute-task`. O shell do container já faz isso quando o usuário digita `claude`/`codex`/`pi` no checkout principal.
+- **Nunca edite nem troque de branch no checkout principal** (`/workspace/<repo>`), que fica sempre na branch padrão. Se você estiver nele (`git rev-parse --git-dir` igual a `--git-common-dir`), não altere nada: avise o usuário e sugira `oute-task <slug>`.
+- Antes do primeiro push, renomeie o branch para `<tipo>/<issue>-<slug>` (`git branch -m …`); tipos: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
+- Commits pequenos, mensagem no padrão convencional. Entrega por PR (`gh pr create`). **Merge só quando o usuário pedir.**
+- Depois do merge, `oute-task clean` lista o que pode ser removido; `oute-task clean --yes` remove.
+
+## Issues e contexto do repositório
+
+- Backlog = **issues do GitHub do próprio repo**, via `gh` (`gh issue view <n> --comments`, `gh issue create`, `gh issue comment`, `gh issue close`). O que ficar pendente ao fim da tarefa vira issue.
+- Antes de começar, leia **`AGENTS.md`** e **`CONTEXT.md`** na raiz do repo, se existirem. O `CONTEXT.md` é um resumo: o canônico (ADRs completos) fica no Project do claude.ai do Bardi, que você não acessa. Se algo faltar ou conflitar, pergunte em vez de supor.
+- Nunca escreva segredos em arquivo, commit, issue, PR ou saída de comando. Os segredos chegam pelo ambiente.

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# oute-task — uma sessão de agente = uma git worktree + um branch próprios (padrão do oute-agent).
+#
+#   oute-task <slug> [claude|codex|pi|shell] [args…]   cria/reabre a worktree da tarefa e abre o agente nela
+#   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
+#   oute-task list                                       worktrees de tarefa abertas
+#   oute-task clean [--yes]                              remove as já mergeadas/vazias e sem mudança local
+#
+# Worktree: /workspace/.worktrees/<repo>-<slug>   Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR)
+# Base: origin/<branch padrão> atualizado. Slug: [a-z0-9-].
+set -euo pipefail
+WT_ROOT="${OUTE_WORKTREES:-/workspace/.worktrees}"
+die() { printf 'oute-task: %s\n' "$*" >&2; exit 1; }
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
+main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
+default_branch() { git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true; }
+all_repos() { local d; for d in /workspace/*/; do [[ -d "$d/.git" ]] && echo "${d%/}"; done; }
+
+cmd_list() {
+  local r; for r in $(all_repos); do
+    git -C "$r" worktree list | awk -v root="$WT_ROOT" 'index($1, root"/")==1'
+  done
+}
+
+cmd_clean() {
+  local yes=0; [[ "${1:-}" == --yes ]] && yes=1
+  local r wt br ahead why todo=0
+  for r in $(all_repos); do
+    local base; base="$(default_branch "$r")"; base="${base:-main}"
+    git -C "$r" fetch -q origin --prune 2>/dev/null || true
+    while read -r wt br; do
+      [[ -n "$wt" ]] || continue
+      if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then echo "mantém  $wt (mudanças locais)"; continue; fi
+      ahead="$(git -C "$r" rev-list --count "origin/$base..$br" 2>/dev/null || echo 1)"
+      why=""
+      if [[ "$ahead" == 0 ]]; then why="sem commits além de origin/$base"
+      elif command -v gh >/dev/null && [[ "$(cd "$r" && gh pr list --head "$br" --state merged --json number --jq length 2>/dev/null || echo 0)" != 0 ]]; then why="PR mergeado"
+      fi
+      if [[ -z "$why" ]]; then echo "mantém  $wt ($br: $ahead commit(s) sem PR mergeado)"; continue; fi
+      todo=1
+      if (( yes )); then git -C "$r" worktree remove "$wt" && git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"
+      else echo "remover $wt ($why)"; fi
+    done < <(git -C "$r" worktree list --porcelain | awk -v root="$WT_ROOT" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2}')
+  done
+  (( yes || ! todo )) || echo "(simulação — rode 'oute-task clean --yes' para remover)"
+}
+
+cmd_open() {
+  local repo="$1" slug="$2"; shift 2
+  local agent="${1:-claude}"; [[ $# -gt 0 ]] && shift
+  local main name base wt br
+  main="$(main_root "$repo")" || die "$repo não é um repositório git"
+  name="$(basename "$main")"; slug="$(slugify "$slug")"; [[ -n "$slug" ]] || die "slug vazio"
+  wt="$WT_ROOT/$name-$slug"; br="sessao/$slug"
+  if [[ -d "$wt" ]]; then
+    echo "reabrindo $wt ($(git -C "$wt" branch --show-current))" >&2
+  else
+    mkdir -p "$WT_ROOT"
+    git -C "$main" fetch -q origin --prune || echo "aviso: fetch falhou; usando o que há localmente" >&2
+    base="$(default_branch "$main")"; base="${base:-main}"
+    if git -C "$main" show-ref -q --verify "refs/heads/$br"; then git -C "$main" worktree add -q "$wt" "$br"
+    else git -C "$main" worktree add -q -b "$br" "$wt" "origin/$base"; fi
+    echo "worktree $wt · branch $br (de origin/$base)" >&2
+  fi
+  cd "$wt"
+  case "$agent" in
+    claude|codex|pi) OUTE_NO_WORKTREE=1 exec "$agent" "$@" ;;
+    shell) exec bash -i ;;
+    *) die "agente desconhecido: $agent (claude|codex|pi|shell)" ;;
+  esac
+}
+
+case "${1:-}" in
+  ""|-h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' ;;
+  list) cmd_list ;;
+  clean) shift; cmd_clean "$@" ;;
+  -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
+      r="$2"; [[ -d "$r" ]] || r="/workspace/$r"; shift 2; cmd_open "$r" "$@" ;;
+  *) cmd_open "$PWD" "$@" ;;
+esac

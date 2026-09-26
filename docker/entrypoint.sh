@@ -211,6 +211,9 @@ case "$MODE" in
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
       grep -q '.oute_env' "$rc" 2>/dev/null || printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$(cat "$rc" 2>/dev/null)" > "$rc"
     done
+    # claude/codex/pi no checkout principal de um repo -> sessão numa worktree própria (oute-task); só shell interativo
+    grep -q 'agent-wrap.sh' "$HOME/.bashrc" 2>/dev/null \
+      || printf '\n%s\n' '[ -f /usr/local/lib/oute/agent-wrap.sh ] && . /usr/local/lib/oute/agent-wrap.sh' >> "$HOME/.bashrc"
 
     log "iniciando herdr server"
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &

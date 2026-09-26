@@ -105,7 +105,10 @@ COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 # canal de aprovação: o agente propõe, o humano aprova no host (`oute approve`)
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
 COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox
+# uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex/pi)
+COPY docker/oute-task /usr/local/bin/
+COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-task
 
 USER ${OUTE_USER}
 WORKDIR /workspace
