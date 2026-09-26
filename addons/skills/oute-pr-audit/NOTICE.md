@@ -3,8 +3,10 @@
 ## mattpocock/skills (code-review)
 
 Origem: https://github.com/mattpocock/skills, commit `c55ee46073ed923f86ce59a5eb3b6d895095d1b7`,
-arquivo `skills/engineering/code-review/SKILL.md`. Trecho adaptado e traduzido: o eixo Spec
-(`SKILL.md`, passo 4, itens 2 a 4).
+arquivo `skills/engineering/code-review/SKILL.md`. Trechos adaptados e traduzidos (`SKILL.md`):
+o eixo Spec (passo 7, itens 2 a 5), a separação entre os eixos Spec e Standards, a distinção
+entre violação dura e julgamento e a linha de base de code smells, com as regras "a regra do repo
+vence" e "smell é sempre julgamento" (passo 8).
 
 MIT License
 
