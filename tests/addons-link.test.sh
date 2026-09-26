@@ -75,6 +75,13 @@ check "inexistente: código 0"                    [ "$RC" -eq 0 ]
 check "inexistente: aviso"                       warned "$A"
 check "inexistente: nada criado no HOME"         [ -z "$(ls -A "$H")" ]
 
+# 5b. pasta de addons vazia (o bind do compose cria a pasta quando ./addons não existe no host)
+#     -> código 0 + aviso, sem criar nada
+fresh vazia; rmdir "$A/skills"; run
+check "vazia: código 0"                          [ "$RC" -eq 0 ]
+check "vazia: aviso"                             warned "$A/skills"
+check "vazia: nada criado no HOME"               [ -z "$(ls -A "$H")" ]
+
 # 6. skill inválida -> sem link + aviso
 fresh invalida
 skill "$A" foo                                   # sem prefixo oute-

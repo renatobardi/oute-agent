@@ -47,7 +47,11 @@ for dest in "${DESTS[@]}"; do
 done
 
 # 2. um link por skill válida
-[[ -d "$SKILLS" ]] || exit 0
+# pasta vazia = checkout sem addons/ (o bind do compose cria a pasta que falta no host)
+if [[ ! -d "$SKILLS" ]]; then
+  warn "AVISO: $SKILLS não existe (checkout sem addons/?); nenhuma skill linkada"
+  exit 0
+fi
 for src in "$SKILLS"/*; do
   [[ -d "$src" ]] || continue
   name="${src##*/}"
