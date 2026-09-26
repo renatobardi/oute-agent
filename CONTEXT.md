@@ -1,6 +1,6 @@
 # CONTEXT.md — oute-agent
 
-Resumo para agentes. **O canônico são os ADRs no Project "Oute Agent" do claude.ai** (arquitetura/01–04, estudos/*), mantidos pelo Bardi; este arquivo é derivado deles e atualizado junto. Em conflito, vale o Project: pergunte.
+Resumo para agentes. **O canônico são os ADRs em `docs/adr/`**, mantidos pelo Bardi; os estudos (`estudos/*`) seguem no Project "Oute Agent" do claude.ai. Este arquivo é derivado dos ADRs e atualizado junto. Em conflito, valem os ADRs: pergunte.
 
 ## Componentes (docker compose, rede `oute` 172.19.0.0/16)
 | serviço | papel |
