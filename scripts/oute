@@ -3,7 +3,10 @@
 #   oute up | down | build | attach | shell | logs | sync-shared | status
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# resolve symlinks (oute instalado em ~/.local/bin etc. aponta pra cá); sem readlink -f (macOS antigo)
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do _dir="$(cd "$(dirname "$_src")" && pwd)"; _src="$(readlink "$_src")"; [[ "$_src" == /* ]] || _src="$_dir/$_src"; done
+ROOT="$(cd "$(dirname "$_src")/.." && pwd)"; unset _src _dir
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 export OUTE_VERSION="$VERSION"
 # --project-directory: .env e paths relativos resolvem na raiz do repo, não em docker/
@@ -219,7 +222,24 @@ oci_bootstrap() {
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
 }
 
+# `oute install`: link no PATH -> digitar só `oute` (Mac e oute-server)
+install_link() {
+  local target="$ROOT/scripts/oute" d dest=""
+  for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+    [[ ":$PATH:" == *":$d:"* && -d "$d" && -w "$d" ]] && { dest="$d"; break; }
+  done
+  if [[ -z "$dest" ]]; then
+    dest="$HOME/.local/bin"; mkdir -p "$dest"
+    echo "aviso: $dest não está no PATH; adicione ao ~/.zshrc (Mac) ou ~/.bashrc: export PATH=\"\$HOME/.local/bin:\$PATH\"" >&2
+  fi
+  ln -sfn "$target" "$dest/oute" && echo "instalado: $dest/oute -> $target"
+}
+
 case "${1:-}" in
+  "")      # sem argumento: abre o herdr; se a stack não estiver de pé, sobe antes
+           docker ps -q -f name='^oute-agent$' -f status=running | grep -q . || "$0" up
+           exec "$0" attach ;;
+  install) install_link ;;
   build)
     docker buildx version >/dev/null 2>&1 || echo "aviso: sem docker-buildx (Ubuntu: apt install docker-buildx; Mac: vem no Docker Desktop/OrbStack)" >&2
     # sem attestation de proveniência: não há registry ainda (#2) e ela só acrescenta um manifesto a cada export
@@ -276,8 +296,10 @@ case "${1:-}" in
     echo "running: ${img:-não está rodando}"
     ;;
   *)
+    [[ "$1" == help || "$1" == -h || "$1" == --help ]] || echo "oute: comando desconhecido: $1" >&2
     cat <<EOF
-uso: oute <cmd>
+uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
+  install      link no PATH para chamar só \`oute\` de qualquer lugar
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)

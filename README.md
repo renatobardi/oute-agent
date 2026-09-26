@@ -61,6 +61,7 @@ DRY_RUN=1 ./scripts/oute oci-bootstrap                # 1x por tenancy: mostra o
 OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 ./scripts/oute up                                     # master password 1x
 ./scripts/oute attach                                 # ssh -> herdr (detach: Ctrl+B q)
+./scripts/oute install                                # 1x por host: link no PATH -> depois é só `oute`
 ```
 
 `oute up`, em ordem: lê o vault (1 leitura, `bw sync`) e grava `~/.oute/agent.env` → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
@@ -82,6 +83,8 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute pull` | baixa do ghcr a imagem da versão atual (feita pelo CI) |
 | `oute build` | build local (fallback); mantém o cache usado nas últimas 24h |
 | `oute up` / `down` / `restart` / `status` | ciclo de vida da stack |
+| `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
+| `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
 | `oute router-sync [--dry-run]` / `schedule` | regenera perfis/presets / agenda diário 04:00 |

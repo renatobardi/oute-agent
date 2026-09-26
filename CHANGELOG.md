@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **`oute` sem argumento** abre o herdr (sobe a stack antes, se o agent não estiver rodando). **`oute install`** cria o link no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`, o primeiro que estiver no PATH e for gravável) — no Mac e no oute-server basta digitar `oute`. O script resolve symlinks para achar a raiz do repo. `oute help` mostra o uso; comando desconhecido avisa.
+
 ## [0.7.4] - 2026-09-25
 
 ### Fixed
