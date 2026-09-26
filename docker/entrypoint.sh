@@ -112,7 +112,8 @@ setup_agents() {
     IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-pi,claude-code,codex}"
     for a in "${AGENTS[@]}"; do
       ai-memory install-mcp   --client "$a" --apply --server-url "$url/mcp" "${tok[@]}" >/dev/null 2>&1 || log "ai-memory mcp: $a não suportado"
-      ai-memory install-hooks --agent  "$a" --apply --server-url "$url"     "${tok[@]}" >/dev/null 2>&1 || log "ai-memory hooks: $a não suportado"
+      # repo-root: projeto = repo principal (subdiretórios e git worktrees caem no mesmo projeto; ver estudo ai-memory × worktrees)
+      ai-memory install-hooks --agent  "$a" --apply --server-url "$url" --project-strategy repo-root "${tok[@]}" >/dev/null 2>&1 || log "ai-memory hooks: $a não suportado"
     done
   fi
 

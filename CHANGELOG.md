@@ -4,6 +4,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **ai-memory 2.4.1** (servidor e cliente juntos; era 2.4.0): log do servidor sem o `reconciliation pass` a cada 30 s, slugs de regra com acentos dobrados (`retenção` → `retencao`), handoff sem rótulos `tool file`, `memory_consolidate` manual corrige job `failed`. **Migração de schema V67, só para frente**: backup do volume `oute-memory` antes de subir.
+- Hooks do ai-memory instalados com **`--project-strategy repo-root`**: o projeto da memória passa a ser o repo principal, então subdiretórios e git worktrees caem no mesmo projeto (antes, `basename(cwd)` criava um projeto por worktree ou por `cd subdir`). Para repos em `/workspace/<repo>` o nome não muda; nada existente é movido.
+
 ### Added
 - **`oute watch [host]`**: atalho de `oute approve --watch`. Com host (ex.: `oute watch oute-server`), abre a espera de aprovação naquele host via `ssh -t` (roda como o usuário do ssh, fora do container).
 

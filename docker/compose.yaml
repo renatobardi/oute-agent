@@ -98,7 +98,7 @@ services:
 
   ai-memory:
     # mesma versão do cliente embutido na imagem do agent (Dockerfile ARG AI_MEMORY_VERSION)
-    image: akitaonrails/ai-memory:${OUTE_AI_MEMORY_VERSION:-2.4.0}
+    image: akitaonrails/ai-memory:${OUTE_AI_MEMORY_VERSION:-2.4.1}
     container_name: oute-ai-memory
     logging: *logging
     restart: unless-stopped
