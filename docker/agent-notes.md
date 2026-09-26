@@ -31,7 +31,7 @@ Motivo: sem escopo, o servidor usa o "projeto ativo" compartilhado, que pode ser
 ## Git: uma sessão = uma worktree + um branch
 
 - Toda sessão roda numa **worktree própria** (`/workspace/.worktrees/<repo>-<slug>`, branch `sessao/<slug>`), aberta pelo `oute-task`. O shell do container já faz isso quando o usuário digita `claude`/`codex`/`pi` no checkout principal.
-- **Nunca edite nem troque de branch no checkout principal** (`/workspace/<repo>`), que fica sempre na branch padrão. Se você estiver nele (`git rev-parse --git-dir` igual a `--git-common-dir`), não altere nada: avise o usuário e sugira `oute-task <slug>`.
+- **Nunca edite nem troque de branch no checkout principal** (`/workspace/<repo>`), que fica sempre na branch padrão. Se você estiver nele (`git rev-parse --git-dir` igual a `--git-common-dir`), não altere nada: avise o usuário e sugira `oute-task <slug>`. Única exceção: `git pull --ff-only` nele, na branch padrão e sem mudança local, pode ser feito sem perguntar (o `oute-task clean --yes` já faz isso).
 - Antes do primeiro push, renomeie o branch para `<tipo>/<issue>-<slug>` (`git branch -m …`); tipos: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Commits pequenos, mensagem no padrão convencional. Entrega por PR (`gh pr create`). **Merge só quando o usuário pedir.**
 - Depois do merge, `oute-task clean` lista o que pode ser removido; `oute-task clean --yes` remove.

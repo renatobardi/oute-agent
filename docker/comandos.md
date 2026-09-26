@@ -48,7 +48,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     cria/reabre /workspace/.worktrees/<repo>-<slug>, branch sessao/<slug>
   oute-task -r <repo> <slug> …      idem, de fora do repo
   oute-task list                    worktrees de tarefa abertas
-  oute-task clean [--yes]           remove as mergeadas/vazias (sem --yes: só mostra)
+  oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
 
 ## CONTAINER — rodada paralela (oute-swarm)
