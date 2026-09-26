@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **`oute watch [host]`**: atalho de `oute approve --watch`. Com host (ex.: `oute watch oute-server`), abre a espera de aprovação naquele host via `ssh -t` (roda como o usuário do ssh, fora do container).
+
 ## [0.7.6] - 2026-09-25
 
 ### Added

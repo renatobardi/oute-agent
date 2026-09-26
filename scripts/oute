@@ -316,6 +316,9 @@ case "${1:-}" in
            exec "$0" attach ;;
   install) install_link ;;
   approve) approve "${@:2}" ;;
+  watch)   # atalho: aprovação em modo espera. Com host: roda no host remoto via ssh (ex.: oute watch oute-server)
+           if [[ -n "${2:-}" ]]; then exec ssh -t "$2" 'bash -lc "oute approve --watch"'
+           else approve --watch; fi ;;
   build)
     docker buildx version >/dev/null 2>&1 || echo "aviso: sem docker-buildx (Ubuntu: apt install docker-buildx; Mac: vem no Docker Desktop/OrbStack)" >&2
     # sem attestation de proveniência: não há registry ainda (#2) e ela só acrescenta um manifesto a cada export
@@ -378,6 +381,7 @@ case "${1:-}" in
 uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   install      link no PATH para chamar só \`oute\` de qualquer lugar
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
+  watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up           sobe agent + jev-router + ai-memory + otel-collector (pede master password do Vaultwarden)
