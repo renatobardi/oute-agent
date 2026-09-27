@@ -290,9 +290,12 @@ approve_dir="$OUTE_HOME/approve"
 ctr() { docker exec "$AGENT_CTR" "$@"; }        # leitura (sem -i: não disputa o teclado com o read)
 ctr_in() { docker exec -i "$AGENT_CTR" "$@"; }  # escrita (stdin -> container)
 approve_pending() { ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true; }
+# evento operacional oute.canal.decided (ADR-04, #124): o oute-emit do container lê o cabeçalho do .out (nunca a
+# saída). Sem -i (não disputa o teclado com o read); imagem sem oute-emit ou coletor fora do ar: segue em silêncio
+approve_emit() { ctr oute-emit canal "$1" </dev/null >/dev/null 2>&1 || true; }
 show_safe() { LC_ALL=C perl -pe 's/[\x00-\x08\x0b-\x1f\x7f]/\xc2\xb7/g; s/\xc2[\x80-\x9f]/\xc2\xb7/g' "$1"; }
 approve_one() {
-  local id="$1" src title as sha ans rc=0 out
+  local id="$1" src title as sha ans rc=0 out t0 dur size
   mkdir -p "$approve_dir/runs"; chmod 700 "$approve_dir"
   src="$approve_dir/runs/$id.sh"; out="$approve_dir/runs/$id.out"
   ctr sh -c 'head -c 65536 "$HOME/outbox/$1.sh"' _ "$id" > "$src" || { echo "não consegui ler $id" >&2; return 1; }
@@ -312,19 +315,23 @@ approve_one() {
       echo "── executando…"
       # set +e: script do agente que falha não pode derrubar o `oute` (pipefail + set -e) antes de devolver o resultado
       set +e
+      t0="$(date +%s)"
       if [[ "$as" == root ]]; then sudo bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}
       else bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}; fi
+      dur=$(( $(date +%s) - t0 )); size="$(wc -c < "$out" | tr -d ' ')"
       set -e
       echo "── fim (código $rc)"
-      { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n# sha256: %s\n\n' \
-          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha"; tail -c 262144 "$out"; } \
+      { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n# sha256: %s\n# duracao: %s s\n# saida: %s bytes\n\n' \
+          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" "$dur" "$size"; tail -c 262144 "$out"; } \
         | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/done" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/done/"' _ "$id"
-      printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log" ;;
+      printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log"
+      approve_emit "$id" ;;
     r|R)
       printf '# id: %s\n# rc: 126\n# recusado: %s por %s@%s\n# sha256: %s\n\nrecusado pelo usuário; nada foi executado.\n' \
           "$id" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" \
         | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/rejected" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/rejected/"' _ "$id"
       printf '%s\t%s\t%s\t%s\trecusado\t-\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$title" >> "$approve_dir/approve.log"
+      approve_emit "$id"
       echo "recusado." ;;
     *) echo "fica pendente." ;;
   esac

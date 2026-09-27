@@ -89,6 +89,17 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-inbox --wait <id> [s]                  espera o resultado (default 1800 s)
   Quem aprova é você, no host: oute watch. Nunca de dentro do herdr.
 
+## CONTAINER — eventos operacionais (oute-emit, ADR-04)
+  Rodadas do swarm e pedidos do canal vão ao bucket como logs OTel (oute.swarm.*, oute.canal.*),
+  com a origem do host; nada ao Langfuse. A saída do script executado no host nunca vai.
+  O oute-swarm, o oute-propose e o oute approve chamam sozinhos; falha nunca muda o comando.
+  oute-emit canal <id>              emite a fase atual do pedido (proposto ou decidido)
+  oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada
+  oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
+                                    (~/.oute/emit/since) com a hora original; resumo no stderr;
+                                    rodar de novo não emite nada (retoma se falhou no meio)
+  OUTE_EMIT_DEBUG=1 oute-emit …     mostra o erro de envio (normalmente silencioso)
+
 ## Memória (ai-memory)
   Única memória dos agentes (auto memory do Claude desligada). Projeto = repo principal
   (worktrees e subpastas caem no mesmo). Handoff automático por diretório (cada worktree
