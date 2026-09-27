@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **Skill `oute-aidlc-qa-security-audit`** (#106, fase `qa`). Auditoria de segurança de um diff, só por leitura: segue cada dado não confiável até o sink e cobre shell e quoting, segredos, portas/binds/rede/TLS, arquivos e caminhos, canal de aprovação, supply chain em runtime e instruções de agente em addons, com cenário concreto por achado e escala própria (alto/médio/baixo/incerto). Complementa a `oute-aidlc-qa-pr-audit` sem repetir o trust gate de mudança hostil nem a supply chain declarada (passos 4 e 5 dela), que a chama no checklist de segurança e converte os achados. Sem release (addon entra com `git pull` + `oute down/up`).
+
 ## [0.7.25] - 2026-09-27
 
 ### Added

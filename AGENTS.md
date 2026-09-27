@@ -39,7 +39,7 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 | `design` | `oute-aidlc-design-modules`, `oute-aidlc-design-prototype` |
 | `plan` | `oute-swarm` §1 (triagem + ok do Bardi), `oute-aidlc-plan-tickets`, `oute-aidlc-plan-triage`, `oute-aidlc-plan-refactor` |
 | `build` | `oute-task`, worker do swarm, `oute-aidlc-build-implement`, `oute-aidlc-build-tdd`, `oute-aidlc-build-conflicts` |
-| `qa` | `oute-aidlc-qa-pr-audit`, `tests/`, CI `pr` |
+| `qa` | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`), `tests/`, CI `pr` |
 | `ship` | `scripts/release` (Bardi) + deploy nos hosts (Bardi) |
 | `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação, `oute-aidlc-ops-diagnose` |
 | `learn` | `oute-swarm` §4.1 (kaizen), `oute-aidlc-learn-feedback` |
