@@ -189,13 +189,14 @@ Pergunta: o PR entrega o que a issue pediu, nem mais, nem menos, e declara isso 
    - `parcial`: diga o que falta;
    - `ausente`;
    - `não verificável aqui`: depende de algo fora do diff (release, host, verificação manual). Diga de quê.
+   - `não verificável aqui (ship)`: critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts). A verificação é da `oute-aidlc-ship-verify`.
 3. **Faltando ou parcial:** requisito da issue (inclusive da seção "What to build") que não está no diff ou está pela metade. Cite a linha da issue.
 4. **Além do pedido:** mudança no diff que a issue não pede (escopo a mais). Cite o trecho.
 5. **Implementado errado:** critério que parece entregue, mas cujo código não faz o que o critério diz. Cite o critério e o trecho.
 6. **`Closes` × `Refs`** (regra da #24 do oute-agent, e a do repo auditado se ela for mais estrita):
-   - `Closes #n` só vale se **todos** os critérios estão `atendido`;
-   - com qualquer critério não `atendido`, o certo é `Refs #n` e uma seção `## Falta` no corpo do PR que liste cada um deles;
-   - `Closes` com critério pendente, ou `## Falta` que omite um critério pendente, é divergência BLOCKING: a correção é trocar para `Refs` e completar o `## Falta`.
+   - `Closes #n` só vale se **todos** os critérios estão `atendido`, exceto o critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts): ele **não conta para `Closes` × `Refs`** (#133), desde que esteja no `## Falta` do PR com a marca `(ship)`;
+   - com qualquer outro critério não `atendido`, o certo é `Refs #n` e uma seção `## Falta` no corpo do PR que liste cada um deles;
+   - `Closes` com critério pendente que não é de pós-deploy, ou `## Falta` que omite um critério pendente (inclusive o de pós-deploy), é divergência BLOCKING: a correção é trocar para `Refs` (ou, se só falta pós-deploy, manter `Closes`) e completar o `## Falta`.
 
 ## 8. Eixo Standards
 
@@ -218,7 +219,7 @@ Regras duras do oute-agent que costumam aparecer (confira no AGENTS.md da base; 
 - workflows de CI só pelo Bardi; mudança de host do oute-server é do repo `lab`;
 - ai-memory não muda de comportamento sem decisão do Bardi;
 - addon com prefixo `oute-`; primitivo que cita addon traz plano B inline (ADR-06);
-- entrega por PR, `Closes` só com todos os critérios.
+- entrega por PR, `Closes` só com todos os critérios; o critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta, mas vai no `## Falta` com `(ship)` (se não estiver, BLOCKING).
 
 **Slop bar (bloqueio).** Defeito objetivo, com evidência que qualquer um confere. Cada ocorrência é BLOCKING:
 - código morto: função, variável, flag, arquivo ou ramo que nada chama (mostre o grep vazio);
@@ -262,7 +263,7 @@ Todo achado recebe exatamente uma severidade:
 | severidade | significa | exemplos |
 |---|---|---|
 | **CRITICAL** | risco de segurança, de segredo, de perda de dados ou do host; não pode entrar | trust gate bloqueado, segredo exposto, `0.0.0.0`, workflow que dá segredo a código do PR |
-| **BLOCKING** | impede o merge até corrigir | gate documentado falhou, violação dura do AGENTS.md, slop, alegação refutada, `Closes` com critério pendente, regressão |
+| **BLOCKING** | impede o merge até corrigir | gate documentado falhou, violação dura do AGENTS.md, slop, alegação refutada, `Closes` com critério pendente (fora o de pós-deploy no `## Falta`), pós-deploy fora do `## Falta`, regressão |
 | **SHOULD-FIX** | deveria ser corrigido, mas pode entrar com issue de acompanhamento | smell relevante, teste faltando em área sem teste, doc incompleta |
 | **NIT** | cosmético, opcional | typo, ordem de itens, formatação local |
 | **UNCERTAIN** | não deu para decidir com a evidência que você tem | gate que não rodou, alegação `não verificada`, comportamento que depende do host |
@@ -326,7 +327,7 @@ Não use `gh pr review --approve` nem `--request-changes`. Cada auditoria é um 
 ### Eixo Spec — issue #<n>
 | critério de aceite | veredito | evidência |
 |---|---|---|
-| <texto do critério> | atendido / parcial / ausente / não verificável aqui | <arquivo:linha, comando> |
+| <texto do critério> | atendido / parcial / ausente / não verificável aqui / não verificável aqui (ship) | <arquivo:linha, comando> |
 
 - **Faltando ou parcial:** <itens ou "nada">
 - **Além do pedido:** <itens ou "nada">

@@ -35,7 +35,7 @@ Você não lembra de todas as skills; pergunte aqui. Cada fase termina num **gat
 3. **Cabe numa sessão?**
    - **Não:** `oute-aidlc-spec-issue` → `oute-aidlc-plan-tickets` → uma sessão por ticket (`oute-task` ou `oute-swarm`).
    - **Sim:** `oute-aidlc-build-implement` aqui mesmo.
-4. PR com `Closes #n` só com todos os critérios; senão `Refs #n` + `## Falta`.
+4. PR com `Closes #n` só com todos os critérios; senão `Refs #n` + `## Falta`. O critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta para `Closes` × `Refs`: vai no `## Falta` com a marca `(ship)`.
 5. `oute-aidlc-qa-pr-audit` no PR. Merge, release e deploy: Bardi.
 
 Mantenha os passos 1 a 3 na mesma janela de contexto. Se ela encher antes do passo 3, faça handoff pelo ai-memory e continue numa sessão nova.
