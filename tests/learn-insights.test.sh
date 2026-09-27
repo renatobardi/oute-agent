@@ -21,6 +21,7 @@ CANARIO="CANARIO-CONTEUDO-7f3a"
 WS="$TMP/ws"; mkdir -p "$WS"
 git init -q "$WS/alvo" && git -C "$WS/alvo" remote add origin https://github.com/dono/alvo.git
 git init -q "$WS/solto"
+git init -q "$WS/outro" && git -C "$WS/outro" remote add origin https://github.com/dono/outro.git
 
 # gh falso: F_CICLO=fechado|aberto|nenhum; F_GH_FAIL=1 derruba tudo
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -35,6 +36,8 @@ case "\$1 \$2" in
         aberto)  echo '[{"number":11,"title":"ciclo 2026-09-20","state":"OPEN","createdAt":"2026-09-20T00:00:00Z","closedAt":null}]' ;;
         *)       echo '[]' ;;
       esac
+    elif [[ "\$*" == *dono/outro* ]]; then
+      echo '[{"number":5,"title":"sem aidlc","state":"OPEN","createdAt":"$(d '90 days ago')","closedAt":null,"updatedAt":"$(d '60 days ago')","labels":[{"name":"infra"}]}]'
     else
       echo '[{"number":1,"title":"kaizen novo","state":"OPEN","createdAt":"$(d '1 day ago')","closedAt":null,"updatedAt":"$(d '1 day ago')","labels":[{"name":"kaizen"},{"name":"aidlc:spec"}]},
              {"number":2,"title":"parada","state":"OPEN","createdAt":"$(d '90 days ago')","closedAt":null,"updatedAt":"$(d '60 days ago')","labels":[{"name":"aidlc:intent"}]},
@@ -81,6 +84,7 @@ check "sem ciclo aberto: learn abre retroativa" has 'ciclo_aberto	nenhum'
 check "só repos com remote do GitHub"          hasnt 'solto'
 check "issues por repo"                        has 'dono/alvo	1	0	2	1'
 check "fase com parada há 30 dias"             has 'aidlc:intent	1	1'
+check "repo sem aidlc fora da tabela de fases" bash -c '! grep -q "^(sem fase)" <<<"$0" && grep -q "^fora_da_tabela	dono/outro" <<<"$0"' "$OUT"
 check "kaizen da janela listado"               has 'dono/alvo	#1	OPEN	kaizen,aidlc:spec'
 check "bug fora da janela não entra"           hasnt '#3	CLOSED'
 check "PRs: parcial contado"                   has 'dono/alvo	2	2	0	1'
