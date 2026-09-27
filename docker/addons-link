@@ -6,7 +6,7 @@
 # Avisos no stderr; sai 0 também quando a pasta de addons não existe (addon nunca derruba o boot).
 #
 # - skill válida = pasta oute-<nome> com SKILL.md cujo frontmatter tem `name: <nome da pasta>`;
-#   as demais são recusadas com aviso;
+#   as demais são recusadas com aviso; skill oute-* recusada que estava linkada perde o link nosso;
 # - nunca sobrescreve um nome que já existe e não é link nosso (skills synced do claude.ai, .system
 #   do Codex, pasta ou link de outra origem): só avisa;
 # - remove, nessas duas pastas, os links que apontam para dentro da pasta de addons e estão quebrados;
@@ -36,6 +36,17 @@ skill_name() {
 # link nosso = link cujo alvo está dentro da pasta de addons
 ours() { [[ -L "$1" ]] && case "$(readlink "$1")" in "$ADDONS"/*) return 0 ;; esac; return 1; }
 
+# skill recusada não fica ativa: remove o link nosso com esse nome (link ou pasta alheia fica intocada)
+unlink_refused() {
+  local dest dst
+  for dest in "${DESTS[@]}"; do
+    dst="$dest/$1"
+    if ours "$dst"; then
+      rm -f "$dst" && warn "removido link de skill recusada $dst"
+    fi
+  done
+}
+
 # 1. limpa links nossos quebrados (skill removida ou renomeada no repo)
 for dest in "${DESTS[@]}"; do
   [[ -d "$dest" ]] || continue
@@ -60,11 +71,11 @@ for src in "$SKILLS"/*; do
     *) warn "AVISO: $src recusada (sem o prefixo oute-)"; continue ;;
   esac
   if [[ ! -f "$src/SKILL.md" ]]; then
-    warn "AVISO: $src recusada (sem SKILL.md)"; continue
+    warn "AVISO: $src recusada (sem SKILL.md)"; unlink_refused "$name"; continue
   fi
   fm="$(skill_name "$src/SKILL.md")"
   if [[ "$fm" != "$name" ]]; then
-    warn "AVISO: $src recusada (name '${fm}' no SKILL.md difere da pasta)"; continue
+    warn "AVISO: $src recusada (name '${fm}' no SKILL.md difere da pasta)"; unlink_refused "$name"; continue
   fi
   for dest in "${DESTS[@]}"; do
     dst="$dest/$name"
@@ -74,8 +85,10 @@ for src in "$SKILLS"/*; do
       ln -sfn "$src" "$dst"                      # link nosso com alvo antigo: corrige
     elif [[ -e "$dst" || -L "$dst" ]]; then
       warn "AVISO: $dst já existe e não é link para $ADDONS; não sobrescrevo"
-    else
-      mkdir -p "$dest" && ln -s "$src" "$dst"
+    elif ! mkdir -p "$dest" 2>/dev/null; then
+      warn "AVISO: não consegui criar a pasta $dest (existe como arquivo?); $name não linkada ali"
+    elif ! ln -s "$src" "$dst" 2>/dev/null; then
+      warn "AVISO: não consegui criar o link $dst"
     fi
   done
 done

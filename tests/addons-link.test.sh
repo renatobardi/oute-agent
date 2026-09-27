@@ -29,9 +29,32 @@ run() { ERR="$("$LINKER" "$A" "$H" 2>&1 >/dev/null)"; RC=$?; }
 linked()  { [[ -L "$H/$1/$2" && "$(readlink "$H/$1/$2")" == "$A/skills/$2" && -f "$H/$1/$2/SKILL.md" ]]; }
 absent()  { [[ ! -e "$H/$1/$2" && ! -L "$H/$1/$2" ]]; }
 warned()  { grep -q -- "$1" <<<"$ERR"; }
-snapshot() { (cd "$H" && find . -print0 | sort -z | xargs -0 ls -ld --time-style=+%s 2>/dev/null | awk '{$1=$1; print}'); }
+unwarned() { ! warned "$1"; }
+# stat portátil: GNU (Linux/CI) ou BSD (macOS); tipo, inode, mtime (s) e tamanho de cada entrada
+if stat -c '%n' . >/dev/null 2>&1; then
+  statf() { stat -c '%F|%i|%Y|%s' "$1"; }
+elif stat -f '%N' . >/dev/null 2>&1; then
+  statf() { stat -f '%HT|%i|%m|%z' "$1"; }
+else
+  echo "FAIL stat sem -c (GNU) nem -f (BSD)"; exit 1
+fi
+# snapshot(<caminho>...): estado de <caminho>... relativos ao $H (nome, alvo do link e statf de cada
+# entrada). Se algo falhar, a saída é única (nunca igual a outra) e o código é 1: a comparação falha.
+snapshot() {
+  local out
+  out="$(cd "$H" && find "$@" -print | LC_ALL=C sort | while IFS= read -r p; do
+           printf '%s|%s|' "$p" "$(readlink "$p")"; statf "$p" || exit 1
+         done)" || { printf 'ERRO snapshot %s%s\n' "$RANDOM" "$RANDOM"; return 1; }
+  printf '%s\n' "$out"
+}
 
 [[ -x "$LINKER" ]] || { echo "FAIL linker ausente ou sem +x: $LINKER"; exit 1; }
+
+# 0. o snapshot enxerga mudança (arquivo recriado com outro mtime) -> as comparações abaixo valem
+fresh snapshot; echo a > "$H/f"
+before="$(snapshot .)"; rm "$H/f"; echo a > "$H/f"; touch -t 200001010000 "$H/f"; after="$(snapshot .)"
+check "snapshot: detecta arquivo recriado"       [ "$before" != "$after" ]
+check "snapshot: estado igual dá igual"          [ "$after" == "$(snapshot .)" ]
 
 # 1. skill válida -> link nas duas pastas (cria as pastas)
 fresh valida; skill "$A" oute-foo; run
@@ -40,7 +63,7 @@ check "válida: link em .claude/skills"           linked .claude/skills oute-foo
 check "válida: link em .agents/skills"           linked .agents/skills oute-foo
 
 # 2. segunda execução -> mesmo estado, sem aviso
-before="$(snapshot)"; run; after="$(snapshot)"
+before="$(snapshot .)"; sleep 1; run; after="$(snapshot .)"
 check "idempotente: código 0"                    [ "$RC" -eq 0 ]
 check "idempotente: mesmo estado"                [ "$before" == "$after" ]
 check "idempotente: sem aviso"                   [ -z "$ERR" ]
@@ -106,14 +129,48 @@ mkdir -p "$H/.claude/skills/synced/alguma" "$H/.agents/skills/.system/outra" "$H
 echo s > "$H/.claude/skills/synced/alguma/SKILL.md"
 echo c > "$H/.agents/skills/.system/outra/SKILL.md"
 echo c > "$H/.codex/skills/.system/outra/SKILL.md"
-before="$(cd "$H" && find .claude/skills/synced .agents/skills/.system .codex -print0 | sort -z | xargs -0 ls -ld --time-style=+%s | awk '{$1=$1; print}')"
-run; run
-after="$(cd "$H" && find .claude/skills/synced .agents/skills/.system .codex -print0 | sort -z | xargs -0 ls -ld --time-style=+%s | awk '{$1=$1; print}')"
+before="$(snapshot .claude/skills/synced .agents/skills/.system .codex)"
+sleep 1; run; run
+after="$(snapshot .claude/skills/synced .agents/skills/.system .codex)"
 check "preexistentes: código 0"                  [ "$RC" -eq 0 ]
 check "preexistentes: synced/.system intactas"   [ "$before" == "$after" ]
 check "preexistentes: conteúdo intacto"          [ "$(cat "$H/.claude/skills/synced/alguma/SKILL.md")$(cat "$H/.codex/skills/.system/outra/SKILL.md")" == sc ]
 check "preexistentes: sem aviso"                 [ -z "$ERR" ]
 check "preexistentes: skill linkada"             linked .agents/skills oute-foo
+
+# 8. skill linkada que fica inválida -> link nosso removido nas duas pastas + aviso
+fresh recusada; skill "$A" oute-nome; skill "$A" oute-sem; skill "$A" oute-ok; run
+skill "$A" oute-nome outro                       # name passa a diferir da pasta
+rm "$A/skills/oute-sem/SKILL.md"                 # pasta perde o SKILL.md
+run
+check "recusada: código 0"                       [ "$RC" -eq 0 ]
+for d in .claude/skills .agents/skills; do
+  check "recusada: name≠pasta sem link ($d)"     absent "$d" oute-nome
+  check "recusada: sem SKILL.md sem link ($d)"   absent "$d" oute-sem
+  check "recusada: a válida continua ($d)"       linked "$d" oute-ok
+  check "recusada: aviso de remoção ($d)"        warned "removido link de skill recusada $H/$d/oute-nome"
+done
+check "recusada: aviso de remoção (sem SKILL.md)" warned "removido link de skill recusada $H/.claude/skills/oute-sem"
+
+# 8b. skill recusada com o nome ocupado por pasta ou link alheio -> intactos
+fresh recusada-alheia; skill "$A" oute-nome outro
+mkdir -p "$H/.claude/skills/oute-nome"; echo meu > "$H/.claude/skills/oute-nome/SKILL.md"
+mkdir -p "$H/.agents/skills"; ln -s /algum/outro/lugar "$H/.agents/skills/oute-nome"
+run
+check "recusada alheia: código 0"                [ "$RC" -eq 0 ]
+check "recusada alheia: pasta intacta"           [ "$(cat "$H/.claude/skills/oute-nome/SKILL.md")" == meu ]
+check "recusada alheia: link intacto"            [ "$(readlink "$H/.agents/skills/oute-nome")" == /algum/outro/lugar ]
+check "recusada alheia: sem aviso de remoção"    unwarned "removido"
+
+# 9. .claude/skills existe como arquivo -> aviso com prefixo, link em .agents/skills, código 0
+fresh arquivo; skill "$A" oute-foo
+mkdir -p "$H/.claude"; echo x > "$H/.claude/skills"
+run
+check "arquivo: código 0"                        [ "$RC" -eq 0 ]
+check "arquivo: .claude/skills intacto"          [ -f "$H/.claude/skills" -a "$(cat "$H/.claude/skills")" == x ]
+check "arquivo: link em .agents/skills"          linked .agents/skills oute-foo
+check "arquivo: aviso cita .claude/skills"       warned "$H/.claude/skills"
+check "arquivo: toda linha com o prefixo"        [ -z "$(grep -v '^\[oute\] addons: ' <<<"$ERR")" ]
 
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
