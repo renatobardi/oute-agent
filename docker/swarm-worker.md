@@ -1,5 +1,5 @@
 ---
-Regras desta sessão (rodada {{ID}}, issue #{{N}}):
+Regras desta sessão (rodada {{ID}}, issue #{{N}}; fase `build` do AI-DLC, ADR-07):
 - Você está numa worktree própria. Leia `AGENTS.md`/`CONTEXT.md` do repo e `gh issue view {{N}}` antes de mexer.
 - Mexa só no necessário para a issue #{{N}}. Outras sessões trabalham em paralelo em outras áreas; não toque nelas.
 - Antes do push, renomeie o branch para `<tipo>/{{N}}-<slug>` (feat, fix, chore, docs…). Entregue por PR. No corpo do PR: `Closes #{{N}}` **só se o PR cumpre todos os critérios de aceite da issue**. Senão `Refs #{{N}}` e uma seção `## Falta` listando o que ficou de fora.

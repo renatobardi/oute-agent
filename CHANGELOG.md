@@ -4,9 +4,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **AI-DLC (ADR-07).** Todo trabalho segue 12 fases, com abreviações `strat` `intent` `spec` `arch` `design` `plan` `build` `qa` `ship` `ops` `learn` `iter` e a faixa transversal `ctx`; cada fase tem contribuição da IA, gate humano (Bardi) e outcome. Skill de fluxo = `oute-aidlc-<fase>-<id>` (ADR-06, adendo), abrindo com a linha `Fase · Outcome · Gate`. `AGENTS.md` ganha a seção "Fluxo AI-DLC" (primitivos e skills por fase) e o `CONTEXT.md`, os termos AI-DLC, fase, gate humano e outcome. Template de issue `.github/ISSUE_TEMPLATE/aidlc.md` (Intenção, Contexto, Critérios de aceite, Fora de escopo) e labels `aidlc:<fase>`.
+
 ### Changed
 - **`oute-pr-audit`: opção numerada com o número do PR vale como pedido de merge** (#98, passo 13, "o quê"). A escolha, pelo Bardi, de uma opção numerada que traz o PR e a ação de merge (ex.: `1. mergear #94 (squash) no head 5bfec3e`) é pedido explícito para aquele PR e só para o head citado; se o head mudou desde a opção, o pedido não vale e a pergunta é refeita com o head novo. Alinha a skill ao `swarm.md` §3 (#96). Sem release: a skill entra com `git pull` + `oute down/up`.
 - **Swarm: fechamento cancela handoff de coordenadora de rodada já fechada** (#99, `swarm.md` §4.3). Depois do resumo final, a coordenadora cancela também os handoffs que coordenadoras de rodadas anteriores deixaram ao terminar (inclusive ela mesma), identificados pelo `summary` que cita "coordenadora da rodada `<id>`", com `<id>` diferente da rodada atual, e só quando o `oute-swarm list` mostra a rodada sem nenhuma aba aberta. Handoff de rodada com aba aberta, de rodada fora do `oute-swarm list` ou não identificável fica e vai numa nota do resumo. Antes, só os handoffs das worktrees removidas eram cancelados, e o da coordenadora sobrava para a sessão seguinte do projeto (no fechamento da `swarm-0926-2359` apareceu o da `swarm-0926-2252`). O `swarm.md` entra na imagem: **precisa de release**.
+- **`oute-pr-audit` → `oute-aidlc-qa-pr-audit`** (ADR-07). Marcadores dos comentários migram para `<!-- oute-aidlc-qa-pr-audit -->` e `<!-- oute-aidlc-qa-pr-audit:merge -->`; a skill de segurança citada passa a `oute-aidlc-qa-security-audit`. Sem release (addon entra com `git pull` + `oute down/up`).
+- **Swarm e notas globais citam as fases** (`swarm.md`: triagem `plan`, sessões `build`, auditoria `qa`, kaizen `learn`, issue kaizen com `aidlc:spec`; `swarm-worker.md`: fase `build`). `agent-notes.md` corrige a fonte canônica: são os ADRs em `docs/adr/` do repo, não o Project do claude.ai. `swarm.md`, `swarm-worker.md` e `agent-notes.md` entram na imagem: **precisa de release**.
 
 ## [0.7.24] - 2026-09-27
 

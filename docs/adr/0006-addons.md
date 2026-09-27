@@ -1,6 +1,6 @@
 # ADR-06 — Addons: pasta do monorepo montada read-only (issue #53)
 
-Status: **aceito** (2026-09-26). Saído do grilling da #53.
+Status: **aceito** (2026-09-26). Saído do grilling da #53. Adendo 2026-09-27: nome de skill de fluxo e skills importadas do Matt Pocock (ADR-07).
 
 ## Contexto
 - O ADR-01 deixava em aberto um repo separado `oute-agent-plugins` para as skills. Esse repo nunca foi criado.
@@ -26,3 +26,8 @@ Regras:
 - Os addons são versionados junto com o oute-agent. Se um dia forem usados fora do container, esta decisão volta para a mesa.
 - Mac e oute-server precisam de um checkout atualizado para ver addon novo.
 - Persona não é única entre harnesses (o Pi não tem subagente nativo). A conversão por harness fica para issue própria.
+
+## Adendo 2026-09-27 — AI-DLC (ADR-07)
+- **Skill de fluxo** (serve a uma fase do AI-DLC) leva `oute-aidlc-<fase>-<id>`. Skill utilitária segue `oute-<id>`. O linker não muda: as duas passam no filtro `oute-*`.
+- **Skills de engenharia do Matt Pocock** entram como fork em `addons/skills/oute-aidlc-*`, adaptadas pelo Bardi ao longo do tempo, **sem registro de procedência** (decisão do Bardi): exceção à regra de procedência acima, só para esse conjunto.
+- Valem **só no container** do oute-agent (mount de addons). As cópias do Mac (`~/.agents/skills`) ficam como estão, fora deste repo.
