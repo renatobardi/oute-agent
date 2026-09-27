@@ -1,0 +1,5 @@
+interface:
+  display_name: "oute-skill-writing"
+  short_description: "Principles for predictable skills"
+policy:
+  allow_implicit_invocation: false

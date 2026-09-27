@@ -1,0 +1,5 @@
+interface:
+  display_name: "oute-aidlc-plan-triage"
+  short_description: "Move issues through triage roles"
+policy:
+  allow_implicit_invocation: false
