@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Swarm: fechamento cancela handoff de coordenadora de rodada já fechada** (#99, `swarm.md` §4.3). Depois do resumo final, a coordenadora cancela também os handoffs que coordenadoras de rodadas anteriores deixaram ao terminar (inclusive ela mesma), identificados pelo `summary` que cita "coordenadora da rodada `<id>`", com `<id>` diferente da rodada atual, e só quando o `oute-swarm list` mostra a rodada sem nenhuma aba aberta. Handoff de rodada com aba aberta, de rodada fora do `oute-swarm list` ou não identificável fica e vai numa nota do resumo. Antes, só os handoffs das worktrees removidas eram cancelados, e o da coordenadora sobrava para a sessão seguinte do projeto (no fechamento da `swarm-0926-2359` apareceu o da `swarm-0926-2252`). O `swarm.md` entra na imagem: **precisa de release**.
+
 ## [0.7.24] - 2026-09-27
 
 ### Changed
