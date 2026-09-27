@@ -1,6 +1,6 @@
 # ADR-04 — Observabilidade (issues #13, #19)
 
-Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27) · sessões (#128)
+Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27; `oute-emit` e catálogo) · sessões (#128)
 Base: `estudos/observabilidade-rascunho.md` (fontes, destinos do Broadcast, opções de painel).
 
 ## Decisões (Bardi, 2026-09-24)
@@ -66,6 +66,34 @@ Decisões do grilling de `arch` da #124 (Bardi). **Evento operacional** = fato d
 - **`oute.agent` = quem causou o evento.** Valor novo **`human`** (o Bardi decidindo um pedido), emitido só por ferramenta do projeto, nunca pelo `transform/agent`. O agente de cada sessão vai em `oute.swarm.session.agent`; pedido sem agente declarado = `unknown`.
 - **Sessões:** ver "Sessões (#128)" abaixo.
 - Opções descartadas: conteúdo completo no bucket, inclusive a saída do host (vazamento irreversível); emitir no `oute-inbox` ao ler (pedido não lido some, leitura repetida duplica) ou por um vigia residente; traces por rodada (o span só sai quando a rodada fecha, e rodada que não fecha nunca apareceria); spool com reenvio (fila e dedup em bash para uma janela de falha local e pequena); `oute.agent` fixo por ferramenta (`swarm`, `canal`), que mistura ferramenta com agente.
+
+### Catálogo e interface do `oute-emit` (#124, implementação)
+**Interface.** O `oute-emit` recebe só "aconteceu algo com X" e lê ele mesmo os artefatos locais; o mesmo leitor serve o caminho ao vivo e o backfill.
+```
+oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
+oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
+oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte; uma vez por host
+```
+- python3 stdlib; OTLP/HTTP JSON em `${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs` (ou `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`). Resource: `OTEL_RESOURCE_ATTRIBUTES` (origem) + `service.name=oute` + `oute.agent`; o registro repete `oute.agent` e leva `event.name` (também no campo `eventName`). Escopo `oute-emit`.
+- Timeout de 2 s (teto do POST inteiro), sempre sai com 0, nunca escreve no stdout; erro só em stderr com `OUTE_EMIT_DEBUG=1`. Sem endpoint, não faz nada.
+- **Coletor:** sem mudança. O `transform/agent` só casa `service.name` `claude-code`, `^codex` e `jev-router`, então o `oute.agent` de `service.name=oute` passa intacto; nenhum processor do `logs/archive` descarta registro; o pipeline do Langfuse só tem traces.
+- **Chamadores:** `oute-swarm` (toda linha do log da rodada), `oute-propose` (depois do rename atômico) e `oute approve` no host (`docker exec oute-agent oute-emit canal <id>`, sem `-i`, depois de gravar o `.out` e o `approve.log`; saída e erro descartados, imagem antiga = ignora). "Fica pendente" não chama.
+- **Log da rodada** (`~/.oute/swarm/<rodada>/log`): uma linha por fato, `<hora UTC> <tipo> …`: `abertura <rodada> (…)`, `spawn <slug> <agente>[ kaizen]`, `tell <slug> ok[ (--force, <estado>)]` ou `tell <slug> recusado: <motivo>`, com a mensagem depois de um TAB; `watch [<tipo>] <texto>`; `close <slug>`; `rodada fechada`. O `meta` ganha `agent=` (coordenadora; rodadas antigas sem ele = `claude`).
+- **Cabeçalho do `.out`** (host): além de `id`, `rc`, `como`, `aprovado`/`recusado`, `sha256`, o executado leva `# duracao: <s> s` e `# saida: <bytes> bytes`. O leitor para na primeira linha em branco: a saída nunca é lida.
+- **Backfill:** o entrypoint grava `~/.oute/emit/since` na primeira subida da imagem com `oute-emit` (o corte). O backfill passa o log de cada rodada (e, nas rodadas antigas, `meta`, `spawned` e `fechada` reescritos como linhas do log, sem repetir o que o log já tem) e os pedidos (`outbox/`, `outbox/done/`, `outbox/rejected/`, `inbox/*.out`) pelos mesmos leitores, emite só o anterior ao corte, com a hora original e `oute.backfill=true`, e grava `~/.oute/emit/backfill.done`. Lotes de 200 registros, timeout de 10 s por lote; `backfill.sent` guarda quantos já foram aceitos, e uma nova execução retoma dali sem duplicar. Resumo em stderr: emitidos, linhas não reconhecidas (ex.: `tell-manual`, `tell` antigo sem resultado) e `close` sem hora (o `closed` antigo), pulados. `tell` antigo sai sem corpo.
+
+| Evento | `oute.agent` | Atributos (além de `oute.swarm.round`/`oute.canal.id`) | Corpo |
+|---|---|---|---|
+| `oute.swarm.round.opened` | coordenadora (`agent=` do `meta`) | `oute.swarm.repo` (nome), `oute.swarm.max`, `oute.swarm.label` | — |
+| `oute.swarm.session.spawned` | coordenadora | `oute.swarm.session` (slug), `oute.swarm.issue`, `oute.swarm.session.agent`, `oute.swarm.repo`, `oute.swarm.kaizen` | prompt (`<slug>.prompt`) |
+| `oute.swarm.tell` | coordenadora | `oute.swarm.session`, `oute.swarm.tell.result` (`ok`/`recusado`), `oute.swarm.tell.reason`, `oute.swarm.tell.forced` | mensagem |
+| `oute.swarm.watch.<tipo>` (`pr`, `ci`, `conflito`, `canal`, `aba`, `sessao`, `aviso`, `rodada`) | coordenadora | `oute.swarm.source=watch` | a linha do evento |
+| `oute.swarm.session.closed` | coordenadora | `oute.swarm.session` | — |
+| `oute.swarm.round.closed` | coordenadora | — | — |
+| `oute.canal.proposed` | `# agente:` do pedido (`desconhecido` → `unknown`) | `oute.canal.title`, `oute.canal.as` (`user`/`root`), `oute.canal.size` (bytes do script) | script (sem o cabeçalho) |
+| `oute.canal.decided` | `human` | `oute.canal.decision` (`executado`/`recusado`), `oute.canal.rc`, `oute.canal.duration_s`, `oute.canal.output_bytes`, `oute.canal.approver` (`usuário@host`), `oute.canal.sha256` (12) | **nunca** |
+
+Hora do registro (`timeUnixNano`) = a hora do fato (linha do log, `criado:`, `aprovado:`/`recusado:`); no backfill também leva `oute.backfill=true`. Leitor filtra por `timeUnixNano`, não por `hour=`. Agente do `oute-propose`: `OUTE_PROPOSE_AGENT`, senão `CLAUDECODE=1` → `claude`, `CODEX_THREAD_ID` → `codex`, `PI_CODING_AGENT=true` → `pi`, senão `unknown`.
 
 ### Sessões (#128, 2026-09-27)
 Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + branch do `oute-task`, de rodada ou avulsa) contém uma ou mais **conversas** (`session.id` do agente).
