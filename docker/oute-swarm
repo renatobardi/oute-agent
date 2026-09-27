@@ -18,6 +18,12 @@ LIB="${OUTE_LIB:-/usr/local/lib/oute}"
 STATE_ROOT="${HOME}/.oute/swarm"
 die() { printf 'oute-swarm: %s\n' "$*" >&2; exit 1; }
 slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
+# log da rodada = linha do tempo completa; cada linha gravada vira também um evento operacional (ADR-04, #124):
+# oute-emit best-effort (timeout curto, sempre 0, sem stdout); sem ele na imagem, só o log
+slog() {
+  printf '%s\n' "$2" >> "$1/log" || true
+  if command -v oute-emit >/dev/null 2>&1; then oute-emit swarm "$(basename "$1")" "$2" >/dev/null 2>&1 || true; fi
+}
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 
 resolve_repo() {
@@ -45,10 +51,12 @@ cmd_start() {
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="swarm-$(date +%m%d-%H%M)"
   mkdir -p "$STATE_ROOT/$id"
-  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\n' "$main" "$max" "$label" "$(date -u +%FT%TZ)" > "$STATE_ROOT/$id/meta"
+  # agent = o da coordenadora (oute.agent dos eventos da rodada)
+  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n' "$main" "$max" "$label" "$(date -u +%FT%TZ)" > "$STATE_ROOT/$id/meta"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
                 -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" "$LIB/swarm.md")"
+  slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label})"
   echo "coordenadora $id · repo $name · max $max${label:+ · label $label}" >&2
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
     exec oute-task -r "$main" "$id" claude "$prompt"
@@ -97,6 +105,7 @@ cmd_spawn() {
   # slug pane agente início aba repo tipo (linhas antigas param na aba: repo = o da rodada)
   printf '%s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \
     "$( (( kaizen )) && echo kaizen || echo -)" >> "$state/spawned"
+  slog "$state" "$(date -u +%FT%TZ) spawn $slug $agent$( (( kaizen )) && echo ' kaizen')"
   echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
@@ -112,7 +121,7 @@ tab_exists() {
 
 # abas fechadas da rodada ficam em $state/closed (spawned é histórico e não muda)
 is_closed() { grep -qsxF -- "$2" "$1/closed"; }
-mark_closed() { is_closed "$1" "$2" || printf '%s\n' "$2" >> "$1/closed"; }
+mark_closed() { is_closed "$1" "$2" || { printf '%s\n' "$2" >> "$1/closed"; slog "$1" "$(date -u +%FT%TZ) close $2"; }; }
 
 # rodada: a da coordenadora (OUTE_SWARM_ID) ou, fora dela, a mais recente
 round_dir() {
@@ -198,8 +207,8 @@ cmd_tell() {
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   read -r slug spane _ _ tab _ <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
-  # a partir daqui toda recusa fica no log da rodada
-  refuse() { printf '%s tell %s recusado: %s\n' "$(date -u +%FT%TZ)" "$slug" "$1" >> "$state/log"; die "$1; ${2:-nada enviado}"; }
+  # a partir daqui toda recusa fica no log da rodada; a mensagem vai depois de um TAB (ela nunca tem TAB)
+  refuse() { slog "$state" "$(date -u +%FT%TZ) tell $slug recusado: ${1//[$'\n\t']/ }"$'\t'"$msg"; die "$1; ${2:-nada enviado}"; }
   ! is_closed "$state" "$slug" || refuse "aba $label já fechada (oute-swarm close)"
   # `pane list` não tem --tab (herdr 0.9.1); cada pane traz tab_id, então filtra no jq
   panes="$(herdr pane list 2>&1)" || refuse "herdr pane list falhou: $panes"
@@ -235,7 +244,7 @@ cmd_tell() {
     got="$(field_text "$pane" "$agent")" || got="(campo de entrada não encontrado na tela)"
     if [[ "$(tr -d '[:space:]' <<<"$got")" == "$(tr -d '[:space:]' <<<"$text")" ]]; then
       herdr pane send-keys "$pane" enter >/dev/null || refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter"
-      printf '%s tell %s ok%s\n' "$(date -u +%FT%TZ)" "$slug" "$( (( force )) && echo " (--force, $st)")" >> "$state/log"
+      slog "$state" "$(date -u +%FT%TZ) tell $slug ok$( (( force )) && echo " (--force, $st)")"$'\t'"$msg"
       echo "enviado a $label ($pane)"
       return 0
     fi
@@ -280,7 +289,9 @@ cmd_close() {
   done < "$state/spawned"
   (( all || found )) || die "$want não é desta rodada ($(basename "$state"))"
   # rodada fechada: o `oute-swarm watch` vê a marca e sai sozinho
-  if (( all && yes && ! failed )); then date -u +%FT%TZ > "$state/fechada"; fi
+  if (( all && yes && ! failed )); then
+    date -u +%FT%TZ > "$state/fechada"; slog "$state" "$(cat "$state/fechada") rodada fechada"
+  fi
   if (( ! pending )); then (( ! all )) || echo "nada a fechar"; return 0; fi
   (( yes )) || echo "(simulação — rode com --yes para fechar)"
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
@@ -298,7 +309,7 @@ declare -A W_PREV=() W_CUR=() W_IID=()
 w_ev() {
   [[ -n "$2" ]] || return 0
   printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"
-  printf '%s watch [%s] %s\n' "$(date -u +%FT%TZ)" "$1" "$2" >> "$W_STATE/log" || true
+  slog "$W_STATE" "$(date -u +%FT%TZ) watch [$1] $2"
 }
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
 w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }

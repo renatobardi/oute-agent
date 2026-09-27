@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""oute-emit — eventos operacionais (ADR-04, adendo #124): um log OTel por fato de rodada ou pedido, só ao bucket.
+
+  oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
+  oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
+  oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
+
+Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"). OTLP/HTTP JSON em
+${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs; origem do OTEL_RESOURCE_ATTRIBUTES, service.name=oute.
+Best-effort: timeout ~2 s, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com OUTE_EMIT_DEBUG=1
+(o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida: o leitor do
+.out para na primeira linha em branco.
+"""
+import json
+import os
+import re
+import signal
+import sys
+import time
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+
+HOME = os.path.expanduser("~")
+SWARM = os.path.join(HOME, ".oute", "swarm")
+EMIT = os.path.join(HOME, ".oute", "emit")
+INBOX = os.environ.get("OUTE_INBOX") or os.path.join(HOME, "inbox")
+OUTBOX = os.environ.get("OUTE_OUTBOX") or os.path.join(HOME, "outbox")
+TIMEOUT = 2.0
+BACKFILL_TIMEOUT = 10.0
+BACKFILL_CHUNK = 200
+ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$")
+ROUND_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def debug(msg):
+    if os.environ.get("OUTE_EMIT_DEBUG") == "1":
+        print(f"oute-emit: {msg}", file=sys.stderr)
+
+
+class Skip(Exception):
+    """linha ou artefato que não dá para interpretar (o backfill conta, o ao vivo ignora)"""
+
+
+# ---------------------------------------------------------------- OTLP
+def ns(ts):
+    """ISO UTC (2026-09-27T15:08:33Z) -> nanossegundos; None = agora"""
+    if ts is None:
+        return time.time_ns()
+    if not TS_RE.match(ts):
+        raise Skip(f"hora inválida: {ts}")
+    return int(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()) * 10**9
+
+
+def anyvalue(v):
+    if isinstance(v, bool):
+        return {"boolValue": v}
+    if isinstance(v, int):
+        return {"intValue": str(v)}
+    return {"stringValue": str(v)}
+
+
+def kvs(d):
+    return [{"key": k, "value": anyvalue(v)} for k, v in d.items() if v is not None and v != ""]
+
+
+def resource(agent):
+    attrs = {}
+    for part in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
+        k, sep, v = part.partition("=")
+        if sep and k.strip():
+            attrs[urllib.parse.unquote(k.strip())] = urllib.parse.unquote(v.strip())
+    attrs["service.name"] = "oute"
+    attrs["oute.agent"] = agent
+    return attrs
+
+
+def event(name, agent, ts, attrs, body=None):
+    """um evento = (agente, registro de log OTLP)"""
+    attrs = {"event.name": name, "oute.agent": agent, **attrs}
+    rec = {
+        "timeUnixNano": str(ns(ts)),
+        "observedTimeUnixNano": str(time.time_ns()),
+        "severityNumber": 9,
+        "severityText": "INFO",
+        "eventName": name,
+        "attributes": kvs(attrs),
+    }
+    if body is not None:
+        rec["body"] = {"stringValue": body}
+    return agent, rec
+
+
+def endpoint():
+    ep = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if ep:
+        return ep
+    base = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    return base.rstrip("/") + "/v1/logs" if base else None
+
+
+def _alarm(*_):
+    raise TimeoutError("timeout")
+
+
+def post(events, timeout=TIMEOUT):
+    """manda os eventos num POST (um resourceLogs por agente). True = aceito"""
+    ep = endpoint()
+    if not events:
+        return True
+    if not ep:
+        debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
+        return False
+    by_agent = {}
+    for agent, rec in events:
+        by_agent.setdefault(agent, []).append(rec)
+    payload = {"resourceLogs": [
+        {"resource": {"attributes": kvs(resource(a))},
+         "scopeLogs": [{"scope": {"name": "oute-emit"}, "logRecords": recs}]}
+        for a, recs in by_agent.items()]}
+    req = urllib.request.Request(ep, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    # teto de verdade: o timeout do urllib vale por operação de socket, não para o POST inteiro
+    signal.signal(signal.SIGALRM, _alarm)
+    signal.setitimer(signal.ITIMER_REAL, timeout)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            ok = 200 <= r.status < 300
+            if not ok:
+                debug(f"{ep}: HTTP {r.status}")
+            return ok
+    except Exception as e:  # noqa: BLE001 — best-effort: nada derruba o chamador
+        debug(f"{ep}: {e}")
+        return False
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+
+
+# ---------------------------------------------------------------- canal
+def header(path):
+    """cabeçalho '# chave: valor' até a primeira linha em branco (o resto do arquivo nunca é lido)"""
+    h = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip():
+                break
+            m = re.match(r"^# ([a-z0-9]+): ?(.*)$", line)
+            if m:
+                h.setdefault(m.group(1), m.group(2))
+    return h
+
+
+def script_body(path):
+    """o script do pedido, sem o cabeçalho do oute-propose"""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    head, sep, rest = text.partition("\n\n")
+    return rest if sep and head.startswith("# oute-propose") else text
+
+
+def proposed_file(pid):
+    for d in ("", "done", "rejected"):
+        p = os.path.join(OUTBOX, d, pid + ".sh")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def canal_proposed(pid, path):
+    h = header(path)
+    agent = h.get("agente", "") or "unknown"
+    if agent == "desconhecido":
+        agent = "unknown"
+    body = script_body(path)
+    return event("oute.canal.proposed", agent, h.get("criado"), {
+        "oute.canal.id": pid,
+        "oute.canal.title": h.get("titulo"),
+        "oute.canal.as": "root" if h.get("como") == "root" else "user",
+        "oute.canal.size": len(body.encode()),
+    }, body)
+
+
+def canal_decided(pid, path):
+    h = header(path)
+    if "recusado" in h:
+        decision, when = "recusado", h["recusado"]
+    elif "aprovado" in h:
+        decision, when = "executado", h["aprovado"]
+    else:
+        raise Skip(f"{pid}.out sem aprovado/recusado")
+    ts, _, who = when.partition(" por ")
+    num = lambda v: int(v) if v and re.fullmatch(r"-?\d+", v) else None  # noqa: E731
+    return event("oute.canal.decided", "human", ts.strip(), {
+        "oute.canal.id": pid,
+        "oute.canal.decision": decision,
+        "oute.canal.rc": num(h.get("rc")),
+        "oute.canal.duration_s": num(h.get("duracao", "").split(" ")[0]),
+        "oute.canal.output_bytes": num(h.get("saida", "").split(" ")[0]),
+        "oute.canal.approver": who.strip(),
+        "oute.canal.sha256": h.get("sha256"),
+    })  # nunca leva corpo: a saída do host não sai daqui
+
+
+def cmd_canal(pid):
+    if not ID_RE.match(pid):
+        raise Skip(f"id inválido: {pid}")
+    out = os.path.join(INBOX, pid + ".out")
+    if os.path.isfile(out):
+        return [canal_decided(pid, out)]
+    src = proposed_file(pid)
+    if src:
+        return [canal_proposed(pid, src)]
+    raise Skip(f"pedido {pid} não encontrado")
+
+
+# ---------------------------------------------------------------- swarm
+def meta(rdir):
+    m = {}
+    try:
+        with open(os.path.join(rdir, "meta"), encoding="utf-8") as f:
+            for line in f:
+                k, sep, v = line.rstrip("\n").partition("=")
+                if sep:
+                    m[k] = v
+    except OSError:
+        pass
+    return m
+
+
+def spawned(rdir, slug):
+    """campos da última linha do spawned da sessão: slug pane agente início aba repo tipo"""
+    found = None
+    try:
+        with open(os.path.join(rdir, "spawned"), encoding="utf-8") as f:
+            for line in f:
+                p = line.split()
+                if p and p[0] == slug:
+                    found = p
+    except OSError:
+        pass
+    return found
+
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def swarm_event(rnd, line):
+    """linha do log da rodada -> evento (o mesmo parser do ao vivo e do backfill)"""
+    rdir = os.path.join(SWARM, rnd)
+    m = meta(rdir)
+    agent = m.get("agent") or "claude"
+    base = {"oute.swarm.round": rnd}
+    line = line.rstrip("\n")
+    text = None
+    if "\t" in line:  # tell: o texto repassado vem depois de um TAB (a mensagem nunca tem TAB)
+        line, text = line.split("\t", 1)
+    parts = line.split(" ", 2)
+    if len(parts) < 2 or not TS_RE.match(parts[0]):
+        raise Skip("linha sem hora")
+    ts, kind, rest = parts[0], parts[1], (parts[2] if len(parts) > 2 else "")
+    if kind == "abertura":
+        repo = m.get("repo", "")
+        return event("oute.swarm.round.opened", agent, ts, {
+            **base, "oute.swarm.repo": os.path.basename(repo) if repo else None,
+            "oute.swarm.max": int(m["max"]) if m.get("max", "").isdigit() else None,
+            "oute.swarm.label": m.get("label")})
+    if kind == "spawn":
+        slug = rest.split(" ", 1)[0]
+        p = spawned(rdir, slug)
+        if not slug or not p:
+            raise Skip(f"spawn de {slug or '?'} sem linha no spawned")
+        repo = p[5] if len(p) > 5 else m.get("repo", "")
+        return event("oute.swarm.session.spawned", agent, ts, {
+            **base, "oute.swarm.session": slug, "oute.swarm.issue": int(slug.split("-", 1)[0]),
+            "oute.swarm.session.agent": p[2] if len(p) > 2 else None,
+            "oute.swarm.repo": os.path.basename(repo) if repo else None,
+            "oute.swarm.kaizen": len(p) > 6 and p[6] == "kaizen"},
+            read_text(os.path.join(rdir, slug + ".prompt")))
+    if kind == "tell":
+        slug, _, res = rest.partition(" ")
+        if res.startswith("ok"):
+            result, reason = "ok", None
+        elif res.startswith("recusado:"):
+            result, reason = "recusado", res[len("recusado:"):].strip()
+        else:
+            raise Skip(f"tell sem resultado: {line}")
+        return event("oute.swarm.tell", agent, ts, {
+            **base, "oute.swarm.session": slug, "oute.swarm.tell.result": result,
+            "oute.swarm.tell.reason": reason, "oute.swarm.tell.forced": "--force" in res}, text)
+    if kind == "watch":
+        mt = re.match(r"^\[([a-z]+)\] (.*)$", rest)
+        if not mt:
+            raise Skip(f"watch sem tipo: {line}")
+        return event(f"oute.swarm.watch.{mt.group(1)}", agent, ts,
+                     {**base, "oute.swarm.source": "watch"}, rest)
+    if kind == "close" and rest:
+        return event("oute.swarm.session.closed", agent, ts, {**base, "oute.swarm.session": rest.split(" ", 1)[0]})
+    if kind == "rodada" and rest.startswith("fechada"):
+        return event("oute.swarm.round.closed", agent, ts, base)
+    raise Skip(f"tipo de linha desconhecido: {kind}")
+
+
+def cmd_swarm(rnd, line):
+    if not ROUND_RE.match(rnd):
+        raise Skip(f"rodada inválida: {rnd}")
+    return [swarm_event(rnd, line)]
+
+
+# ---------------------------------------------------------------- backfill
+def round_lines(rnd):
+    """linha do tempo da rodada: o log + o que as rodadas antigas só guardavam fora dele (meta, spawned,
+    fechada), reescrito no formato do log para passar pelo mesmo parser. Vale item a item: numa rodada que
+    atravessa o corte, o que já tem linha no log não é repetido. close sem hora (closed antigo) = pulado."""
+    rdir = os.path.join(SWARM, rnd)
+    log = (read_text(os.path.join(rdir, "log")) or "").splitlines()
+    seen = {tuple(ln.split("\t", 1)[0].split(" ")[1:3]) for ln in log}
+    kinds = {k[0] for k in seen if k}
+    lines = []
+    m = meta(rdir)
+    if "abertura" not in kinds and m.get("started"):
+        lines.append(f"{m['started']} abertura {rnd}")
+    for sl in (read_text(os.path.join(rdir, "spawned")) or "").splitlines():
+        p = sl.split()
+        if len(p) >= 4 and ("spawn", p[0]) not in seen:
+            lines.append(f"{p[3]} spawn {p[0]}")
+    lines += log
+    untimed = len({s for s in (read_text(os.path.join(rdir, "closed")) or "").split() if ("close", s) not in seen})
+    fechada = (read_text(os.path.join(rdir, "fechada")) or "").strip()
+    if fechada and "rodada" not in kinds:
+        lines.append(f"{fechada} rodada fechada")
+    return lines, untimed
+
+
+def cmd_backfill():
+    os.makedirs(EMIT, exist_ok=True)
+    done = os.path.join(EMIT, "backfill.done")
+    if os.path.exists(done):
+        print("oute-emit backfill: já feito neste host (~/.oute/emit/backfill.done); nada a emitir", file=sys.stderr)
+        return []
+    since_f = os.path.join(EMIT, "since")
+    since = (read_text(since_f) or "").strip()
+    if not TS_RE.match(since):  # sem corte (entrypoint antigo): o corte é agora
+        since = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(since_f, "w") as f:
+            f.write(since + "\n")
+    cut = ns(since)
+    events, skipped, untimed = [], 0, 0
+    rounds = sorted(d for d in os.listdir(SWARM) if ROUND_RE.match(d)) if os.path.isdir(SWARM) else []
+    for rnd in rounds:
+        lines, u = round_lines(rnd)
+        untimed += u
+        for ln in lines:
+            if not ln.strip():
+                continue
+            try:
+                ev = swarm_event(rnd, ln)
+            except Skip as e:
+                debug(f"{rnd}: {e}")
+                skipped += 1
+                continue
+            if int(ev[1]["timeUnixNano"]) < cut:
+                events.append(ev)
+    pids = set()
+    for d in ("", "done", "rejected"):
+        try:
+            pids |= {f[:-3] for f in os.listdir(os.path.join(OUTBOX, d)) if f.endswith(".sh")}
+        except OSError:
+            pass
+    try:
+        outs = {f[:-4] for f in os.listdir(INBOX) if f.endswith(".out")}
+    except OSError:
+        outs = set()
+    for pid in sorted(pids | outs):
+        if not ID_RE.match(pid):
+            skipped += 1
+            continue
+        todo = []
+        if pid in pids:
+            todo.append(lambda p=pid: canal_proposed(p, proposed_file(p)))
+        if pid in outs:
+            todo.append(lambda p=pid: canal_decided(p, os.path.join(INBOX, p + ".out")))
+        for mk in todo:
+            try:
+                ev = mk()
+            except (Skip, OSError) as e:
+                debug(f"{pid}: {e}")
+                skipped += 1
+                continue
+            if int(ev[1]["timeUnixNano"]) < cut:
+                events.append(ev)
+    for _, rec in events:
+        rec["attributes"].append({"key": "oute.backfill", "value": {"boolValue": True}})
+    # retomada: a ordem é determinística; backfill.sent guarda quantos já foram aceitos (sem duplicar)
+    sent_f = os.path.join(EMIT, "backfill.sent")
+    sent = int((read_text(sent_f) or "0").strip() or 0)
+    failed = False
+    for i in range(sent, len(events), BACKFILL_CHUNK):
+        if not post(events[i:i + BACKFILL_CHUNK], BACKFILL_TIMEOUT):
+            failed = True
+            break
+        sent = min(i + BACKFILL_CHUNK, len(events))
+        with open(sent_f, "w") as f:
+            f.write(f"{sent}\n")
+    ep = endpoint() or "(OTEL_EXPORTER_OTLP_ENDPOINT vazio)"
+    summary = (f"oute-emit backfill: corte {since}; {sent} de {len(events)} evento(s) emitido(s) "
+               f"({len(rounds)} rodada(s)); pulados: {skipped} linha(s) não reconhecida(s), "
+               f"{untimed} close(s) sem hora")
+    if failed or (events and not endpoint()):
+        print(f"{summary}\noute-emit backfill: falhou ao mandar a {ep}; rode de novo (retoma de onde parou)",
+              file=sys.stderr)
+        return []
+    with open(done, "w") as f:
+        f.write(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + f" {sent}\n")
+    print(summary, file=sys.stderr)
+    return []
+
+
+def main(argv):
+    verb = argv[0] if argv else ""
+    if verb in ("-h", "--help", ""):
+        print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
+        return
+    if verb == "canal" and len(argv) == 2:
+        post(cmd_canal(argv[1]))
+    elif verb == "swarm" and len(argv) == 3:
+        post(cmd_swarm(argv[1], argv[2]))
+    elif verb == "backfill" and len(argv) == 1:
+        cmd_backfill()
+    else:
+        debug(f"uso inválido: {' '.join(argv)}")
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout = open(os.devnull, "w")  # nunca escreve no stdout
+        main(sys.argv[1:])
+    except Exception as e:  # noqa: BLE001 — sempre rc 0
+        debug(str(e))
+    sys.exit(0)

@@ -165,6 +165,11 @@ if new != text:
 PY
   done
 
+  # eventos operacionais (ADR-04, #124): corte do backfill = a primeira subida de uma imagem com oute-emit.
+  # O que é anterior sai uma vez pelo `oute-emit backfill`; o que vem depois sai ao vivo. Gravado uma vez só.
+  mkdir -p "$HOME/.oute/emit"
+  [[ -s "$HOME/.oute/emit/since" ]] || date -u +%FT%TZ > "$HOME/.oute/emit/since"
+
   # o ai-memory deixa um .bak-<ts> a cada --apply: fica o MAIS ANTIGO (original, única cópia do que
   # havia antes de qualquer edição automática) + os 2 mais recentes (atual + anterior, #12)
   local base; for base in "$HOME/.codex/config.toml" "$HOME/.codex/hooks.json"; do
