@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.25] - 2026-09-27
+
 ### Added
 - **Skills de engenharia do Matt Pocock como `oute-aidlc-*`** (#105, ADR-06 adendo). Fork sem procedência, só no container: `strat-research`, `strat-wayfinder`, `intent-grilling`, `intent-grill`, `spec-issue`, `arch-grill`, `arch-deepen`, `design-modules`, `design-prototype`, `plan-refactor`, `plan-triage`, `plan-tickets`, `build-implement`, `build-tdd`, `build-conflicts`, `ops-diagnose`, `learn-feedback`, `ctx-domain`, `ctx-setup`, a utilitária `oute-skill-writing` e o roteador novo `oute-aidlc-ctx-router` (mapa das 12 fases). Referências entre skills renomeadas; `build-implement` faz autorrevisão (Spec + Standards) no lugar do `code-review`; handoff só pelo ai-memory; plano B sem subagente (Pi). `AGENTS.md` (Fluxo AI-DLC) e `docs/agents/` com os nomes novos. Sem release (addons entram com `git pull` + `oute down/up`).
 - **AI-DLC (ADR-07).** Todo trabalho segue 12 fases, com abreviações `strat` `intent` `spec` `arch` `design` `plan` `build` `qa` `ship` `ops` `learn` `iter` e a faixa transversal `ctx`; cada fase tem contribuição da IA, gate humano (Bardi) e outcome. Skill de fluxo = `oute-aidlc-<fase>-<id>` (ADR-06, adendo), abrindo com a linha `Fase · Outcome · Gate`. `AGENTS.md` ganha a seção "Fluxo AI-DLC" (primitivos e skills por fase) e o `CONTEXT.md`, os termos AI-DLC, fase, gate humano e outcome. Template de issue `.github/ISSUE_TEMPLATE/aidlc.md` (Intenção, Contexto, Critérios de aceite, Fora de escopo) e labels `aidlc:<fase>`.
