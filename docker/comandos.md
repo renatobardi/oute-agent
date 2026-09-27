@@ -63,7 +63,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 ## CONTAINER — rodada paralela (oute-swarm)
   oute-swarm <repo> [--max N] [--label L]
       abre a coordenadora: tria issues → ESPERA SEU OK → abre uma aba por issue →
-      acompanha PRs/CI/pedidos → fecha com clean + cancela handoffs órfãos.
+      acompanha PRs/CI/pedidos → retrospectiva kaizen (lições numeradas; você escolhe:
+      `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       Default --max 3 (teto 5). Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force] [--repo R] [--kaizen]
       (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max.
