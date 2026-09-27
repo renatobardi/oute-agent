@@ -418,7 +418,7 @@ Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `
 
   O nome do branch vem do autor do PR (passo 1) e pode conter `$`, `(`, `` ` `` ou `;`: leia-o para uma variável, valide e use sempre `"$HEAD_REF"` entre aspas, nunca colado no texto do comando.
 
-  PR de fork: só com `maintainerCanModify` verdadeiro, empurrando para o repo do fork; sem isso, devolva ao autor.
+  PR de fork (`isCrossRepository` verdadeiro): nenhum push para o fork, nem com `maintainerCanModify`. Todo ajuste volta ao autor, e a fase espera o push novo.
 - **Conflito com a base:** traga a base para o branch com **merge**, nunca rebase: `gh pr update-branch <N>` (sem `--rebase`) quando não há conflito textual; com conflito, `git merge origin/<base>` na worktree, resolva e faça o commit de merge. Resolva só as linhas do conflito; nas linhas alheias (`CHANGELOG.md` de outro PR, por exemplo), fica o que está na base, e a linha deste PR entra junto, sem apagar nem reescrever as outras.
 - **Push recusado** (non-fast-forward): o autor empurrou algo durante o ajuste. Não force: pare, busque o head novo e volte ao passo 2.
 - **Branch de sessão ativa do swarm** (worker com a aba aberta): o branch é da sessão (`swarm.md`, repasse do ajuste). Você não faz commit, push, merge da base nem edição no branch dela nem no PR, inclusive no corpo. O ajuste mínimo volta ao worker: a coordenadora repassa com `oute-swarm tell <sessão> "<ajuste, numa linha>"`, e a fase espera o push novo e segue do item 3 com o head novo. Commit próprio no branch e edição do corpo do PR só fora do swarm (PR sem sessão ativa).
