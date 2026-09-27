@@ -376,7 +376,7 @@ w_diff() {
           num="${t#pr|}"; num="${num%%|*}"; pr="${pr:+$pr, }PR #$num ${W_CUR[$t],,}"
         done
         case "$new" in
-          idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new${pr:+ ($pr)}${pr:- (sem PR)}" ;;
+          idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new (${pr:-sem PR})" ;;
           working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)"; fi ;;
           none) if [[ "$old" =~ ^(working|idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): sem agente na aba (o agente saiu?)"; fi ;;
         esac ;;
