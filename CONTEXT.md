@@ -41,6 +41,8 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **persona:** addon com prompt de papel (revisor, arquiteto…), instalado como subagente onde a ferramenta suporta. "agente" continua sendo Claude, Codex ou Pi.
 - **script:** addon determinístico, sem LLM; o agente ou o humano o chama e o resultado é sempre o mesmo.
 - **worker:** só a sessão do swarm por issue (uma aba do herdr). Não usar para scripts.
+- **lição (kaizen):** fato de uma rodada do swarm (travamento, retrabalho) que vira regra escrita. A coordenadora propõe; só vira regra com aprovação do Bardi.
+- **nível da lição:** onde a regra vale. `repo` (AGENTS.md do repo alvo), `swarm` (prompts da coordenadora/worker), `agentes` (notas globais do container), `skill` (addon `oute-*`). Se valeria num repo diferente, não é `repo`.
 - **plugin:** só no sentido nativo de cada ferramenta (plugin do Claude Code, plugin herdr). Um plugin herdr é um tipo de addon.
 
 ## Backlog
