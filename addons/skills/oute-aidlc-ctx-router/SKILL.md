@@ -14,7 +14,7 @@ Você não lembra de todas as skills; pergunte aqui. Cada fase termina num **gat
 
 | Fase | Quando | Skill / primitivo |
 |---|---|---|
-| `strat` | tema novo, pergunta de viabilidade, esforço grande e nebuloso | `oute-aidlc-strat-research` (leitura de fontes primárias), `oute-aidlc-strat-wayfinder` (mapa de decisões para o que não cabe numa sessão) |
+| `strat` | tema novo, pergunta de viabilidade, esforço grande e nebuloso | `oute-aidlc-strat-opportunity` (tema → oportunidade/viabilidade → issue com a Intenção), `oute-aidlc-strat-research` (leitura de fontes primárias), `oute-aidlc-strat-wayfinder` (mapa de decisões para o que não cabe numa sessão) |
 | `intent` | afiar um plano ou ideia | `oute-aidlc-intent-grill` (sem codebase); `oute-aidlc-intent-grilling` é a base |
 | `spec` | a conversa já tem o que construir | `oute-aidlc-spec-issue` → issue pelo template `aidlc` |
 | `arch` | ideia que toca o codebase ou decisão difícil de desfazer | `oute-aidlc-arch-grill` (grava ADR e `CONTEXT.md`), `oute-aidlc-arch-deepen` (manutenção: onde aprofundar módulos) |
