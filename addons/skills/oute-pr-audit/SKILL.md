@@ -408,11 +408,15 @@ Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `
   ```bash
   git fetch --no-tags origin "pull/<N>/head"
   git rev-parse FETCH_HEAD                  # tem que ser o head auditado; se não, volte ao passo 2
+  HEAD_REF=$(gh pr view <N> --json headRefName --jq .headRefName)   # dado do autor: nunca interpole no comando
+  git check-ref-format --branch "$HEAD_REF" >/dev/null || { echo "headRefName inválido"; exit 1; }
   AUD=$(mktemp -d)
   git worktree add --detach "$AUD/fix" "$HEAD_SHA"
   # ... edite e faça um commit por ajuste em "$AUD/fix" ...
-  git -C "$AUD/fix" push origin "HEAD:refs/heads/<headRefName>"   # fast-forward; sem --force
+  git -C "$AUD/fix" push origin "HEAD:refs/heads/$HEAD_REF"   # fast-forward; sem --force
   ```
+
+  O nome do branch vem do autor do PR (passo 1) e pode conter `$`, `(`, `` ` `` ou `;`: leia-o para uma variável, valide e use sempre `"$HEAD_REF"` entre aspas, nunca colado no texto do comando.
 
   PR de fork: só com `maintainerCanModify` verdadeiro, empurrando para o repo do fork; sem isso, devolva ao autor.
 - **Conflito com a base:** traga a base para o branch com **merge**, nunca rebase: `gh pr update-branch <N>` (sem `--rebase`) quando não há conflito textual; com conflito, `git merge origin/<base>` na worktree, resolva e faça o commit de merge. Resolva só as linhas do conflito; nas linhas alheias (`CHANGELOG.md` de outro PR, por exemplo), fica o que está na base, e a linha deste PR entra junto, sem apagar nem reescrever as outras.
