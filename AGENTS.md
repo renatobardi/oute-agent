@@ -40,7 +40,7 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 | `plan` | `oute-swarm` §1 (triagem + ok do Bardi), `oute-aidlc-plan-tickets`, `oute-aidlc-plan-triage`, `oute-aidlc-plan-refactor` |
 | `build` | `oute-task`, worker do swarm, `oute-aidlc-build-implement`, `oute-aidlc-build-tdd`, `oute-aidlc-build-conflicts` |
 | `qa` | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`), `tests/`, CI `pr` |
-| `ship` | `scripts/release` (Bardi) + deploy nos hosts (Bardi) |
+| `ship` | `oute-aidlc-ship-release` (checklist antes da release), `scripts/release` + deploy nos hosts (Bardi), `oute-aidlc-ship-verify` (pós-deploy pelo canal de aprovação) |
 | `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação, `oute-aidlc-ops-observe`, `oute-aidlc-ops-diagnose` |
 | `learn` | `oute-swarm` §4.1 (kaizen), `oute-aidlc-learn-feedback` |
 | `iter` | issues de fim de sessão |

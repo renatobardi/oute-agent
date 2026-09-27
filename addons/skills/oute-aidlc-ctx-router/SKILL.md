@@ -22,7 +22,7 @@ Você não lembra de todas as skills; pergunte aqui. Cada fase termina num **gat
 | `plan` | quebrar spec em trabalho, issues que chegaram cruas, refactor | `oute-aidlc-plan-tickets`, `oute-aidlc-plan-triage` (só issues que você não criou), `oute-aidlc-plan-refactor`; em lote: `oute-swarm` §1 |
 | `build` | implementar uma issue | `oute-task` (worktree), `oute-aidlc-build-implement` (usa `oute-aidlc-build-tdd`), `oute-aidlc-build-conflicts` |
 | `qa` | PR aberto, antes do merge | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`; esta também roda sozinha sobre um diff); merge só com pedido do Bardi |
-| `ship` | release e deploy | do Bardi: `scripts/release` + deploy nos hosts; agente só prepara e confere pelo canal de aprovação |
+| `ship` | release e deploy | `oute-aidlc-ship-release` (checklist: precisa de release, CHANGELOG, versão) → Bardi roda `scripts/release` e faz o deploy → `oute-aidlc-ship-verify` (versão, serviços e telemetria em cada host, pelo canal de aprovação) |
 | `ops` | algo quebrado, lento ou intermitente; saúde, custo e telemetria dos agentes | `oute-aidlc-ops-diagnose`; `oute-aidlc-ops-observe` (lê a telemetria do ADR-04) |
 | `learn` | relatos de problema, fim de rodada | `oute-aidlc-learn-feedback` (relato → issues), `oute-swarm` §4.1 (kaizen) |
 | `iter` | fim de sessão | o que ficou pendente vira issue com `aidlc:<fase>` |
