@@ -65,8 +65,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       abre a coordenadora: tria issues → ESPERA SEU OK → abre uma aba por issue →
       acompanha PRs/CI/pedidos → fecha com clean + cancela handoffs órfãos.
       Default --max 3 (teto 5). Merge só quando você pedir.
-  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force]
-      (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max
+  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force] [--repo R] [--kaizen]
+      (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max.
+      --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (a coordenadora usa quando você decide).
                                     Só com a sessão parada (idle/done/blocked); confere o campo antes do Enter
@@ -75,7 +76,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm watch [--interval s] [--round ID]
                                     (monitor da coordenadora) uma linha por mudança real: sessão, aba, PR, CI,
-                                    conflito, pedido pendente/rc≠0 no canal; retoma do último estado; sai no close --all
+                                    conflito, pedido pendente/rc≠0 no canal; retoma do último estado; sai no close --all.
+                                    Grava no log da rodada; PR/issue de outro repo aparecem como <repo>#n
   oute-swarm list                   abas abertas por rodada + worktrees
   Fim de cada sessão: `PRONTO #n: <url do PR>` ou `BLOQUEADO #n: <pergunta>`.
 

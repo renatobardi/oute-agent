@@ -3,7 +3,8 @@
 #
 #   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
-#              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue
+#              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue. --repo: outro repo
+#              [--repo <repo>] [--kaizen]           (padrão: o da rodada); --kaizen: sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
@@ -54,11 +55,13 @@ cmd_start() {
 }
 
 cmd_spawn() {
-  local agent=claude force=0 task="" instr="" main slug n state pane tab out cmd pfile count
+  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out cmd pfile count
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
       --force) force=1; shift ;;
+      --repo) repo="${2:?}"; shift 2 ;;
+      --kaizen) kaizen=1; shift ;;
       -*) die "opção desconhecida: $1" ;;
       *) if [[ -z "$task" ]]; then task="$1"; elif [[ -z "$instr" ]]; then instr="$1"; else die "argumento a mais: $1"; fi; shift ;;
     esac
@@ -68,11 +71,14 @@ cmd_spawn() {
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
   n="${slug%%-*}"
-  main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"
+  if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
+  else main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"; fi
+  [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
   state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
-  count="$(wc -l < "$state/spawned")"
-  if (( ! force )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
+  # sessão kaizen (7º campo) não conta no limite
+  count="$(awk '$7 != "kaizen"' "$state/spawned" | wc -l)"
+  if (( ! force && ! kaizen )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
     die "limite da rodada atingido ($count/$OUTE_SWARM_MAX); peça ao Bardi para liberar e use --force"
   fi
   pfile="$state/$slug.prompt"
@@ -88,8 +94,10 @@ cmd_spawn() {
   [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
   printf -v cmd 'OUTE_SWARM_WORKER=1 oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
-  printf '%s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" >> "$state/spawned"
-  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent"
+  # slug pane agente início aba repo tipo (linhas antigas param na aba: repo = o da rodada)
+  printf '%s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \
+    "$( (( kaizen )) && echo kaizen || echo -)" >> "$state/spawned"
+  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
 # id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)
@@ -188,7 +196,7 @@ cmd_tell() {
   [[ -n "$msg" ]] || die "mensagem vazia"
   state="$(round_dir)"
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
-  read -r slug spane _ _ tab <<<"$line"
+  read -r slug spane _ _ tab _ <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
   # a partir daqui toda recusa fica no log da rodada
   refuse() { printf '%s tell %s recusado: %s\n' "$(date -u +%FT%TZ)" "$slug" "$1" >> "$state/log"; die "$1; ${2:-nada enviado}"; }
@@ -250,7 +258,7 @@ cmd_close() {
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
   state="$(round_dir)"
   echo "rodada $(basename "$state")"
-  while read -r slug pane agent ts tab; do
+  while read -r slug pane agent ts tab _; do
     [[ -n "$slug" ]] || continue
     (( all )) || [[ "$slug" == "$want" ]] || continue
     found=1
@@ -284,7 +292,7 @@ cmd_close() {
 # e um watch reiniciado (monitor expirou) compara com o último retrato, sem perder o que mudou no intervalo.
 # Falha de herdr/gh numa passada não vira evento: o estado anterior daquela fonte é mantido (e sai um aviso só).
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
-declare -A W_PREV=() W_CUR=()
+declare -A W_PREV=() W_CUR=() W_IID=()
 
 # evento: no stdout (monitor da coordenadora) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
 w_ev() {
@@ -294,15 +302,20 @@ w_ev() {
 }
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
 w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }
+# PR/issue de outro repo que o da rodada vêm como <repo>#<n> (sem colisão de número); os da rodada, só <n>
+w_pfx() { [[ "$1" == "$2" ]] || printf '%s#' "$(basename "$1")"; }
+w_ref() { if [[ "$1" == *"#"* ]]; then printf '%s' "$1"; else printf '#%s' "$1"; fi; }
 w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
 
 w_snapshot() {
-  local state="$1" main="$2" since="$3" slug _p _a _ts tab label tabs line kind num n st mg url name res ns f id rc
-  W_CUR=()
+  local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
+  local gh_ok=1
+  W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
   if tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs"; then
-    while read -r slug _p _a _ts tab; do
+    while read -r slug _p _a _ts tab repo _; do
       [[ -n "$slug" ]] || continue
+      W_IID[$slug]="$(w_pfx "${repo:-$main}" "$main")${slug%%-*}"
       if is_closed "$state" "$slug"; then W_CUR["tab|$slug"]=closed; continue; fi
       label="$(w_label "$slug")"
       # a aba pelo id gravado no spawn (se ainda tem o label) ou pelo label (ids mudam no restore do herdr)
@@ -316,11 +329,15 @@ w_snapshot() {
   else
     w_keep "tab|"; w_keep "agent|"; W_CUR["falha|herdr"]=1
   fi
-  # PRs da rodada: criados depois do início, branch <tipo>/<n>-… (ou sessao/<n>-…) de uma issue aberta nela
-  ns="$(awk '{split($1, a, "-"); print a[1]}' "$state/spawned" 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != ""))')" || ns="[]"
-  if [[ "$ns" != "[]" && -n "$ns" ]]; then
-    if res="$(cd "$main" && gh pr list --state all --limit 100 --json number,headRefName,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
-       && res="$(jq -r --arg since "$since" --argjson ns "$ns" '
+  # PRs da rodada: criados depois do início, branch <tipo>/<n>-… (ou sessao/<n>-…) de uma issue aberta nela, em cada
+  # repo das sessões (6º campo do spawned; sem ele, o da rodada). Um repo que falha mantém o estado anterior de todos.
+  all=""
+  while read -r repo; do
+    [[ -n "$repo" ]] || continue
+    ns="$(awk -v m="$main" -v r="$repo" '($6 == "" ? m : $6) == r {split($1, a, "-"); print a[1]}' "$state/spawned" \
+          | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
+    if res="$(cd "$repo" && gh pr list --state all --limit 100 --json number,headRefName,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
+       && res="$(jq -r --arg since "$since" --argjson ns "$ns" --arg pf "$(w_pfx "$repo" "$main")" '
           def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
                  | if test("^(SUCCESS|NEUTRAL|SKIPPED)$") then "pass"
                    elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail"
@@ -328,25 +345,30 @@ w_snapshot() {
           .[] | select((.createdAt // "") >= $since) | . as $p
           | ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) as $n
           | select(any($ns[]; . == $n))
-          | "pr\t\($p.number)\t\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)",
+          | "pr\t\($pf)\($p.number)\t\($pf)\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)",
             ([$p.statusCheckRollup[]? | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")),
                                            t: (.completedAt // .startedAt // ""), r: r}]
-             | group_by(.name)[] | max_by(.t) | "ci\t\($p.number)\t\(.name)\t\(.r)")' <<<"$res" 2>/dev/null)"; then
-      while IFS=$'\t' read -r kind num n st mg url; do
-        case "$kind" in
-          pr)
-            W_CUR["pr|$num|$n"]="$st"; W_CUR["url|$num"]="$url"
-            case "$mg" in
-              CONFLICTING) W_CUR["merge|$num"]=conflict ;;
-              MERGEABLE) W_CUR["merge|$num"]=ok ;;
-              *) [[ -z "${W_PREV[merge|$num]:-}" ]] || W_CUR["merge|$num"]="${W_PREV[merge|$num]}" ;;   # UNKNOWN: recalculando
-            esac ;;
-          ci) name="$n"; W_CUR["ci|$num|$name"]="$st" ;;
-        esac
-      done <<<"$res"
+             | group_by(.name)[] | max_by(.t) | "ci\t\($pf)\($p.number)\t\(.name)\t\(.r)")' <<<"$res" 2>/dev/null)"; then
+      all+="${res:+$res$'\n'}"
     else
-      w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; W_CUR["falha|gh"]=1
+      gh_ok=0; break
     fi
+  done < <(awk -v m="$main" '{print ($6 == "" ? m : $6)}' "$state/spawned" 2>/dev/null | sort -u)
+  if (( gh_ok )); then
+    while IFS=$'\t' read -r kind num n st mg url; do
+      case "$kind" in
+        pr)
+          W_CUR["pr|$num|$n"]="$st"; W_CUR["url|$num"]="$url"
+          case "$mg" in
+            CONFLICTING) W_CUR["merge|$num"]=conflict ;;
+            MERGEABLE) W_CUR["merge|$num"]=ok ;;
+            *) [[ -z "${W_PREV[merge|$num]:-}" ]] || W_CUR["merge|$num"]="${W_PREV[merge|$num]}" ;;   # UNKNOWN: recalculando
+          esac ;;
+        ci) name="$n"; W_CUR["ci|$num|$name"]="$st" ;;
+      esac
+    done <<<"$all"
+  else
+    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; W_CUR["falha|gh"]=1
   fi
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do
@@ -377,8 +399,8 @@ w_diff() {
         [[ -n "$new" ]] || continue   # aba fechada: a sessão sai junto (o evento é o da aba)
         slug="$a" pr=""
         for t in "${!W_CUR[@]}"; do
-          [[ "$t" == "pr|"*"|${slug%%-*}" ]] || continue
-          num="${t#pr|}"; num="${num%%|*}"; pr="${pr:+$pr, }PR #$num ${W_CUR[$t],,}"
+          [[ "$t" == "pr|"*"|${W_IID[$slug]:-${slug%%-*}}" ]] || continue
+          num="${t#pr|}"; num="${num%%|*}"; pr="${pr:+$pr, }PR $(w_ref "$num") ${W_CUR[$t],,}"
         done
         case "$new" in
           idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new (${pr:-sem PR})" ;;
@@ -388,18 +410,18 @@ w_diff() {
       pr)
         [[ -n "$new" ]] || continue
         case "$new" in
-          OPEN) w_ev pr "PR #$a aberto (issue #$b) ${W_CUR[url|$a]:-}" ;;
-          MERGED) w_ev pr "PR #$a mergeado (issue #$b)" ;;
-          CLOSED) w_ev pr "PR #$a fechado sem merge (issue #$b)" ;;
-          *) w_ev pr "PR #$a: $new (issue #$b)" ;;
+          OPEN) w_ev pr "PR $(w_ref "$a") aberto (issue $(w_ref "$b")) ${W_CUR[url|$a]:-}" ;;
+          MERGED) w_ev pr "PR $(w_ref "$a") mergeado (issue $(w_ref "$b"))" ;;
+          CLOSED) w_ev pr "PR $(w_ref "$a") fechado sem merge (issue $(w_ref "$b"))" ;;
+          *) w_ev pr "PR $(w_ref "$a"): $new (issue $(w_ref "$b"))" ;;
         esac ;;
       ci)
         [[ "$new" == pass || "$new" == fail ]] || continue
-        w_ev ci "PR #$a · $b: $new" ;;
+        w_ev ci "PR $(w_ref "$a") · $b: $new" ;;
       merge)
         case "$old>$new" in
-          *">conflict") w_ev conflito "PR #$a em conflito com a base (mergeable=CONFLICTING)" ;;
-          "conflict>ok") w_ev conflito "PR #$a sem conflito de novo" ;;
+          *">conflict") w_ev conflito "PR $(w_ref "$a") em conflito com a base (mergeable=CONFLICTING)" ;;
+          "conflict>ok") w_ev conflito "PR $(w_ref "$a") sem conflito de novo" ;;
         esac ;;
       ask)
         [[ "$new" == pending ]] || continue
@@ -474,7 +496,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;

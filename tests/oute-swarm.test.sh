@@ -19,48 +19,77 @@ command -v jq >/dev/null || { echo "FAIL precisa de jq"; exit 1; }
 
 # ---------------------------------------------------------------- fakes
 BIN="$TMP/bin"; mkdir -p "$BIN"
+# herdr: listas lidas de $FAKE/*.json; ações anotadas em $FAKE/herdr.log. O campo de entrada do pane é
+# $FAKE/field (send-text escreve, pane read mostra entre réguas como o Claude Code, ctrl+c limpa).
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
+echo "$*" >> "$FAKE/herdr.log"
 case "$1 ${2:-}" in
   "tab list") cat "$FAKE/tabs.json" ;;
+  "tab create") n=$(( $(cat "$FAKE/tabs.n" 2>/dev/null || echo 1) + 1 )); echo "$n" > "$FAKE/tabs.n"
+                echo "{\"result\":{\"tab\":{\"tab_id\":\"w1:t$n\"},\"pane\":{\"pane_id\":\"w1:p$n\"}}}" ;;
+  "tab close") ;;
   "pane list") cat "$FAKE/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
+  "pane run") ;;
+  "pane read") printf '%s\n❯ %s\n%s\n' "──────────────────" "$(cat "$FAKE/field" 2>/dev/null)" "──────────────────" ;;
+  "pane send-text") printf '%s' "$4" > "$FAKE/field" ;;
+  "pane send-keys") [[ "$4" != ctrl+c ]] || : > "$FAKE/field" ;;
   "agent list") cat "$FAKE/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   *) echo "herdr falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
+# gh: `pr list` devolve $FAKE/prs-<nome da pasta do repo>.json (o watch roda o gh dentro do repo)
 cat > "$BIN/gh" <<'SH'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
-  "pr list") cat "$FAKE/prs.json" ;;
+  "pr list") cat "$FAKE/prs-$(basename "$PWD").json" 2>/dev/null || echo '[]' ;;
   *) echo "gh falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
+cat > "$BIN/oute-task" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == list ]] && echo "(worktrees falsas)"
+SH
+# sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
 cat > "$BIN/sleep" <<'SH'
 #!/usr/bin/env bash
+[[ -n "${FAKE_WATCH:-}" ]] || exit 0
 n=$(( $(cat "$FAKE/sleeps" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE/sleeps"
 if [[ -f "$FAKE/on-sleep-$n" ]]; then . "$FAKE/on-sleep-$n"; else date -u +%FT%TZ > "$STATE/fechada"; fi
 SH
-# fake-tabs <status>: a aba "#7 foo" com o agente em <status> (usável nos ganchos on-sleep-<n>)
+# fake-tabs [<label>=]<status>...: abas w1:t1, w1:t2… com o agente em <status> (label padrão "#7 foo");
+# usável nos ganchos on-sleep-<n>
 cat > "$BIN/fake-tabs" <<'SH'
 #!/usr/bin/env bash
-printf '{"result":{"tabs":[{"tab_id":"w1:t1","label":"#7 foo","agent_status":"%s"}]}}\n' "$1" > "$FAKE/tabs.json"
+i=0; for a in "$@"; do
+  i=$((i + 1)); [[ "$a" == *=* ]] || a="#7 foo=$a"
+  jq -n --arg id "w1:t$i" --arg l "${a%=*}" --arg s "${a##*=}" '{tab_id: $id, label: $l, agent_status: $s}'
+done | jq -s '{result: {tabs: .}}' > "$FAKE/tabs.json"
 SH
 chmod +x "$BIN"/*
 
-# round(<caso>): HOME, rodada swarm-test (repo falso, início no passado) e $FAKE limpos; issue #7 aberta na aba
-# "#7 foo". Globais: H, STATE, FAKE.
+# round(<caso>): HOME, rodada swarm-test (repo da rodada = pasta git "repo", início no passado) e $FAKE limpos;
+# issue #7 aberta na aba "#7 foo" (linha do spawned no formato antigo, sem repo). Globais: H, STATE, FAKE, REPO.
 round() {
-  H="$TMP/$1/home"; STATE="$H/.oute/swarm/swarm-test"; FAKE="$TMP/$1/fake"
-  mkdir -p "$STATE" "$FAKE" "$TMP/$1/repo" "$TMP/$1/inbox" "$TMP/$1/outbox"
-  printf 'repo=%s\nmax=3\nlabel=\nstarted=2026-01-01T00:00:00Z\n' "$TMP/$1/repo" > "$STATE/meta"
+  H="$TMP/$1/home"; STATE="$H/.oute/swarm/swarm-test"; FAKE="$TMP/$1/fake"; REPO="$TMP/$1/repo"
+  mkdir -p "$STATE" "$FAKE" "$TMP/$1/inbox" "$TMP/$1/outbox"
+  gitrepo "$REPO"
+  printf 'repo=%s\nmax=3\nlabel=\nstarted=2026-01-01T00:00:00Z\n' "$REPO" > "$STATE/meta"
   printf '7-foo w1:p1 claude 2026-01-01T00:00:01Z w1:t1\n' > "$STATE/spawned"
-  FAKE="$FAKE" "$BIN/fake-tabs" working; echo '[]' > "$FAKE/prs.json"
+  FAKE="$FAKE" "$BIN/fake-tabs" working
+}
+gitrepo() { mkdir -p "$1" && git -C "$1" init -q 2>/dev/null; }
+# sw <args>: roda o oute-swarm como a coordenadora da rodada (dentro do herdr); stdout em $OUT, stderr em $ERR
+sw() {
+  OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+         OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX="${MAX:-3}" \
+         "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
 # roda o watch até a rodada fechar; stdout em $OUT, stderr em $ERR, código em $RC
 watch() {
   local g=(); command -v timeout >/dev/null && g=(timeout 30)
   rm -f "$FAKE/sleeps" "$STATE/fechada"
-  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" \
+  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
          OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" \
          ${g[@]+"${g[@]}"} "$SWARM" watch --round swarm-test 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
@@ -78,7 +107,7 @@ CASE=eventos; round "$CASE"
 cat > "$FAKE/on-sleep-1" <<'SH'
 cp "$STATE/log" "$FAKE/log.p1" 2>/dev/null || : > "$FAKE/log.p1"
 fake-tabs idle
-cat > "$FAKE/prs.json" <<'J'
+cat > "$FAKE/prs-repo.json" <<'J'
 [{"number":12,"headRefName":"feat/7-foo","state":"OPEN","mergeable":"MERGEABLE","createdAt":"2026-06-01T00:00:00Z",
   "url":"https://github.com/x/y/pull/12","statusCheckRollup":[{"name":"test","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]}]
 J
@@ -113,6 +142,75 @@ CASE=sempr; round "$CASE"
 echo 'fake-tabs blocked' > "$FAKE/on-sleep-1"
 watch
 check "sem PR: evento da sessão"                         logged "[sessao] #7 foo: blocked (sem PR)"
+
+# ---------------------------------------------------------------- #85: sessão kaizen em outro repo
+# 5. spawn --repo --kaizen: aba e worktree no repo indicado, registro com repo e tipo, fora do --max
+CASE=spawn; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
+MAX=1 sw spawn 7-bar "instrução kaizen" --repo "$LAB" --kaizen
+check "spawn --repo: código 0"                           [ "$RC" -eq 0 ]
+check "spawn --repo: aba aberta no repo indicado"        grep -q -- "tab create --workspace w1 --cwd $LAB " "$FAKE/herdr.log"
+check "spawn --repo: oute-task na worktree do repo"      grep -q -- "pane run w1:p2 OUTE_SWARM_WORKER=1 oute-task -r $LAB 7-bar claude" "$FAKE/herdr.log"
+check "spawn --repo: spawned grava repo e kaizen"        [ "$(awk '$1=="7-bar" {print $2, $6, $7}' "$STATE/spawned")" == "w1:p2 $LAB kaizen" ]
+check "kaizen: fora do --max (1 normal já aberta)"       grep -q 'kaizen' <<<"$OUT"
+MAX=1 sw spawn 8-baz "instrução normal"
+check "limite: sessão normal continua contando"          [ "$RC" -ne 0 ]
+check "limite: mensagem do limite (kaizen fora)"         grep -q 'limite da rodada atingido (1/1)' <<<"$ERR"
+MAX=2 sw spawn 8-baz "instrução normal"
+check "limite: normal passa com 1 normal + 1 kaizen"     [ "$RC" -eq 0 ]
+check "spawn sem --repo: grava o repo da rodada"         [ "$(awk '$1=="8-baz" {print $6, $7}' "$STATE/spawned")" == "$REPO -" ]
+before="$(cat "$STATE/spawned")"
+sw spawn 9-x "instrução" --repo "$TMP/$CASE/nao-existe" --kaizen
+check "repo inexistente: falha"                          [ "$RC" -ne 0 ]
+check "repo inexistente: mensagem clara"                 grep -q "repo não encontrado: $TMP/$CASE/nao-existe" <<<"$ERR"
+check "repo inexistente: nada registrado nem aberto"     [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 2 ]
+
+# 6. watch multi-repo: mesma issue #7 e mesmo PR #12 em dois repos, sem colisão
+CASE=multi; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
+printf '7-bar w1:p2 claude 2026-01-01T00:00:02Z w1:t2 %s kaizen\n' "$LAB" >> "$STATE/spawned"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#7 bar=working"
+cat > "$FAKE/on-sleep-1" <<'SH'
+fake-tabs "#7 foo=idle" "#7 bar=idle"
+cat > "$FAKE/prs-repo.json" <<'J'
+[{"number":12,"headRefName":"feat/7-foo","state":"OPEN","mergeable":"MERGEABLE","createdAt":"2026-06-01T00:00:00Z",
+  "url":"https://github.com/x/repo/pull/12","statusCheckRollup":[{"name":"test","conclusion":"SUCCESS","completedAt":"2026-06-01T00:05:00Z"}]}]
+J
+cat > "$FAKE/prs-lab.json" <<'J'
+[{"number":12,"headRefName":"fix/7-bar","state":"OPEN","mergeable":"CONFLICTING","createdAt":"2026-06-01T00:00:00Z",
+  "url":"https://github.com/x/lab/pull/12","statusCheckRollup":[{"name":"test","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]}]
+J
+SH
+watch
+check "multi: código 0"                                  [ "$RC" -eq 0 ]
+check "multi: PR do repo da rodada"                      logged "[pr] PR #12 aberto (issue #7) https://github.com/x/repo/pull/12"
+check "multi: PR do outro repo, com o repo"              logged "[pr] PR lab#12 aberto (issue lab#7) https://github.com/x/lab/pull/12"
+check "multi: CI do outro repo"                          logged "[ci] PR lab#12 · test: fail"
+check "multi: CI do repo da rodada"                      logged "[ci] PR #12 · test: pass"
+check "multi: conflito do outro repo"                    logged "[conflito] PR lab#12 em conflito com a base (mergeable=CONFLICTING)"
+check "multi: sessão da rodada com o PR dela"            logged "[sessao] #7 foo: idle (PR #12 open)"
+check "multi: sessão kaizen com o PR dela"               logged "[sessao] #7 bar: idle (PR lab#12 open)"
+check "multi: PR do lab não vira PR da issue #7 da rodada" [ -z "$(log_events | grep -F '(issue #7) https://github.com/x/lab')" ]
+check "multi: sem conflito no repo da rodada"            [ -z "$(log_events | grep -F '[conflito] PR #12')" ]
+
+# 7. tell, close e list com sessão de outro repo (linha do spawned com repo e kaizen)
+CASE=outros; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
+printf '7-bar w1:p2 claude 2026-01-01T00:00:02Z w1:t2 %s kaizen\n' "$LAB" >> "$STATE/spawned"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#7 bar=idle"
+echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
+echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
+sw tell 7-bar "pode seguir"
+check "tell: código 0"                                   [ "$RC" -eq 0 ]
+check "tell: Enter no pane da sessão"                    grep -q 'pane send-keys w1:p2 enter' "$FAKE/herdr.log"
+check "tell: registrado no log"                          grep -q ' tell 7-bar ok$' "$STATE/log"
+sw list
+check "list: mostra a sessão de outro repo"              grep -q "7-bar w1:p2 claude .* $LAB kaizen" <<<"$OUT"
+# aba renomeada: o close acha pelo id gravado no spawn (5º campo, antes do repo)
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "outro nome=idle"
+sw close 7-bar --yes
+check "close: código 0"                                  [ "$RC" -eq 0 ]
+check "close: fecha a aba pelo id gravado"               grep -q 'tab close w1:t2' "$FAKE/herdr.log"
+check "close: marca a sessão fechada"                    grep -qx '7-bar' "$STATE/closed"
+sw list
+check "list: sessão fechada marcada"                     grep -q "$LAB kaizen (fechada)" <<<"$OUT"
 
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
