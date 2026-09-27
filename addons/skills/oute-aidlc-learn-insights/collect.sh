@@ -48,8 +48,10 @@ if [[ -n "$DESDE" ]]; then
   ORIGEM="--desde"
 elif [[ -n "$CYCLES" ]] && last="$(jq -r '[.[] | select(.state == "CLOSED") | .closedAt] | max // empty' <<<"$CYCLES")" && [[ -n "$last" ]]; then
   FROM="$(date -u -d "$last" +%s)"; ORIGEM="fechamento da última issue de ciclo"
-else
+elif [[ -n "$CYCLES" ]]; then
   FROM=$((NOW - 7 * 86400)); ORIGEM="padrão de 7 dias (nenhum ciclo fechado)"
+else  # gh falhou: não dá para saber onde o último ciclo fechou
+  FROM=$((NOW - 7 * 86400)); ORIGEM="padrão de 7 dias (issues de ciclo ilegíveis)"
 fi
 [[ "$FROM" -lt "$NOW" ]] || { echo "collect: início da janela no futuro" >&2; exit 2; }
 W_FROM="$(iso "$FROM")"; W_TO="$(iso "$NOW")"
@@ -58,6 +60,7 @@ HOURS=$(( (NOW - FROM + 3599) / 3600 ))
 janela() {
   echo "## janela"
   printf 'de\t%s\nate\t%s\norigem\t%s\nhoras\t%s\nhost_local\t%s\n' "$W_FROM" "$W_TO" "$ORIGEM" "$HOURS" "$HOST"
+  [[ -n "$CYCLES" || -n "$DESDE" ]] || printf 'LACUNA\tciclos\tissues de ciclo ilegíveis (gh): a janela pode não começar no fim do último ciclo\n'
   [[ "$HOURS" -le 720 ]] || printf 'LACUNA\tlangfuse\tjanela de %s h passa dos 30 dias que o Langfuse guarda; o bucket cobre\n' "$HOURS"
 }
 

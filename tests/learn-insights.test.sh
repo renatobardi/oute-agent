@@ -118,6 +118,10 @@ check "observe.sh falho: código 1"             [ "$RC" -eq 1 ]
 run env F_GH_FAIL=1 bash "$SCRIPT" github
 check "gh fora: ERRO e código 1"               bash -c '[ "$1" -eq 1 ] && grep -q "^ERRO	issues de dono/alvo" <<<"$0"' "$OUT" "$RC"
 
+run env F_GH_FAIL=1 bash "$SCRIPT" rodadas
+check "gh fora: janela não diz 'nenhum ciclo'" has 'origem	padrão de 7 dias (issues de ciclo ilegíveis)'
+check "gh fora: lacuna dos ciclos na janela"   has 'LACUNA	ciclos'
+
 run bash "$SCRIPT" --desde amanhã-talvez
 check "data inválida: código 2"                [ "$RC" -eq 2 ]
 
