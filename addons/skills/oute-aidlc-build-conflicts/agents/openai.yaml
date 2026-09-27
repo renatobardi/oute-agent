@@ -1,0 +1,3 @@
+interface:
+  display_name: "oute-aidlc-build-conflicts"
+  short_description: "Resolve merge and rebase conflicts"

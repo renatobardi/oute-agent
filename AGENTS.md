@@ -32,21 +32,21 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 
 | Fase | Primitivos e skills |
 |---|---|
-| `strat` | — |
-| `intent` | — |
-| `spec` | issue pelo template `aidlc` |
-| `arch` | `docs/adr/`, `CONTEXT.md` |
-| `design` | — |
-| `plan` | `oute-swarm` §1 (triagem + ok do Bardi) |
-| `build` | `oute-task`, worker do swarm |
+| `strat` | `oute-aidlc-strat-research`, `oute-aidlc-strat-wayfinder` |
+| `intent` | `oute-aidlc-intent-grill` (base: `oute-aidlc-intent-grilling`) |
+| `spec` | issue pelo template `aidlc`, `oute-aidlc-spec-issue` |
+| `arch` | `docs/adr/`, `CONTEXT.md`, `oute-aidlc-arch-grill`, `oute-aidlc-arch-deepen` |
+| `design` | `oute-aidlc-design-modules`, `oute-aidlc-design-prototype` |
+| `plan` | `oute-swarm` §1 (triagem + ok do Bardi), `oute-aidlc-plan-tickets`, `oute-aidlc-plan-triage`, `oute-aidlc-plan-refactor` |
+| `build` | `oute-task`, worker do swarm, `oute-aidlc-build-implement`, `oute-aidlc-build-tdd`, `oute-aidlc-build-conflicts` |
 | `qa` | `oute-aidlc-qa-pr-audit`, `tests/`, CI `pr` |
 | `ship` | `scripts/release` (Bardi) + deploy nos hosts (Bardi) |
-| `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação |
-| `learn` | `oute-swarm` §4.1 (kaizen) |
+| `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação, `oute-aidlc-ops-diagnose` |
+| `learn` | `oute-swarm` §4.1 (kaizen), `oute-aidlc-learn-feedback` |
 | `iter` | issues de fim de sessão |
-| `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory |
+| `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory, `oute-aidlc-ctx-router`, `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
 
-Skill de fluxo nova entra nesta tabela no mesmo PR.
+Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aidlc-ctx-router`. Utilitária: `oute-skill-writing` (escrever e editar skills).
 
 ## Validar antes do PR
 - `bash -n` em todo script alterado; `docker compose --project-directory . -f docker/compose.yaml config` com as envs necessárias.
