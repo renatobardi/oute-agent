@@ -25,6 +25,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
   - repo com `.ai-memory.toml`.
 - **ADR-06, addons:** `addons/<tipo>/` deste repo, montado read-only; o entrypoint linka cada addon em `~/.claude/skills` e `~/.agents/skills`. Primitivo fica na imagem e só cita addon com plano B.
 - **Plugins herdr:** próprios (`oute-*`), nada do marketplace em runtime (ADR-05, em estudo).
+- **ADR-07, AI-DLC:** todo trabalho segue 12 fases (`strat` `intent` `spec` `arch` `design` `plan` `build` `qa` `ship` `ops` `learn` `iter`) + faixa transversal `ctx`, cada uma com contribuição da IA, **gate humano** (Bardi) e outcome. Skill de fluxo = `oute-aidlc-<fase>-<id>`; issue com label `aidlc:<fase>` e template `aidlc`.
 
 ## Glossário
 - **Jev:** roteador de perfis (`typesafe/jev-1.13`), consultado por request.
@@ -36,8 +37,12 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **primitivo:** peça sem a qual o runtime não cumpre suas garantias: canal de aprovação, worktree por sessão, swarm e seus prompts (`oute-propose`, `oute-task`, `oute-swarm`…). Vai na imagem. Pode citar um addon, mas sempre com plano B: nunca depende dele. Pode ser promovido a addon ou rebaixado, caso a caso.
 - **addon:** tudo que é nosso e se instala por cima dos agentes/herdr: skill, persona, script, plugin herdr. Evite usar "plugin" como guarda-chuva.
 - **skill:** addon de instrução empacotada que Claude, Codex e Pi carregam sob demanda. Uma só para os três: não depende de recurso exclusivo de um harness. Pode compor outra skill citando-a pelo nome, com um plano B inline para quando ela não estiver disponível.
-- **prefixo `oute-`:** todo addon leva esse prefixo (`oute-pr-audit`), inclusive plugin herdr.
-- **skill importada:** fork sem volta de uma skill de terceiros, transformada para o nosso uso. Guarda a procedência (origem, commit, licença) e nunca sincroniza com o upstream. Se a licença não permitir, o original é só referência e o texto é todo nosso.
+- **prefixo `oute-`:** todo addon leva esse prefixo, inclusive plugin herdr. Skill de fluxo: `oute-aidlc-<fase>-<id>` (`oute-aidlc-qa-pr-audit`); utilitária: `oute-<id>`.
+- **AI-DLC:** o ciclo de entrega do projeto (ADR-07), de `strat` a `iter`, voltando por `learn`.
+- **fase:** etapa do AI-DLC, pela abreviação (`spec`, `qa`…). `ctx` não é fase: é a faixa transversal (contexto compartilhado, governança).
+- **gate humano:** decisão do Bardi que fecha uma fase (aprovar a rodada, merge, release, lição). Agente não fecha fase com gate.
+- **outcome:** o que a fase entrega para liberar a próxima.
+- **skill importada:** fork sem volta de uma skill de terceiros, transformada para o nosso uso. Guarda a procedência (origem, commit, licença) e nunca sincroniza com o upstream. Se a licença não permitir, o original é só referência e o texto é todo nosso. Exceção: as do Matt Pocock (`oute-aidlc-*`) entram sem procedência (ADR-06, adendo).
 - **persona:** addon com prompt de papel (revisor, arquiteto…), instalado como subagente onde a ferramenta suporta. "agente" continua sendo Claude, Codex ou Pi.
 - **script:** addon determinístico, sem LLM; o agente ou o humano o chama e o resultado é sempre o mesmo.
 - **worker:** só a sessão do swarm por issue (uma aba do herdr). Não usar para scripts.
@@ -46,4 +51,4 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **plugin:** só no sentido nativo de cada ferramenta (plugin do Claude Code, plugin herdr). Um plugin herdr é um tipo de addon.
 
 ## Backlog
-Issues em `renatobardi/oute-agent`, com os labels `tema`, `infra`, `agentes`, `seguranca`, `ci`, `bug`, `debito`, `observabilidade`, `spike` e `later`.
+Issues em `renatobardi/oute-agent`, com o label de fase `aidlc:<fase>` e os labels `tema`, `infra`, `agentes`, `seguranca`, `ci`, `bug`, `debito`, `observabilidade`, `spike` e `later`.

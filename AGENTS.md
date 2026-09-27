@@ -7,10 +7,11 @@ Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex),
 
 ## Mapa do repo
 - `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `comandos.md` (guia do `oute help`) + `oute-container`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`).
-- `addons/<tipo>/`: addons (ADR-06). Hoje só `addons/skills/oute-*` (`SKILL.md` com `name` = pasta). Montado read-only em `/opt/oute/addons`; o `docker/addons-link` (chamado pelo entrypoint) cria os links em `~/.claude/skills` e `~/.agents/skills`. Skill entra com `git pull` + `oute down/up`, sem release.
+- `addons/<tipo>/`: addons (ADR-06). Hoje só `addons/skills/oute-*` (skill de fluxo: `oute-aidlc-<fase>-<id>`, ADR-07) (`SKILL.md` com `name` = pasta). Montado read-only em `/opt/oute/addons`; o `docker/addons-link` (chamado pelo entrypoint) cria os links em `~/.claude/skills` e `~/.agents/skills`. Skill entra com `git pull` + `oute down/up`, sem release.
 - `tests/`: testes em bash puro (`tests/addons-link.test.sh`), rodados pelo workflow `pr` em todo PR.
 - `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
 - `config/litellm/`: `policy.yaml` é a fonte do roteador; os demais arquivos são gerados pelo `oute router-sync` e ficam fora do git. `config/otel/`: pipelines do collector.
+- `.github/ISSUE_TEMPLATE/aidlc.md`: template de issue (AI-DLC).
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.
 
 ## Regras
@@ -25,6 +26,27 @@ Runtime em container para agentes de código (herdr + Pi + Claude Code + Codex),
 - Telemetria no bucket `oute-observability` **nunca é apagada**. Ferramenta nova só entra se mandar consumo ao bucket + Langfuse.
 - Comportamento do **ai-memory** não muda sem decisão explícita do Bardi. Servidor e cliente sempre na mesma versão.
 - Mudanças no host oute-server (usuários, sudoers, nginx, firewall, systemd) são do repo `renatobardi/lab`, não daqui.
+
+## Fluxo AI-DLC (ADR-07)
+Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bardi: agente não fecha fase com gate. Issue nova pelo template `aidlc` e com o label `aidlc:<fase>`; ao mudar de fase, troque o label.
+
+| Fase | Primitivos e skills |
+|---|---|
+| `strat` | — |
+| `intent` | — |
+| `spec` | issue pelo template `aidlc` |
+| `arch` | `docs/adr/`, `CONTEXT.md` |
+| `design` | — |
+| `plan` | `oute-swarm` §1 (triagem + ok do Bardi) |
+| `build` | `oute-task`, worker do swarm |
+| `qa` | `oute-aidlc-qa-pr-audit`, `tests/`, CI `pr` |
+| `ship` | `scripts/release` (Bardi) + deploy nos hosts (Bardi) |
+| `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação |
+| `learn` | `oute-swarm` §4.1 (kaizen) |
+| `iter` | issues de fim de sessão |
+| `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory |
+
+Skill de fluxo nova entra nesta tabela no mesmo PR.
 
 ## Validar antes do PR
 - `bash -n` em todo script alterado; `docker compose --project-directory . -f docker/compose.yaml config` com as envs necessárias.

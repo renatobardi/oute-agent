@@ -1,4 +1,4 @@
-# Avisos de terceiros — oute-pr-audit
+# Avisos de terceiros — oute-aidlc-qa-pr-audit
 
 ## mattpocock/skills (code-review)
 
