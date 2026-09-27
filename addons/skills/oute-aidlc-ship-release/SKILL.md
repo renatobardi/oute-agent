@@ -55,10 +55,11 @@ Feito quando: há uma versão proposta e a tag dela está livre.
 O script recusa sem estas; confira antes, na `main`:
 
 - scripts executáveis: `bash scripts/exec-files | while read -r f; do [[ "$(git ls-files -s -- "$f" | cut -d' ' -f1)" == 100755 ]] || echo "$f"; done` sem saída;
-- `grep -q '^## \[Unreleased\]' CHANGELOG.md`;
-- CI `pr` verde no último commit da `main` (`gh run list --branch main --limit 5`).
+- `grep -q '^## \[Unreleased\]' CHANGELOG.md`.
 
-Feito quando: as três estão ok ou o que falhou está no relatório.
+À parte (o script não confere): CI `pr` verde no PR de cada commit do passo 1 (`gh pr checks <n>`).
+
+Feito quando: as duas pré-condições e o CI dos PRs estão ok ou o que falhou está no relatório.
 
 ## 6. Relatório para o Bardi
 
