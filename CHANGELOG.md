@@ -5,7 +5,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Fixed
-- **Storage: `rclone mount` não morre mais com o terminal** (`scripts/oute`). O `--daemon` do rclone ficava no grupo de processos e na sessão do terminal que rodou o `oute up`/`oute update`: um Ctrl+C ou o fechamento do terminal matava o mount, e o `/data/shared` do container ficava `Transport endpoint is not connected` até um `oute down/up` (visto no oute-server em 2026-09-26). No Linux o mount sobe com `setsid -w`, em sessão própria; no macOS, sem `setsid(1)`, segue como antes. E o `oute up`/`sync-shared` reconhece um mount morto (listado, mas sem resposta), desmonta, monta de novo e avisa que o container já de pé precisa de `oute restart`. Sem release: `scripts/oute` entra com `git pull`.
+- **Storage: `rclone mount` não morre mais com o terminal** (`scripts/oute`). O `--daemon` do rclone ficava no grupo de processos e na sessão do terminal que rodou o `oute up`/`oute update`: um Ctrl+C ou o fechamento do terminal matava o mount, e o `/data/shared` do container ficava `Transport endpoint is not connected` até um `oute down/up` (visto no oute-server em 2026-09-26). No Linux o mount sobe com `setsid -w`, em sessão própria; no macOS, sem `setsid(1)`, segue como antes. E o `oute up`/`sync-shared` reconhece um mount morto (listado, mas o `ls` dá `Transport endpoint is not connected`, ou `Device not configured` no macOS), desmonta, monta de novo e avisa que um container já de pé precisa de `oute restart`; outro erro do `ls` (bucket fora do ar) não derruba um mount vivo. Sem release: `scripts/oute` entra com `git pull`.
 
 ## [0.7.23] - 2026-09-26
 

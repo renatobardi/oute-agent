@@ -189,13 +189,17 @@ is_mounted() { mount | grep -q " on $1 "; }
 mount_shared() {
   local dir="$OUTE_HOME/shared" bucket="${OUTE_BUCKET:-oute-shared}"
   command -v rclone >/dev/null || { echo "rclone ausente no host; /data/shared fica local"; return 0; }
-  # mount morto (rclone morto sem desmontar: "Transport endpoint is not connected"): desmonta e monta de novo
-  if is_mounted "$dir" && ! ls "$dir" >/dev/null 2>&1; then
-    echo "storage: mount de $dir sem resposta (rclone caiu); remontando" >&2
-    fusermount -uz "$dir" 2>/dev/null || umount "$dir" 2>/dev/null || umount -f "$dir" 2>/dev/null || true
-    is_mounted "$dir" && { echo "não consegui desmontar $dir; /data/shared fica sem storage" >&2; return 0; }
-    echo "storage: container já de pé continua com o mount antigo; rode 'oute restart'" >&2
-  fi
+  # mount morto (rclone morreu sem desmontar): desmonta e monta de novo. Só com o erro de mount desconectado
+  # (Linux: "Transport endpoint is not connected"; macOS: "Device not configured"): outro erro do ls (bucket
+  # fora do ar) não derruba um mount vivo
+  local err=""; is_mounted "$dir" && err="$(LC_ALL=C ls "$dir" 2>&1 >/dev/null || true)"
+  case "$err" in
+    *"not connected"*|*"Device not configured"*)
+      echo "storage: mount de $dir sem resposta (rclone caiu); remontando" >&2
+      fusermount -uz "$dir" 2>/dev/null || umount "$dir" 2>/dev/null || umount -f "$dir" 2>/dev/null || true
+      is_mounted "$dir" && { echo "não consegui desmontar $dir; /data/shared fica sem storage" >&2; return 0; }
+      echo "storage: se o container já estava de pé, ele segue com o mount antigo; rode 'oute restart'" >&2 ;;
+  esac
   is_mounted "$dir" && { export OUTE_SHARED_DIR="$dir"; echo "storage: $dir já montado"; return 0; }
   oci_remote_env || { echo "OCI_S3_* ausente em $AGENT_ENV_FILE (item oci-storage: oute oci-bootstrap; depois oute secrets refresh); /data/shared fica local"; return 0; }
   local extra=()
