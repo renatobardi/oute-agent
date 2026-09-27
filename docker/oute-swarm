@@ -286,7 +286,12 @@ cmd_close() {
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
 declare -A W_PREV=() W_CUR=()
 
-w_ev() { [[ -n "$2" ]] || return 0; printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"; }
+# evento: no stdout (monitor da coordenadora) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
+w_ev() {
+  [[ -n "$2" ]] || return 0
+  printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"
+  printf '%s watch [%s] %s\n' "$(date -u +%FT%TZ)" "$1" "$2" >> "$W_STATE/log" || true
+}
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
 w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }
 w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
