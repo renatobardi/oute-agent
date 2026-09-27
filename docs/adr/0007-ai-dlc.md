@@ -1,6 +1,6 @@
 # ADR-07 — AI-DLC: ciclo de entrega AI-native
 
-Status: **aceito** (2026-09-27). Base: plano AI-Native Software Delivery Lifecycle do Bardi; estudo de aderência `estudos/ai-dlc-aderencia.md` (Project).
+Status: **aceito** (2026-09-27). Adendo 2026-09-27: ciclo learn → iter (#109). Base: plano AI-Native Software Delivery Lifecycle do Bardi; estudo de aderência `estudos/ai-dlc-aderencia.md` (Project).
 
 ## Contexto
 - IA só no passo de código não é um SDLC AI-native: é o SDLC antigo com código mais rápido. O ciclo vai de estratégia a operação e volta como aprendizado.
@@ -44,3 +44,10 @@ Todo o trabalho no oute-agent segue as 12 fases abaixo. Projeto solo: o Bardi oc
 - `oute-pr-audit` vira `oute-aidlc-qa-pr-audit`; os marcadores dos comentários migram para `<!-- oute-aidlc-qa-pr-audit -->` e `<!-- oute-aidlc-qa-pr-audit:merge -->`.
 - Fases sem skill (`strat`, `ship`, `ops`, `learn` de uso/custo, `iter`) viram issues próprias.
 - O catálogo de skills por fase fica no `AGENTS.md` (seção "Fluxo AI-DLC") e acompanha as skills que entram.
+
+## Adendo 2026-09-27 — ciclo learn → iter (#109)
+- **Ciclo** = período entre dois gates de `learn`. Uma **issue de ciclo** só, global (cobre todos os repos do `/workspace`), sempre em `renatobardi/oute-agent`: a `iter` a abre com foco (1 a 3 temas) e as issues do ciclo numa task list (`- [ ] #n`, inclusive de outros repos); a `learn` seguinte a completa com o relatório de insights e as escolhas do Bardi, e a fecha. O **roadmap** é a issue de ciclo aberta: sem milestone, label de ciclo nem painel.
+- **Insight** (padrão entre rodadas/fontes num período) não muda nada sozinho: no gate vira **lição** (regra), **melhoria** (issue `aidlc:intent`) ou é descartado, e o descarte fica registrado na issue de ciclo.
+- O label **`kaizen`** marca toda issue de lição, venha de rodada (§4.1 do swarm) ou de insight; o corpo diz a origem.
+- O kaizen por rodada continua primitivo e não depende das skills de `learn`/`iter`.
+- Opções descartadas: absorver ou substituir o kaizen pela skill de insights (acoplaria primitivo a addon); milestone ou label `ciclo` (mais um lugar para manter); ciclo por repo (multiplica gates, telemetria não separa por repo); label `licao` separado (o §4.1 teria de buscar dois labels, com release).
