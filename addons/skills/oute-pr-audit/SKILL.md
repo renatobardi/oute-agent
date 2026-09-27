@@ -403,7 +403,7 @@ Se `baseRefName` do PR for outra, e a política não justificar (PR empilhado so
 Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `Closes` por `Refs` e completar o `## Falta`, a linha que falta no `CHANGELOG.md`, o modo `100755` de um script, um typo que quebra um gate, o conflito com a base. Se a correção sugerida não é mínima, pare aqui e devolva ao autor.
 
 - **Corpo do PR** (`Closes` × `Refs`, `## Falta`): `gh pr edit <N> --body-file <arquivo>`, mudando só o necessário. Não é commit.
-- **Arquivos:** um commit por ajuste, no topo do branch do autor, com mensagem convencional que diz o ajuste e por quê (ex.: `fix: modo 100755 em tests/x.test.sh (oute-pr-audit)`) e os trailers de coautoria que o repo pede.
+- **Arquivos** (fora do swarm; branch de sessão ativa, veja o último item): um commit por ajuste, no topo do branch do autor, com mensagem convencional que diz o ajuste e por quê (ex.: `fix: modo 100755 em tests/x.test.sh (oute-pr-audit)`) e os trailers de coautoria que o repo pede.
 
   ```bash
   git fetch --no-tags origin "pull/<N>/head"
@@ -421,7 +421,7 @@ Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `
   PR de fork: só com `maintainerCanModify` verdadeiro, empurrando para o repo do fork; sem isso, devolva ao autor.
 - **Conflito com a base:** traga a base para o branch com **merge**, nunca rebase: `gh pr update-branch <N>` (sem `--rebase`) quando não há conflito textual; com conflito, `git merge origin/<base>` na worktree, resolva e faça o commit de merge. Resolva só as linhas do conflito; nas linhas alheias (`CHANGELOG.md` de outro PR, por exemplo), fica o que está na base, e a linha deste PR entra junto, sem apagar nem reescrever as outras.
 - **Push recusado** (non-fast-forward): o autor empurrou algo durante o ajuste. Não force: pare, busque o head novo e volte ao passo 2.
-- Se o branch é de uma sessão ativa (worker do swarm), diga no relatório que ele recebeu commits seus: a sessão precisa de `git pull` antes de continuar.
+- **Branch de sessão ativa do swarm** (worker com a aba aberta): o branch é da sessão (`swarm.md`, repasse do ajuste). Você não faz commit, push, merge da base nem edição no branch dela. O ajuste mínimo volta ao worker: a coordenadora repassa com `oute-swarm tell <sessão> "<ajuste, numa linha>"`, e a fase espera o push novo e segue do item 3 com o head novo. Só a edição do corpo do PR, quando é o único ajuste, pode ser feita aqui, avisando a sessão. Commit próprio no branch só fora do swarm (PR sem sessão ativa).
 
 ### 3. Auditoria de novo, no head final
 
