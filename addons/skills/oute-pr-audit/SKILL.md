@@ -431,7 +431,7 @@ Espere o CI do head final terminar. Pendente, pulado, cancelado ou neutro não �
 
 ### 4. Decisão
 
-Siga para o merge só se a ação recomendada no head final for `merge como está`, e se `gh pr view <N> --json mergeable,mergeStateStatus` disser `MERGEABLE` e `CLEAN` (ou `HAS_HOOKS`/`UNSTABLE` com o motivo explicado e fora dos gates documentados).
+Siga para o merge só se a ação recomendada no head final for `merge como está`, e se `gh pr view <N> --json mergeable,mergeStateStatus` disser `MERGEABLE` e `CLEAN` ou `HAS_HOOKS`. Qualquer outro estado (`UNSTABLE`, `BLOCKED`, `BEHIND`, `DIRTY`, `UNKNOWN`) não segue: resolva pelo item 2 ou relate.
 
 - **CRITICAL:** não faça merge, mesmo com o pedido. Mostre a evidência ao Bardi.
 - **BLOCKING ou UNCERTAIN que pesa como BLOCKING, sem ajuste mínimo possível:** não faça merge. Mostre os achados e espere. Se o Bardi, depois de ver os achados, pedir de novo o merge citando-os, siga (sem `--admin`) e registre isso no relatório do merge.
