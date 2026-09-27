@@ -49,6 +49,7 @@ SH
 cat > "$BIN/oute-task" <<'SH'
 #!/usr/bin/env bash
 [[ "${1:-}" == list ]] && echo "(worktrees falsas)"
+exit 0
 SH
 # sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
 cat > "$BIN/sleep" <<'SH'
@@ -200,7 +201,7 @@ echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"i
 sw tell 7-bar "pode seguir"
 check "tell: código 0"                                   [ "$RC" -eq 0 ]
 check "tell: Enter no pane da sessão"                    grep -q 'pane send-keys w1:p2 enter' "$FAKE/herdr.log"
-check "tell: registrado no log"                          grep -q ' tell 7-bar ok$' "$STATE/log"
+check "tell: registrado no log, com a mensagem"          grep -q " tell 7-bar ok"$'\t'"pode seguir\$" "$STATE/log"
 sw list
 check "list: mostra a sessão de outro repo"              grep -q "7-bar w1:p2 claude .* $LAB kaizen" <<<"$OUT"
 # aba renomeada: o close acha pelo id gravado no spawn (5º campo, antes do repo)
@@ -211,6 +212,71 @@ check "close: fecha a aba pelo id gravado"               grep -q 'tab close w1:t
 check "close: marca a sessão fechada"                    grep -qx '7-bar' "$STATE/closed"
 sw list
 check "list: sessão fechada marcada"                     grep -q "$LAB kaizen (fechada)" <<<"$OUT"
+
+# ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
+# cada linha do log da rodada também chega ao receptor como log OTLP (oute-emit), com a origem e o oute.agent
+. "$ROOT/tests/lib/otlp.sh"
+trap 'rcv_stop; rm -rf "$TMP"' EXIT
+ln -sf "$ROOT/docker/oute-emit" "$BIN/oute-emit"
+export OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent"
+ev() { events "$RCV_DIR" | jq -c "select($1)"; }
+n() { ev "$1" | grep -c . || true; }
+
+# 8. abertura, spawn, tell (ok e recusado), close, rodada fechada e watch
+CASE=eventos-op; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 "$SWARM" "$REPO" --max 2 --label bug 2>&1)"; RC=$?
+nr="$(ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1)"
+check "abertura: código 0"                               [ "$RC" -eq 0 -a -n "$nr" ]
+check "abertura: meta com o agente da coordenadora"      grep -qx 'agent=claude' "$H/.oute/swarm/$nr/meta"
+check "abertura: linha no log"                           grep -q " abertura $nr (repo repo, max 2, label bug)$" "$H/.oute/swarm/$nr/log"
+check "abertura: oute.swarm.round.opened"                [ "$(ev '.name == "oute.swarm.round.opened"' | jq -c --arg r "$nr" 'select(.attrs["oute.swarm.round"] == $r and .attrs["oute.swarm.repo"] == "repo"
+                                                              and .attrs["oute.swarm.max"] == "2" and .attrs["oute.swarm.label"] == "bug" and .attrs["oute.agent"] == "claude")' | grep -c .)" -eq 1 ]
+sw spawn 8-bar "faça a issue 8" --agent codex
+e="$(ev '.name == "oute.swarm.session.spawned"')"
+check "spawn: código 0 e linha no log"                   [ "$RC" -eq 0 ] && grep -q ' spawn 8-bar codex$' "$STATE/log"
+check "spawn: sessão, issue, agente da sessão, repo"     jq -e '.attrs["oute.swarm.round"] == "swarm-test" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.issue"] == "8"
+                                                              and .attrs["oute.swarm.session.agent"] == "codex" and .attrs["oute.swarm.repo"] == "repo" and .attrs["oute.swarm.kaizen"] == false' <<<"$e" >/dev/null
+check "spawn: oute.agent = coordenadora, origem"         jq -e '.attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e" >/dev/null
+check "spawn: corpo = prompt da sessão"                  jq -e '.body | startswith("faça a issue 8\n\n")' <<<"$e" >/dev/null
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
+echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
+echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
+sw tell 8-bar "pode seguir, Bardi aprovou"
+check "tell ok: evento com o texto"                      [ "$RC" -eq 0 -a "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.tell.result"] == "ok"
+                                                              and .attrs["oute.swarm.tell.forced"] == false and .body == "pode seguir, Bardi aprovou"')" -eq 1 ]
+sw close 8-bar --yes
+check "close: linha com hora no log"                     grep -qE '^[0-9T:Z-]+ close 8-bar$' "$STATE/log"
+check "close: oute.swarm.session.closed"                 [ "$(n '.name == "oute.swarm.session.closed" and .attrs["oute.swarm.session"] == "8-bar"')" -eq 1 ]
+sw tell 8-bar "de novo"
+check "tell recusado: evento com motivo e texto"         [ "$RC" -ne 0 -a "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.tell.result"] == "recusado"
+                                                              and (.attrs["oute.swarm.tell.reason"] | startswith("aba #8 bar já fechada")) and .body == "de novo"')" -eq 1 ]
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=idle"
+sw close --all --yes
+check "close --all: sessão e rodada fechadas"            [ "$(n '.name == "oute.swarm.session.closed" and .attrs["oute.swarm.session"] == "7-foo"')" -eq 1 -a \
+                                                           "$(n '.name == "oute.swarm.round.closed" and .attrs["oute.swarm.round"] == "swarm-test"')" -eq 1 ]
+cat > "$FAKE/on-sleep-1" <<'SH'
+cat > "$FAKE/prs-repo.json" <<'J'
+[{"number":12,"headRefName":"feat/7-foo","state":"OPEN","mergeable":"MERGEABLE","createdAt":"2026-06-01T00:00:00Z",
+  "url":"https://github.com/x/y/pull/12","statusCheckRollup":[{"name":"test","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]}]
+J
+SH
+watch
+check "watch: pr, ci e rodada como observação"           [ "$(n '.name == "oute.swarm.watch.pr" and .attrs["oute.swarm.source"] == "watch" and (.body | startswith("[pr] PR #12 aberto"))')" -eq 1 -a \
+                                                           "$(n '.name == "oute.swarm.watch.ci" and .body == "[ci] PR #12 · test: fail"')" -eq 1 -a "$(n '.name == "oute.swarm.watch.rodada"')" -eq 1 ]
+check "todos: oute.agent=claude e origem do host"        [ "$(n 'true')" -gt 0 -a "$(n '.attrs["oute.agent"] != "claude" or .res["oute.agent"] != "claude" or .res["host.name"] != "oute-mac" or .res["oute.instance"] != "oute-agent"')" -eq 0 ]
+check "todos: uma linha do log = um evento"              [ "$(n 'true')" -eq "$(( $(wc -l < "$STATE/log") + $(wc -l < "$H/.oute/swarm/$nr/log") ))" ]
+rcv_stop
+
+# 9. coletor fora do ar: mesma saída e mesmo código, sem travar
+CASE=fora; round "$CASE"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
+t0=$(date +%s)
+sw spawn 9-baz "instrução"
+check "fora do ar: spawn com código 0 e a mesma saída"   [ "$RC" -eq 0 -a "$OUT" == "aberta: #9 → pane w1:p2 · worktree repo-9-baz · agente claude" ]
+check "fora do ar: sem erro na tela"                     [ -z "$ERR" ]
+check "fora do ar: rápido"                               [ $(( $(date +%s) - t0 )) -le 3 ]
+check "fora do ar: log continua sendo gravado"           grep -q ' spawn 9-baz claude$' "$STATE/log"
+unset OTEL_EXPORTER_OTLP_ENDPOINT
 
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
