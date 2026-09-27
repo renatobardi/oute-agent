@@ -38,11 +38,15 @@ ours() { [[ -L "$1" ]] && case "$(readlink "$1")" in "$ADDONS"/*) return 0 ;; es
 
 # skill recusada não fica ativa: remove o link nosso com esse nome (link ou pasta alheia fica intocada)
 unlink_refused() {
-  local dest dst
+  local dest dst err
   for dest in "${DESTS[@]}"; do
     dst="$dest/$1"
-    if ours "$dst"; then
-      rm -f "$dst" && warn "removido link de skill recusada $dst"
+    if ! ours "$dst"; then
+      continue
+    elif err="$(rm -f "$dst" 2>&1)"; then
+      warn "removido link de skill recusada $dst"
+    else
+      warn "AVISO: não consegui remover o link de skill recusada $dst: $err"
     fi
   done
 }
@@ -87,8 +91,8 @@ for src in "$SKILLS"/*; do
       warn "AVISO: $dst já existe e não é link para $ADDONS; não sobrescrevo"
     elif ! mkdir -p "$dest" 2>/dev/null; then
       warn "AVISO: não consegui criar a pasta $dest (existe como arquivo?); $name não linkada ali"
-    elif ! ln -s "$src" "$dst" 2>/dev/null; then
-      warn "AVISO: não consegui criar o link $dst"
+    elif ! err="$(ln -s "$src" "$dst" 2>&1)"; then
+      warn "AVISO: não consegui criar o link $dst: $err"
     fi
   done
 done
