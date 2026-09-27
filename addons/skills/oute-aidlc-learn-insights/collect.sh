@@ -107,11 +107,15 @@ github() {
     ($f | fromdateiso8601) as $from | group_by(.repo)[]
     | [.[0].repo, (map(select(.c | ts >= $from)) | length), (map(select(.x | ts >= $from)) | length),
        (map(select(.state == "OPEN")) | length), (map(select(.state == "OPEN" and (.u | ts) < $s)) | length)] | @tsv' "$TMP/iss"
-  echo "### issues abertas por fase (todos os repos)"
+  echo "### issues abertas por fase (repos que usam labels aidlc:*)"
+  # repo sem nenhuma issue aidlc:* não segue o AI-DLC: fica fora da tabela, senão vira "(sem fase)" em massa
   jq -rs --argjson s "$stale" "$q"'
-    (["fase","abertas","paradas_30d"] | @tsv),
-    (map(select(.state == "OPEN") | . + {f: ((.l | map(select(startswith("aidlc:")))[0]) // "(sem fase)")})
-     | group_by(.f)[] | [.[0].f, length, (map(select((.u | ts) < $s)) | length)] | @tsv)' "$TMP/iss"
+    ([.[] | select(any(.l[]; startswith("aidlc:"))) | .repo] | unique) as $ai
+    | (["fase","abertas","paradas_30d"] | @tsv),
+      (map(select(.state == "OPEN" and (.repo | IN($ai[])))
+           | . + {f: ((.l | map(select(startswith("aidlc:")))[0]) // "(sem fase)")})
+       | group_by(.f)[] | [.[0].f, length, (map(select((.u | ts) < $s)) | length)] | @tsv),
+      ([.[].repo] | unique - $ai | select(length > 0) | "fora_da_tabela\t\(join(","))\tsem labels aidlc:*")' "$TMP/iss"
   echo "### issues kaizen, bug e ciclo na janela"
   jq -rs --arg f "$W_FROM" "$q"'
     ($f | fromdateiso8601) as $from

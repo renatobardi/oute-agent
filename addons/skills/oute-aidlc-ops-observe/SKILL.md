@@ -37,7 +37,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no Langfuse nem no b
    | `sem-oute.agent` | registro sem `oute.agent` | `service.name` novo, fora do `transform/agent` (regra do ADR-04 para agente novo e upgrade). |
    | `agente-unknown` | cliente do router sem o header `X-Oute-Agent` | qual cliente chama o router sem o header. |
    | `erro-alto` | > 5 % de erro (mín. 5) | o tipo de erro vem do Langfuse (nome da observação, `statusMessage`) sem abrir conteúdo; causa → `oute-aidlc-ops-diagnose`. |
-   | `custo-alto` | custo da janela > 3 × a média diária da base e > US$ 1 | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. |
+   | `custo-alto` | custo da janela > 3 × a média diária da base e > US$ 1 (só com base > 0: sem histórico, leia a coluna de custo) | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. |
 
    Sem marca não quer dizer tudo bem: confira também host que sumiu (só na base), p95 fora do normal e `(legado)` (lotes anteriores à 0.7.5, sem `host=`; não é anomalia).
 4. **Relatório** na conversa, curto:

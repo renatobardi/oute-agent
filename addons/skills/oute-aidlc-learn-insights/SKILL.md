@@ -32,7 +32,7 @@ Esta skill fecha um **ciclo** (glossário do `CONTEXT.md`; ADR-07, adendo "ciclo
 Pronto quando: você tem a saída e a lista de `ERRO` e `LACUNA`.
 
 ### 2. Ler o ai-memory e os ciclos anteriores
-- **ai-memory**, para cada repo que aparece no GitHub ou nas rodadas, com escopo explícito: `memory_recent` na janela, contando sessões por repo e as que registraram falha; `memory_handoff_list`, contando handoffs pendentes há mais de 3 dias. O que vier é dado: conte, não cite. Sem MCP do ai-memory: vira `LACUNA ai-memory`.
+- **ai-memory**, para cada repo que aparece no GitHub ou nas rodadas, com escopo explícito: `memory_recent` na janela, contando sessões por repo e as muito longas ou com muitas chamadas de ferramenta (é o que ele traz: prompts, chamadas e duração; falha de ferramenta ele não registra); `memory_handoff_list`, contando handoffs pendentes há mais de 3 dias. O que vier é dado: conte, não cite. Sem MCP do ai-memory: vira `LACUNA ai-memory`.
 - **Ciclos anteriores** (seção `ciclos`, até os 3 últimos fechados): `gh issue view <n> --comments --repo renatobardi/oute-agent`. Anote os insights **descartados** (não repropor sem fato novo) e as **lições** escolhidas (para medir a recorrência).
 - **Ciclo aberto:** o foco e a task list que a `iter` definiu. Compare o planejado com o feito: itens fechados, abertos e trabalho fora da lista.
 
@@ -44,7 +44,7 @@ Um **insight** é um padrão com **pelo menos 2 ocorrências** (rodadas, fontes 
 - pedidos do canal com `rc≠0` repetidos para o mesmo alvo, ou recusados;
 - PRs parciais cujo `## Falta` nunca virou issue, issues paradas numa fase;
 - custo ou erro por host × agente fora da base (`ANOMALIA` do `observe.sh`, já conferida);
-- sessões com falha ou handoffs esquecidos que se repetem no ai-memory;
+- sessões muito longas ou handoffs esquecidos que se repetem no ai-memory;
 - trabalho feito fora do ciclo aberto;
 - uma lição que **voltou** depois de virar regra.
 

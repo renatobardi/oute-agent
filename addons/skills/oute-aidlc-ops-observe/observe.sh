@@ -83,10 +83,10 @@ langfuse() {
     | (["host","agente","observações","erros","custo_usd","tokens","p95_ms","base_custo_usd/dia"] | @tsv),
       ($w[] | [.env, .agent, .obs, .err, (.cost*10000|round/10000), .tok, (.p95|round),
                (($b["\(.env)/\(.agent)"].cost // 0) / $bdays * 10000 | round / 10000)] | @tsv),
-      ( # anomalias
+      ( # anomalias (custo-alto só com base > 0: sem histórico não há o que comparar)
         ($w[] | select(.err >= 5 and .err / .obs > 0.05)
               | ["ANOMALIA","erro-alto","\(.env)/\(.agent)","\(.err) de \(.obs) observações com level=ERROR"] | @tsv),
-        ($w[] | ($b["\(.env)/\(.agent)"].cost // 0) as $bc | select(.cost > 1 and .cost > 3 * $bc / $bdays)
+        ($w[] | ($b["\(.env)/\(.agent)"].cost // 0) as $bc | select(.cost > 1 and $bc > 0 and .cost > 3 * $bc / $bdays)
               | ["ANOMALIA","custo-alto","\(.env)/\(.agent)","US$ \(.cost*100|round/100) na janela; base US$ \($bc/$bdays*100|round/100)/dia"] | @tsv),
         ($w[] | select(.agent == "unknown")
               | ["ANOMALIA","agente-unknown","\(.env)","\(.obs) observações de cliente do router sem X-Oute-Agent"] | @tsv),
