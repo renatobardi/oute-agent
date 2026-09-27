@@ -25,7 +25,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
   - repo com `.ai-memory.toml`.
 - **ADR-06, addons:** `addons/<tipo>/` deste repo, montado read-only; o entrypoint linka cada addon em `~/.claude/skills` e `~/.agents/skills`. Primitivo fica na imagem e só cita addon com plano B.
 - **Plugins herdr:** próprios (`oute-*`), nada do marketplace em runtime (ADR-05, em estudo).
-- **ADR-07, AI-DLC:** todo trabalho segue 12 fases (`strat` `intent` `spec` `arch` `design` `plan` `build` `qa` `ship` `ops` `learn` `iter`) + faixa transversal `ctx`, cada uma com contribuição da IA, **gate humano** (Bardi) e outcome. Skill de fluxo = `oute-aidlc-<fase>-<id>`; issue com label `aidlc:<fase>` e template `aidlc`.
+- **ADR-07, AI-DLC:** todo trabalho segue 12 fases (`strat` `intent` `spec` `arch` `design` `plan` `build` `qa` `ship` `ops` `learn` `iter`) + faixa transversal `ctx`, cada uma com contribuição da IA, **gate humano** (Bardi) e outcome. Skill de fluxo = `oute-aidlc-<fase>-<id>`; issue com label `aidlc:<fase>` e template `aidlc`. Adendo: `learn` e `iter` fecham o **ciclo** numa issue global em `oute-agent` (aberta pela `iter`, fechada pela `learn`); o roadmap é essa issue aberta.
 
 ## Glossário
 - **Jev:** roteador de perfis (`typesafe/jev-1.13`), consultado por request.
@@ -46,7 +46,11 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **persona:** addon com prompt de papel (revisor, arquiteto…), instalado como subagente onde a ferramenta suporta. "agente" continua sendo Claude, Codex ou Pi.
 - **script:** addon determinístico, sem LLM; o agente ou o humano o chama e o resultado é sempre o mesmo.
 - **worker:** só a sessão do swarm por issue (uma aba do herdr). Não usar para scripts.
-- **lição (kaizen):** fato de uma rodada do swarm (travamento, retrabalho) que vira regra escrita. A coordenadora propõe; só vira regra com aprovação do Bardi.
+- **lição:** fato com evidência que vira regra escrita, só com aprovação do Bardi. Origem: uma rodada do swarm (**kaizen**, proposta pela coordenadora) ou um insight. Lição é sempre regra; o que pede trabalho é melhoria. O label `kaizen` marca toda issue de lição, de qualquer origem (o corpo diz qual).
+- **insight:** padrão observado num período, em mais de uma rodada ou fonte (telemetria, issues, rodadas, canal de aprovação), com evidência. Sozinho não muda nada: no gate, o Bardi o torna lição, melhoria ou o descarta.
+- **melhoria:** insight que vira issue de trabalho (não regra).
+- **ciclo:** período entre dois gates de `learn`. Abre no gate da `iter` (o Bardi decide foco e temas) e fecha no gate da `learn` seguinte (o Bardi escolhe lições e melhorias). Contém zero ou mais rodadas e sessões avulsas. Não confundir com rodada.
+- **rodada:** uma execução do swarm (`oute-swarm`), da triagem ao fechamento, com id `swarm-<data>-<hora>`.
 - **nível da lição:** onde a regra vale. `repo` (AGENTS.md do repo alvo), `swarm` (prompts da coordenadora/worker), `agentes` (notas globais do container), `skill` (addon `oute-*`). Se valeria num repo diferente, não é `repo`.
 - **plugin:** só no sentido nativo de cada ferramenta (plugin do Claude Code, plugin herdr). Um plugin herdr é um tipo de addon.
 
