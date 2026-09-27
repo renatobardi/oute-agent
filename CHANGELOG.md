@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **Coordenadora do swarm confirma em uma linha antes de ação irreversível** (#78, `swarm.md` §3). Antes de merge, `oute-swarm close … --yes`, `oute-task clean --yes` ou `tell` que manda aplicar no host, ela ecoa numa linha o que vai fazer (PR, estratégia, head: `vou mergear o #75 (squash) no head a1db228`) e só executa se não houver mensagem nova do Bardi. Se a correção dele chegar durante ou depois da ação, ela para, diz o que já foi feito e o que dá para desfazer e pede a decisão, sem desfazer nada sozinha. Opção de merge sempre com o número do PR no texto (`1. mergear #75`). Na rodada `swarm-0926-2039`, um "2" seguido de "na vdd queria a 3" virou merge do #75 com a decisão já trocada. O `swarm.md` entra na imagem: **precisa de release**.
+
 ### Fixed
 - **Storage: `rclone mount` não morre mais com o terminal** (`scripts/oute`). O `--daemon` do rclone ficava no grupo de processos e na sessão do terminal que rodou o `oute up`/`oute update`: um Ctrl+C ou o fechamento do terminal matava o mount, e o `/data/shared` do container ficava `Transport endpoint is not connected` até um `oute down/up` (visto no oute-server em 2026-09-26). No Linux o mount sobe com `setsid -w`, em sessão própria; no macOS, sem `setsid(1)`, segue como antes. E o `oute up`/`sync-shared` reconhece um mount morto (listado, mas o `ls` dá `Transport endpoint is not connected`, ou `Device not configured` no macOS), desmonta, monta de novo e avisa que um container já de pé precisa de `oute restart`; outro erro do `ls` (bucket fora do ar) não derruba um mount vivo. Sem release: `scripts/oute` entra com `git pull`.
 
