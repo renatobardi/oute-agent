@@ -32,7 +32,7 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 
 | Fase | Primitivos e skills |
 |---|---|
-| `strat` | `oute-aidlc-strat-research`, `oute-aidlc-strat-wayfinder` |
+| `strat` | `oute-aidlc-strat-opportunity`, `oute-aidlc-strat-research`, `oute-aidlc-strat-wayfinder` |
 | `intent` | `oute-aidlc-intent-grill` (base: `oute-aidlc-intent-grilling`) |
 | `spec` | issue pelo template `aidlc`, `oute-aidlc-spec-issue` |
 | `arch` | `docs/adr/`, `CONTEXT.md`, `oute-aidlc-arch-grill`, `oute-aidlc-arch-deepen` |

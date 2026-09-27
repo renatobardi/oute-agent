@@ -1,0 +1,5 @@
+interface:
+  display_name: "oute-aidlc-strat-opportunity"
+  short_description: "Tema → oportunidade e viabilidade → issue com Intenção"
+policy:
+  allow_implicit_invocation: false
