@@ -1,6 +1,6 @@
 # ADR-04 — Observabilidade (issues #13, #19)
 
-Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26)
+Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27)
 Base: `estudos/observabilidade-rascunho.md` (fontes, destinos do Broadcast, opções de painel).
 
 ## Decisões (Bardi, 2026-09-24)
@@ -54,6 +54,18 @@ Decisão (Bardi): a identidade de origem é a dupla **máquina + instância**. A
 - **Regra para agente novo:** se falar OTel direto, acrescentar o `service.name` no `transform/agent`; se passar pelo jev-router, mandar o header `X-Oute-Agent`.
 - **Validado (0.7.2):** `served agent=pi profile=cheap via=jev model=openai/gpt-oss-20b provider=DeepInfra cost=0.00037435`.
 - **Lição:** logo depois do `oute up`, o LiteLLM leva ~15–30 s para aceitar conexões (o Pi devolve `Connection error.` nesse intervalo).
+
+## Adendo 2026-09-27 — eventos operacionais: swarm e canal (#124)
+Decisões do grilling de `arch` da #124 (Bardi). **Evento operacional** = fato de um primitivo (rodada do swarm, pedido do canal de aprovação) registrado como log OTel no bucket, com a origem de sempre e `oute.agent`. Não é consumo de modelo. Motivo: as rodadas (`~/.oute/swarm/<id>/`) e o canal (`~/outbox`, `~/inbox`) ficam no volume de cada host, e a `learn` de um host não enxerga o outro.
+- **Conteúdo, exceção ao "bucket = tudo":** vai com conteúdo o que o agente escreveu (prompt da sessão, texto do `tell`, script do pedido), texto que já chega ao bucket pelas transcrições dos agentes. A **saída do script executado no host não vai**: seguem só `rc`, duração, tamanho da saída e aprovador. É o único dado que nasce fora do container, e o bucket nunca apaga (um segredo impresso sem querer não teria volta). É a mesma linha do Claude Code, que manda `tool_input` e só `tool_result_size_bytes`.
+- **Sinal:** logs OTel, um registro por evento (`oute.swarm.*`, `oute.canal.*`), **só no bucket** (pipeline `logs/archive`). O Langfuse não recebe: a regra "nenhuma ferramenta entra sem mandar consumo ao bucket + Langfuse" vale para **consumo de modelo**, e o consumo das sessões já vai pelos agentes. Um trace-resumo por rodada no Langfuse pode entrar depois sem mudar o formato.
+- **Rodada:** espelha a linha do tempo inteira (abertura, `spawn` com o prompt, `tell`, eventos do `watch`, `close`, rodada fechada). Os eventos do `watch` são **observações** (`oute.swarm.watch.*`): a fonte primária de PR/CI continua sendo o GitHub, mas a hora em que a coordenadora viu mede a reação da rodada.
+- **Quem emite:** um primitivo único, `oute-emit`, na imagem. O `oute-propose` emite o pedido proposto; o `oute approve` (host) emite a decisão chamando o `oute-emit` dentro do container (`docker exec`), porque o host não alcança o coletor (sem porta publicada). Com imagem antiga, sem `oute-emit`, o host pula em silêncio.
+- **Falha:** best-effort, timeout curto, sem spool: a telemetria nunca faz o primitivo falhar ou travar. A fonte local (`log` da rodada, `approve.log`) continua sendo a primária.
+- **Histórico:** backfill único e idempotente por host, com a hora original do evento e `oute.backfill=true`. O bucket particiona pela **hora de chegada** (`hour=`): quem lê filtra pelo `timeUnixNano` do registro, não pelo caminho (vale também para o atraso do lote de 5 min).
+- **`oute.agent` = quem causou o evento.** Valor novo **`human`** (o Bardi decidindo um pedido), emitido só por ferramenta do projeto, nunca pelo `transform/agent`. O agente de cada sessão vai em `oute.swarm.session.agent`; pedido sem agente declarado = `unknown`.
+- **Fora:** sessões avulsas (`oute-task`), na #128, reusando o `oute-emit`.
+- Opções descartadas: conteúdo completo no bucket, inclusive a saída do host (vazamento irreversível); emitir no `oute-inbox` ao ler (pedido não lido some, leitura repetida duplica) ou por um vigia residente; traces por rodada (o span só sai quando a rodada fecha, e rodada que não fecha nunca apareceria); spool com reenvio (fila e dedup em bash para uma janela de falha local e pequena); `oute.agent` fixo por ferramenta (`swarm`, `canal`), que mistura ferramenta com agente.
 
 ## Onde cada coisa fica / limites
 | Local | Conteúdo | Limite |
