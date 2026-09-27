@@ -78,3 +78,8 @@ Só depois que os PRs kaizen estiverem mergeados ou abandonados (confirme com o 
   - lição → issue kaizen → PR → estado, com **precisa de release** nas de nível `swarm` ou `agentes` (entram na imagem); lição que ficou só como issue (sem sessão, ou repo fora do `/workspace`) aparece como tal;
   - problemas das sessões kaizen, só como nota;
   - achados que valem virar issue. Fora as issues kaizen escolhidas no 4.2, não crie issue sem o Bardi pedir.
+- Depois do resumo, cancele os **handoffs de coordenadora de rodadas já fechadas**, inclusive os que você deixou em rodada anterior (a sessão da coordenadora gera um ao terminar, em qualquer cwd). No mesmo `memory_handoff_list` de cima:
+  - **identificação:** o `summary` cita "coordenadora da rodada `<id>`" (com ou sem a formatação do prompt, ex.: `**coordenadora** da rodada \`swarm-0926-2252\``), com `<id>` diferente de `{{ID}}`;
+  - **rodada fechada:** o `oute-swarm list` mostra a rodada `<id>` e nenhuma aba dela sem `(fechada)`. Só então cancele com `memory_handoff_cancel`;
+  - **fica**, sem cancelar: handoff de rodada com aba aberta, de rodada que não aparece no `oute-swarm list` e o que não dá para identificar (sem o texto, ou `<id>` ambíguo). Liste cada um numa nota ao fim do resumo (id curto do handoff, rodada citada ou "não identificado", motivo), para o Bardi decidir;
+  - o handoff que esta sessão gerar ao sair fica para a próxima coordenadora, pela mesma regra.
