@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Changed
+- **`oute-pr-audit`: opção numerada com o número do PR vale como pedido de merge** (#98, passo 13, "o quê"). A escolha, pelo Bardi, de uma opção numerada que traz o PR e a ação de merge (ex.: `1. mergear #94 (squash) no head 5bfec3e`) é pedido explícito para aquele PR e só para o head citado; se o head mudou desde a opção, o pedido não vale e a pergunta é refeita com o head novo. Alinha a skill ao `swarm.md` §3 (#96). Sem release: a skill entra com `git pull` + `oute down/up`.
+
 ## [0.7.24] - 2026-09-27
 
 ### Changed
