@@ -42,8 +42,8 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 | `qa` | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`), `tests/`, CI `pr` |
 | `ship` | `oute-aidlc-ship-release` (checklist antes da release), `scripts/release` + deploy nos hosts (Bardi), `oute-aidlc-ship-verify` (pós-deploy pelo canal de aprovação) |
 | `ops` | telemetria ADR-04 (bucket + Langfuse), canal de aprovação, `oute-aidlc-ops-observe`, `oute-aidlc-ops-diagnose` |
-| `learn` | `oute-swarm` §4.1 (kaizen), `oute-aidlc-learn-feedback` |
-| `iter` | issues de fim de sessão |
+| `learn` | `oute-swarm` §4.1 (kaizen, por rodada), `oute-aidlc-learn-insights` (fecha o ciclo: insights entre rodadas e fontes → lições e melhorias), `oute-aidlc-learn-feedback` |
+| `iter` | `oute-aidlc-iter-roadmap` (abre o próximo ciclo: foco, issues e limpeza do backlog), issues de fim de sessão |
 | `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory, `oute-aidlc-ctx-router`, `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
 
 Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aidlc-ctx-router`. Utilitária: `oute-skill-writing` (escrever e editar skills).

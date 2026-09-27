@@ -24,8 +24,8 @@ Você não lembra de todas as skills; pergunte aqui. Cada fase termina num **gat
 | `qa` | PR aberto, antes do merge | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`; esta também roda sozinha sobre um diff); merge só com pedido do Bardi |
 | `ship` | release e deploy | `oute-aidlc-ship-release` (checklist: precisa de release, CHANGELOG, versão) → Bardi roda `scripts/release` e faz o deploy → `oute-aidlc-ship-verify` (versão, serviços e telemetria em cada host, pelo canal de aprovação) |
 | `ops` | algo quebrado, lento ou intermitente; saúde, custo e telemetria dos agentes | `oute-aidlc-ops-diagnose`; `oute-aidlc-ops-observe` (lê a telemetria do ADR-04) |
-| `learn` | relatos de problema, fim de rodada | `oute-aidlc-learn-feedback` (relato → issues), `oute-swarm` §4.1 (kaizen) |
-| `iter` | fim de sessão | o que ficou pendente vira issue com `aidlc:<fase>` |
+| `learn` | relatos de problema, fim de rodada, fim de ciclo | `oute-aidlc-learn-feedback` (relato → issues), `oute-swarm` §4.1 (kaizen, uma rodada), `oute-aidlc-learn-insights` (fecha o ciclo: telemetria, issues, rodadas, canal e ai-memory → insights → lições e melhorias) |
+| `iter` | fim de ciclo, fim de sessão | `oute-aidlc-iter-roadmap` (abre o próximo ciclo: foco, issues numa task list, limpeza do backlog); fim de sessão: o que ficou pendente vira issue com `aidlc:<fase>` |
 | `ctx` | termos, regras, configuração do repo | `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
 
 ## Fluxo principal: ideia → merge
