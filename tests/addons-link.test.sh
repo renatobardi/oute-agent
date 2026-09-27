@@ -39,10 +39,12 @@ else
   echo "FAIL stat sem -c (GNU) nem -f (BSD)"; exit 1
 fi
 # snapshot(<caminho>...): estado de <caminho>... relativos ao $H (nome, alvo do link e statf de cada
-# entrada). Se algo falhar, a saída é única (nunca igual a outra) e o código é 1: a comparação falha.
+# entrada). Se algo falhar (caminho ausente, erro do find ou do stat), a saída é única (nunca igual a
+# outra) e o código é 1: a comparação falha. O find roda fora do pipe para o código dele contar.
 snapshot() {
-  local out
-  out="$(cd "$H" && find "$@" -print | LC_ALL=C sort | while IFS= read -r p; do
+  local list out
+  list="$(cd "$H" && find "$@" -print 2>/dev/null)" &&
+  out="$(cd "$H" && LC_ALL=C sort <<<"$list" | while IFS= read -r p; do
            printf '%s|%s|' "$p" "$(readlink "$p")"; statf "$p" || exit 1
          done)" || { printf 'ERRO snapshot %s%s\n' "$RANDOM" "$RANDOM"; return 1; }
   printf '%s\n' "$out"
@@ -55,6 +57,11 @@ fresh snapshot; echo a > "$H/f"
 before="$(snapshot .)"; rm "$H/f"; echo a > "$H/f"; touch -t 200001010000 "$H/f"; after="$(snapshot .)"
 check "snapshot: detecta arquivo recriado"       [ "$before" != "$after" ]
 check "snapshot: estado igual dá igual"          [ "$after" == "$(snapshot .)" ]
+# 0b. caminho inexistente -> snapshot falha (código != 0) e nunca dá saída comparável
+snapshot nao-existe >/dev/null; rc=$?
+check "snapshot: caminho inexistente falha"      [ "$rc" -ne 0 ]
+check "snapshot: inexistente nunca dá igual"     [ "$(snapshot nao-existe)" != "$(snapshot nao-existe)" ]
+check "snapshot: inexistente junto de um que existe falha" [ "$(snapshot . nao-existe)" != "$(snapshot . nao-existe)" ]
 
 # 1. skill válida -> link nas duas pastas (cria as pastas)
 fresh valida; skill "$A" oute-foo; run
@@ -171,6 +178,33 @@ check "arquivo: .claude/skills intacto"          [ -f "$H/.claude/skills" -a "$(
 check "arquivo: link em .agents/skills"          linked .agents/skills oute-foo
 check "arquivo: aviso cita .claude/skills"       warned "$H/.claude/skills"
 check "arquivo: toda linha com o prefixo"        [ -z "$(grep -v '^\[oute\] addons: ' <<<"$ERR")" ]
+
+# 10 e 11 dependem de pasta sem permissão de escrita, que root ignora
+if [[ "$(id -u)" -eq 0 ]]; then
+  echo "skip rm/ln que falham: rodando como root (permissão de escrita não vale)"
+else
+  # 10. rm do link de skill recusada falha (pasta sem escrita) -> aviso com prefixo e motivo, código 0
+  fresh rm-falha; skill "$A" oute-nome; run
+  skill "$A" oute-nome outro
+  chmod a-w "$H/.claude/skills"
+  run
+  chmod u+w "$H/.claude/skills"
+  check "rm falha: código 0"                     [ "$RC" -eq 0 ]
+  check "rm falha: aviso de não remoção"         warned "^\[oute\] addons: AVISO: não consegui remover o link de skill recusada $H/.claude/skills/oute-nome: .*rm"
+  check "rm falha: nada de 'removido' para ela"  unwarned "removido link de skill recusada $H/.claude/skills/"
+  check "rm falha: a outra pasta é limpa"        absent .agents/skills oute-nome
+  check "rm falha: toda linha com o prefixo"     [ -z "$(grep -v '^\[oute\] addons: ' <<<"$ERR")" ]
+
+  # 11. ln -s falha (pasta de destino existe, sem escrita) -> aviso com prefixo e motivo, código 0
+  fresh ln-falha; skill "$A" oute-foo
+  mkdir -p "$H/.claude/skills"; chmod a-w "$H/.claude/skills"
+  run
+  chmod u+w "$H/.claude/skills"
+  check "ln falha: código 0"                     [ "$RC" -eq 0 ]
+  check "ln falha: aviso com o motivo do ln"     warned "^\[oute\] addons: AVISO: não consegui criar o link $H/.claude/skills/oute-foo: .*ln"
+  check "ln falha: link na outra pasta"          linked .agents/skills oute-foo
+  check "ln falha: toda linha com o prefixo"     [ -z "$(grep -v '^\[oute\] addons: ' <<<"$ERR")" ]
+fi
 
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
