@@ -189,6 +189,17 @@ is_mounted() { mount | grep -q " on $1 "; }
 mount_shared() {
   local dir="$OUTE_HOME/shared" bucket="${OUTE_BUCKET:-oute-shared}"
   command -v rclone >/dev/null || { echo "rclone ausente no host; /data/shared fica local"; return 0; }
+  # mount morto (rclone morreu sem desmontar): desmonta e monta de novo. Só com o erro de mount desconectado
+  # (Linux: "Transport endpoint is not connected"; macOS: "Device not configured"): outro erro do ls (bucket
+  # fora do ar) não derruba um mount vivo
+  local err=""; is_mounted "$dir" && err="$(LC_ALL=C ls "$dir" 2>&1 >/dev/null || true)"
+  case "$err" in
+    *"not connected"*|*"Device not configured"*)
+      echo "storage: mount de $dir sem resposta (rclone caiu); remontando" >&2
+      fusermount -uz "$dir" 2>/dev/null || umount "$dir" 2>/dev/null || umount -f "$dir" 2>/dev/null || true
+      is_mounted "$dir" && { echo "não consegui desmontar $dir; /data/shared fica sem storage" >&2; return 0; }
+      echo "storage: se o container já estava de pé, ele segue com o mount antigo; rode 'oute restart'" >&2 ;;
+  esac
   is_mounted "$dir" && { export OUTE_SHARED_DIR="$dir"; echo "storage: $dir já montado"; return 0; }
   oci_remote_env || { echo "OCI_S3_* ausente em $AGENT_ENV_FILE (item oci-storage: oute oci-bootstrap; depois oute secrets refresh); /data/shared fica local"; return 0; }
   local extra=()
@@ -202,7 +213,11 @@ mount_shared() {
   # dono = usuário do container (grava); grupo = usuário do host (também grava, umask 002). FUSE de usuário
   # já é nosuid/nodev e o rclone não cria symlink -> o container não planta nada executável no host (lab#181)
   # ${extra[@]+...}: array vazio + set -u quebra no bash 3.2 do macOS (#3)
-  rclone mount "oci:$bucket" "$dir" --daemon ${extra[@]+"${extra[@]}"} \
+  # sessão própria: o --daemon do rclone fica no grupo de processos e na sessão do terminal que rodou o
+  # oute up/update, e um Ctrl+C ou SIGHUP nele matava o mount (/data/shared "Transport endpoint is not
+  # connected"). setsid(1) não existe no macOS: lá segue como antes.
+  local detach=(); command -v setsid >/dev/null && detach=(setsid -w)
+  ${detach[@]+"${detach[@]}"} rclone mount "oci:$bucket" "$dir" --daemon ${extra[@]+"${extra[@]}"} \
     --uid "$CONTAINER_UID" --gid "$(id -g)" --umask 002 \
     --vfs-cache-mode full --vfs-cache-max-size "${OUTE_SHARED_CACHE:-2G}" --vfs-cache-max-age 24h \
     --dir-cache-time 5m --cache-dir "$OUTE_HOME/rclone-cache" \
