@@ -1,6 +1,6 @@
 # ADR-04 — Observabilidade (issues #13, #19)
 
-Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27)
+Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27) · sessões (#128)
 Base: `estudos/observabilidade-rascunho.md` (fontes, destinos do Broadcast, opções de painel).
 
 ## Decisões (Bardi, 2026-09-24)
@@ -64,8 +64,18 @@ Decisões do grilling de `arch` da #124 (Bardi). **Evento operacional** = fato d
 - **Falha:** best-effort, timeout curto, sem spool: a telemetria nunca faz o primitivo falhar ou travar. A fonte local (`log` da rodada, `approve.log`) continua sendo a primária.
 - **Histórico:** backfill único e idempotente por host, com a hora original do evento e `oute.backfill=true`. O bucket particiona pela **hora de chegada** (`hour=`): quem lê filtra pelo `timeUnixNano` do registro, não pelo caminho (vale também para o atraso do lote de 5 min).
 - **`oute.agent` = quem causou o evento.** Valor novo **`human`** (o Bardi decidindo um pedido), emitido só por ferramenta do projeto, nunca pelo `transform/agent`. O agente de cada sessão vai em `oute.swarm.session.agent`; pedido sem agente declarado = `unknown`.
-- **Fora:** sessões avulsas (`oute-task`), na #128, reusando o `oute-emit`.
+- **Sessões:** ver "Sessões (#128)" abaixo.
 - Opções descartadas: conteúdo completo no bucket, inclusive a saída do host (vazamento irreversível); emitir no `oute-inbox` ao ler (pedido não lido some, leitura repetida duplica) ou por um vigia residente; traces por rodada (o span só sai quando a rodada fecha, e rodada que não fecha nunca apareceria); spool com reenvio (fila e dedup em bash para uma janela de falha local e pequena); `oute.agent` fixo por ferramenta (`swarm`, `canal`), que mistura ferramenta com agente.
+
+### Sessões (#128, 2026-09-27)
+Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + branch do `oute-task`, de rodada ou avulsa) contém uma ou mais **conversas** (`session.id` do agente).
+- **Ciclo de vida:** `oute.task.opened` (worktree criada), `oute.task.reopened`, `oute.task.removed` (pelo `clean --yes`, com o motivo: PR mergeado, sem commits, detached). O `oute-task` continua fazendo `exec` do agente, então não há evento de fim de conversa. A sessão mede o ciclo da **entrega**; o tempo de trabalho vem das conversas. Simulação do `clean` não emite. Sem corpo: o prompt já chega pela conversa ou pelo `oute.swarm.session.spawned`.
+- **Toda sessão emite**, de rodada ou avulsa. Sessão avulsa = `oute.task.*` sem `oute.swarm.round`.
+- **Identidade:** `oute.task.id` = `<repo>-<slug>-<AAAAMMDDhhmmss>` (UTC), gerado na criação da worktree e gravado no git-dir dela, como a marca `oute-swarm-worker`. O `reopened`, o `removed` e o shim, no restore do herdr, leem de lá. `repo + slug` não serve: o slug se repete depois do `clean`.
+- **Vínculo com o consumo:** antes do `exec`, o `oute-task` acrescenta ao `OTEL_RESOURCE_ATTRIBUTES` `oute.task.id`, `oute.task.repo`, `oute.task.slug` e, em sessão de rodada, `oute.swarm.round`/`oute.swarm.session`. Toda conversa sai marcada. Vale para Claude Code, e para Codex se o SDK dele ler a variável (conferir no `build`). **Pi fica de fora** (a conversa passa pelo jev-router, que não vê o ambiente): #130. Só no bucket; o Langfuse segue a allowlist.
+- **`oute.agent` = quem chamou**, pelo ambiente (marcador de sessão do agente, `OUTE_SWARM_*`). `human` só com terminal interativo e nenhum marcador; na dúvida, `unknown`. O agente da sessão vai em `oute.task.agent` (`claude|codex|pi|shell`).
+- **Sem backfill:** as sessões passadas já estão no GitHub (branch, PR). Worktree anterior à release ganha id na próxima reabertura, com `oute.task.legacy=true`; se só for removida, o `removed` sai sem `oute.task.id`.
+- Opções descartadas: fim de sessão por processo que espera o agente (muda o primitivo e o restore do herdr o contorna) ou por hook de fim do harness (o Pi não tem); emitir só nas avulsas (a remoção das worktrees de rodada ficaria sem registro); id pelo branch (renomeado no meio da sessão, sem o `oute-task` saber); backfill com hora aproximada (dado errado com cara de certo); `oute.agent` = agente da sessão (quebra a regra "quem causou").
 
 ## Onde cada coisa fica / limites
 | Local | Conteúdo | Limite |
