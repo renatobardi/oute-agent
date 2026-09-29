@@ -1,16 +1,18 @@
 # ADR-04 — Observabilidade (issues #13, #19)
 
-Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27; `oute-emit` e catálogo; spool #166; reconciliação da `inbox` #167) · sessões (#128)
+Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27; `oute-emit` e catálogo; spool #166; reconciliação da `inbox` #167) · sessões (#128) · **substituído em parte pelo ADR-08** (agent-studio, #151): as partes do Langfuse e a regra "sem spool" do adendo #124
 Base: `estudos/observabilidade-rascunho.md` (fontes, destinos do Broadcast, opções de painel).
 
+> **Substituído em parte pelo [ADR-08](0008-agent-studio.md)** (#151, 2026-09-29, proposto). O agent-studio (DuckDB + SurrealDB, só no oute-server) substitui o Langfuse como painel e lugar de consulta; o Langfuse roda em paralelo por 1 semana e depois sai. Tudo o que este ADR diz sobre o **Langfuse** (painel, allowlist de metadados, `langfuse.yaml`, limites do Hobby, regra "bucket + Langfuse") vale só até o desligamento e está marcado *(substituído: ADR-08)*. A regra de ferramenta nova passa a ser **bucket + agent-studio**. A regra **"sem spool"** do adendo #124 foi substituída pelo spool do `oute-emit` (#138, ADR-08 §2), já descrito abaixo. Origem, `oute.agent`, eventos operacionais, sessões, bucket e fila em disco continuam valendo.
+
 ## Decisões (Bardi, 2026-09-24)
-- Painel: **híbrido com Langfuse Cloud (região EU, plano Hobby)**. O conteúdo completo fica só no bucket OCI (São Paulo); o Langfuse recebe **só metadados**. Não há região Langfuse na América do Sul; EU por governança (GDPR); a latência não importa (envio assíncrono em lote).
+- *(substituído: ADR-08, painel = agent-studio)* Painel: **híbrido com Langfuse Cloud (região EU, plano Hobby)**. O conteúdo completo fica só no bucket OCI (São Paulo); o Langfuse recebe **só metadados**. Não há região Langfuse na América do Sul; EU por governança (GDPR); a latência não importa (envio assíncrono em lote).
 - **Guardar conteúdo** (prompts/respostas/tools) só no bucket `oute-observability` (compartment `oute-agent`, privado).
 - **Retenção do bucket: nada é apagado** (Bardi, 2026-09-24: "não quero apagar nada do que salvamos"). Sem lifecycle de deleção. Se o volume crescer, a alavanca é tiering (Infrequent Access / Archive), nunca delete.
 - Porta de entrada única: **OTel Collector** próprio; os destinos são detalhe trocável.
 - **Fonte da verdade de modelo real, provedor e custo = OpenRouter.** O LiteLLM só enxerga o preset.
 - **Fase 2 = pull via API, não Broadcast**: o hook consulta `GET /api/v1/generation?id=gen-…` e enriquece o `jev.decision`.
-- **Regra (Bardi): nenhuma ferramenta entra no stack se não mandar consumo neste padrão (bucket + Langfuse).**
+- ~~**Regra (Bardi): nenhuma ferramenta entra no stack se não mandar consumo neste padrão (bucket + Langfuse).**~~ *(substituído: ADR-08 §11)* A regra passa a ser **bucket + agent-studio**.
 
 ## Arquitetura
 ```
@@ -58,10 +60,10 @@ Decisão (Bardi): a identidade de origem é a dupla **máquina + instância**. A
 ## Adendo 2026-09-27 — eventos operacionais: swarm e canal (#124)
 Decisões do grilling de `arch` da #124 (Bardi). **Evento operacional** = fato de um primitivo (rodada do swarm, pedido do canal de aprovação) registrado como log OTel no bucket, com a origem de sempre e `oute.agent`. Não é consumo de modelo. Motivo: as rodadas (`~/.oute/swarm/<id>/`) e o canal (`~/outbox`, `~/inbox`) ficam no volume de cada host, e a `learn` de um host não enxerga o outro.
 - **Conteúdo, exceção ao "bucket = tudo":** vai com conteúdo o que o agente escreveu (prompt da sessão, texto do `tell`, script do pedido), texto que já chega ao bucket pelas transcrições dos agentes. A **saída do script executado no host não vai**: seguem só `rc`, duração, tamanho da saída e aprovador. É o único dado que nasce fora do container, e o bucket nunca apaga (um segredo impresso sem querer não teria volta). É a mesma linha do Claude Code, que manda `tool_input` e só `tool_result_size_bytes`.
-- **Sinal:** logs OTel, um registro por evento (`oute.swarm.*`, `oute.canal.*`), **só no bucket** (pipeline `logs/archive`). O Langfuse não recebe: a regra "nenhuma ferramenta entra sem mandar consumo ao bucket + Langfuse" vale para **consumo de modelo**, e o consumo das sessões já vai pelos agentes. Um trace-resumo por rodada no Langfuse pode entrar depois sem mudar o formato.
+- **Sinal:** logs OTel, um registro por evento (`oute.swarm.*`, `oute.canal.*`), **só no bucket** (pipeline `logs/archive`); com o ADR-08, também no agent-studio (tabela `logs` e estado derivado no SurrealDB). O Langfuse não recebe: a regra "nenhuma ferramenta entra sem mandar consumo ao bucket + Langfuse" vale para **consumo de modelo**, e o consumo das sessões já vai pelos agentes. Um trace-resumo por rodada no Langfuse pode entrar depois sem mudar o formato.
 - **Rodada:** espelha a linha do tempo inteira (abertura, `spawn` com o prompt, `tell`, eventos do `watch`, `close`, rodada fechada). Os eventos do `watch` são **observações** (`oute.swarm.watch.*`): a fonte primária de PR/CI continua sendo o GitHub, mas a hora em que a coordenadora viu mede a reação da rodada.
 - **Quem emite:** um primitivo único, `oute-emit`, na imagem. O `oute-propose` emite o pedido proposto; o `oute approve` (host) emite a decisão chamando o `oute-emit` dentro do container (`docker exec`), porque o host não alcança o coletor (sem porta publicada). Com imagem antiga, sem `oute-emit`, o host pula em silêncio.
-- **Falha:** best-effort, teto de 2 s por chamada, **com spool local e reenvio** (#166, ver "Spool" abaixo): a telemetria nunca faz o primitivo falhar ou travar, e o evento não se perde quando o coletor está fora. A fonte local (`log` da rodada, `approve.log`) continua sendo a primária.
+- **Falha:** best-effort, teto de 2 s por chamada, **com spool local e reenvio** (substitui o "sem spool" original deste adendo: #138, ADR-08 §2; #166, ver "Spool" abaixo): a telemetria nunca faz o primitivo falhar ou travar, e o evento não se perde quando o coletor está fora. A fonte local (`log` da rodada, `approve.log`) continua sendo a primária.
 - **Histórico:** backfill único e idempotente por host, com a hora original do evento e `oute.backfill=true`. O bucket particiona pela **hora de chegada** (`hour=`): quem lê filtra pelo `timeUnixNano` do registro, não pelo caminho (vale também para o atraso do lote de 5 min).
 - **`oute.agent` = quem causou o evento.** Valor novo **`human`** (o Bardi decidindo um pedido), emitido só por ferramenta do projeto, nunca pelo `transform/agent`. O agente de cada sessão vai em `oute.swarm.session.agent`; pedido sem agente declarado = `unknown`.
 - **Sessões:** ver "Sessões (#128)" abaixo.
@@ -129,7 +131,7 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 | Local | Conteúdo | Limite |
 |---|---|---|
 | Bucket OCI `oute-observability` | tudo (com conteúdo), gzip | free tier 20 GB (todas as camadas somadas); acima ~US$ 0,026/GB·mês; budget US$ 1 com alerta. Sem expiração. |
-| Langfuse Cloud Hobby | só metadados | 50k unidades/mês (trace+observação+score), 30 dias de histórico. 1 interação simples ≈ 14 unidades. |
+| Langfuse Cloud Hobby *(substituído: ADR-08)* | só metadados | 50k unidades/mês (trace+observação+score), 30 dias de histórico. 1 interação simples ≈ 14 unidades. |
 | Disco de cada host (oute-server e Mac) | fila em disco do collector no volume `oute-otel-queue` (reserva de 4 GB, abaixo); os agentes guardam transcrições no volume home (`~/.claude/projects`, `~/.codex/sessions`); SQLite do ai-memory; logs stdout dos containers | disco de 44 GB, que é o limite real a vigiar. |
 
 **Reserva de disco da fila do collector (#163, decisão do Bardi no #137).** Cada host reserva **4 GB** de disco para a fila: **2 GB de disco por fila de 1 GB** (o arquivo bbolt chega a ~1,7× o limite da fila e não encolhe), com duas filas, a do bucket (#161) e a da ingestão do agent-studio (#155). O `oute up` avisa, sem bloquear a subida, quando o disco livre não comporta os 4 GB descontado o que o volume já ocupa; o `oute status` mostra o tamanho do volume junto da linha de disco. A medida é feita de dentro de um container, porque no Mac o disco que conta é o da VM do Docker Desktop.
@@ -137,7 +139,7 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 ## Fase 1 (concluída)
 - `otel-collector`: `otel/opentelemetry-collector-contrib:0.161.0` (`OUTE_OTELCOL_VERSION`), sem porta publicada. `config/otel/collector.yaml` (bucket) + `langfuse.yaml` ou `none.yaml` (2º `--config`). Config montada do repo: mudança no pipeline = `git pull` + `oute down/up`, sem release.
 - Bucket: exporter `awss3` no endpoint S3-compat da OCI. Partição `host=/instance=/year=/month=/day=/hour=` UTC, `otlp_json` + gzip, lote 5 min. **Exige `AWS_REQUEST_CHECKSUM_CALCULATION=when_required` e `AWS_RESPONSE_CHECKSUM_VALIDATION=when_required`** (senão a OCI responde 501 e o lote é descartado).
-- Langfuse: `otlphttp` → `${LANGFUSE_HOST}/api/public/otel`, Basic auth, `x-langfuse-ingestion-version: 4`. Filter: spans internos do LiteLLM fora; span events fora (exceto Codex). Transform: **allowlist** (`keep_matching_keys`).
+- *(substituído: ADR-08)* Langfuse: `otlphttp` → `${LANGFUSE_HOST}/api/public/otel`, Basic auth, `x-langfuse-ingestion-version: 4`. Filter: spans internos do LiteLLM fora; span events fora (exceto Codex). Transform: **allowlist** (`keep_matching_keys`).
 - jev-router: callback `otel` do LiteLLM + **span próprio `jev.decision`**. Trace `jev:<perfil>` no Langfuse.
 
 ## Fase 2 (validada)
@@ -156,9 +158,9 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 
 ## Pendências menores
 - Custo das chamadas do próprio Jev (Decisions API) não entra no span.
-- Limite de eventos do plano Hobby do Langfuse: acompanhar.
+- *(substituído: ADR-08)* Limite de eventos do plano Hobby do Langfuse: acompanhar.
 - Nova versão do Claude Code/Codex pode renomear atributos: reconferir tokens e `service.name` (mapa do `oute.agent`) depois de upgrade.
-- Tags do Langfuse (`langfuse.trace.tags`) por agente: não aplicado (o agente vai em metadata); reavaliar se o filtro por metadata não bastar.
+- *(substituído: ADR-08)* Tags do Langfuse (`langfuse.trace.tags`) por agente: não aplicado (o agente vai em metadata); reavaliar se o filtro por metadata não bastar.
 
 ## Lições
 - `pi -p` via `ssh host cmd` trava esperando stdin → o `oute ssh` aloca `-t` quando há terminal.
@@ -170,4 +172,4 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 
 ## Riscos / verificar
 - Nomes de atributos de conteúdo do Claude Code/Codex variam; a allowlist protege por padrão.
-- `langfuse.environment` precisa casar `^(?!langfuse)[a-z0-9-_]+$` (até 40): o `slug` do `oute` garante; não usar nome de máquina começando com `langfuse`.
+- *(substituído: ADR-08)* `langfuse.environment` precisa casar `^(?!langfuse)[a-z0-9-_]+$` (até 40): o `slug` do `oute` garante; não usar nome de máquina começando com `langfuse`.

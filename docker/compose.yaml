@@ -149,6 +149,82 @@ services:
       - oute-memory:/v/memory
       # fila em disco do collector (#161): a imagem roda como 10001:10001
       - oute-otel-queue:/v/otel-queue
+      # RocksDB do SurrealDB (#187, só no oute-server; nos outros hosts o volume fica vazio): a imagem roda como nonroot
+      - oute-surrealdb:/v/surrealdb
+
+  agent-studio:
+    # ADR-08 (#185): recebe OTLP/HTTP JSON do collector de cada host e grava no DuckDB (dedupe; 2xx só depois do
+    # commit). Só no host com OUTE_AGENT_STUDIO=1 no .env (o oute-server): o `oute up` liga o profile quando o
+    # agent.env tem o item agent-studio do vault. No Mac não sobe. Mesma imagem do agent, outro comando; um
+    # processo só (o DuckDB aceita um escritor só).
+    profiles: [agent-studio]
+    image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
+    container_name: oute-agent-studio
+    logging: *logging
+    restart: unless-stopped
+    user: "10001:10001"
+    entrypoint: ["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"]
+    environment:
+      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_TOKEN:-}
+      AGENT_STUDIO_DB: /data/agent-studio/agent-studio.duckdb
+      AGENT_STUDIO_PORT: "8430"
+      PYTHONPATH: /opt/agent-studio/app
+      # estado derivado (#187): o SurrealDB pela rede oute; os dois bancos juntos ou nenhum (503)
+      AGENT_STUDIO_SURREAL_URL: http://surrealdb:8000
+      AGENT_STUDIO_SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
+      # telemetria própria (#188): logs (só avisos, com teto) e métricas pelo SDK OTel ao collector local, com a
+      # origem de sempre (ADR-04) e service.name próprio; sem oute.agent (não é agente)
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: agent-studio
+      OTEL_RESOURCE_ATTRIBUTES: host.name=${OUTE_HOST:-oute},oute.instance=${OUTE_INSTANCE:-oute-agent},deployment.environment=${OUTE_HOST:-oute}
+      OTEL_METRIC_EXPORT_INTERVAL: "60000"
+    ports:
+      # só loopback, nunca 0.0.0.0: o Mac chega pelo vhost agent-studio.oute.pro na tailnet (nginx, repo lab)
+      - "127.0.0.1:${OUTE_AGENT_STUDIO_PORT:-8430}:8430"
+    mem_limit: ${OUTE_AGENT_STUDIO_MEM:-2g}
+    volumes:
+      # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
+      - oute-agent-studio:/data/agent-studio
+    healthcheck:
+      test: ["CMD", "/opt/agent-studio/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8430/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    networks: [oute]
+
+  surrealdb:
+    # ADR-08 (#187): estado derivado (rodadas, workers, sessões, pedidos, conversas), consultado pelo tray e pela
+    # tela; pode ser remontado a partir do DuckDB ou do bucket. Só no oute-server (mesmo profile do agent-studio).
+    # Fixado por digest (= v3.3.0, multi-arch). Upgrade é deliberado: troca aqui + tests/lib/surreal.sh.
+    profiles: [agent-studio]
+    image: ${OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v3.3.0@sha256:681c6c22c287421b5c7d99e0fde79b6e0d32c36c1ddeaab2762a1661cb04cd20}
+    container_name: oute-surrealdb
+    logging: *logging
+    restart: unless-stopped
+    user: "10001:10001"
+    # RocksDB (recomendado em nó único; sync=every é o padrão). Autenticação ligada: root com a senha do vault.
+    command: ["start", "--no-banner", "--log", "info", "--bind", "0.0.0.0:8000", "rocksdb:///data/surrealdb"]
+    environment:
+      SURREAL_USER: root
+      SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
+    # obrigatório: sem limite, o cache do RocksDB mede pela RAM do host (~metade dela, #139)
+    mem_limit: ${OUTE_SURREALDB_MEM:-1g}
+    # sem porta publicada: só o agent-studio, pela rede oute
+    volumes:
+      - oute-surrealdb:/data/surrealdb
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://127.0.0.1:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    networks: [oute]
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
@@ -196,6 +272,8 @@ volumes:
   oute-memory:
   oute-shared:
   oute-otel-queue:
+  oute-agent-studio:
+  oute-surrealdb:
 
 networks:
   oute:

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Receptor OTLP/HTTP falso para os testes (#124): grava cada POST em <dir>/<n>.json e responde 200.
+"""Receptor OTLP/HTTP falso para os testes (#124): grava cada POST em <dir>/<n>.json (e a rota em <n>.path) e
+responde 200.
 Uso: otlp-receiver.py <dir>   (escreve a porta em <dir>/port; RCV_SLEEP=s atrasa a resposta;
 RCV_REJECT=<texto>: POST que contém o texto recebe 400 e não é gravado)"""
 import http.server
 import os
 import sys
+import threading
 import time
 
 D = sys.argv[1]
+# POSTs simultâneos (o SDK manda logs e métricas em threads próprias) não podem disputar o mesmo número
+LOCK = threading.Lock()
 os.makedirs(D, exist_ok=True)
 
 
@@ -20,10 +24,13 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_response(400)
             self.end_headers()
             return
-        n = len([f for f in os.listdir(D) if f.endswith(".json")]) + 1
-        with open(os.path.join(D, f".{n}.tmp"), "wb") as f:
-            f.write(body)
-        os.replace(os.path.join(D, f".{n}.tmp"), os.path.join(D, f"{n:04d}.json"))
+        with LOCK:
+            n = len([f for f in os.listdir(D) if f.endswith(".json")]) + 1
+            with open(os.path.join(D, f".{n}.tmp"), "wb") as f:
+                f.write(body)
+            with open(os.path.join(D, f"{n:04d}.path"), "w") as f:  # rota do POST (/v1/logs, /v1/metrics…)
+                f.write(self.path)
+            os.replace(os.path.join(D, f".{n}.tmp"), os.path.join(D, f"{n:04d}.json"))
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()

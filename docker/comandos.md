@@ -27,6 +27,8 @@ Dois lugares, dois conjuntos de comandos:
   oute watch [host]    = approve --watch; com host, abre a espera nele via ssh
   oute up | down | restart | status
   oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
+                                       (no oute-server, com OUTE_AGENT_STUDIO=1 no .env, o up liga também
+                                       o agent-studio, se o vault tem o item agent-studio; ADR-08)
   oute secrets refresh                 relê o Vaultwarden, regrava ~/.oute/agent.env e tranca a sessão
                                        (depois: oute restart, se a stack estiver de pé)
   oute attach          ssh → herdr
