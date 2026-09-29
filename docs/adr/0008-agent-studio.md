@@ -1,6 +1,6 @@
 # ADR-08 — agent-studio: telemetria sem perda num banco próprio (substitui o Langfuse)
 
-Status: **proposto** (2026-09-29, #151), aguardando o gate de `arch` do Bardi. Substitui, no ADR-04, as partes do **Langfuse** e a regra **"sem spool"** do adendo #124. O ADR-01 não muda.
+Status: **aceito** (2026-09-29, #151; gate de `arch` do Bardi). Substitui, no ADR-04, as partes do **Langfuse** e a regra **"sem spool"** do adendo #124. O ADR-01 não muda.
 Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collector), #138 (spool do `oute-emit`), #139 (fatos de SurrealDB e DuckDB), #140 (divisão e ingestão), #141 (topologia), #142 (papel do bucket), #143 (inventário do Langfuse), #144 (escopo do v1 e troca), #145 (tray), #146 (watch), #150 (stack). Nota de pesquisa: #135, comentário "Nota de pesquisa completa" (§5.1 = respostas do Bardi).
 
 ## Contexto
