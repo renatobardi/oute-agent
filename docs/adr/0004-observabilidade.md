@@ -112,7 +112,9 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 |---|---|---|
 | Bucket OCI `oute-observability` | tudo (com conteúdo), gzip | free tier 20 GB (todas as camadas somadas); acima ~US$ 0,026/GB·mês; budget US$ 1 com alerta. Sem expiração. |
 | Langfuse Cloud Hobby | só metadados | 50k unidades/mês (trace+observação+score), 30 dias de histórico. 1 interação simples ≈ 14 unidades. |
-| Disco do oute-server | o collector não persiste nada; os agentes guardam transcrições no volume home (`~/.claude/projects`, `~/.codex/sessions`); SQLite do ai-memory; logs stdout dos containers | disco de 44 GB, que é o limite real a vigiar. |
+| Disco de cada host (oute-server e Mac) | fila em disco do collector no volume `oute-otel-queue` (reserva de 4 GB, abaixo); os agentes guardam transcrições no volume home (`~/.claude/projects`, `~/.codex/sessions`); SQLite do ai-memory; logs stdout dos containers | disco de 44 GB, que é o limite real a vigiar. |
+
+**Reserva de disco da fila do collector (#163, decisão do Bardi no #137).** Cada host reserva **4 GB** de disco para a fila: **2 GB de disco por fila de 1 GB** (o arquivo bbolt chega a ~1,7× o limite da fila e não encolhe), com duas filas, a do bucket (#161) e a da ingestão do agent-studio (#155). O `oute up` avisa, sem bloquear a subida, quando o disco livre não comporta os 4 GB descontado o que o volume já ocupa; o `oute status` mostra o tamanho do volume junto da linha de disco. A medida é feita de dentro de um container, porque no Mac o disco que conta é o da VM do Docker Desktop.
 
 ## Fase 1 (concluída)
 - `otel-collector`: `otel/opentelemetry-collector-contrib:0.161.0` (`OUTE_OTELCOL_VERSION`), sem porta publicada. `config/otel/collector.yaml` (bucket) + `langfuse.yaml` ou `none.yaml` (2º `--config`). Config montada do repo: mudança no pipeline = `git pull` + `oute down/up`, sem release.
