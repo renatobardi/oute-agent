@@ -116,6 +116,13 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
   - `conversa:<session.id>`: de todo log ou span com `session.id`; agente, máquina, instância, serviço e link `sessao` pelo `oute.task.id` do resource. Os traces da conversa ficam no DuckDB (`spans.session_id`).
   - Cada registro guarda o `oute.event.id` dos eventos que o formaram (`proposed_event`, `decided_event`…), a chave da linha no DuckDB.
 
+### Telemetria própria (#188)
+- SDK OTel (`opentelemetry-sdk` + exporter OTLP/HTTP protobuf) ao `otel-collector` local (`http://otel-collector:4318`), com a origem de sempre (`OTEL_RESOURCE_ATTRIBUTES`: `host.name`, `oute.instance`, `deployment.environment`) e `service.name=agent-studio`. **Sem `oute.agent`**: o agent-studio não é agente, e o ADR-04 descarta `oute.agent` fixo por ferramenta.
+- **Métricas** (a cada 60 s): `agent_studio.requests` (por sinal e `http.response.status_code`), `agent_studio.records.written` e `agent_studio.records.duplicate` (por sinal), `agent_studio.write.duration` (histograma, por sinal e resultado `ok`/`error`; DuckDB + SurrealDB).
+- **Logs:** só aviso e erro saem como log OTel: requisição recusada (token, `Content-Type`, corpo inválido ou grande demais) e gravação que falhou (503). Cada tipo sai no máximo uma vez por minuto (`AGENT_STUDIO_LOG_EVERY`), e o seguinte diz quantos foram suprimidos. O log de sucesso por requisição fica só no stderr do container. Erros do próprio SDK (collector fora) também ficam no stderr.
+- **Sem laço:** quando a telemetria do agent-studio volta a ele pela ingestão (#155), gravar é só somar contadores; nenhum registro novo nasce por registro recebido. Com a ingestão falhando, os avisos têm teto por minuto.
+- Na parada (SIGTERM), o lifespan do app exporta o que ficou no lote e fecha o DuckDB antes de o processo sair.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.

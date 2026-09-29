@@ -8,6 +8,7 @@ import uvicorn
 from .app import create_app
 from .store import Store
 from .surreal import Surreal
+from . import telemetry
 
 
 def main():
@@ -31,11 +32,11 @@ def main():
                           db=os.environ.get("AGENT_STUDIO_SURREAL_DB", "studio"))
     db = os.environ.get("AGENT_STUDIO_DB", "/data/agent-studio/agent-studio.duckdb")
     store = Store(db)
-    app = create_app(store, token, surreal)
+    tel = telemetry.setup()
+    app = create_app(store, token, surreal, tel, on_shutdown=store.close)
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)
-    store.close()
     return 0
 
 

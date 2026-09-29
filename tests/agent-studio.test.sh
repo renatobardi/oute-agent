@@ -399,5 +399,67 @@ check "compose: surrealdb com senha do vault"          has 'SURREAL_PASS: \$\{AG
 check "compose: surrealdb sem --unauthenticated"       bash -c '! grep -q unauthenticated <<<"$0"' "$SVC"
 check "compose: volume-init dá o dono do volume"       grep -q '^      - oute-surrealdb:/v/surrealdb$' "$ROOT/docker/compose.yaml"
 
+# ---------------------------------------------------------------- 10. telemetria própria ao collector (#188)
+# o agent-studio exporta pelo SDK OTel (OTLP/HTTP protobuf) ao receptor falso; o decodificador usa o proto do venv
+dec() { "$STUDIO_PY" "$ROOT/tests/lib/otlp-pb-decode.py" "$1" "$2"; }
+# um objeto por registro de log: {sev, body, attrs{}, res{}}
+tlogs() { dec "$1" logs | jq -c '.resourceLogs[] | (.resource.attributes | map({(.key): (.value | to_entries[0].value)}) | add) as $res
+  | .scopeLogs[].logRecords[] | {sev: .severityText, body: .body.stringValue, attrs: ((.attributes // []) | map({(.key): (.value | to_entries[0].value)}) | add), res: $res}'; }
+# um objeto por ponto de métrica: {name, value, attrs{}, res{}} (soma dos pontos cumulativos: o último vale)
+tmetrics() { dec "$1" metrics | jq -c '.resourceMetrics[] | (.resource.attributes | map({(.key): (.value | to_entries[0].value)}) | add) as $res
+  | .scopeMetrics[].metrics[] | .name as $n | ((.sum // .histogram).dataPoints[])
+  | {name: $n, value: ((.asInt // .asDouble // .count) | tonumber), attrs: ((.attributes // []) | map({(.key): (.value | to_entries[0].value)}) | add), res: $res}'; }
+last() { tmetrics "$TMP/r4" | jq -s -c --arg n "$1" "map(select(.name == \$n and ($2))) | last | .value // 0"; }
+TENV=(OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent,deployment.environment=oute-server"
+      OTEL_METRIC_EXPORT_INTERVAL=300 OTEL_BLRP_SCHEDULE_DELAY=100 AGENT_STUDIO_LOG_EVERY=1)
+rcv_start "$TMP/r4"; TEL_EP="$OTEL_EXPORTER_OTLP_ENDPOINT"; unset OTEL_EXPORTER_OTLP_ENDPOINT
+studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" || { cat "$TMP/s3/stderr"; die "agent-studio com telemetria não subiu"; }
+post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude-2.json" >/dev/null
+for i in 1 2 3; do code -H 'Authorization: Bearer errado' "$STUDIO_URL/v1/logs" >/dev/null; done
+sleep 1.2
+code "$STUDIO_URL/v1/logs" >/dev/null
+post logs "$TMP/lixo" >/dev/null
+studio_stop   # SIGTERM: o SDK exporta o que ficou no lote
+studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" STUDIO_FAIL=1 || die "agent-studio (falha injetada) não subiu"
+post logs "$TMP/novo.json" >/dev/null
+studio_stop
+L="$(tlogs "$TMP/r4")"
+check "telemetria: logs chegaram ao collector"         test -n "$L"
+check "origem de sempre + service.name próprio"        jqe -s 'all(.res["service.name"] == "agent-studio" and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent")' <<<"$L"
+check "sem oute.agent (não é agente)"                  jqe -s 'all(.res["oute.agent"] == null)' <<<"$L"
+check "log: requisição recusada (token)"               jqe -s 'map(select(.sev == "WARN" and (.body | startswith("recusado: token ausente ou errado (logs)")))) | length == 2' <<<"$L"
+check "log: 3 recusas seguidas = 1 aviso; o seguinte conta os suprimidos" \
+                                                       jqe -s 'map(select(.body | startswith("recusado: token"))) | .[1].body | endswith("(+2 suprimidos desde o último aviso)")' <<<"$L"
+check "log: corpo inválido"                            jqe -s 'any(.body | startswith("recusado: logs inválido"))' <<<"$L"
+check "log: gravação que falhou (503)"                 jqe -s 'any(.sev == "ERROR" and (.body | startswith("gravação falhou, respondi 503 (logs, 1 registros)")))' <<<"$L"
+check "log: tipo do aviso no atributo"                 jqe -s 'any(.attrs["agent_studio.warning"] == "write-failed")' <<<"$L"
+check "sucesso não vira log OTel (só stderr)"          jqe -s 'all(.body | test("gravados") | not)' <<<"$L"
+check "métrica: requisições 200 (3)"                   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "200"')" = 3
+check "métrica: requisições 401 (4)"                   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "401"')" = 4
+check "métrica: requisições 400 (1)"                   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "400"')" = 1
+check "métrica: requisições 503 (1)"                   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "503"')" = 1
+check "métrica: registros gravados (2)"               test "$(last agent_studio.records.written '.attrs.signal == "logs"')" = 2
+check "métrica: registros repetidos (1)"               test "$(last agent_studio.records.duplicate '.attrs.signal == "logs"')" = 1
+check "métrica: duração da gravação (ok e erro)"       bash -c '[[ "$0" -ge 3 && "$1" -ge 1 ]]' "$(last agent_studio.write.duration '.attrs.result == "ok"')" "$(last agent_studio.write.duration '.attrs.result == "error"')"
+# sem laço: a telemetria do agent-studio volta a ele (#155) e não gera registro novo
+dec "$TMP/r4" logs > "$TMP/own-logs.jsonl"
+dec "$TMP/r4" metrics > "$TMP/own-metrics.jsonl"
+rm -rf "$TMP/r4"/*; mkdir -p "$TMP/own"
+split -l 1 "$TMP/own-logs.jsonl" "$TMP/own/l."; split -l 1 "$TMP/own-metrics.jsonl" "$TMP/own/m."
+studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" || die "agent-studio não voltou"
+own() { local f rc=0; for f in "$TMP/own"/l.*; do [[ "$(post logs "$f")" == 200 ]] || rc=1; done
+        for f in "$TMP/own"/m.*; do [[ "$(post metrics "$f")" == 200 ]] || rc=1; done; return $rc; }
+check "a própria telemetria volta pela ingestão: 200"  own
+check "…duas vezes (reenvio): 200"                     own
+studio_stop
+rcv_stop
+check "sem laço: ingerir a própria telemetria não gera log OTel" test -z "$(tlogs "$TMP/r4")"
+check "sem laço: só métricas agregadas (contadores)"   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "200"')" -gt 0
+DB="$TMP/s3/db.duckdb"
+check "a própria telemetria ficou no DuckDB, uma vez"  test "$(count logs "WHERE service_name = 'agent-studio'")" = "$(jq -s '[.[].resourceLogs[].scopeLogs[].logRecords[]] | length' "$TMP/own-logs.jsonl")"
+check "métricas do agent-studio no DuckDB"             test "$(count metrics "WHERE metric_name = 'agent_studio.requests'")" -gt 0
+check "compose: telemetria ao otel-collector local"    bash -c 'grep -q "OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318" <<<"$0" && grep -q "OTEL_SERVICE_NAME: agent-studio" <<<"$0" && grep -q "OTEL_RESOURCE_ATTRIBUTES: host.name=\${OUTE_HOST:-oute},oute.instance=\${OUTE_INSTANCE:-oute-agent}" <<<"$0"' \
+                                                         "$(awk '/^  agent-studio:$/ {on=1; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
+
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]
