@@ -199,5 +199,59 @@ check "backfill de novo: rc 0, zero POSTs"             [ "$RC" -eq 0 -a "$(posts
 check "backfill de novo: avisa que já foi feito"       grep -q 'já feito' "$TMP/bf.err"
 rcv_stop
 
+# ---------------------------------------------------------------- 5. oute.event.id fixo por fato (#165)
+# o mesmo fato leva o mesmo id ao vivo, numa repetição e no backfill; fatos distintos (inclusive linhas iguais no
+# mesmo segundo) levam ids diferentes. Ao vivo: cada linha entra no log antes do oute-emit, como no slog do oute-swarm
+IH="$TMP/eid"; RND=swarm-0928-0900; IR="$IH/.oute/swarm/$RND"; mkdir -p "$IR" "$IH/outbox" "$IH/inbox" "$IH/.oute/emit"
+echo 2099-01-01T00:00:00Z > "$IH/.oute/emit/since"
+printf 'repo=/workspace/lab\nmax=2\nagent=claude\nstarted=2026-09-28T09:00:00Z\n' > "$IR/meta"
+printf '7-foo w1:p1 codex 2026-09-28T09:01:00Z w1:t1 /workspace/lab\n' > "$IR/spawned"
+T=$'\t'
+LINES=("2026-09-28T09:00:00Z abertura $RND (repo lab, max 2)" "2026-09-28T09:01:00Z spawn 7-foo codex"
+       "2026-09-28T09:02:00Z tell 7-foo ok${T}rebase" "2026-09-28T09:02:00Z tell 7-foo ok${T}rebase"
+       "2026-09-28T09:02:00Z tell 7-foo ok${T}outra" "2026-09-28T09:03:00Z watch [ci] PR #12 · test: fail"
+       "2026-09-28T09:03:00Z watch [ci] PR #12 · test: fail" "2026-09-28T09:04:00Z close 7-foo" "2026-09-28T09:05:00Z rodada fechada")
+# ids <dir> <jq-select>: "<nome> <id>" dos registros, ordenado
+ids() { events "$1" | jq -r "select($2) | \"\(.name) \(.attrs[\"oute.event.id\"])\"" | sort; }
+rcv_start "$TMP/r5"
+for ln in "${LINES[@]}"; do printf '%s\n' "$ln" >> "$IR/log"; HOME="$IH" oute-emit swarm "$RND" "$ln"; done
+pedido5() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: %s\n\necho %s\n' "$2" "$3" "$2" > "$IH/outbox/$1.sh"; }
+pedido5 20260928-090000-um um 2026-09-28T09:00:00Z
+pedido5 20260928-090000-dois dois 2026-09-28T09:00:00Z
+HOME="$IH" oute-emit canal 20260928-090000-um; HOME="$IH" oute-emit canal 20260928-090000-dois
+mkdir -p "$IH/outbox/done" "$IH/outbox/rejected"
+mv "$IH/outbox/20260928-090000-um.sh" "$IH/outbox/done/"; mv "$IH/outbox/20260928-090000-dois.sh" "$IH/outbox/rejected/"
+printf '# id: 20260928-090000-um\n# rc: 0\n# aprovado: 2026-09-28T09:10:00Z por ubuntu@oute-server\n\nsaida\n' > "$IH/inbox/20260928-090000-um.out"
+printf '# id: 20260928-090000-dois\n# rc: 126\n# recusado: 2026-09-28T09:10:00Z por ubuntu@oute-server\n\nrecusado\n' > "$IH/inbox/20260928-090000-dois.out"
+HOME="$IH" oute-emit canal 20260928-090000-um; HOME="$IH" oute-emit canal 20260928-090000-dois
+live="$(ids "$RCV_DIR" true)"
+check "event.id: todo evento ao vivo leva o id (32 hex)" [ "$(events "$RCV_DIR" | jq -r '.attrs["oute.event.id"] // "x"' | grep -cvE '^[0-9a-f]{32}$')" -eq 0 -a "$(grep -c . <<<"$live")" -eq 13 ]
+check "event.id: fatos distintos, ids distintos (13)"   [ "$(cut -d' ' -f2 <<<"$live" | sort -u | grep -c .)" -eq 13 ]
+check "event.id: dois tell iguais no mesmo segundo"     [ "$(ids "$RCV_DIR" '.name == "oute.swarm.tell"' | cut -d' ' -f2 | sort -u | grep -c .)" -eq 3 ]
+check "event.id: dois watch iguais no mesmo segundo"    [ "$(ids "$RCV_DIR" '.name == "oute.swarm.watch.ci"' | cut -d' ' -f2 | sort -u | grep -c .)" -eq 2 ]
+check "event.id: dois pedidos no mesmo segundo, proposto × decidido" [ "$(ids "$RCV_DIR" '.attrs["oute.canal.id"] != null' | cut -d' ' -f2 | sort -u | grep -c .)" -eq 4 ]
+rcv_stop
+# repetição (timeout, restart): a mesma linha e o mesmo pedido de novo, noutro segundo
+rcv_start "$TMP/r5b"; sleep 1
+HOME="$IH" oute-emit swarm "$RND" "${LINES[4]}"; HOME="$IH" oute-emit swarm "$RND" "${LINES[3]}"; HOME="$IH" oute-emit canal 20260928-090000-dois
+again="$(ids "$RCV_DIR" true)"
+check "event.id: repetição de tell = mesmo id (sem hora de envio)" [ -n "$(grep -Fx "$(ids "$RCV_DIR" '.body == "outra"')" <<<"$live")" ]
+check "event.id: repetição da última linha igual = id da última ocorrência" [ -n "$(grep -Fx "$(ids "$RCV_DIR" '.body == "rebase"')" <<<"$live")" ]
+check "event.id: repetição de decidido = mesmo id"      [ -n "$(grep -Fx "$(ids "$RCV_DIR" '.name == "oute.canal.decided"')" <<<"$live")" ]
+rcv_stop
+# backfill do mesmo HOME (corte no futuro: tudo é anterior) = os mesmos ids do ao vivo
+rcv_start "$TMP/r5c"
+HOME="$IH" oute-emit backfill 2>/dev/null
+check "event.id: backfill = ao vivo (swarm e canal)"    [ "$(ids "$RCV_DIR" true)" == "$live" ]
+rcv_stop
+# rodada antiga (meta/spawned/fechada sem linha no log): a linha reescrita pelo backfill leva o id da linha ao vivo
+OH2="$TMP/eid-old"; OR="$OH2/.oute/swarm/$RND"; mkdir -p "$OR" "$OH2/.oute/emit"
+echo 2099-01-01T00:00:00Z > "$OH2/.oute/emit/since"; cp "$IR/meta" "$IR/spawned" "$OR/"
+echo 2026-09-28T09:05:00Z > "$OR/fechada"
+rcv_start "$TMP/r5d"
+HOME="$OH2" oute-emit backfill 2>/dev/null
+check "event.id: rodada antiga reescrita = ids do ao vivo" [ "$(ids "$RCV_DIR" true)" == "$(grep -E '^oute\.swarm\.(round\.opened|session\.spawned|round\.closed) ' <<<"$live")" ]
+rcv_stop
+
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

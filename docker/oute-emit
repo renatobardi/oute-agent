@@ -11,6 +11,7 @@ Best-effort: timeout ~2 s, sempre sai com 0, nunca escreve no stdout. Erro só e
 (o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida: o leitor do
 .out para na primeira linha em branco.
 """
+import hashlib
 import json
 import os
 import re
@@ -76,9 +77,17 @@ def resource(agent):
     return attrs
 
 
-def event(name, agent, ts, attrs, body=None):
+def event_id(name, scope, ts, key="", nth=1):
+    """oute.event.id: fixo por fato (#165). sha256 de tipo + rodada/pedido + hora do fato (o texto, nunca a hora de
+    envio) + o que distingue o fato + a ocorrência de linha idêntica; 32 hex. Sem aleatoriedade: repetição (timeout,
+    spool, restart, backfill) leva o mesmo id, e a ingestão deduplica por ele"""
+    raw = "\x1f".join((name, scope, ts or "", key, str(nth)))
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+def event(name, agent, ts, attrs, body=None, scope="", key="", nth=1):
     """um evento = (agente, registro de log OTLP)"""
-    attrs = {"event.name": name, "oute.agent": agent, **attrs}
+    attrs = {"event.name": name, "oute.event.id": event_id(name, scope, ts, key, nth), "oute.agent": agent, **attrs}
     rec = {
         "timeUnixNano": str(ns(ts)),
         "observedTimeUnixNano": str(time.time_ns()),
@@ -179,7 +188,7 @@ def canal_proposed(pid, path):
         "oute.canal.title": h.get("titulo"),
         "oute.canal.as": "root" if h.get("como") == "root" else "user",
         "oute.canal.size": len(body.encode()),
-    }, body)
+    }, body, scope=f"canal/{pid}")
 
 
 def canal_decided(pid, path):
@@ -191,8 +200,9 @@ def canal_decided(pid, path):
     else:
         raise Skip(f"{pid}.out sem aprovado/recusado")
     ts, _, who = when.partition(" por ")
+    ts = ts.strip()
     num = lambda v: int(v) if v and re.fullmatch(r"-?\d+", v) else None  # noqa: E731
-    return event("oute.canal.decided", "human", ts.strip(), {
+    return event("oute.canal.decided", "human", ts, {
         "oute.canal.id": pid,
         "oute.canal.decision": decision,
         "oute.canal.rc": num(h.get("rc")),
@@ -200,7 +210,7 @@ def canal_decided(pid, path):
         "oute.canal.output_bytes": num(h.get("saida", "").split(" ")[0]),
         "oute.canal.approver": who.strip(),
         "oute.canal.sha256": h.get("sha256"),
-    })  # nunca leva corpo: a saída do host não sai daqui
+    }, scope=f"canal/{pid}", key=decision)  # nunca leva corpo: a saída do host não sai daqui
 
 
 def cmd_canal(pid):
@@ -251,8 +261,9 @@ def read_text(path):
         return None
 
 
-def swarm_event(rnd, line):
-    """linha do log da rodada -> evento (o mesmo parser do ao vivo e do backfill)"""
+def swarm_event(rnd, line, nth=1):
+    """linha do log da rodada -> evento (o mesmo parser do ao vivo e do backfill). nth = ocorrência desta linha
+    idêntica no log (1 = primeira): distingue fatos repetidos no mesmo segundo (ex.: dois tell iguais)"""
     rdir = os.path.join(SWARM, rnd)
     m = meta(rdir)
     agent = m.get("agent") or "claude"
@@ -265,12 +276,15 @@ def swarm_event(rnd, line):
     if len(parts) < 2 or not TS_RE.match(parts[0]):
         raise Skip("linha sem hora")
     ts, kind, rest = parts[0], parts[1], (parts[2] if len(parts) > 2 else "")
+    # id: chave pelos campos que definem o fato, não pela linha crua (a linha reescrita pelo backfill das rodadas
+    # antigas é mais curta que a do ao vivo)
+    fact = {"scope": f"swarm/{rnd}", "nth": nth}
     if kind == "abertura":
         repo = m.get("repo", "")
         return event("oute.swarm.round.opened", agent, ts, {
             **base, "oute.swarm.repo": os.path.basename(repo) if repo else None,
             "oute.swarm.max": int(m["max"]) if m.get("max", "").isdigit() else None,
-            "oute.swarm.label": m.get("label")})
+            "oute.swarm.label": m.get("label")}, **fact)
     if kind == "spawn":
         slug = rest.split(" ", 1)[0]
         p = spawned(rdir, slug)
@@ -282,7 +296,7 @@ def swarm_event(rnd, line):
             "oute.swarm.session.agent": p[2] if len(p) > 2 else None,
             "oute.swarm.repo": os.path.basename(repo) if repo else None,
             "oute.swarm.kaizen": len(p) > 6 and p[6] == "kaizen"},
-            read_text(os.path.join(rdir, slug + ".prompt")))
+            read_text(os.path.join(rdir, slug + ".prompt")), key=slug, **fact)
     if kind == "tell":
         slug, _, res = rest.partition(" ")
         if res.startswith("ok"):
@@ -293,24 +307,29 @@ def swarm_event(rnd, line):
             raise Skip(f"tell sem resultado: {line}")
         return event("oute.swarm.tell", agent, ts, {
             **base, "oute.swarm.session": slug, "oute.swarm.tell.result": result,
-            "oute.swarm.tell.reason": reason, "oute.swarm.tell.forced": "--force" in res}, text)
+            "oute.swarm.tell.reason": reason, "oute.swarm.tell.forced": "--force" in res}, text,
+            key=f"{rest}\t{text or ''}", **fact)
     if kind == "watch":
         mt = re.match(r"^\[([a-z]+)\] (.*)$", rest)
         if not mt:
             raise Skip(f"watch sem tipo: {line}")
         return event(f"oute.swarm.watch.{mt.group(1)}", agent, ts,
-                     {**base, "oute.swarm.source": "watch"}, rest)
+                     {**base, "oute.swarm.source": "watch"}, rest, key=rest, **fact)
     if kind == "close" and rest:
-        return event("oute.swarm.session.closed", agent, ts, {**base, "oute.swarm.session": rest.split(" ", 1)[0]})
+        slug = rest.split(" ", 1)[0]
+        return event("oute.swarm.session.closed", agent, ts, {**base, "oute.swarm.session": slug}, key=slug, **fact)
     if kind == "rodada" and rest.startswith("fechada"):
-        return event("oute.swarm.round.closed", agent, ts, base)
+        return event("oute.swarm.round.closed", agent, ts, base, **fact)
     raise Skip(f"tipo de linha desconhecido: {kind}")
 
 
 def cmd_swarm(rnd, line):
+    """a linha acabou de entrar no log (o slog grava antes de chamar): é a última ocorrência dela até aqui"""
     if not ROUND_RE.match(rnd):
         raise Skip(f"rodada inválida: {rnd}")
-    return [swarm_event(rnd, line)]
+    line = line.rstrip("\n")
+    log = (read_text(os.path.join(SWARM, rnd, "log")) or "").splitlines()
+    return [swarm_event(rnd, line, max(1, log.count(line)))]
 
 
 # ---------------------------------------------------------------- backfill
@@ -356,11 +375,13 @@ def cmd_backfill():
     for rnd in rounds:
         lines, u = round_lines(rnd)
         untimed += u
+        seen = {}
         for ln in lines:
             if not ln.strip():
                 continue
+            seen[ln] = seen.get(ln, 0) + 1
             try:
-                ev = swarm_event(rnd, ln)
+                ev = swarm_event(rnd, ln, seen[ln])
             except Skip as e:
                 debug(f"{rnd}: {e}")
                 skipped += 1
