@@ -1,8 +1,9 @@
 # S3 falso (base: lab do #137, docs/research/137-medir-collector no 13e79ba). Aceita PUT path-style de objetos
 # OTLP-JSON (gzip ou não) e grava em <dir>/received.jsonl um registro por objeto com os ids que chegaram:
-# body do log, nome do span, nome da métrica. Controle pelo arquivo <dir>/mode: "ok" | "down" (503).
+# body do log, nome do span, nome da métrica; em <dir>/objects.jsonl, uma linha {path, otlp} por linha OTLP-JSON do
+# objeto (#162: prefixo e atributos das métricas; path decodificado, sem query). Controle pelo arquivo <dir>/mode: "ok" | "down" (503).
 # Cada PUT recusado soma uma linha em <dir>/refused (só o código, nada da requisição). Porta livre escolhida pelo SO, escrita em <dir>/port.
-import gzip, json, os, sys, threading
+import gzip, json, os, sys, threading, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 D = sys.argv[1]
 lock = threading.Lock()
@@ -33,11 +34,16 @@ class H(BaseHTTPRequestHandler):
             return self._reply(503, b'<Error><Code>ServiceUnavailable</Code></Error>')
         try:
             raw = gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data
-            ids = [i for line in raw.splitlines() if line.strip() for i in ids_of(json.loads(line))]
+            objs = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            ids = [i for o in objs for i in ids_of(o)]
         except Exception:
-            ids = ['PARSE-ERR']
-        with lock, open(os.path.join(D, 'received.jsonl'), 'a') as f:
-            f.write(json.dumps({'ids': ids}) + '\n')
+            objs, ids = [], ['PARSE-ERR']
+        with lock:
+            with open(os.path.join(D, 'received.jsonl'), 'a') as f:
+                f.write(json.dumps({'ids': ids}) + '\n')
+            with open(os.path.join(D, 'objects.jsonl'), 'a') as f:
+                path = urllib.parse.unquote(self.path.split('?')[0])
+                for o in objs: f.write(json.dumps({'path': path, 'otlp': o}) + '\n')
         self._reply(200)
     def do_HEAD(self): self._reply(200)
     def do_GET(self): self._reply(200)

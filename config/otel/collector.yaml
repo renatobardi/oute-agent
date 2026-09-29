@@ -4,6 +4,7 @@
 # Destino 2 (opcional, langfuse.yaml): Langfuse Cloud — só traces, só metadados (allowlist).
 # Sem perda no bucket (#161, #152): fila em disco por exporter, lote formado na fila (não em memória),
 # retry sem prazo. kill -9 ou OCI fora por dias não perdem o que o collector aceitou (tests/otelcol-queue.test.sh).
+# Métricas do próprio collector no pipeline metrics (#162, tests/otelcol-metrics.test.sh).
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -120,6 +121,20 @@ service:
   extensions: [health_check, file_storage/queue]
   telemetry:
     logs: {level: warn}
+    # métricas do próprio collector (#162): fila (tamanho, capacidade), envio que falhou, dado recusado, por exporter
+    # e receiver. Saem via OTLP para o receiver do próprio collector (loopback, sem porta nova) e seguem pelo
+    # metrics/archive até o bucket, como qualquer métrica. Com `readers` o Prometheus :8888 padrão não sobe.
+    # Fonte do alerta de fila > 50% e de recusa (#136); a linha de log "Dropping data" não serve (#137).
+    # Com retry sem prazo, send_failed_* só sobe quando um envio é abandonado (na parada, e aí nem chega ao bucket);
+    # OCI fora aparece como queue_size subindo e sent_* parado. Na parada, o último envio do reader acha o receiver fechado: loga erro e sai com 1, depois
+    # de a fila já ter fechado (nada se perde).
+    metrics:
+      level: basic
+      readers:
+        - periodic:
+            interval: 60000
+            exporter:
+              otlp: {protocol: http/protobuf, endpoint: "http://127.0.0.1:4318/v1/metrics"}
   pipelines:
     traces/archive:
       receivers: [otlp]
