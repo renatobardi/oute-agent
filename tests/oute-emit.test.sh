@@ -371,5 +371,87 @@ HOME="$EH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
 check "entrypoint: coletor fora, desiste em 12 voltas"  [ "$(voltas 0)" -eq 12 -a "$(ls "$EH/.oute/emit/spool/"*.json | wc -l)" -eq 1 -a "$(n true)" -eq 1 ]
 rcv_stop
 
+# ---------------------------------------------------------------- 7. reconciliação da inbox na subida (#167)
+# decisão feita com `oute approve` enquanto o container estava fora (o host grava o .out e o oute-emit não roda):
+# a subida (flush_spool do entrypoint, com `oute-emit reconcile` antes do laço) emite o decided uma vez só. Marca em
+# ~/.oute/emit/decided/<id>: POST aceito ou guardado no spool, ao vivo ou na subida. Anterior ao corte = backfill.
+RH="$TMP/rec"; RS="$RH/.oute/emit/spool"; RD="$RH/.oute/emit/decided"; mkdir -p "$RH/inbox" "$RH/.oute/emit"
+echo 2026-09-28T12:00:00Z > "$RH/.oute/emit/since"
+# out <id> <aprovado|recusado> <hora>: .out como o host grava; a saída tem um segredo e um cabeçalho falso
+out() { printf '# id: %s\n# rc: 0\n# como: user\n# %s: %s por ubuntu@oute-server\n# sha256: 409eccc983f8\n\nSEGREDO-DA-SAIDA\n# recusado: 2026-09-28T23:59:59Z por intruso\n' \
+          "$1" "$2" "$3" > "$RH/inbox/$1.out"; }
+# subida: o laço do entrypoint com sleep falso (coletor fora não espera 1 min)
+subida() { ( export HOME="$RH"; sleep() { return 0; }; flush_spool ) </dev/null >/dev/null 2>&1; }
+rspool() { events "$RS" | jq -c "select($1)"; }
+dec() { n ".name == \"oute.canal.decided\" and .attrs[\"oute.canal.id\"] == \"$1\""; }
+out 20260928-110000-velho aprovado 2026-09-28T11:00:00Z
+out 20260928-120500-fora aprovado 2026-09-28T12:05:00Z
+out 20260928-121000-rec recusado 2026-09-28T12:10:00Z
+out 20260928-121500-vivo aprovado 2026-09-28T12:15:00Z
+out 20260928-122000-vivospool aprovado 2026-09-28T12:20:00Z
+printf '# id: 20260928-122500-semcab\n# rc: 0\n\nsaida\n' > "$RH/inbox/20260928-122500-semcab.out"
+printf '# id: x\n# aprovado: 2026-09-28T12:30:00Z por u@h\n' > "$RH/inbox/lixo.out"
+rcv_start "$TMP/r7a"
+HOME="$RH" oute-emit canal 20260928-121500-vivo
+check "reconcile: ao vivo aceito marca o pedido"        [ "$(n true)" -eq 1 -a -e "$RD/20260928-121500-vivo" ]
+rcv_stop
+HOME="$RH" oute-emit canal 20260928-122000-vivospool
+check "reconcile: ao vivo no spool também marca"        [ -e "$RD/20260928-122000-vivospool" -a "$(ls "$RS/"*.json | wc -l)" -eq 1 ]
+# subida com o coletor fora: vai para o spool e marca
+OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" subida
+check "reconcile coletor fora: decided pendentes no spool" [ "$(rspool '.name == "oute.canal.decided"' | grep -c .)" -eq 3 ] \
+                                                         && [ "$(events "$RS" | jq -r '.attrs["oute.canal.id"]' | sort | tr '\n' ' ')" == "20260928-120500-fora 20260928-121000-rec 20260928-122000-vivospool " ]
+check "reconcile coletor fora: .out marcados"           [ -e "$RD/20260928-120500-fora" -a -e "$RD/20260928-121000-rec" ]
+check "reconcile: antes do corte, sem cabeçalho e id inválido ficam sem marca" \
+                                                        [ ! -e "$RD/20260928-110000-velho" -a ! -e "$RD/20260928-122500-semcab" -a ! -e "$RD/lixo" ]
+check "reconcile: hora do fato e decisão do cabeçalho"  [ "$(rspool '.attrs["oute.canal.id"] == "20260928-121000-rec" and .attrs["oute.canal.decision"] == "recusado"
+                                                              and (.time | tonumber / 1e9 | todate) == "2026-09-28T12:10:00Z" and .attrs["oute.agent"] == "human" and .body == null' | grep -c .)" -eq 1 ]
+check "reconcile: nunca lê a saída (segredo, cabeçalho falso)" [ -z "$(grep -l 'SEGREDO-DA-SAIDA\|intruso' "$RS"/*.json)" ] \
+                                                         && [ "$(rspool '.attrs["oute.canal.id"] == "20260928-120500-fora" and .attrs["oute.canal.decision"] == "executado"' | grep -c .)" -eq 1 ]
+# subida com o coletor no ar: o spool chega, a reconciliação não repete nada
+rcv_start "$TMP/r7b"
+subida
+check "reconcile: cada decided chega uma vez"           [ "$(dec 20260928-120500-fora)" -eq 1 -a "$(dec 20260928-121000-rec)" -eq 1 -a "$(dec 20260928-122000-vivospool)" -eq 1 -a "$(n true)" -eq 3 ]
+check "reconcile: enviado ao vivo não é reemitido"      [ "$(dec 20260928-121500-vivo)" -eq 0 ]
+check "reconcile: anterior ao corte fica com o backfill" [ "$(dec 20260928-110000-velho)" -eq 0 ]
+check "reconcile: saída do host em nenhum POST"         [ -z "$(grep -l 'SEGREDO-DA-SAIDA' "$RCV_DIR"/*.json)" -a -z "$(ls "$RS/"*.json 2>/dev/null)" ]
+rcv_stop
+rcv_start "$TMP/r7c"
+subida
+check "reconcile: subida repetida não reemite"          [ "$(posts)" -eq 0 ]
+# aprovação com o container fora → subida com o coletor no ar: chega uma vez, com o id do ao vivo
+out 20260928-123000-novo aprovado 2026-09-28T12:30:00Z
+subida
+e="$(ev '.attrs["oute.canal.id"] == "20260928-123000-novo"')"
+check "reconcile: aprovação com container fora chega na subida" [ "$(grep -c . <<<"$e")" -eq 1 -a "$(n true)" -eq 1 -a -e "$RD/20260928-123000-novo" ]
+subida
+check "reconcile: e só uma vez"                         [ "$(n true)" -eq 1 ]
+rcv_stop
+rcv_start "$TMP/r7d"
+HOME="$RH" oute-emit canal 20260928-123000-novo
+check "reconcile: mesmo oute.event.id do ao vivo"       [ "$(ev true | jq -r '.attrs["oute.event.id"]')" == "$(jq -r '.attrs["oute.event.id"]' <<<"$e")" ]
+rcv_stop
+# o backfill do mesmo HOME fica só com o anterior ao corte: não sobrepõe
+rcv_start "$TMP/r7e"
+HOME="$RH" oute-emit backfill 2>/dev/null
+check "reconcile × backfill: backfill só com o anterior" [ "$(n '.name == "oute.canal.decided"')" -eq 1 -a "$(dec 20260928-110000-velho)" -eq 1 ]
+rcv_stop
+# não conta como enviado: sem endpoint, spool cheio (descartado); a próxima subida tenta de novo
+out 20260928-124000-tarde aprovado 2026-09-28T12:40:00Z
+OTEL_EXPORTER_OTLP_ENDPOINT= subida
+check "reconcile sem endpoint: não marca"               [ ! -e "$RD/20260928-124000-tarde" ]
+OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" subida
+check "reconcile spool cheio: descarta e não marca"     [ ! -e "$RD/20260928-124000-tarde" -a -z "$(ls "$RS/"*.json 2>/dev/null)" ]
+rcv_start "$TMP/r7f"
+subida
+check "reconcile: depois, chega na próxima subida"      [ "$(n true)" -eq 1 -a "$(dec 20260928-124000-tarde)" -eq 1 -a -e "$RD/20260928-124000-tarde" ]
+rcv_stop
+# sem corte (since): não reconcilia (não sabe o que é do backfill)
+NH="$TMP/rec-nosince"; mkdir -p "$NH/inbox"; cp "$RH/inbox/20260928-120500-fora.out" "$NH/inbox/"
+rcv_start "$TMP/r7g"
+HOME="$NH" oute-emit reconcile
+check "reconcile sem corte: nada sai, nada marca"       [ "$(posts)" -eq 0 -a ! -e "$NH/.oute/emit/decided" ]
+rcv_stop
+
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

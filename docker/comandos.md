@@ -101,6 +101,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     rodar de novo não emite nada (retoma se falhou no meio)
   oute-emit flush                   reenvia o spool (~/.oute/emit/spool/: o que falhou com o
                                     coletor fora; toda chamada e a subida já reenviam sozinhas)
+  oute-emit reconcile               decided de todo ~/inbox/*.out ainda não enviado (ex.: aprovado
+                                    com o container fora); a subida já chama; registro em
+                                    ~/.oute/emit/decided/; o anterior ao corte é do backfill
   OUTE_EMIT_DEBUG=1 oute-emit …     mostra o erro de envio (normalmente silencioso)
 
 ## Memória (ai-memory)
