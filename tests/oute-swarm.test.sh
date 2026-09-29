@@ -155,7 +155,7 @@ check "spawn --repo: spawned grava repo e kaizen"        [ "$(awk '$1=="7-bar" {
 check "kaizen: fora do --max (1 normal já aberta)"       grep -q 'kaizen' <<<"$OUT"
 MAX=1 sw spawn 8-baz "instrução normal"
 check "limite: sessão normal continua contando"          [ "$RC" -ne 0 ]
-check "limite: mensagem do limite (kaizen fora)"         grep -q 'limite da rodada atingido (1/1)' <<<"$ERR"
+check "limite: mensagem do limite (kaizen fora)"         grep -q 'limite da rodada atingido (1/1 abertas)' <<<"$ERR"
 MAX=2 sw spawn 8-baz "instrução normal"
 check "limite: normal passa com 1 normal + 1 kaizen"     [ "$RC" -eq 0 ]
 check "spawn sem --repo: grava o repo da rodada"         [ "$(awk '$1=="8-baz" {print $6, $7}' "$STATE/spawned")" == "$REPO -" ]
@@ -164,6 +164,22 @@ sw spawn 9-x "instrução" --repo "$TMP/$CASE/nao-existe" --kaizen
 check "repo inexistente: falha"                          [ "$RC" -ne 0 ]
 check "repo inexistente: mensagem clara"                 grep -q "repo não encontrado: $TMP/$CASE/nao-existe" <<<"$ERR"
 check "repo inexistente: nada registrado nem aberto"     [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 2 ]
+
+# ---------------------------------------------------------------- #170: --max conta só abas abertas
+# 5b. cadeia de issues numa rodada --max 1: o elo seguinte abre depois do `oute-swarm close` do anterior
+CASE=cadeia; round "$CASE"
+MAX=1 sw spawn 8-elo "instrução"
+check "cadeia: aba aberta ocupa a vaga"                  [ "$RC" -ne 0 ]
+check "cadeia: mensagem conta abertas"                   grep -q 'limite da rodada atingido (1/1 abertas)' <<<"$ERR"
+check "cadeia: mensagem aponta o close"                  grep -q 'oute-swarm close' <<<"$ERR"
+FAKE="$FAKE" "$BIN/fake-tabs" '#9 outra=working'
+sw close 7-foo --yes
+check "cadeia: close marca a aba fechada"                grep -qxF 7-foo "$STATE/closed"
+MAX=1 sw spawn 8-elo "instrução"
+check "cadeia: aba fechada libera a vaga"                [ "$RC" -eq 0 ]
+MAX=1 sw spawn 9-elo "instrução"
+check "cadeia: elo novo aberto volta a contar"           [ "$RC" -ne 0 ]
+check "cadeia: spawned segue com o histórico"            [ "$(wc -l < "$STATE/spawned")" -eq 2 ]
 
 # 6. watch multi-repo: mesma issue #7 e mesmo PR #12 em dois repos, sem colisão
 CASE=multi; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
