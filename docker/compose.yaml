@@ -147,12 +147,16 @@ services:
       - oute-workspace:/v/workspace
       - oute-home:/v/home
       - oute-memory:/v/memory
+      # fila em disco do collector (#161): a imagem roda como 10001:10001
+      - oute-otel-queue:/v/otel-queue
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
     container_name: oute-otel-collector
     logging: *logging
     restart: unless-stopped
+    # parada limpa com o OCI lento (PUT de até 30 s, #137 C4); se estourar, o SIGKILL não perde nada (fila em disco)
+    stop_grace_period: 30s
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:
       - --config=/etc/otelcol/collector.yaml
@@ -174,6 +178,11 @@ services:
       OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
     volumes:
       - ./config/otel:/etc/otelcol:ro
+      # fila em disco dos exporters do bucket (#161): sobrevive a oute down/up e a kill -9
+      - oute-otel-queue:/var/lib/otelcol/queue
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     networks: [oute]
 
 secrets:
@@ -186,6 +195,7 @@ volumes:
   oute-home:
   oute-memory:
   oute-shared:
+  oute-otel-queue:
 
 networks:
   oute:

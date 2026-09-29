@@ -2,9 +2,16 @@
 # Fontes (rede docker "oute", sem porta publicada): Claude Code, Codex, jev-router (LiteLLM).
 # Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt.
 # Destino 2 (opcional, langfuse.yaml): Langfuse Cloud — só traces, só metadados (allowlist).
+# Sem perda no bucket (#161, #152): fila em disco por exporter, lote formado na fila (não em memória),
+# retry sem prazo. kill -9 ou OCI fora por dias não perdem o que o collector aceitou (tests/otelcol-queue.test.sh).
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
+  # volume nomeado oute-otel-queue (dono 10001 = USER da imagem, via volume-init); sobrevive a oute down/up.
+  # O bbolt chega a ~1,7× o queue_size e não encolhe (#137): 1 GB de fila ≈ 2 GB de disco.
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
+    create_directory: true   # o volume já traz o diretório; isto deixa o `validate` passar fora do container
 
 receivers:
   otlp:
@@ -43,11 +50,6 @@ processors:
     metric_statements:
       - context: resource
         statements: *agent_by_service
-  # arquivo: lotes grandes = poucos objetos/requests no OCI (franquia 50 mil/mês)
-  batch/archive:
-    timeout: 5m
-    send_batch_size: 20000
-    send_batch_max_size: 50000
 
 exporters:
   awss3/traces:
@@ -61,8 +63,18 @@ exporters:
       s3_partition_timezone: UTC
       compression: gzip
     marshaler: otlp_json
-    sending_queue: {enabled: true}
     timeout: 30s
+    # OCI fora: retenta para sempre (400 também é retentado, #137 C8); o limite é o tamanho da fila
+    retry_on_failure: &retry_forever {enabled: true, max_elapsed_time: 0}
+    # 1 GB do bucket dividido entre os três (logs 600 / traces 300 / metrics 100 MB). Fila cheia = 503 para a fonte (retentável).
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 314572800  # 300 MB
+      block_on_overflow: false
+      # lote na fila: poucos objetos/requests no OCI (franquia 50 mil/mês)
+      batch: &archive_batch {flush_timeout: 5m, sizer: items, min_size: 20000, max_size: 50000}
   awss3/metrics:
     s3uploader:
       region: "${env:OCI_S3_REGION}"
@@ -74,8 +86,15 @@ exporters:
       s3_partition_timezone: UTC
       compression: gzip
     marshaler: otlp_json
-    sending_queue: {enabled: true}
     timeout: 30s
+    retry_on_failure: *retry_forever
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 104857600  # 100 MB
+      block_on_overflow: false
+      batch: *archive_batch
   awss3/logs:
     s3uploader:
       region: "${env:OCI_S3_REGION}"
@@ -87,23 +106,30 @@ exporters:
       s3_partition_timezone: UTC
       compression: gzip
     marshaler: otlp_json
-    sending_queue: {enabled: true}
     timeout: 30s
+    retry_on_failure: *retry_forever
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 629145600  # 600 MB
+      block_on_overflow: false
+      batch: *archive_batch
 
 service:
-  extensions: [health_check]
+  extensions: [health_check, file_storage/queue]
   telemetry:
     logs: {level: warn}
   pipelines:
     traces/archive:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource]
       exporters: [awss3/traces]
     metrics/archive:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource]
       exporters: [awss3/metrics]
     logs/archive:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource, batch/archive]
+      processors: [memory_limiter, transform/agent, resource]
       exporters: [awss3/logs]
