@@ -253,5 +253,123 @@ HOME="$OH2" oute-emit backfill 2>/dev/null
 check "event.id: rodada antiga reescrita = ids do ao vivo" [ "$(ids "$RCV_DIR" true)" == "$(grep -E '^oute\.swarm\.(round\.opened|session\.spawned|round\.closed) ' <<<"$live")" ]
 rcv_stop
 
+# ---------------------------------------------------------------- 6. spool (#166)
+# coletor fora → o evento vai para ~/.oute/emit/spool/ (rc 0, sem stdout) → volta → a próxima chamada reenvia o
+# gravado como está (id e hora do fato originais, nunca recalculados) antes do evento novo
+SH="$TMP/spool"; RND=swarm-0928-1000; SR="$SH/.oute/swarm/$RND"; SP="$SH/.oute/emit/spool"; mkdir -p "$SR" "$SH/outbox"
+printf 'repo=/workspace/lab\nmax=2\nagent=codex\nstarted=2026-09-28T10:00:00Z\n' > "$SR/meta"
+DOWN="http://127.0.0.1:$(closed_port)"
+nspool() { ls "$SP"/*.json 2>/dev/null | wc -l | tr -d ' '; }
+# spooled <jq-select>: registros gravados no spool que casam o filtro (mesmo formato do events)
+spooled() { events "$SP" | jq -c "select($1)"; }
+ms() { date +%s%3N; }
+TELL="2026-09-28T10:02:00Z tell 7-foo ok${T}mesma"
+printf '%s\n' "$TELL" >> "$SR/log"
+OUT="$(HOME="$SH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit swarm "$RND" "$TELL" 2>&1)"; RC=$?
+check "spool: coletor fora, rc 0 e nada na tela"        [ "$RC" -eq 0 -a -z "$OUT" ]
+check "spool: um arquivo, sem temporário"               [ "$(nspool)" -eq 1 -a -z "$(ls -A "$SP" | grep -v '\.json$' | grep -v '^\.lock$')" ]
+id1="$(spooled true | jq -r '.attrs["oute.event.id"]')"
+check "spool: gravado com id, hora do fato e origem"    jqe '.attrs["oute.event.id"] != null and (.time | tonumber / 1e9 | todate) == "2026-09-28T10:02:00Z"
+                                                         and .res["host.name"] == "oute-mac" and .res["oute.agent"] == "codex" and .body == "mesma"' <<<"$(spooled true)"
+printf '%s\n' "$TELL" >> "$SR/log"   # a mesma linha de novo, no mesmo segundo: outro fato
+printf '# oute-propose\n# titulo: t\n# como: user\n# agente: pi\n# criado: 2026-09-28T10:03:00Z\n\necho t\n' > "$SH/outbox/20260928-100300-t.sh"
+HOME="$SH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-100300-t
+check "spool: segunda falha, segundo arquivo"           [ "$(nspool)" -eq 2 ]
+rcv_start "$TMP/r6"
+OUT="$(HOME="$SH" oute-emit swarm "$RND" "$TELL" 2>&1)"; RC=$?
+check "spool: coletor volta, rc 0, nada na tela"        [ "$RC" -eq 0 -a -z "$OUT" ]
+check "spool: tudo chega e o spool esvazia"             [ "$(n true)" -eq 3 -a "$(nspool)" -eq 0 ]
+check "spool: reenvio antes do evento novo (ordem)"     [ "$(events "$RCV_DIR" | jq -r '.attrs["oute.event.id"]' | head -1)" == "$id1" ]
+check "spool: os dois tell iguais, ids distintos"       [ "$(ids "$RCV_DIR" '.name == "oute.swarm.tell"' | cut -d' ' -f2 | sort -u | grep -c .)" -eq 2 ]
+check "spool: reenviado com o id gravado (nunca recalculado)" [ "$(n ".attrs[\"oute.event.id\"] == \"$id1\" and .body == \"mesma\"")" -eq 1 ]
+check "spool: reenviado com hora do fato e agente originais" [ "$(n '.name == "oute.canal.proposed" and (.time | tonumber / 1e9 | todate) == "2026-09-28T10:03:00Z" and .attrs["oute.agent"] == "pi"')" -eq 1 ]
+check "spool: todo evento leva spool.bytes e spool.dropped" [ "$(n '.attrs["oute.emit.spool.bytes"] != null and .attrs["oute.emit.spool.dropped"] != null')" -eq 3 ]
+check "spool: evento novo com spool vazio (bytes 0)"    [ "$(n '.attrs["oute.event.id"] != "'"$id1"'" and .name == "oute.swarm.tell" and (.attrs["oute.emit.spool.bytes"] | tonumber) == 0')" -eq 1 ]
+check "spool: guardado leva o spool de quando falhou"   [ "$(n '.name == "oute.canal.proposed" and (.attrs["oute.emit.spool.bytes"] | tonumber) > 0')" -eq 1 ]
+rcv_stop
+
+# spool cheio: descarta o evento novo, conta em spool.dropped, avisa em stderr só com OUTE_EMIT_DEBUG=1
+FH="$TMP/full"; mkdir -p "$FH/outbox"
+printf '# oute-propose\n# titulo: f\n# como: user\n# agente: pi\n# criado: 2026-09-28T11:00:00Z\n\necho f\n' > "$FH/outbox/20260928-110000-f.sh"
+OUT="$(HOME="$FH" OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f 2>&1)"; RC=$?
+check "cheio: rc 0, nada na tela, nada gravado"         [ "$RC" -eq 0 -a -z "$OUT" -a -z "$(ls "$FH/.oute/emit/spool/" 2>/dev/null)" ]
+check "cheio: dropped = 1"                              [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 1 ]
+ERR="$(HOME="$FH" OUTE_EMIT_DEBUG=1 OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f 2>&1 >/dev/null)"
+check "cheio: dropped acumula; aviso com OUTE_EMIT_DEBUG=1" [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 2 ] && grep -q 'spool cheio' <<<"$ERR"
+rcv_start "$TMP/r6b"
+HOME="$FH" oute-emit canal 20260928-110000-f
+check "cheio: próximo evento leva dropped = 2"          [ "$(n '(.attrs["oute.emit.spool.dropped"] | tonumber) == 2')" -eq 1 ]
+rcv_stop
+# o limite conta o spool inteiro: com 50 MB (padrão) ocupados, o evento novo não entra
+FH2="$TMP/full2"; mkdir -p "$FH2/outbox" "$FH2/.oute/emit/spool"; cp "$FH/outbox/"*.sh "$FH2/outbox/"
+python3 -c 'import sys; open(sys.argv[1], "w").write("{\"resourceLogs\": [], \"pad\": \"" + "x" * 52428700 + "\"}")' "$FH2/.oute/emit/spool/00000000000000000001-1.json"
+HOME="$FH2" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
+check "cheio: 50 MB por padrão"                         [ "$(ls "$FH2/.oute/emit/spool/"*.json | wc -l)" -eq 1 -a "$(cat "$FH2/.oute/emit/spool.dropped")" -eq 1 ]
+
+# teto de 2 s: spool com envios pendentes + coletor lento; o reenvio e o evento novo cabem nos mesmos 2 s
+LH="$TMP/slow"; mkdir -p "$LH/outbox"; cp "$FH/outbox/"*.sh "$LH/outbox/"
+for _ in 1 2 3; do HOME="$LH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f; done
+RCV_SLEEP=6 rcv_start "$TMP/r6c"
+t0=$(ms); OUT="$(HOME="$LH" oute-emit canal 20260928-110000-f 2>&1)"; RC=$?; dt=$(( $(ms) - t0 ))
+check "teto: coletor lento, rc 0 e nada na tela"        [ "$RC" -eq 0 -a -z "$OUT" ]
+check "teto: reenvio + evento novo nos 2 s ($dt ms)"   [ "$dt" -le 2800 ]
+check "teto: nada se perde (spool com os 4)"            [ "$(ls "$LH/.oute/emit/spool/"*.json | wc -l)" -eq 4 ]
+rcv_stop
+t0=$(ms); HOME="$LH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit flush; dt=$(( $(ms) - t0 ))
+check "teto: coletor fora, spool cheio de envios, rápido ($dt ms)" [ "$dt" -le 2500 ]
+
+# concorrência: a trava é não bloqueante; quem não pega pula o reenvio e manda só o seu
+rcv_start "$TMP/r6d"
+python3 -c 'import fcntl,sys,time; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(5)' \
+  "$LH/.oute/emit/spool/.lock" "$TMP/locked" & LPID=$!
+for _ in $(seq 1 50); do [[ -e "$TMP/locked" ]] && break; sleep 0.1; done
+t0=$(ms); HOME="$LH" oute-emit canal 20260928-110000-f; dt=$(( $(ms) - t0 ))
+check "trava ocupada: não espera ($dt ms) e manda só o novo" [ "$dt" -le 2500 -a "$(n true)" -eq 1 -a "$(ls "$LH/.oute/emit/spool/"*.json | wc -l)" -eq 4 ]
+kill "$LPID" 2>/dev/null; wait "$LPID" 2>/dev/null
+rcv_stop
+spool_ids="$(events "$LH/.oute/emit/spool" | jq -r '.attrs["oute.event.id"]' | sort)"
+RCV_SLEEP=0.3 rcv_start "$TMP/r6e"
+pids=(); for _ in 1 2 3 4; do HOME="$LH" oute-emit flush & pids+=($!); done; wait "${pids[@]}"
+check "simultâneas: cada arquivo reenviado uma vez só"  [ "$(events "$RCV_DIR" | jq -r '.attrs["oute.event.id"]' | sort)" == "$spool_ids" -a "$(posts)" -eq 1 ]
+check "simultâneas: spool vazio"                        [ -z "$(ls "$LH/.oute/emit/spool/"*.json 2>/dev/null)" ]
+# arquivo ilegível no spool não trava a fila: sai para spool.bad, o resto segue
+echo '{quebrado' > "$LH/.oute/emit/spool/00000000000000000001-1.json"
+HOME="$LH" oute-emit canal 20260928-110000-f
+check "ilegível: vai para spool.bad, o evento novo sai" [ -f "$LH/.oute/emit/spool.bad/00000000000000000001-1.json" -a -z "$(ls "$LH/.oute/emit/spool/"*.json 2>/dev/null)" -a "$(posts)" -eq 2 ]
+rcv_stop
+
+# lote recusado com 4xx: reenvia um por um; só o arquivo recusado de novo vai para spool.bad
+MH="$TMP/misto"; MS="$MH/.oute/emit/spool"; mkdir -p "$MH/outbox"
+for t in bom1 RUIM bom2; do
+  id="20260928-120000-$(tr A-Z a-z <<<"$t")"
+  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: 2026-09-28T12:00:00Z\n\necho %s\n' "$t" "$t" > "$MH/outbox/$id.sh"
+  HOME="$MH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal "$id"
+done
+check "4xx em lote: três arquivos no spool"             [ "$(ls "$MS/"*.json | wc -l)" -eq 3 ]
+RCV_REJECT=RUIM rcv_start "$TMP/r6f"
+HOME="$MH" oute-emit flush
+check "4xx em lote: os bons chegam, um por um"          [ "$(n true)" -eq 2 -a "$(n '.attrs["oute.canal.title"] == "bom1"')" -eq 1 -a "$(n '.attrs["oute.canal.title"] == "bom2"')" -eq 1 ]
+check "4xx em lote: só o recusado vai para spool.bad"  [ -z "$(ls "$MS/"*.json 2>/dev/null)" -a "$(ls "$MH/.oute/emit/spool.bad/"*.json | wc -l)" -eq 1 ] \
+                                                         && grep -q RUIM "$MH/.oute/emit/spool.bad/"*.json
+rcv_stop
+
+# laço de flush do entrypoint (a função flush_spool, extraída do entrypoint.sh): sleep falso conta as voltas
+eval "$(sed -n '/^flush_spool() {/,/^}/p' "$ROOT/docker/entrypoint.sh")"
+check "entrypoint: flush_spool extraída"                [ "$(type -t flush_spool)" == function ]
+EH="$TMP/ep"; mkdir -p "$EH/outbox"; cp "$FH/outbox/"*.sh "$EH/outbox/"
+# voltas <up-na-volta>: roda o laço com o coletor fora até a volta dada (0 = nunca); imprime quantos sleep
+voltas() { (
+  HOME="$EH"; UP="$OTEL_EXPORTER_OTLP_ENDPOINT"; export OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN"; c=0
+  up="$1"; sleep() { c=$((c + 1)); [[ "$c" -eq "$up" ]] && export OTEL_EXPORTER_OTLP_ENDPOINT="$UP"; return 0; }
+  flush_spool </dev/null >/dev/null 2>&1; echo "$c"
+) }
+rcv_start "$TMP/r6g"
+check "entrypoint: sem spool, uma volta só"             [ "$(voltas 0)" -eq 0 -a "$(posts)" -eq 0 ]
+HOME="$EH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
+check "entrypoint: coletor sobe depois, laço esvazia e para" [ "$(voltas 2)" -eq 2 -a -z "$(ls "$EH/.oute/emit/spool/"*.json 2>/dev/null)" -a "$(n true)" -eq 1 ]
+HOME="$EH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
+check "entrypoint: coletor fora, desiste em 12 voltas"  [ "$(voltas 0)" -eq 12 -a "$(ls "$EH/.oute/emit/spool/"*.json | wc -l)" -eq 1 -a "$(n true)" -eq 1 ]
+rcv_stop
+
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

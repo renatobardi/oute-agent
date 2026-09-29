@@ -99,6 +99,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
                                     (~/.oute/emit/since) com a hora original; resumo no stderr;
                                     rodar de novo não emite nada (retoma se falhou no meio)
+  oute-emit flush                   reenvia o spool (~/.oute/emit/spool/: o que falhou com o
+                                    coletor fora; toda chamada e a subida já reenviam sozinhas)
   OUTE_EMIT_DEBUG=1 oute-emit …     mostra o erro de envio (normalmente silencioso)
 
 ## Memória (ai-memory)

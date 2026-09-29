@@ -4,13 +4,18 @@
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
+  oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
 
 Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"). OTLP/HTTP JSON em
 ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs; origem do OTEL_RESOURCE_ATTRIBUTES, service.name=oute.
-Best-effort: timeout ~2 s, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com OUTE_EMIT_DEBUG=1
-(o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida: o leitor do
-.out para na primeira linha em branco.
+Best-effort: teto de ~2 s por chamada, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com
+OUTE_EMIT_DEBUG=1 (o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida:
+o leitor do .out para na primeira linha em branco.
+Spool (#166): POST que falha (coletor fora, timeout, 5xx) vai para ~/.oute/emit/spool/ (um arquivo por envio,
+gravação atômica, até 50 MB; cheio = descarta e conta em ~/.oute/emit/spool.dropped). Toda chamada reenvia o
+spool antes, como foi gravado (mesmo oute.event.id e hora do fato), dentro do mesmo teto.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -18,6 +23,7 @@ import re
 import signal
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -27,7 +33,13 @@ SWARM = os.path.join(HOME, ".oute", "swarm")
 EMIT = os.path.join(HOME, ".oute", "emit")
 INBOX = os.environ.get("OUTE_INBOX") or os.path.join(HOME, "inbox")
 OUTBOX = os.environ.get("OUTE_OUTBOX") or os.path.join(HOME, "outbox")
+SPOOL = os.path.join(EMIT, "spool")
+SPOOL_BAD = os.path.join(EMIT, "spool.bad")
+DROPPED = os.path.join(EMIT, "spool.dropped")
+SPOOL_MAX = int(os.environ.get("OUTE_EMIT_SPOOL_MAX") or 50 * 2**20)  # a variável só existe para os testes
+SPOOL_BATCH = 2**20
 TIMEOUT = 2.0
+MIN_POST = 0.05
 BACKFILL_TIMEOUT = 10.0
 BACKFILL_CHUNK = 200
 ID_RE = re.compile(r"^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$")
@@ -113,37 +125,207 @@ def _alarm(*_):
     raise TimeoutError("timeout")
 
 
-def post(events, timeout=TIMEOUT):
-    """manda os eventos num POST (um resourceLogs por agente). True = aceito"""
-    ep = endpoint()
-    if not events:
-        return True
-    if not ep:
-        debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
-        return False
+def resource_logs(events):
+    """eventos -> resourceLogs do OTLP (um por agente), com o resource de agora"""
     by_agent = {}
     for agent, rec in events:
         by_agent.setdefault(agent, []).append(rec)
-    payload = {"resourceLogs": [
-        {"resource": {"attributes": kvs(resource(a))},
-         "scopeLogs": [{"scope": {"name": "oute-emit"}, "logRecords": recs}]}
-        for a, recs in by_agent.items()]}
-    req = urllib.request.Request(ep, data=json.dumps(payload).encode(), method="POST",
+    return [{"resource": {"attributes": kvs(resource(a))},
+             "scopeLogs": [{"scope": {"name": "oute-emit"}, "logRecords": recs}]}
+            for a, recs in by_agent.items()]
+
+
+def post_logs(logs, timeout):
+    """um POST com os resourceLogs. "ok" = aceito; "retry" = coletor fora, timeout, 5xx/408/429 (vale guardar);
+    "bad" = recusa permanente (4xx: reenviar não adianta)"""
+    ep = endpoint()
+    if not ep:
+        debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
+        return "bad"
+    if timeout < MIN_POST:
+        return "retry"
+    req = urllib.request.Request(ep, data=json.dumps({"resourceLogs": logs}).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     # teto de verdade: o timeout do urllib vale por operação de socket, não para o POST inteiro
     signal.signal(signal.SIGALRM, _alarm)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            ok = 200 <= r.status < 300
-            if not ok:
-                debug(f"{ep}: HTTP {r.status}")
-            return ok
+            if 200 <= r.status < 300:
+                return "ok"
+            debug(f"{ep}: HTTP {r.status}")
+            return "retry"
+    except urllib.error.HTTPError as e:
+        debug(f"{ep}: HTTP {e.code}")
+        return "bad" if 400 <= e.code < 500 and e.code not in (408, 429) else "retry"
     except Exception as e:  # noqa: BLE001 — best-effort: nada derruba o chamador
         debug(f"{ep}: {e}")
-        return False
+        return "retry"
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
+
+
+def post(events, timeout=TIMEOUT):
+    """manda os eventos num POST, sem spool (backfill). True = aceito"""
+    if not events:
+        return True
+    return post_logs(resource_logs(events), timeout) == "ok"
+
+
+# ---------------------------------------------------------------- spool (#166)
+def spool_files():
+    """arquivos prontos do spool, do mais antigo ao mais novo (o nome começa pela hora em ns)"""
+    try:
+        return sorted(f for f in os.listdir(SPOOL) if f.endswith(".json") and not f.startswith("."))
+    except OSError:
+        return []
+
+
+def spool_bytes():
+    total = 0
+    for f in spool_files():
+        try:
+            total += os.path.getsize(os.path.join(SPOOL, f))
+        except OSError:
+            pass
+    return total
+
+
+def dropped():
+    try:
+        return int((read_text(DROPPED) or "0").strip() or 0)
+    except ValueError:
+        return 0
+
+
+def count_drop():
+    os.makedirs(EMIT, exist_ok=True)
+    with open(DROPPED, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)  # só o tempo de somar 1
+        f.seek(0)
+        try:
+            n = int(f.read().strip() or 0) + 1
+        except ValueError:
+            n = 1
+        f.seek(0)
+        f.truncate()
+        f.write(f"{n}\n")
+    return n
+
+
+def stamp(events):
+    """todo evento leva o estado do spool na hora do envio (o alerta é do agent-studio, #150)"""
+    extra = kvs({"oute.emit.spool.bytes": spool_bytes(), "oute.emit.spool.dropped": dropped()})
+    for _, rec in events:
+        rec["attributes"] += extra
+
+
+def quarantine(path):
+    """arquivo do spool que não dá para reenviar (ilegível ou recusado com 4xx): sai do spool, não se perde"""
+    os.makedirs(SPOOL_BAD, exist_ok=True)
+    try:
+        os.replace(path, os.path.join(SPOOL_BAD, os.path.basename(path)))
+    except OSError:
+        pass
+    debug(f"spool: {os.path.basename(path)} não reenviável, movido para {SPOOL_BAD}")
+
+
+def spool(logs):
+    """guarda o envio que falhou como está (resource, id e hora do fato), gravação atômica. Cheio = descarta"""
+    data = json.dumps({"resourceLogs": logs}).encode()
+    os.makedirs(SPOOL, exist_ok=True)
+    size = spool_bytes()
+    if size + len(data) > SPOOL_MAX:
+        n = count_drop()
+        debug(f"spool cheio ({size} de {SPOOL_MAX} bytes): evento descartado; descartes: {n}")
+        return
+    name = f"{time.time_ns():020d}-{os.getpid()}"
+    tmp = os.path.join(SPOOL, f".{name}.tmp")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, os.path.join(SPOOL, name + ".json"))
+    debug(f"coletor indisponível: evento guardado no spool ({name}.json, spool com {size + len(data)} bytes)")
+
+
+def drain(deadline):
+    """reenvia o spool, do mais antigo ao mais novo, em lotes de ~1 MB, até o prazo. Cada arquivo sai como foi
+    gravado: nunca recalcula o oute.event.id (ao vivo, a ocorrência vem da contagem no log, que já mudou).
+    Trava não bloqueante: quem não pega pula. False = o coletor falhou (ou o prazo acabou) no meio"""
+    if not endpoint() or not spool_files():
+        return True
+    try:
+        lock = open(os.path.join(SPOOL, ".lock"), "a")
+    except OSError as e:
+        debug(f"spool: {e}")
+        return True
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            debug("spool: outra chamada está esvaziando; pulei")
+            return True
+        names = spool_files()  # de novo, já com a trava
+        i = 0
+        while i < len(names):
+            batch, logs, size = [], [], 0
+            while i < len(names) and (not batch or size < SPOOL_BATCH):
+                path = os.path.join(SPOOL, names[i])
+                i += 1
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        rl = json.load(f)["resourceLogs"]
+                    if not isinstance(rl, list):
+                        raise ValueError("resourceLogs não é lista")
+                    size += os.path.getsize(path)
+                except FileNotFoundError:
+                    continue
+                except (OSError, ValueError, KeyError, TypeError):
+                    quarantine(path)
+                    continue
+                batch.append((path, rl))
+                logs += rl
+            if not batch:
+                continue
+            r = post_logs(logs, deadline - time.monotonic())
+            if r == "bad" and len(batch) > 1:
+                # lote recusado com 4xx: um arquivo ruim não leva os bons junto; de novo, um por um
+                for path, rl in batch:
+                    r = post_logs(rl, deadline - time.monotonic())
+                    if r == "retry":
+                        return False
+                    settle(path, r)
+                continue
+            if r == "retry":
+                return False
+            for path, _ in batch:
+                settle(path, r)
+        return True
+
+
+def settle(path, result):
+    """arquivo do spool depois do POST: aceito = sai; recusado com 4xx = spool.bad"""
+    if result == "bad":
+        quarantine(path)
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def send(events, deadline, drained):
+    """ao vivo: manda o evento novo no tempo que sobrou; falhou (ou o coletor já falhou no reenvio) = spool"""
+    if not events or not endpoint():
+        if events:
+            debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
+        return
+    stamp(events)
+    logs = resource_logs(events)
+    r = post_logs(logs, deadline - time.monotonic()) if drained else "retry"
+    if r == "retry":
+        spool(logs)
 
 
 # ---------------------------------------------------------------- canal
@@ -418,6 +600,7 @@ def cmd_backfill():
                 events.append(ev)
     for _, rec in events:
         rec["attributes"].append({"key": "oute.backfill", "value": {"boolValue": True}})
+    stamp(events)
     # retomada: a ordem é determinística; backfill.sent guarda quantos já foram aceitos (sem duplicar)
     sent_f = os.path.join(EMIT, "backfill.sent")
     sent = int((read_text(sent_f) or "0").strip() or 0)
@@ -444,18 +627,22 @@ def cmd_backfill():
 
 
 def main(argv):
+    deadline = time.monotonic() + TIMEOUT
     verb = argv[0] if argv else ""
     if verb in ("-h", "--help", ""):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
-    if verb == "canal" and len(argv) == 2:
-        post(cmd_canal(argv[1]))
-    elif verb == "swarm" and len(argv) == 3:
-        post(cmd_swarm(argv[1], argv[2]))
-    elif verb == "backfill" and len(argv) == 1:
-        cmd_backfill()
-    else:
+    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1}
+    if valid.get(verb) != len(argv):
         debug(f"uso inválido: {' '.join(argv)}")
+        return
+    drained = drain(deadline)  # toda chamada: primeiro o que ficou para trás
+    if verb == "canal":
+        send(cmd_canal(argv[1]), deadline, drained)
+    elif verb == "swarm":
+        send(cmd_swarm(argv[1], argv[2]), deadline, drained)
+    elif verb == "backfill":
+        cmd_backfill()
 
 
 if __name__ == "__main__":
