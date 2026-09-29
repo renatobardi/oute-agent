@@ -96,10 +96,11 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
       | tar -xz -C /usr/local/bin && chmod +x /usr/local/bin/ai-memory
 
 # agent-studio (ADR-08, #185): ingestão OTLP -> DuckDB; serviço próprio no compose, só no oute-server.
-# venv isolado, dependências fixadas por hash (requirements.txt gerado do requirements.in pelo uv)
+# venv isolado, dependências fixadas por hash (requirements.txt gerado do requirements.in pelo uv), só wheels
+# (nenhum setup.py roda no build)
 COPY docker/agent-studio/requirements.txt /opt/agent-studio/requirements.txt
 RUN uv venv /opt/agent-studio/venv --python /usr/bin/python3 \
-    && uv pip install --no-cache --python /opt/agent-studio/venv/bin/python --require-hashes -r /opt/agent-studio/requirements.txt
+    && uv pip install --no-cache --only-binary :all: --python /opt/agent-studio/venv/bin/python --require-hashes -r /opt/agent-studio/requirements.txt
 COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio
 
 # --- ssh ---------------------------------------------------------------------

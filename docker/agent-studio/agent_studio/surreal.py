@@ -6,7 +6,6 @@ rollback (os dois bancos juntos ou nenhum).
 """
 import base64
 import json
-import urllib.error
 import urllib.request
 
 
@@ -30,7 +29,7 @@ class Surreal:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 out = json.load(r)
-        except (urllib.error.URLError, OSError, ValueError) as e:
+        except (OSError, ValueError) as e:  # URLError é OSError
             raise SurrealError(f"SurrealDB fora ou com erro: {e}") from e
         if out.get("error"):
             raise SurrealError(f"SurrealDB: {out['error']}")

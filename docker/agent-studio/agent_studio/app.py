@@ -108,7 +108,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None):
             tel.warn("write-failed", "gravação falhou, respondi 503 (%s, %d registros): %s", signal, len(rows),
                      type(e).__name__, level=logging.ERROR)
             # a causa (DuckDB, SurrealDB) só no stderr: logger fora da árvore agent_studio, sem o handler OTel
-            detail.error("gravação falhou (%s)", signal, exc_info=True)
+            detail.exception("gravação falhou (%s)", signal)
             return JSONResponse({"message": "gravação falhou; reenvie"}, status_code=503, headers={"Retry-After": "5"})
         n, dup = written[table]
         tel.written(signal, n, dup, time.monotonic() - t0, ok=True)

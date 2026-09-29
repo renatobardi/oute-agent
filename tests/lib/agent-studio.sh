@@ -15,9 +15,9 @@ studio_venv() {
   if ! "$d/bin/python" -c 'import duckdb, fastapi, uvicorn' 2>/dev/null; then
     rm -rf "$d"; mkdir -p "$(dirname "$d")"
     if command -v uv >/dev/null; then
-      uv venv -q "$d" --python python3 && uv pip install -q --python "$d/bin/python" --require-hashes -r "$req"
+      uv venv -q "$d" --python python3 && uv pip install -q --only-binary :all: --python "$d/bin/python" --require-hashes -r "$req"
     else
-      python3 -m venv "$d" && "$d/bin/pip" install -q --require-hashes -r "$req"
+      python3 -m venv "$d" && "$d/bin/pip" install -q --only-binary :all: --require-hashes -r "$req"
     fi || return 1
   fi
   STUDIO_PY="$d/bin/python"

@@ -94,6 +94,23 @@ TABLES["metrics"] = [
     ("received_unix_nano", "UBIGINT NOT NULL"),
 ]
 DERIVED = {"time": "time_unix_nano", "received_at": "received_unix_nano"}
+TS_UTC = "(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')"
+
+
+def _sql(table, cols):
+    names = [c for c, _ in cols]
+    return {
+        "create": f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(f'{c} {t}' for c, t in cols)})",
+        # chaves que já existem, com a lista inteira num parâmetro só
+        "existing": f"SELECT dedupe_key FROM {table} WHERE list_contains(?::VARCHAR[], dedupe_key)",
+        "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) "
+                  f"VALUES ({', '.join(TS_UTC if c in DERIVED else '?' for c in names)})",
+        "columns": names,
+    }
+
+
+# todo SQL montado uma vez, só com os nomes deste módulo; os valores vão sempre em parâmetros
+SQL = {table: _sql(table, cols) for table, cols in TABLES.items()}
 
 
 class Store:
@@ -104,8 +121,8 @@ class Store:
         self.con.execute("SET TimeZone = 'UTC'")
         self.lock = threading.Lock()
         with self.lock:
-            for table, cols in TABLES.items():
-                self.con.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(f'{c} {t}' for c, t in cols)})")
+            for sql in SQL.values():
+                self.con.execute(sql["create"])
 
     def close(self):
         with self.lock:
@@ -137,16 +154,11 @@ class Store:
             uniq.setdefault(r["dedupe_key"], r)
         if not uniq:
             return 0, len(rows)
+        sql = SQL[table]
         keys = list(uniq)
-        seen = set()
-        for i in range(0, len(keys), 1000):
-            part = keys[i:i + 1000]
-            seen.update(k for (k,) in self.con.execute(
-                f"SELECT dedupe_key FROM {table} WHERE dedupe_key IN ({', '.join('?' * len(part))})", part).fetchall())
+        seen = {k for (k,) in self.con.execute(sql["existing"], [keys]).fetchall()}
         new = [uniq[k] for k in keys if k not in seen]
         if new:
-            cols = [c for c, _ in TABLES[table]]
-            vals = ", ".join("(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')" if c in DERIVED else "?" for c in cols)
-            sql = f"INSERT OR IGNORE INTO {table} ({', '.join(cols)}) VALUES ({vals})"
-            self.con.executemany(sql, [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
+            cols = sql["columns"]
+            self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)

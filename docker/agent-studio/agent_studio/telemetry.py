@@ -22,16 +22,16 @@ log = logging.getLogger("agent_studio")
 
 class Noop:
     def request(self, signal, status):
-        pass
+        pass  # sem endpoint OTLP: não há o que contar
 
     def written(self, signal, n, dup, seconds, ok):
-        pass
+        pass  # sem endpoint OTLP: não há o que contar
 
     def warn(self, kind, msg, *args, level=logging.WARNING):
         log.log(level, msg, *args)
 
     def shutdown(self):
-        pass
+        pass  # nada a exportar
 
 
 class Telemetry(Noop):
