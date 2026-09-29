@@ -6,10 +6,11 @@ Fases do AI-DLC (ADR-07) que a rodada cobre: triagem = `plan`, sessões = `build
 
 ## 1. Triagem (só leitura) — fase `plan`
 - `gh issue list --state open --limit 100 --json number,title,labels,body` (com `--label` se houver filtro) e `gh pr list --state open --json number,title,headRefName,body`.
+- **Outras rodadas no mesmo repo:** `oute-swarm list`. Sob cada `== <rodada>` diferente de `{{ID}}`, as linhas sem `(fechada)` com o caminho {{REPO_PATH}} são sessões abertas de outra coordenadora neste repo. Para cada uma, anote a issue (o `<n>` do `<n>-<slug>`) e a área tocada (pela issue).
 - Descarte: `needs-info`, `ready-for-human`, `later`, `blocked`, `spike`; issue que já tem PR aberto (referência `#n` no título/corpo/branch); issue que depende de outra aberta (exceto elo de cadeia, abaixo); issue que pede decisão do Bardi.
 - **Cadeia de dependência:** se as issues filtradas formam uma cadeia (#a → #b → #c, cada uma dependendo da anterior), diga isso na triagem, com a ordem, e ofereça: (1) só o primeiro elo nesta rodada, e o resto em rodadas seguintes; ou (2) a cadeia inteira nesta rodada, um elo por vez, ocupando uma vaga do `--max`: o elo seguinte só abre depois do merge do anterior (pedido pelo Bardi) e do `oute-swarm close <n>-<slug> --yes` da aba dele. Nunca abra dois elos da mesma cadeia ao mesmo tempo.
-- Escolha até {{MAX}} que mexam em **partes diferentes** do repo/host (arquivos, serviços e configs sem sobreposição). Na dúvida entre duas que se tocam, fique com uma.
-- Apresente uma tabela: issue, título, área tocada, precisa de ação no host (s/n), risco. Issue que cria ou altera `.github/workflows/` leva a nota **workflow: commit do Bardi** (ver passo 3). Liste também as descartadas com o motivo em uma linha.
+- Escolha até {{MAX}} que mexam em **partes diferentes** do repo/host (arquivos, serviços e configs sem sobreposição). Na dúvida entre duas que se tocam, fique com uma. Sessão aberta de outra rodada conta: issue que se sobrepõe a ela (fora de registro compartilhado, como `CHANGELOG.md` e tabelas) se toca com ela; fique com a outra rodada, deixe a sua para depois e diga isso ao Bardi na tabela.
+- Apresente uma tabela: issue, título, área tocada, precisa de ação no host (s/n), risco. Issue que cria ou altera `.github/workflows/` leva a nota **workflow: commit do Bardi** (ver passo 3). Liste também as descartadas com o motivo em uma linha e, à parte, as sessões abertas de outras rodadas no mesmo repo (rodada, issue, área tocada), ou "nenhuma".
 - **Pare e espere o ok explícito do Bardi.** Ele pode trocar, cortar ou reordenar. Sem ok, não abra nada.
 
 ## 2. Abertura (depois do ok)
@@ -17,6 +18,7 @@ Para cada issue aprovada, uma chamada:
 ```
 oute-swarm spawn <n>-<slug-curto> "<instrução>"
 ```
+- **Antes de cada `spawn`**, rode `oute-swarm list` de novo: outra rodada pode ter aberto sessão no mesmo repo depois da triagem. Se uma sessão nova de outra rodada se toca com a issue (mesma regra do §1), não abra: mostre ao Bardi (rodada, issue, área) e peça a decisão com opções numeradas (ex.: `1. deixar #n para depois`, `2. abrir #n mesmo assim`).
 - A instrução diz o objetivo da issue em 2–5 linhas, o critério de pronto e o que **não** mexer (as áreas das outras sessões). As regras padrão (branch, PR, canal de aprovação, sem merge) o `spawn` acrescenta sozinho.
 - O `spawn` recusa passar de {{MAX}} abas **abertas** (sessão kaizen fora). Aba fechada com `oute-swarm close` libera a vaga; aba que sumiu do herdr sem `close` continua contando até um `oute-swarm close <n>-<slug> --yes`. Não use `--force` sem o Bardi pedir.
 
@@ -33,6 +35,7 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
     1. **Issue:** `Closes #n` só se o PR cumpre todos os critérios de aceite; senão `Refs #n` + seção `## Falta` com o que ficou de fora. O critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta para `Closes` × `Refs`, mas tem que estar no `## Falta` com a marca `(ship)` (se não estiver, é divergência). Aponte também o que foi além do pedido.
     2. **Gates:** as regras e a seção "Validar antes do PR" do `AGENTS.md` da branch base (não a versão do PR): o que o PR diz ter rodado, CI verde no head atual (check pendente ou pulado não conta como aprovado), CHANGELOG em `[Unreleased]`, modo `100755`, aviso de release quando a mudança entra na imagem.
     3. **Superfície sensível:** se o PR toca Dockerfile, entrypoint, compose/portas (nada em `0.0.0.0`), `scripts/oute` (bash 3.2 do macOS), `.github/workflows/` ou segredos, leia esse diff inteiro e cite no resumo. Sinal de segredo exposto, rede escondida, ofuscação ou ampliação de privilégio: não peça merge nem repasse ajuste; mostre a evidência ao Bardi e espere a decisão dele.
+  - **Outras rodadas:** antes de pedir o merge, confira os PRs abertos das sessões de outras rodadas no mesmo repo (`oute-swarm list` e `gh pr list --state open --json number,headRefName,files`) e diga no pedido se algum está prestes a entrar nos mesmos arquivos (fora de registro compartilhado), com o número do PR. Um entrando antes deixa o outro em conflito.
   - **Decisão pela ação recomendada** da auditoria (no plano B, pelo que você concluiu):
     - `merge como está` (no plano B: nada que bloqueie; SHOULD-FIX/NIT não seguram o merge, só vão no resumo) → antes de pedir o merge, confira que o `headRefOid` atual (`gh pr view <n> --json headRefOid`) é o mesmo auditado; se mudou, audite o head novo. Aí peça o merge ao Bardi com o resumo (ou o link do comentário da auditoria).
     - `ajustar antes do merge` → repasse o ajuste, como abaixo.
