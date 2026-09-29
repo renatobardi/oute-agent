@@ -128,6 +128,106 @@ check "AGENT_STUDIO_TOKEN vazio: sai com erro"         test "$RC" -ne 0
 check "AGENT_STUDIO_TOKEN vazio: diz o item do vault"  grep -q "item agent-studio" <<<"$OUT"
 check "AGENT_STUDIO_TOKEN vazio: não cria o banco"     test ! -e "$TMP/x.duckdb"
 
+# ---------------------------------------------------------------- 6b. spans e métricas (#186)
+# spans do Claude Code (claude_code.llm_request), do Codex (session_task.turn) e o jev.decision do jev-router
+cat > "$TMP/traces.json" <<'EOF'
+{"resourceSpans":[
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"oute.instance","value":{"stringValue":"oute-agent"}},
+   {"key":"service.name","value":{"stringValue":"claude-code"}},{"key":"oute.agent","value":{"stringValue":"claude"}}]},
+  "scopeSpans":[{"scope":{"name":"com.anthropic.claude_code.tracing"},"spans":[
+   {"traceId":"0AF7651916CD43DD8448EB211C80319C","spanId":"B7AD6B7169203331","parentSpanId":"00F067AA0BA902B7","name":"claude_code.llm_request","kind":1,
+    "startTimeUnixNano":"1759000000000000000","endTimeUnixNano":"1759000002500000000","status":{"code":1},
+    "attributes":[{"key":"session.id","value":{"stringValue":"sess-c"}},{"key":"model","value":{"stringValue":"claude-sonnet-5"}},
+      {"key":"input_tokens","value":{"intValue":"120"}},{"key":"output_tokens","value":{"intValue":"45"}},
+      {"key":"cache_read_tokens","value":{"intValue":"1000"}},{"key":"cache_creation_tokens","value":{"intValue":"7"}},
+      {"key":"cost_usd","value":{"doubleValue":0.0123}}],
+    "events":[{"timeUnixNano":"1759000001000000000","name":"primeiro_token","attributes":[{"key":"n","value":{"intValue":"1"}}]}]}]}]},
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-mac"}},{"key":"service.name","value":{"stringValue":"codex_exec"}},
+   {"key":"oute.agent","value":{"stringValue":"codex"}}]},
+  "scopeSpans":[{"spans":[
+   {"traceId":"1af7651916cd43dd8448eb211c80319c","spanId":"c7ad6b7169203331","name":"session_task.turn",
+    "startTimeUnixNano":"1759000010000000000","endTimeUnixNano":"1759000011000000000",
+    "attributes":[{"key":"model","value":{"stringValue":"gpt-5-codex"}},{"key":"codex.turn.token_usage.non_cached_input_tokens","value":{"intValue":"300"}},
+      {"key":"codex.turn.token_usage.output_tokens","value":{"intValue":"80"}},{"key":"codex.turn.token_usage.cached_input_tokens","value":{"intValue":"2000"}}]}]}]},
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"service.name","value":{"stringValue":"jev-router"}}]},
+  "scopeSpans":[{"spans":[
+   {"traceId":"2af7651916cd43dd8448eb211c80319c","spanId":"d7ad6b7169203331","name":"jev.decision",
+    "startTimeUnixNano":"1759000020000000000","endTimeUnixNano":"1759000020500000000","status":{"code":2,"message":"deu ruim"},
+    "attributes":[{"key":"oute.agent","value":{"stringValue":"pi"}},{"key":"gen_ai.request.model","value":{"stringValue":"@preset/oute-cheap"}},
+      {"key":"gen_ai.response.model","value":{"stringValue":"openai/gpt-oss-20b"}},{"key":"gen_ai.usage.input_tokens","value":{"intValue":"50"}},
+      {"key":"gen_ai.usage.output_tokens","value":{"intValue":"10"}},{"key":"oute.cost_usd","value":{"doubleValue":0.00037435}}]}]}]}]}
+EOF
+# métricas: as do próprio collector (#162: gauge da fila por exporter, sum de envios que falharam) + histograma
+cat > "$TMP/metrics.json" <<'EOF'
+{"resourceMetrics":[
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-mac"}},{"key":"oute.instance","value":{"stringValue":"oute-agent"}},
+   {"key":"service.name","value":{"stringValue":"otelcol-contrib"}}]},
+  "scopeMetrics":[{"scope":{"name":"go.opentelemetry.io/collector/exporter/exporterhelper"},"metrics":[
+   {"name":"otelcol_exporter_queue_size","unit":"{items}","gauge":{"dataPoints":[
+     {"timeUnixNano":"1759000060000000000","asInt":"524288000","attributes":[{"key":"exporter","value":{"stringValue":"awss3/logs"}}]},
+     {"timeUnixNano":"1759000060000000000","asInt":"0","attributes":[{"key":"exporter","value":{"stringValue":"awss3/traces"}}]}]}},
+   {"name":"otelcol_exporter_queue_capacity","unit":"{items}","gauge":{"dataPoints":[
+     {"timeUnixNano":"1759000060000000000","asInt":"629145600","attributes":[{"key":"exporter","value":{"stringValue":"awss3/logs"}}]}]}},
+   {"name":"otelcol_exporter_send_failed_log_records","unit":"{records}","sum":{"aggregationTemporality":2,"isMonotonic":true,"dataPoints":[
+     {"startTimeUnixNano":"1758990000000000000","timeUnixNano":"1759000060000000000","asInt":"3","attributes":[{"key":"exporter","value":{"stringValue":"awss3/logs"}}]}]}}]}]},
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"service.name","value":{"stringValue":"claude-code"}}]},
+  "scopeMetrics":[{"metrics":[
+   {"name":"claude_code.cost.usage","unit":"USD","sum":{"aggregationTemporality":1,"isMonotonic":true,"dataPoints":[
+     {"timeUnixNano":"1759000070000000000","asDouble":0.5,"attributes":[{"key":"session.id","value":{"stringValue":"sess-c"}},{"key":"oute.agent","value":{"stringValue":"claude"}}]}]}},
+   {"name":"latencia","unit":"ms","histogram":{"aggregationTemporality":1,"dataPoints":[
+     {"timeUnixNano":"1759000070000000000","count":"4","sum":10.5,"bucketCounts":["1","3"],"explicitBounds":[5]}]}}]}]}]}
+EOF
+studio_start "$TMP/s" || { echo "FAIL agent-studio não voltou"; exit 1; }
+for sig in traces metrics; do
+  check "$sig: sem token = 401"                        test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/$sig.json" "$STUDIO_URL/v1/$sig")" = 401
+  check "$sig: token errado = 401"                     test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer x' -H 'Content-Type: application/json' --data-binary "@$TMP/$sig.json" "$STUDIO_URL/v1/$sig")" = 401
+  check "$sig: com token = 200"                        test "$(post "$sig" "$TMP/$sig.json")" = 200
+  check "$sig: mesmo lote reenviado = 200"             test "$(post "$sig" "$TMP/$sig.json")" = 200
+  gzip -c "$TMP/$sig.json" > "$TMP/$sig.json.gz"
+  check "$sig: mesmo lote em gzip = 200"               test "$(post "$sig" "$TMP/$sig.json.gz" -H 'Content-Encoding: gzip')" = 200
+done
+# ids em maiúsculas (outro encoder) = o mesmo span
+jq -c '.resourceSpans[1].scopeSpans[0].spans[0] |= (.traceId |= ascii_upcase | .spanId |= ascii_upcase)' "$TMP/traces.json" > "$TMP/spans-upper.json"
+check "traces: mesmo span com ids em maiúsculas = 200" test "$(post traces "$TMP/spans-upper.json")" = 200
+printf '{"resourceSpans":[{"scopeSpans":[{"spans":[{"name":"sem id"}]}]}]}' > "$TMP/span-sem-id.json"
+check "traces: span sem traceId/spanId = 400"          test "$(post traces "$TMP/span-sem-id.json")" = 400
+printf '{"resourceMetrics": 3}' > "$TMP/forma-m"
+check "metrics: fora do formato = 400"                 test "$(post metrics "$TMP/forma-m")" = 400
+studio_stop
+check "spans: reenvio não duplica (3 spans)"           test "$(count spans)" = 3
+check "metrics: reenvio não duplica (6 pontos)"        test "$(count metrics)" = 6
+row="$(studio_sql "$DB" "SELECT * FROM spans WHERE name = 'claude_code.llm_request'")"
+check "span Claude: modelo, tokens e custo"            jqe '.model == "claude-sonnet-5" and .input_tokens == 120 and .output_tokens == 45 and .cache_read_tokens == 1000 and .cache_creation_tokens == 7 and .cost_usd == 0.0123' <<<"$row"
+check "span Claude: ids em minúsculas, pai, duração"   jqe '.trace_id == "0af7651916cd43dd8448eb211c80319c" and .span_id == "b7ad6b7169203331" and .parent_span_id == "00f067aa0ba902b7" and .duration_ns == 2500000000' <<<"$row"
+check "span Claude: origem, agente, sessão, hora"      jqe '.host_name == "oute-server" and .oute_agent == "claude" and .session_id == "sess-c" and (.time | startswith("2025-09-27 19:06:40"))' <<<"$row"
+check "span Claude: chave trace_id + span_id"          jqe '.dedupe_key == "s:0af7651916cd43dd8448eb211c80319c:b7ad6b7169203331"' <<<"$row"
+check "span Claude: eventos e atributos em JSON"       jqe '.events[0].name == "primeiro_token" and .events[0].attributes.n == 1 and .attributes.model == "claude-sonnet-5"' <<<"$row"
+row="$(studio_sql "$DB" "SELECT * FROM spans WHERE name = 'session_task.turn'")"
+check "span Codex: modelo e tokens (sem custo real)"   jqe '.model == "gpt-5-codex" and .input_tokens == 300 and .output_tokens == 80 and .cache_read_tokens == 2000 and .cost_usd == null and .oute_agent == "codex"' <<<"$row"
+row="$(studio_sql "$DB" "SELECT * FROM spans WHERE name = 'jev.decision'")"
+check "jev.decision: modelo servido, tokens, custo"    jqe '.model == "openai/gpt-oss-20b" and .input_tokens == 50 and .output_tokens == 10 and .cost_usd == 0.00037435 and .oute_agent == "pi"' <<<"$row"
+check "jev.decision: status de erro"                   jqe '.status_code == 2 and .status_message == "deu ruim"' <<<"$row"
+row="$(studio_sql "$DB" "SELECT * FROM metrics WHERE metric_name = 'otelcol_exporter_queue_size' AND (attributes->>'exporter') = 'awss3/logs'")"
+check "métrica do collector: fila, valor, origem"      jqe '.metric_type == "gauge" and .value == 524288000 and .host_name == "oute-mac" and .service_name == "otelcol-contrib" and .unit == "{items}"' <<<"$row"
+check "métrica do collector: hora do fato"             jqe '.time | startswith("2025-09-27 19:07:40")' <<<"$row"
+check "métrica: chave = hash"                          jqe '.dedupe_key | test("^h:[0-9a-f]{64}$")' <<<"$row"
+check "métrica do collector: os dois exporters"        test "$(count metrics "WHERE metric_name = 'otelcol_exporter_queue_size'")" = 2
+row="$(studio_sql "$DB" "SELECT * FROM metrics WHERE metric_name = 'otelcol_exporter_send_failed_log_records'")"
+check "métrica sum: monotônica, temporalidade, início" jqe '.metric_type == "sum" and .value == 3 and .is_monotonic == true and .aggregation_temporality == 2 and .start_unix_nano == 1758990000000000000' <<<"$row"
+row="$(studio_sql "$DB" "SELECT * FROM metrics WHERE metric_name = 'claude_code.cost.usage'")"
+check "métrica do Claude: sessão e agente do ponto"    jqe '.value == 0.5 and .session_id == "sess-c" and .oute_agent == "claude"' <<<"$row"
+row="$(studio_sql "$DB" "SELECT * FROM metrics WHERE metric_name = 'latencia'")"
+check "histograma: soma, contagem e buckets no JSON"   jqe '.metric_type == "histogram" and .value == 10.5 and .count == 4 and .point.bucketCounts == ["1","3"]' <<<"$row"
+# mesmas regras de 503 dos logs: falha depois do INSERT volta tudo
+studio_start "$TMP/s" STUDIO_FAIL=1 || { echo "FAIL agent-studio (falha injetada) não subiu"; exit 1; }
+jq -c '.resourceSpans[0].scopeSpans[0].spans[0].spanId = "e7ad6b7169203331"' "$TMP/traces.json" > "$TMP/spans-novo.json"
+jq -c '.resourceMetrics[0].scopeMetrics[0].metrics[0].gauge.dataPoints[0].timeUnixNano = "1759000120000000000"' "$TMP/metrics.json" > "$TMP/metrics-novo.json"
+check "traces: gravação falha = 503"                   test "$(post traces "$TMP/spans-novo.json")" = 503
+check "metrics: gravação falha = 503"                  test "$(post metrics "$TMP/metrics-novo.json")" = 503
+studio_stop
+check "traces: 503 = nada gravado"                     test "$(count spans)" = 3
+check "metrics: 503 = nada gravado"                    test "$(count metrics)" = 6
+
 # ---------------------------------------------------------------- 7. serviço no compose
 SVC="$(awk '/^  agent-studio:$/ {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
 has() { grep -qE -- "$1" <<<"$SVC"; }

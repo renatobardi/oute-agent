@@ -148,3 +148,137 @@ def log_rows(payload, received_ns):
                 }
                 rows.append(row)
     return rows
+
+
+# modelo, tokens e custo nas colunas fixas de `spans`: primeiro atributo presente, na ordem
+# (Claude Code: claude_code.llm_request; Codex: session_task.turn; jev-router: jev.decision e spans do LiteLLM)
+SPAN_MODEL = ("gen_ai.response.model", "oute.served_model", "model", "gen_ai.request.model", "llm.model_name")
+SPAN_TOKENS = {
+    "input_tokens": ("gen_ai.usage.input_tokens", "input_tokens", "codex.turn.token_usage.non_cached_input_tokens"),
+    "output_tokens": ("gen_ai.usage.output_tokens", "output_tokens", "codex.turn.token_usage.output_tokens"),
+    "cache_read_tokens": ("gen_ai.usage.cache_read_input_tokens", "cache_read_tokens",
+                          "codex.turn.token_usage.cached_input_tokens"),
+    "cache_creation_tokens": ("gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"),
+}
+# custo real (Claude manda cost_usd; o jev.decision traz o do OpenRouter); estimado fica para a API (#156)
+SPAN_COST = ("oute.cost_usd", "cost_usd", "gen_ai.usage.cost")
+
+
+def first(d, keys):
+    for k in keys:
+        if d.get(k) is not None:
+            return d[k]
+    return None
+
+
+def number(v, conv):
+    if v is None:
+        return None
+    try:
+        return conv(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def span_rows(payload, received_ns):
+    """ExportTraceServiceRequest -> linhas da tabela `spans`. Dedupe por trace_id + span_id."""
+    rows = []
+    for rs in _payload(payload, "resourceSpans"):
+        res = attrs((rs.get("resource") or {}).get("attributes"))
+        for ss in _list(rs, "scopeSpans"):
+            scope = ss.get("scope") or {}
+            for sp in _list(ss, "spans"):
+                if not isinstance(sp, dict):
+                    raise BadPayload("span não é objeto")
+                trace_id, span_id = sp.get("traceId"), sp.get("spanId")
+                if not trace_id or not span_id:
+                    raise BadPayload("span sem traceId/spanId")
+                rec = attrs(sp.get("attributes"))
+                start, end = to_int(sp.get("startTimeUnixNano")), to_int(sp.get("endTimeUnixNano"))
+                status = sp.get("status") or {}
+                row = {
+                    "dedupe_key": f"s:{trace_id.lower()}:{span_id.lower()}",
+                    "time_unix_nano": start or end or received_ns,
+                    "end_unix_nano": end or None,
+                    "duration_ns": (end - start) if start and end >= start else None,
+                    **fixed(rec, res),
+                    "trace_id": trace_id.lower(),
+                    "span_id": span_id.lower(),
+                    "parent_span_id": (sp.get("parentSpanId") or "").lower() or None,
+                    "name": sp.get("name"),
+                    "kind": to_int(sp.get("kind")) or None,
+                    "status_code": to_int(status.get("code")) or None,
+                    "status_message": status.get("message") or None,
+                    "model": text(first(rec, SPAN_MODEL)),
+                    **{col: number(first(rec, keys), int) for col, keys in SPAN_TOKENS.items()},
+                    "cost_usd": number(first(rec, SPAN_COST), float),
+                    "scope_name": scope.get("name") or None,
+                    "resource_attributes": canon(res),
+                    "attributes": canon(rec),
+                    "events": canon([{"time_unix_nano": to_int(e.get("timeUnixNano")), "name": e.get("name"),
+                                      "attributes": attrs(e.get("attributes"))} for e in _list(sp, "events")]),
+                    "links": canon([{"trace_id": ln.get("traceId"), "span_id": ln.get("spanId"),
+                                     "attributes": attrs(ln.get("attributes"))} for ln in _list(sp, "links")]),
+                    "received_unix_nano": received_ns,
+                }
+                rows.append(row)
+    return rows
+
+
+METRIC_TYPES = {"gauge": "gauge", "sum": "sum", "histogram": "histogram",
+                "exponentialHistogram": "exponential_histogram", "summary": "summary"}
+
+
+def metric_rows(payload, received_ns):
+    """ExportMetricsServiceRequest -> linhas da tabela `metrics`, uma por ponto.
+
+    Dedupe por hash do conteúdo (hora em ns + origem + métrica + ponto inteiro)."""
+    rows = []
+    for rm in _payload(payload, "resourceMetrics"):
+        res = attrs((rm.get("resource") or {}).get("attributes"))
+        for sm in _list(rm, "scopeMetrics"):
+            scope = sm.get("scope") or {}
+            scope_id = {"name": scope.get("name"), "version": scope.get("version")}
+            for m in _list(sm, "metrics"):
+                if not isinstance(m, dict):
+                    raise BadPayload("metric não é objeto")
+                kind = next((k for k in METRIC_TYPES if isinstance(m.get(k), dict)), None)
+                if kind is None:
+                    continue  # métrica sem dados (tipo vazio): nada a gravar
+                data = m[kind]
+                for p in _list(data, "dataPoints"):
+                    if not isinstance(p, dict):
+                        raise BadPayload("dataPoint não é objeto")
+                    pa = attrs(p.get("attributes"))
+                    t = to_int(p.get("timeUnixNano"))
+                    start = to_int(p.get("startTimeUnixNano"))
+                    point = {k: v for k, v in p.items() if k != "attributes"}
+                    if "asInt" in p:
+                        value = float(to_int(p["asInt"]))
+                    elif "asDouble" in p:
+                        value = number(p["asDouble"], float)
+                    else:
+                        value = number(p.get("sum"), float)  # histogram/summary: a soma; o resto fica em `point`
+                    key = "h:" + content_hash({
+                        "time": t, "start": start, "resource": res, "scope": scope_id, "name": m.get("name"),
+                        "type": kind, "unit": m.get("unit"), "attributes": pa, "point": point,
+                    })
+                    rows.append({
+                        "dedupe_key": key,
+                        "time_unix_nano": t or start or received_ns,
+                        "start_unix_nano": start or None,
+                        **fixed(pa, res),
+                        "metric_name": m.get("name"),
+                        "metric_type": METRIC_TYPES[kind],
+                        "unit": m.get("unit") or None,
+                        "value": value,
+                        "count": number(p.get("count"), int),
+                        "is_monotonic": data.get("isMonotonic") if kind == "sum" else None,
+                        "aggregation_temporality": to_int(data.get("aggregationTemporality")) or None,
+                        "scope_name": scope.get("name") or None,
+                        "resource_attributes": canon(res),
+                        "attributes": canon(pa),
+                        "point": canon(point),
+                        "received_unix_nano": received_ns,
+                    })
+    return rows

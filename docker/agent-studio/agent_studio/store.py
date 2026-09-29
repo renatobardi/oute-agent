@@ -36,6 +36,63 @@ TABLES = {
         ("received_unix_nano", "UBIGINT NOT NULL"),
     ],
 }
+FIXED_COLS = [
+    ("host_name", "VARCHAR"),
+    ("oute_instance", "VARCHAR"),
+    ("oute_agent", "VARCHAR"),
+    ("service_name", "VARCHAR"),
+    ("session_id", "VARCHAR"),
+    ("oute_task_id", "VARCHAR"),
+    ("oute_swarm_round", "VARCHAR"),
+]
+TABLES["spans"] = [
+    ("dedupe_key", "VARCHAR PRIMARY KEY"),  # s:<trace_id>:<span_id>
+    ("time", "TIMESTAMPTZ NOT NULL"),       # início do span
+    ("time_unix_nano", "UBIGINT NOT NULL"),
+    ("end_unix_nano", "UBIGINT"),
+    ("duration_ns", "UBIGINT"),
+    *FIXED_COLS,
+    ("trace_id", "VARCHAR NOT NULL"),
+    ("span_id", "VARCHAR NOT NULL"),
+    ("parent_span_id", "VARCHAR"),
+    ("name", "VARCHAR"),
+    ("kind", "INTEGER"),
+    ("status_code", "INTEGER"),
+    ("status_message", "VARCHAR"),
+    ("model", "VARCHAR"),
+    ("input_tokens", "BIGINT"),
+    ("output_tokens", "BIGINT"),
+    ("cache_read_tokens", "BIGINT"),
+    ("cache_creation_tokens", "BIGINT"),
+    ("cost_usd", "DOUBLE"),
+    ("scope_name", "VARCHAR"),
+    ("resource_attributes", "JSON"),
+    ("attributes", "JSON"),
+    ("events", "JSON"),
+    ("links", "JSON"),
+    ("received_at", "TIMESTAMPTZ NOT NULL"),
+    ("received_unix_nano", "UBIGINT NOT NULL"),
+]
+TABLES["metrics"] = [
+    ("dedupe_key", "VARCHAR PRIMARY KEY"),  # h:<sha256> do ponto
+    ("time", "TIMESTAMPTZ NOT NULL"),
+    ("time_unix_nano", "UBIGINT NOT NULL"),
+    ("start_unix_nano", "UBIGINT"),
+    *FIXED_COLS,
+    ("metric_name", "VARCHAR NOT NULL"),
+    ("metric_type", "VARCHAR NOT NULL"),    # gauge | sum | histogram | exponential_histogram | summary
+    ("unit", "VARCHAR"),
+    ("value", "DOUBLE"),                    # gauge/sum: o valor; histogram/summary: a soma
+    ("count", "UBIGINT"),                   # histogram/summary
+    ("is_monotonic", "BOOLEAN"),
+    ("aggregation_temporality", "INTEGER"),
+    ("scope_name", "VARCHAR"),
+    ("resource_attributes", "JSON"),
+    ("attributes", "JSON"),                 # atributos do ponto
+    ("point", "JSON"),                      # ponto inteiro (buckets, quantis…) sem os atributos
+    ("received_at", "TIMESTAMPTZ NOT NULL"),
+    ("received_unix_nano", "UBIGINT NOT NULL"),
+]
 DERIVED = {"time": "time_unix_nano", "received_at": "received_unix_nano"}
 
 

@@ -25,6 +25,8 @@ MAX_BODY = 64 * 1024 * 1024  # depois de descomprimir; lote do collector fica mu
 # sinal -> (função que monta as linhas, tabela)
 SIGNALS = {
     "logs": (otlp.log_rows, "logs"),
+    "traces": (otlp.span_rows, "spans"),
+    "metrics": (otlp.metric_rows, "metrics"),
 }
 
 
@@ -85,6 +87,14 @@ def create_app(store, token):
     @app.post("/v1/logs")
     async def v1_logs(request: Request):
         return await ingest("logs", request)
+
+    @app.post("/v1/traces")
+    async def v1_traces(request: Request):
+        return await ingest("traces", request)
+
+    @app.post("/v1/metrics")
+    async def v1_metrics(request: Request):
+        return await ingest("metrics", request)
 
     @app.get("/healthz")
     async def healthz():
