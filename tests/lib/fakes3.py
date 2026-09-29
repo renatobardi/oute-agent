@@ -1,7 +1,7 @@
 # S3 falso (base: lab do #137, docs/research/137-medir-collector no 13e79ba). Aceita PUT path-style de objetos
 # OTLP-JSON (gzip ou não) e grava em <dir>/received.jsonl um registro por objeto com os ids que chegaram:
 # body do log, nome do span, nome da métrica. Controle pelo arquivo <dir>/mode: "ok" | "down" (503).
-# Cada PUT recusado soma uma linha em <dir>/refused. Porta livre escolhida pelo SO, escrita em <dir>/port.
+# Cada PUT recusado soma uma linha em <dir>/refused (só o código, nada da requisição). Porta livre escolhida pelo SO, escrita em <dir>/port.
 import gzip, json, os, sys, threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 D = sys.argv[1]
@@ -29,15 +29,15 @@ class H(BaseHTTPRequestHandler):
     def do_PUT(self):
         data = self.rfile.read(int(self.headers.get('Content-Length', 0)))
         if mode() == 'down':
-            with lock, open(os.path.join(D, 'refused'), 'a') as f: f.write(self.path + '\n')
+            with lock, open(os.path.join(D, 'refused'), 'a') as f: f.write('503\n')
             return self._reply(503, b'<Error><Code>ServiceUnavailable</Code></Error>')
         try:
             raw = gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data
             ids = [i for line in raw.splitlines() if line.strip() for i in ids_of(json.loads(line))]
-        except Exception as e:
-            ids = ['PARSE-ERR:' + str(e)]
+        except Exception:
+            ids = ['PARSE-ERR']
         with lock, open(os.path.join(D, 'received.jsonl'), 'a') as f:
-            f.write(json.dumps({'key': self.path, 'ids': ids}) + '\n')
+            f.write(json.dumps({'ids': ids}) + '\n')
         self._reply(200)
     def do_HEAD(self): self._reply(200)
     def do_GET(self): self._reply(200)

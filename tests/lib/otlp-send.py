@@ -2,7 +2,7 @@
 # com id "<run>-<sinal>-<i>" no body do log, no nome do span e no nome da métrica. Grava em <accepted> só os ids
 # que o collector aceitou (2xx); um lote recusado não conta. Uso: otlp-send.py <porta> <run> <n> <accepted>
 import json, sys, time, urllib.request
-port, run, n, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+port, run, n, out = int(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
 res = {'attributes': [{'key': 'service.name', 'value': {'stringValue': 'otelcol-queue-test'}}]}
 now = str(time.time_ns())
 def logs(ids):    return {'resourceLogs': [{'resource': res, 'scopeLogs': [{'logRecords': [
