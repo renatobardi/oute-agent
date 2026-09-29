@@ -6,7 +6,8 @@
 # token certo; imprime o código HTTP.
 STUDIO_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STUDIO_ROOT="$(cd "$STUDIO_LIB/../.." && pwd)"
-STUDIO_TOKEN="tok-de-teste-$$"
+# token só do teste, aleatório a cada execução
+STUDIO_TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
 studio_venv() {
   local req="$STUDIO_ROOT/docker/agent-studio/requirements.txt" h d
   h="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:12])' "$req")"

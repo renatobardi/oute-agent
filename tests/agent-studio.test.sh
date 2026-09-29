@@ -59,7 +59,7 @@ jq -c '.resourceLogs[0].scopeLogs[0].logRecords[0].observedTimeUnixNano = "1"' "
 studio_start "$TMP/s" || { echo "FAIL agent-studio não subiu"; cat "$TMP/s/stderr"; exit 1; }
 code() { curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/claude.json" "$@"; }
 check "sem token: 401"                                 test "$(code "$STUDIO_URL/v1/logs")" = 401
-check "token errado: 401"                              test "$(code -H 'Authorization: Bearer errado' "$STUDIO_URL/v1/logs")" = 401
+check "token errado: 401"                              test "$(code -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs")" = 401
 check "token sem 'Bearer': 401"                        test "$(code -H "Authorization: $STUDIO_TOKEN" "$STUDIO_URL/v1/logs")" = 401
 check "GET /healthz sem token: 200 (só 'ok')"          test "$(curl -s "$STUDIO_URL/healthz")" = ok
 
@@ -180,7 +180,7 @@ EOF
 studio_start "$TMP/s" || { echo "FAIL agent-studio não voltou"; exit 1; }
 for sig in traces metrics; do
   check "$sig: sem token = 401"                        test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/$sig.json" "$STUDIO_URL/v1/$sig")" = 401
-  check "$sig: token errado = 401"                     test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Authorization: Bearer x' -H 'Content-Type: application/json' --data-binary "@$TMP/$sig.json" "$STUDIO_URL/v1/$sig")" = 401
+  check "$sig: token errado = 401"                     test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${STUDIO_TOKEN}x" -H 'Content-Type: application/json' --data-binary "@$TMP/$sig.json" "$STUDIO_URL/v1/$sig")" = 401
   check "$sig: com token = 200"                        test "$(post "$sig" "$TMP/$sig.json")" = 200
   check "$sig: mesmo lote reenviado = 200"             test "$(post "$sig" "$TMP/$sig.json")" = 200
   gzip -c "$TMP/$sig.json" > "$TMP/$sig.json.gz"
@@ -248,27 +248,28 @@ check "Dockerfile: copia o pacote e instala por hash"  bash -c 'grep -q "COPY do
 FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^router_sync()/p' "$ROOT/scripts/oute" | sed '$d')"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 envf="$TMP/env"; : > "$envf"
+T1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"; S1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
 up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
   $FUNCS"$'\n'"agent_studio_up; echo \"profiles=\${COMPOSE_PROFILES:-}\"; echo \"token=\${AGENT_STUDIO_TOKEN:-}\"" 2>&1)"; RC=$?; }
 rm -f "$TMP/.env"
-up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
-check "sem OUTE_AGENT_STUDIO (Mac): não liga, sem aviso" bash -c '[[ "$0" == "profiles="$'"'"'\n'"'"'"token=t1" ]]' "$OUT"
+up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
+check "sem OUTE_AGENT_STUDIO (Mac): não liga, sem aviso" test "$OUT" = "profiles="$'\n'"token=$T1"
 printf 'OUTE_AGENT_STUDIO=1\n' > "$TMP/.env"
-up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
+up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
 check ".env com OUTE_AGENT_STUDIO=1, token e senha: liga" grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "…e sem aviso"                                   bash -c '! grep -q aviso <<<"$0"' "$OUT"
-up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1 COMPOSE_PROFILES=outro
+up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1 COMPOSE_PROFILES=outro
 check "soma ao COMPOSE_PROFILES que já existe"         grep -qx 'profiles=outro,agent-studio' <<<"$OUT"
 up
 check "sem o item no vault: não liga"                  grep -qx 'profiles=' <<<"$OUT"
 check "sem o item no vault: avisa e cita o item"       grep -q 'aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS não está em .*item agent-studio' <<<"$OUT"
 check "sem o item no vault: não bloqueia (rc 0)"       test "$RC" = 0
-up AGENT_STUDIO_TOKEN=t1
+up AGENT_STUDIO_TOKEN=$T1
 check "item sem a senha do SurrealDB: não liga"        grep -qx 'profiles=' <<<"$OUT"
 check "item sem a senha do SurrealDB: avisa qual falta" grep -q 'mas AGENT_STUDIO_SURREAL_PASS não está em' <<<"$OUT"
 rm -f "$TMP/.env"
-up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
+up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
 check "OUTE_AGENT_STUDIO=1 no ambiente também liga"    grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "up chama agent_studio_up depois dos segredos"   grep -q 'host_secrets "$refresh"; agent_studio_up;' "$ROOT/scripts/oute"
 check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
@@ -332,7 +333,7 @@ cat > "$TMP/task.json" <<'EOF'
 EOF
 
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS")
-OUT="$(env AGENT_STUDIO_TOKEN=x AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS= AGENT_STUDIO_DB="$TMP/y.duckdb" \
+OUT="$(env AGENT_STUDIO_TOKEN="$T1" AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS= AGENT_STUDIO_DB="$TMP/y.duckdb" \
   PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio 2>&1)"; RC=$?
 check "SurrealDB sem senha: não sobe e diz o item"     bash -c '[[ $0 -ne 0 ]] && grep -q "AGENT_STUDIO_SURREAL_PASS vazio" <<<"$1"' "$RC" "$OUT"
 DB="$TMP/s2/db.duckdb"
@@ -415,7 +416,7 @@ TENV=(OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent,d
 rcv_start "$TMP/r4"; TEL_EP="$OTEL_EXPORTER_OTLP_ENDPOINT"; unset OTEL_EXPORTER_OTLP_ENDPOINT
 studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" || { cat "$TMP/s3/stderr"; die "agent-studio com telemetria não subiu"; }
 post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude-2.json" >/dev/null
-for i in 1 2 3; do code -H 'Authorization: Bearer errado' "$STUDIO_URL/v1/logs" >/dev/null; done
+for i in 1 2 3; do code -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs" >/dev/null; done
 sleep 1.2
 code "$STUDIO_URL/v1/logs" >/dev/null
 post logs "$TMP/lixo" >/dev/null

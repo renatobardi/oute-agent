@@ -6,7 +6,8 @@
 SV=3.3.0
 grep -q "surrealdb/surrealdb:v$SV@sha256:" "$ROOT/docker/compose.yaml" \
   || die "a versão do SurrealDB no compose mudou: atualize SV e os checksums de tests/lib/surreal.sh"
-SURREAL_TEST_PASS="senha-de-teste-$$"
+# credencial só do teste, aleatória a cada execução
+SURREAL_TEST_PASS="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
 surreal_bin() {
   local p os arch sum url cache tgz got
   p="$(command -v surreal || true)"
