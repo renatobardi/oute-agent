@@ -5,6 +5,7 @@
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
+  oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
 
 Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"). OTLP/HTTP JSON em
 ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs; origem do OTEL_RESOURCE_ATTRIBUTES, service.name=oute.
@@ -14,6 +15,9 @@ o leitor do .out para na primeira linha em branco.
 Spool (#166): POST que falha (coletor fora, timeout, 5xx) vai para ~/.oute/emit/spool/ (um arquivo por envio,
 gravação atômica, até 50 MB; cheio = descarta e conta em ~/.oute/emit/spool.dropped). Toda chamada reenvia o
 spool antes, como foi gravado (mesmo oute.event.id e hora do fato), dentro do mesmo teto.
+Reconciliação (#167): ~/.oute/emit/decided/<id> marca o pedido cujo oute.canal.decided já foi enviado (POST aceito
+ou guardado no spool), ao vivo ou na subida. Na subida, todo .out sem marca e com a decisão a partir do corte
+(~/.oute/emit/since) sai; o anterior ao corte é do backfill.
 """
 import fcntl
 import hashlib
@@ -36,6 +40,7 @@ OUTBOX = os.environ.get("OUTE_OUTBOX") or os.path.join(HOME, "outbox")
 SPOOL = os.path.join(EMIT, "spool")
 SPOOL_BAD = os.path.join(EMIT, "spool.bad")
 DROPPED = os.path.join(EMIT, "spool.dropped")
+DECIDED = os.path.join(EMIT, "decided")
 SPOOL_MAX = int(os.environ.get("OUTE_EMIT_SPOOL_MAX") or 50 * 2**20)  # a variável só existe para os testes
 SPOOL_BATCH = 2**20
 TIMEOUT = 2.0
@@ -231,14 +236,15 @@ def quarantine(path):
 
 
 def spool(logs):
-    """guarda o envio que falhou como está (resource, id e hora do fato), gravação atômica. Cheio = descarta"""
+    """guarda o envio que falhou como está (resource, id e hora do fato), gravação atômica. Cheio = descarta.
+    True = guardado"""
     data = json.dumps({"resourceLogs": logs}).encode()
     os.makedirs(SPOOL, exist_ok=True)
     size = spool_bytes()
     if size + len(data) > SPOOL_MAX:
         n = count_drop()
         debug(f"spool cheio ({size} de {SPOOL_MAX} bytes): evento descartado; descartes: {n}")
-        return
+        return False
     name = f"{time.time_ns():020d}-{os.getpid()}"
     tmp = os.path.join(SPOOL, f".{name}.tmp")
     with open(tmp, "wb") as f:
@@ -247,6 +253,7 @@ def spool(logs):
         os.fsync(f.fileno())
     os.replace(tmp, os.path.join(SPOOL, name + ".json"))
     debug(f"coletor indisponível: evento guardado no spool ({name}.json, spool com {size + len(data)} bytes)")
+    return True
 
 
 def drain(deadline):
@@ -316,16 +323,19 @@ def settle(path, result):
 
 
 def send(events, deadline, drained):
-    """ao vivo: manda o evento novo no tempo que sobrou; falhou (ou o coletor já falhou no reenvio) = spool"""
+    """ao vivo: manda o evento novo no tempo que sobrou; falhou (ou o coletor já falhou no reenvio) = spool.
+    "ok" = aceito; "spool" = guardado no spool; "retry" = falhou e não coube no spool; "bad" = recusa permanente
+    (4xx) ou sem endpoint. Enviado = "ok" ou "spool" (o spool é a única fila de reenvio)"""
     if not events or not endpoint():
         if events:
             debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
-        return
+        return "bad"
     stamp(events)
     logs = resource_logs(events)
     r = post_logs(logs, deadline - time.monotonic()) if drained else "retry"
-    if r == "retry":
-        spool(logs)
+    if r == "retry" and spool(logs):
+        return "spool"
+    return r
 
 
 # ---------------------------------------------------------------- canal
@@ -393,6 +403,16 @@ def canal_decided(pid, path):
         "oute.canal.approver": who.strip(),
         "oute.canal.sha256": h.get("sha256"),
     }, scope=f"canal/{pid}", key=decision)  # nunca leva corpo: a saída do host não sai daqui
+
+
+def mark_decided(events):
+    """registra os pedidos cujo decided foi enviado (arquivo vazio por pedido: sem trava, sem reescrever lista)"""
+    for _, rec in events:
+        if rec["eventName"] != "oute.canal.decided":
+            continue
+        pid = next(a["value"]["stringValue"] for a in rec["attributes"] if a["key"] == "oute.canal.id")
+        os.makedirs(DECIDED, exist_ok=True)
+        open(os.path.join(DECIDED, pid), "a").close()
 
 
 def cmd_canal(pid):
@@ -514,6 +534,40 @@ def cmd_swarm(rnd, line):
     return [swarm_event(rnd, line, max(1, log.count(line)))]
 
 
+# ---------------------------------------------------------------- reconciliação (#167)
+def cmd_reconcile(deadline, drained):
+    """na subida: decided de todo .out sem marca em decided/ e com a decisão a partir do corte (o anterior é do
+    backfill). Decisão feita com oute approve enquanto o container estava fora chega assim ao bucket; o host segue
+    sem spool. Mesmo leitor do ao vivo (para na primeira linha em branco) e mesmo id: repetição deduplica"""
+    since = (read_text(os.path.join(EMIT, "since")) or "").strip()
+    if not TS_RE.match(since):
+        debug("reconcile: sem corte (~/.oute/emit/since); nada a fazer")
+        return
+    cut = ns(since)
+    try:
+        outs = sorted(f[:-4] for f in os.listdir(INBOX) if f.endswith(".out"))
+    except OSError:
+        return
+    events = []
+    for pid in outs:
+        if not ID_RE.match(pid) or os.path.exists(os.path.join(DECIDED, pid)):
+            continue
+        try:
+            ev = canal_decided(pid, os.path.join(INBOX, pid + ".out"))
+        except (Skip, OSError) as e:
+            debug(f"reconcile: {pid}: {e}")
+            continue
+        if int(ev[1]["timeUnixNano"]) >= cut:
+            events.append(ev)
+    for i in range(0, len(events), BACKFILL_CHUNK):
+        chunk = events[i:i + BACKFILL_CHUNK]
+        r = send(chunk, deadline, drained)
+        if r in ("ok", "spool"):
+            mark_decided(chunk)
+        drained = drained and r in ("ok", "bad")  # coletor falhou: o resto vai direto ao spool
+    debug(f"reconcile: {len(events)} decided pendente(s)")
+
+
 # ---------------------------------------------------------------- backfill
 def round_lines(rnd):
     """linha do tempo da rodada: o log + o que as rodadas antigas só guardavam fora dele (meta, spawned,
@@ -632,13 +686,17 @@ def main(argv):
     if verb in ("-h", "--help", ""):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
-    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1}
+    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1}
     if valid.get(verb) != len(argv):
         debug(f"uso inválido: {' '.join(argv)}")
         return
     drained = drain(deadline)  # toda chamada: primeiro o que ficou para trás
     if verb == "canal":
-        send(cmd_canal(argv[1]), deadline, drained)
+        events = cmd_canal(argv[1])
+        if send(events, deadline, drained) in ("ok", "spool"):
+            mark_decided(events)  # a reconciliação da subida não repete
+    elif verb == "reconcile":
+        cmd_reconcile(deadline, drained)
     elif verb == "swarm":
         send(cmd_swarm(argv[1], argv[2]), deadline, drained)
     elif verb == "backfill":

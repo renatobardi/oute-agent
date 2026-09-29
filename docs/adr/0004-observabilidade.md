@@ -1,6 +1,6 @@
 # ADR-04 — Observabilidade (issues #13, #19)
 
-Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27; `oute-emit` e catálogo; spool #166) · sessões (#128)
+Status: **aceito · fases 1 e 2 validadas · Claude Code e Codex validados (0.5.4) · identificador do agente `oute.agent` (0.7.2) · origem máquina + instância (0.7.5)** · 2026-09-25 · várias instâncias por host descartado (#22, 2026-09-26) · adendo: eventos operacionais do swarm e do canal (#124, 2026-09-27; `oute-emit` e catálogo; spool #166; reconciliação da `inbox` #167) · sessões (#128)
 Base: `estudos/observabilidade-rascunho.md` (fontes, destinos do Broadcast, opções de painel).
 
 ## Decisões (Bardi, 2026-09-24)
@@ -74,6 +74,7 @@ oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.s
 oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
 oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte; uma vez por host
 oute-emit flush                    só reenvia o spool (#166; o entrypoint chama na subida)
+oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (#167; o entrypoint chama na subida)
 ```
 - python3 stdlib; OTLP/HTTP JSON em `${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs` (ou `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`). Resource: `OTEL_RESOURCE_ATTRIBUTES` (origem) + `service.name=oute` + `oute.agent`; o registro repete `oute.agent` e leva `event.name` (também no campo `eventName`). Escopo `oute-emit`.
 - Teto de 2 s por chamada (reenvio do spool + POST do evento novo), sempre sai com 0, nunca escreve no stdout; erro só em stderr com `OUTE_EMIT_DEBUG=1`. Sem endpoint, não faz nada.
@@ -105,6 +106,14 @@ Hora do registro (`timeUnixNano`) = a hora do fato (linha do log, `criado:`, `ap
 - **Concorrência:** trava não bloqueante (`flock` em `spool/.lock`). Quem não pega pula o reenvio e manda só o seu evento; duas chamadas simultâneas nunca reenviam o mesmo arquivo. Só quem tem a trava remove arquivo.
 - **Limite:** 50 MB (soma dos arquivos). Cheio = o evento novo é descartado e `~/.oute/emit/spool.dropped` (contador acumulado, nunca zera) sobe 1; o fato segue nos artefatos locais. Arquivo ilegível ou recusado com 4xx sai do spool para `~/.oute/emit/spool.bad/` (não trava a fila, não se perde). Lote de vários arquivos recusado com 4xx é reenviado arquivo por arquivo: só vai para `spool.bad` o que for recusado de novo.
 - **Aviso:** todo evento leva `oute.emit.spool.bytes` (tamanho do spool na hora do envio, depois do reenvio) e `oute.emit.spool.dropped` (o contador). O alerta é calculado pelo agent-studio (#150). Com `OUTE_EMIT_DEBUG=1`, uma linha em stderr ao guardar e ao descartar.
+
+**Reconciliação da `inbox` (#167): decisão tomada com o container fora chega ao bucket**, sem spool no host (#138). O `oute approve` grava o `.out` mesmo quando o `docker exec oute-emit canal <id>` falha (container parado, imagem antiga); o `decided` desse pedido sai na próxima subida.
+- **Registro:** `~/.oute/emit/decided/<id>`, um arquivo vazio por pedido cujo `oute.canal.decided` já foi **enviado**. Enviado = POST aceito **ou** envio guardado no spool (o spool é a única fila de reenvio). Não conta: sem endpoint, spool cheio (descartado), recusa permanente (4xx). Quem marca: o caminho ao vivo (`oute-emit canal <id>` com `.out`, chamado pelo `oute approve`) e a reconciliação.
+- **Subida:** o entrypoint chama `oute-emit reconcile` em segundo plano, antes do laço do `flush` (função `flush_spool`): todo `inbox/*.out` sem registro, com id válido, cabeçalho com `aprovado:`/`recusado:` e decisão **a partir do corte** (`~/.oute/emit/since`) sai como no ao vivo (mesmo leitor, mesma hora do fato, mesmo `oute.event.id`) e é marcado. Mesmo teto de 2 s e mesmas regras do spool: coletor fora = vai para o spool e marca; o laço do `flush` reenvia quando o coletor subir.
+- **Corte:** `.out` com decisão anterior ao corte é do backfill, nunca da reconciliação; sem corte gravado, não reconcilia. Os dois são disjuntos pela hora do fato.
+- **Saída do host:** o leitor para na primeira linha em branco do `.out`, como no ao vivo; a saída nunca é lida.
+- **Duplicata:** a primeira subida depois da release reemite uma vez os `.out` posteriores ao corte que já tinham saído ao vivo antes de existir o registro, e uma corrida entre a subida e um `oute approve` pode mandar o mesmo `decided` duas vezes; nos dois casos o `oute.event.id` é o mesmo e a ingestão deduplica.
+- Opções descartadas: spool no host (#138: o host não alcança o coletor e ficaria com um segundo spool); marcar só pelo POST aceito (o spool já garante a entrega, marcar depois obrigaria a reler o spool); registro num arquivo único de linhas (precisaria de trava entre o ao vivo e a subida).
 
 ### Sessões (#128, 2026-09-27)
 Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + branch do `oute-task`, de rodada ou avulsa) contém uma ou mais **conversas** (`session.id` do agente).
