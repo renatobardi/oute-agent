@@ -432,7 +432,7 @@ check "log: requisição recusada (token)"               jqe -s 'map(select(.sev
 check "log: 3 recusas seguidas = 1 aviso; o seguinte conta os suprimidos" \
                                                        jqe -s 'map(select(.body | startswith("recusado: token"))) | .[1].body | endswith("(+2 suprimidos desde o último aviso)")' <<<"$L"
 check "log: corpo inválido"                            jqe -s 'any(.body | startswith("recusado: logs inválido"))' <<<"$L"
-check "log: gravação que falhou (503)"                 jqe -s 'any(.sev == "ERROR" and (.body | startswith("gravação falhou, respondi 503 (logs, 1 registros)")))' <<<"$L"
+check "log: gravação que falhou (503)"                 jqe -s 'any(.sev == "ERROR" and (.body == "gravação falhou, respondi 503 (logs, 1 registros): RuntimeError"))' <<<"$L"
 check "log: tipo do aviso no atributo"                 jqe -s 'any(.attrs["agent_studio.warning"] == "write-failed")' <<<"$L"
 check "sucesso não vira log OTel (só stderr)"          jqe -s 'all(.body | test("gravados") | not)' <<<"$L"
 check "métrica: requisições 200 (3)"                   test "$(last agent_studio.requests '.attrs["http.response.status_code"] == "200"')" = 3

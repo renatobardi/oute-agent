@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from . import otlp, state, telemetry
 
 log = logging.getLogger("agent_studio")
+detail = logging.getLogger("agent_studio_detail")
 
 MAX_BODY = 64 * 1024 * 1024  # depois de descomprimir; lote do collector fica muito abaixo disso
 
@@ -81,7 +82,8 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None):
             return JSONResponse({"message": "unauthorized"}, status_code=401)
         ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
         if ctype != "application/json":
-            tel.warn("content-type", "recusado: %s com Content-Type %s (só OTLP/HTTP JSON)", signal, ctype or "vazio")
+            # nada do que o cliente mandou vai ao log (injeção em log): só o sinal, que é nosso
+            tel.warn("content-type", "recusado: %s com Content-Type que não é application/json", signal)
             return JSONResponse({"message": "só OTLP/HTTP JSON (application/json)"}, status_code=415)
         received_ns = time.time_ns()
         try:
@@ -93,8 +95,8 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None):
             tel.warn("too-large", "recusado: %s com corpo acima de %d bytes", signal, MAX_BODY)
             return JSONResponse({"message": "corpo grande demais"}, status_code=413)
         except (otlp.BadPayload, ValueError, zlib.error, gzip.BadGzipFile, AttributeError, TypeError) as e:
-            tel.warn("bad-payload", "recusado: %s inválido (%s)", signal, e)
-            return JSONResponse({"message": f"OTLP JSON inválido: {e}"}, status_code=400)
+            tel.warn("bad-payload", "recusado: %s inválido (%s)", signal, type(e).__name__)
+            return JSONResponse({"message": "OTLP JSON inválido"}, status_code=400)
         # estado derivado no SurrealDB dentro da transação do DuckDB: os dois bancos juntos ou nenhum (#187)
         stmts = state.statements(table, rows) if surreal else []
         before_commit = (lambda: surreal.apply(stmts)) if stmts else None
@@ -103,8 +105,10 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None):
             written = await run_in_threadpool(store.write, {table: rows}, before_commit)
         except Exception as e:  # noqa: BLE001 — qualquer falha na gravação é retentável
             tel.written(signal, 0, 0, time.monotonic() - t0, ok=False)
-            tel.warn("write-failed", "gravação falhou, respondi 503 (%s, %d registros): %s", signal, len(rows), e,
-                     level=logging.ERROR)
+            tel.warn("write-failed", "gravação falhou, respondi 503 (%s, %d registros): %s", signal, len(rows),
+                     type(e).__name__, level=logging.ERROR)
+            # a causa (DuckDB, SurrealDB) só no stderr: logger fora da árvore agent_studio, sem o handler OTel
+            detail.error("gravação falhou (%s)", signal, exc_info=True)
             return JSONResponse({"message": "gravação falhou; reenvie"}, status_code=503, headers={"Retry-After": "5"})
         n, dup = written[table]
         tel.written(signal, n, dup, time.monotonic() - t0, ok=True)
