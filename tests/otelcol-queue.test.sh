@@ -42,7 +42,7 @@ otelcol_bin() {
   sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64; }
   if [[ ! -f "$tgz" || "$(sha "$tgz")" != "$sum" ]]; then
     echo "# baixando otelcol-contrib $V ($os/$arch)"
-    curl -fsSL --retry 3 -o "$tgz.part" "$url" || die "download do otelcol-contrib falhou"
+    curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$tgz.part" "$url" || die "download do otelcol-contrib falhou"
     got="$(sha "$tgz.part")"
     [[ "$got" == "$sum" ]] || { rm -f "$tgz.part"; die "checksum do otelcol-contrib não confere ($got)"; }
     mv "$tgz.part" "$tgz"
