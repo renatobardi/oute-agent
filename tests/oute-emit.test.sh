@@ -338,5 +338,38 @@ HOME="$LH" oute-emit canal 20260928-110000-f
 check "ilegível: vai para spool.bad, o evento novo sai" [ -f "$LH/.oute/emit/spool.bad/00000000000000000001-1.json" -a -z "$(ls "$LH/.oute/emit/spool/"*.json 2>/dev/null)" -a "$(posts)" -eq 2 ]
 rcv_stop
 
+# lote recusado com 4xx: reenvia um por um; só o arquivo recusado de novo vai para spool.bad
+MH="$TMP/misto"; MS="$MH/.oute/emit/spool"; mkdir -p "$MH/outbox"
+for t in bom1 RUIM bom2; do
+  id="20260928-120000-$(tr A-Z a-z <<<"$t")"
+  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: 2026-09-28T12:00:00Z\n\necho %s\n' "$t" "$t" > "$MH/outbox/$id.sh"
+  HOME="$MH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal "$id"
+done
+check "4xx em lote: três arquivos no spool"             [ "$(ls "$MS/"*.json | wc -l)" -eq 3 ]
+RCV_REJECT=RUIM rcv_start "$TMP/r6f"
+HOME="$MH" oute-emit flush
+check "4xx em lote: os bons chegam, um por um"          [ "$(n true)" -eq 2 -a "$(n '.attrs["oute.canal.title"] == "bom1"')" -eq 1 -a "$(n '.attrs["oute.canal.title"] == "bom2"')" -eq 1 ]
+check "4xx em lote: só o recusado vai para spool.bad"  [ -z "$(ls "$MS/"*.json 2>/dev/null)" -a "$(ls "$MH/.oute/emit/spool.bad/"*.json | wc -l)" -eq 1 ] \
+                                                         && grep -q RUIM "$MH/.oute/emit/spool.bad/"*.json
+rcv_stop
+
+# laço de flush do entrypoint (a função flush_spool, extraída do entrypoint.sh): sleep falso conta as voltas
+eval "$(sed -n '/^flush_spool() {/,/^}/p' "$ROOT/docker/entrypoint.sh")"
+check "entrypoint: flush_spool extraída"                [ "$(type -t flush_spool)" == function ]
+EH="$TMP/ep"; mkdir -p "$EH/outbox"; cp "$FH/outbox/"*.sh "$EH/outbox/"
+# voltas <up-na-volta>: roda o laço com o coletor fora até a volta dada (0 = nunca); imprime quantos sleep
+voltas() { (
+  HOME="$EH"; UP="$OTEL_EXPORTER_OTLP_ENDPOINT"; export OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN"; c=0
+  up="$1"; sleep() { c=$((c + 1)); [[ "$c" -eq "$up" ]] && export OTEL_EXPORTER_OTLP_ENDPOINT="$UP"; return 0; }
+  flush_spool </dev/null >/dev/null 2>&1; echo "$c"
+) }
+rcv_start "$TMP/r6g"
+check "entrypoint: sem spool, uma volta só"             [ "$(voltas 0)" -eq 0 -a "$(posts)" -eq 0 ]
+HOME="$EH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
+check "entrypoint: coletor sobe depois, laço esvazia e para" [ "$(voltas 2)" -eq 2 -a -z "$(ls "$EH/.oute/emit/spool/"*.json 2>/dev/null)" -a "$(n true)" -eq 1 ]
+HOME="$EH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f
+check "entrypoint: coletor fora, desiste em 12 voltas"  [ "$(voltas 0)" -eq 12 -a "$(ls "$EH/.oute/emit/spool/"*.json | wc -l)" -eq 1 -a "$(n true)" -eq 1 ]
+rcv_stop
+
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

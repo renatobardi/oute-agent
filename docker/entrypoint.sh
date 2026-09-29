@@ -216,6 +216,18 @@ EOF
   log "chave do container p/ o host (oute-ops): $(cat "$key.pub")"
 }
 
+# ---------------------------------------------------------------- 5. spool do oute-emit (#166)
+# o coletor pode subir depois do agent: tenta por ~1 min até esvaziar. Sem spool, sai na primeira volta.
+# tests/oute-emit.test.sh extrai esta função (até a primeira linha "}")
+flush_spool() {
+  local _
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    oute-emit flush
+    compgen -G "$HOME/.oute/emit/spool/*.json" >/dev/null || break
+    sleep 5
+  done
+}
+
 # ---------------------------------------------------------------- run
 case "$MODE" in
   serve)
@@ -234,13 +246,8 @@ case "$MODE" in
     grep -q 'agent-wrap.sh' "$HOME/.bashrc" 2>/dev/null \
       || printf '\n%s\n' '[ -f /usr/local/lib/oute/agent-wrap.sh ] && . /usr/local/lib/oute/agent-wrap.sh' >> "$HOME/.bashrc"
 
-    # spool do oute-emit (#166): reenvia em segundo plano o que ficou para trás (a subida não espera; o coletor
-    # pode subir depois do agent, então tenta por ~1 min até esvaziar). Sem spool, sai na primeira volta
-    ( for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-        oute-emit flush
-        compgen -G "$HOME/.oute/emit/spool/*.json" >/dev/null || break
-        sleep 5
-      done ) </dev/null >/dev/null 2>&1 &
+    # spool do oute-emit (#166): reenvia em segundo plano o que ficou para trás (a subida não espera)
+    flush_spool </dev/null >/dev/null 2>&1 &
 
     log "iniciando herdr server"
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &

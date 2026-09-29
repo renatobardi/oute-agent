@@ -284,22 +284,35 @@ def drain(deadline):
                 except (OSError, ValueError, KeyError, TypeError):
                     quarantine(path)
                     continue
-                batch.append(path)
+                batch.append((path, rl))
                 logs += rl
             if not batch:
                 continue
             r = post_logs(logs, deadline - time.monotonic())
+            if r == "bad" and len(batch) > 1:
+                # lote recusado com 4xx: um arquivo ruim não leva os bons junto; de novo, um por um
+                for path, rl in batch:
+                    r = post_logs(rl, deadline - time.monotonic())
+                    if r == "retry":
+                        return False
+                    settle(path, r)
+                continue
             if r == "retry":
                 return False
-            for path in batch:
-                if r == "bad":
-                    quarantine(path)
-                else:
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
+            for path, _ in batch:
+                settle(path, r)
         return True
+
+
+def settle(path, result):
+    """arquivo do spool depois do POST: aceito = sai; recusado com 4xx = spool.bad"""
+    if result == "bad":
+        quarantine(path)
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def send(events, deadline, drained):
