@@ -234,6 +234,14 @@ case "$MODE" in
     grep -q 'agent-wrap.sh' "$HOME/.bashrc" 2>/dev/null \
       || printf '\n%s\n' '[ -f /usr/local/lib/oute/agent-wrap.sh ] && . /usr/local/lib/oute/agent-wrap.sh' >> "$HOME/.bashrc"
 
+    # spool do oute-emit (#166): reenvia em segundo plano o que ficou para trás (a subida não espera; o coletor
+    # pode subir depois do agent, então tenta por ~1 min até esvaziar). Sem spool, sai na primeira volta
+    ( for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        oute-emit flush
+        compgen -G "$HOME/.oute/emit/spool/*.json" >/dev/null || break
+        sleep 5
+      done ) </dev/null >/dev/null 2>&1 &
+
     log "iniciando herdr server"
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &
     log "iniciando sshd :2222"
