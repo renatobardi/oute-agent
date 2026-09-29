@@ -265,6 +265,46 @@ ensure_image() {
   if [[ "${OUTE_BUILD_LOCAL:-0}" == 1 ]]; then "$0" build; else oute_pull; fi
 }
 
+# --- reserva de disco da fila do collector (#163, ADR-04): 4 GB por host = 2 filas de 1 GB (bucket #161 e
+# agent-studio #155) × 2 GB de disco cada (o bbolt chega a ~1,7× o limite da fila e não encolhe, #137)
+QUEUE_VOLUME="${COMPOSE_PROJECT_NAME:-oute-agent}_oute-otel-queue"
+QUEUE_RESERVE_KB=$((4 * 1024 * 1024))
+kb_gb() { awk -v k="$1" 'BEGIN { printf "%.1f GB", k / 1048576 }'; }
+# "<livre_kb> <fila_kb>" do disco onde o Docker guarda os volumes, medido de dentro de um container: no Mac é o
+# disco da VM do Docker Desktop, não o do Mac. Volume ainda não criado = fila 0 (df na raiz do container, mesmo
+# disco). Sem a imagem local (nunca baixa aqui) ou sem docker: rc 1.
+queue_disk() {
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || return 1
+  local mnt=() out
+  docker volume inspect "$QUEUE_VOLUME" >/dev/null 2>&1 && mnt=(-v "$QUEUE_VOLUME:/q:ro")
+  out="$(docker run --rm --pull never --network none --user 0:0 --entrypoint sh ${mnt[@]+"${mnt[@]}"} "$IMAGE" -c \
+    'if [ -d /q ]; then d=/q; u=$(du -sk /q | cut -f1); else d=/; u=0; fi; df -Pk "$d" | awk -v u="$u" "NR==2 {print \$4, u}"' \
+    2>/dev/null)" || return 1
+  [[ "$out" =~ ^[0-9]+\ [0-9]+$ ]] || return 1
+  printf '%s\n' "$out"
+}
+# `oute up`: só avisa, nunca bloqueia a subida
+queue_reserve_check() {
+  local out free used need
+  out="$(queue_disk)" || { echo "aviso: não medi o disco livre para a fila do collector (reserva de 4 GB, ADR-04)" >&2; return 0; }
+  read -r free used <<<"$out"
+  need=$(( QUEUE_RESERVE_KB - used )); (( need > 0 )) || need=0
+  (( free >= need )) && return 0
+  echo "aviso: disco do Docker com $(kb_gb "$free") livres não comporta a reserva de 4 GB da fila do collector" \
+    "(a fila já ocupa $(kb_gb "$used"); faltam $(kb_gb $(( need - free )))). Com o OCI fora, a fila pode encher o disco." \
+    "Libere espaço (docker system df) ou aumente o disco (no Mac: Docker Desktop → Resources). Subindo mesmo assim." >&2
+}
+# `oute status`: linha de disco com o tamanho do volume da fila
+queue_status_line() {
+  local out free used
+  if out="$(queue_disk)"; then
+    read -r free used <<<"$out"
+    echo "disco do Docker: $(kb_gb "$free") livres · fila do collector ($QUEUE_VOLUME): $(kb_gb "$used") de 4 GB reservados"
+  else
+    echo "disco do Docker: não medido (sem docker ou sem a imagem $IMAGE local)"
+  fi
+}
+
 oci_bootstrap() {
   need jq
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
@@ -396,6 +436,7 @@ case "${1:-}" in
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
     ensure_image
+    queue_reserve_check
     "${COMPOSE[@]}" up -d --no-build ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
@@ -404,7 +445,7 @@ case "${1:-}" in
   restart) "$0" down; "$0" up ;;
   logs)    "${COMPOSE[@]}" logs --tail=100 "${@:2}" ;;
   follow)  "${COMPOSE[@]}" logs -f "${@:2}" ;;
-  status)  "${COMPOSE[@]}" ps ;;
+  status)  "${COMPOSE[@]}" ps; queue_status_line ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
   ssh)     # com comando: -t quando há terminal (CLIs como `pi -p` leem stdin se não for TTY e ficam esperando EOF)
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
@@ -462,7 +503,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   ssh [cmd]    ssh direto no container
   shell        docker exec bash
   logs [svc] | follow [svc]
-  status
+  status       serviços + disco do Docker e tamanho da fila do collector (reserva de 4 GB)
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)

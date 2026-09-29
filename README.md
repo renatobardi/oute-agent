@@ -85,7 +85,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 |---|---|
 | `oute pull` | baixa do ghcr a imagem da versão atual (feita pelo CI) |
 | `oute build` | build local (fallback); mantém o cache usado nas últimas 24h |
-| `oute up [--refresh-secrets]` / `down` / `restart` / `status` | ciclo de vida da stack |
+| `oute up [--refresh-secrets]` / `down` / `restart` / `status` | ciclo de vida da stack; `status` mostra também o disco livre do Docker e o tamanho da fila do collector |
 | `oute secrets refresh` | relê o Vaultwarden (master password), regrava `~/.oute/agent.env` e tranca a sessão |
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
 | `oute watch [host]` | atalho de `approve --watch`; com host (ex.: `oute watch oute-server`), abre a espera naquele host via ssh |
@@ -117,6 +117,7 @@ Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `a
 - **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/host=<máquina>/instance=<instância>/year=…/hour=…/` (gzip, lotes de 5 min). Até a 0.7.4 não havia `host=/instance=` no caminho; esses objetos ficam onde estão.
 - **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events, sem spans internos do LiteLLM. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
 - Span **`jev.decision`** (trace `jev:<perfil>`): perfil e via do Jev, modelos candidatos, sinais, tokens e — via `GET /api/v1/generation` do OpenRouter, em background — **modelo servido, provedor, custo (US$) e latência**.
+- **Fila em disco do collector** (volume `oute-otel-queue`): o collector guarda o que ainda não chegou ao destino e retenta sem prazo. **Reserva de 4 GB por host**: 2 GB de disco por fila de 1 GB (o bbolt chega a ~1,7× o limite e não encolhe), duas filas (bucket e agent-studio). O `oute up` avisa, sem bloquear, quando o disco livre do Docker (no Mac, o da VM do Docker Desktop) não comporta a reserva descontado o que a fila já ocupa; o `oute status` mostra o disco livre e o tamanho da fila.
 - Conferir: Langfuse → Tracing (`name = jev.decision`); `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`.
 
 ## Storage comum (ADR-03)
