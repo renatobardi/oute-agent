@@ -11,6 +11,7 @@
 #   oute-swarm list                                 abas abertas por esta coordenadora + worktrees de tarefa
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
+# --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
 # Triagem, espera do ok do Bardi, acompanhamento e limpeza estão no prompt (/usr/local/lib/oute/swarm.md).
 # A coordenadora nunca faz merge sem pedido explícito; ações no host só pelo canal de aprovação.
 set -euo pipefail
@@ -82,12 +83,12 @@ cmd_spawn() {
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
   else main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
-  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned"; rm -f "$state/fechada"
+  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
-  # sessão kaizen (7º campo) não conta no limite
-  count="$(awk '$7 != "kaizen"' "$state/spawned" | wc -l)"
+  # o limite conta as abas abertas agora (spawned menos closed); sessão kaizen (7º campo) não conta
+  count="$(awk -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1} $7 != "kaizen" && !($1 in c)' "$state/spawned" | wc -l)"
   if (( ! force && ! kaizen )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
-    die "limite da rodada atingido ($count/$OUTE_SWARM_MAX); peça ao Bardi para liberar e use --force"
+    die "limite da rodada atingido ($count/$OUTE_SWARM_MAX abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
   fi
   pfile="$state/$slug.prompt"
   {

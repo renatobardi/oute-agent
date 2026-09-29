@@ -65,9 +65,10 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       abre a coordenadora: tria issues → ESPERA SEU OK → abre uma aba por issue →
       acompanha PRs/CI/pedidos → retrospectiva kaizen (lições numeradas; você escolhe:
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
-      Default --max 3 (teto 5). Merge só quando você pedir.
+      --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
+      Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force] [--repo R] [--kaizen]
-      (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max.
+      (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (a coordenadora usa quando você decide).
