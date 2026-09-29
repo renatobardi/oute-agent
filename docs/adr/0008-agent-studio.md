@@ -89,6 +89,14 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 ### 11. Regra de ferramenta nova (substitui a do ADR-04)
 **Nenhuma ferramenta entra no stack se não mandar consumo ao bucket + agent-studio**, pelo collector, com a origem (`host.name` + `oute.instance`) e `oute.agent` (ADR-04). Enquanto o Langfuse roda em paralelo (item 9), ele continua recebendo o que já recebe, mas não é mais exigência para ferramenta nova.
 
+## Implementação
+### Ingestão de logs (#185)
+- Código em `docker/agent-studio/agent_studio/` (FastAPI + DuckDB), num venv próprio da imagem (`/opt/agent-studio/venv`, dependências fixadas por hash em `docker/agent-studio/requirements.txt`, geradas do `requirements.in` com `uv pip compile --universal --generate-hashes`).
+- Compose: serviço `agent-studio` no profile `agent-studio`, `python -m agent_studio` (um processo, um worker), usuário 10001, `127.0.0.1:${OUTE_AGENT_STUDIO_PORT:-8430}`, `mem_limit` `${OUTE_AGENT_STUDIO_MEM:-2g}`, DuckDB no volume `oute-agent-studio` (`/data/agent-studio/agent-studio.duckdb`).
+- **Quem liga:** `OUTE_AGENT_STUDIO=1` no `.env` do checkout do host (só no oute-server). O `oute up` põe o profile em `COMPOSE_PROFILES` quando o `agent.env` tem **`AGENT_STUDIO_TOKEN`** (campo do item `agent-studio` da pasta `oute-agent` do vault); sem ele, avisa e sobe o resto. `down`, `status` e `logs` sempre enxergam o profile. Sem token, o próprio processo recusa subir.
+- `POST /v1/logs` (OTLP/HTTP JSON, `gzip` aceito): 401 sem o `Bearer` certo; 415 fora de `application/json`; 400 para corpo que não é OTLP JSON (permanente); 503 com `Retry-After` quando a gravação falha (a transação volta inteira); 200 só depois do `COMMIT`. `GET /healthz` sem token (só `ok`).
+- Tabela `logs`: `dedupe_key` (PRIMARY KEY: `ev:<oute.event.id>` ou `h:<sha256>` do conteúdo normalizado: hora, hora observada, resource, escopo, severidade, corpo, atributos, `eventName`, trace/span), `time` (TIMESTAMPTZ em UTC, da hora do fato; sem `timeUnixNano`, a observada pela fonte; sem as duas, a chegada), `time_unix_nano`, `observed_unix_nano`, `host_name`, `oute_instance`, `oute_agent`, `service_name`, `session_id`, `oute_task_id`, `oute_swarm_round` (do registro, senão do resource), `event_name`, `oute_event_id`, `severity_number`, `severity_text`, `body`, `trace_id`, `span_id`, `scope_name`, `resource_attributes` e `attributes` (JSON completo), `received_at`/`received_unix_nano`.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.

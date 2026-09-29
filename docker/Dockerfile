@@ -50,7 +50,7 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && groupadd -g ${OUTE_UID} ${OUTE_USER} \
     && useradd -m -u ${OUTE_UID} -g ${OUTE_UID} -s /bin/bash -p "*" ${OUTE_USER} \
     && echo "${OUTE_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${OUTE_USER} \
-    && mkdir -p /workspace /data/shared /data/ai-memory /run/sshd \
+    && mkdir -p /workspace /data/shared /data/ai-memory /data/agent-studio /run/sshd \
     && chown -R ${OUTE_USER}:${OUTE_USER} /workspace /data
 
 # --- agentes e CLIs (npm) ----------------------------------------------------
@@ -94,6 +94,13 @@ ARG AI_MEMORY_VERSION=2.4.1
 RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
     && curl -fsSL "https://github.com/akitaonrails/ai-memory/releases/download/v${AI_MEMORY_VERSION}/ai-memory-linux-${ARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin && chmod +x /usr/local/bin/ai-memory
+
+# agent-studio (ADR-08, #185): ingestão OTLP -> DuckDB; serviço próprio no compose, só no oute-server.
+# venv isolado, dependências fixadas por hash (requirements.txt gerado do requirements.in pelo uv)
+COPY docker/agent-studio/requirements.txt /opt/agent-studio/requirements.txt
+RUN uv venv /opt/agent-studio/venv --python /usr/bin/python3 \
+    && uv pip install --no-cache --python /opt/agent-studio/venv/bin/python --require-hashes -r /opt/agent-studio/requirements.txt
+COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio
 
 # --- ssh ---------------------------------------------------------------------
 COPY config/ssh/sshd_config /etc/ssh/sshd_config

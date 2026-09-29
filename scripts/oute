@@ -104,6 +104,24 @@ host_secrets() {
   fi
 }
 
+# --- agent-studio (ADR-08, #185): só no host que o liga com OUTE_AGENT_STUDIO=1 no .env (o oute-server; no Mac
+# fica desligado). Token do item agent-studio da pasta oute-agent do vault (campo AGENT_STUDIO_TOKEN), via agent.env.
+STUDIO_PROFILE=agent-studio
+agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
+# `oute up`: liga o profile do compose quando o host tem o agent-studio e o token existe; sem o item, avisa e sobe
+# o resto (nunca bloqueia a subida)
+agent_studio_up() {
+  agent_studio_enabled || return 0
+  if [[ -z "${AGENT_STUDIO_TOKEN:-}" ]]; then
+    echo "aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN não está em $AGENT_ENV_FILE (item agent-studio da pasta" \
+      "oute-agent do vault). O agent-studio não sobe; crie o item e rode: oute up --refresh-secrets" >&2
+    return 0
+  fi
+  export AGENT_STUDIO_TOKEN
+  COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
+  export COMPOSE_PROFILES
+}
+
 router_sync() {
   # cron/up: só env ou agent.env, sem vault e sem tty (#21)
   [[ -n "${OPENROUTER_API_KEY:-}" ]] || load_agent_env
@@ -431,7 +449,7 @@ case "${1:-}" in
   up)
     refresh=0; up_args=()
     for a in "${@:2}"; do if [[ "$a" == --refresh-secrets ]]; then refresh=1; else up_args+=("$a"); fi; done
-    host_secrets "$refresh"; ensure_dirs; mount_shared
+    host_secrets "$refresh"; agent_studio_up; ensure_dirs; mount_shared
     # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
     router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
     schedule_sync
@@ -441,11 +459,12 @@ case "${1:-}" in
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
     ;;
-  down)    "${COMPOSE[@]}" down "${@:2}"; umount_shared ;;
+  # --profile: down/logs/status enxergam também o agent-studio, quando ele existe (no Mac não há nada dele)
+  down)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" down "${@:2}"; umount_shared ;;
   restart) "$0" down; "$0" up ;;
-  logs)    "${COMPOSE[@]}" logs --tail=100 "${@:2}" ;;
-  follow)  "${COMPOSE[@]}" logs -f "${@:2}" ;;
-  status)  "${COMPOSE[@]}" ps; queue_status_line ;;
+  logs)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs --tail=100 "${@:2}" ;;
+  follow)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs -f "${@:2}" ;;
+  status)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" ps; queue_status_line ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
   ssh)     # com comando: -t quando há terminal (CLIs como `pi -p` leem stdin se não for TTY e ficam esperando EOF)
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
@@ -496,6 +515,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up [--refresh-secrets]  sobe agent + jev-router + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
+               (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08)
                (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)
   secrets refresh  relê o Vaultwarden (pede a master password), regrava ~/.oute/agent.env e tranca a sessão
   down|restart

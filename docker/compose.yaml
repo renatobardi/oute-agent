@@ -150,6 +150,37 @@ services:
       # fila em disco do collector (#161): a imagem roda como 10001:10001
       - oute-otel-queue:/v/otel-queue
 
+  agent-studio:
+    # ADR-08 (#185): recebe OTLP/HTTP JSON do collector de cada host e grava no DuckDB (dedupe; 2xx só depois do
+    # commit). Só no host com OUTE_AGENT_STUDIO=1 no .env (o oute-server): o `oute up` liga o profile quando o
+    # agent.env tem o item agent-studio do vault. No Mac não sobe. Mesma imagem do agent, outro comando; um
+    # processo só (o DuckDB aceita um escritor só).
+    profiles: [agent-studio]
+    image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
+    container_name: oute-agent-studio
+    logging: *logging
+    restart: unless-stopped
+    user: "10001:10001"
+    entrypoint: ["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"]
+    environment:
+      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_TOKEN:-}
+      AGENT_STUDIO_DB: /data/agent-studio/agent-studio.duckdb
+      AGENT_STUDIO_PORT: "8430"
+      PYTHONPATH: /opt/agent-studio/app
+    ports:
+      # só loopback, nunca 0.0.0.0: o Mac chega pelo vhost agent-studio.oute.pro na tailnet (nginx, repo lab)
+      - "127.0.0.1:${OUTE_AGENT_STUDIO_PORT:-8430}:8430"
+    mem_limit: ${OUTE_AGENT_STUDIO_MEM:-2g}
+    volumes:
+      # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
+      - oute-agent-studio:/data/agent-studio
+    healthcheck:
+      test: ["CMD", "/opt/agent-studio/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8430/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [oute]
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
     container_name: oute-otel-collector
@@ -196,6 +227,7 @@ volumes:
   oute-memory:
   oute-shared:
   oute-otel-queue:
+  oute-agent-studio:
 
 networks:
   oute:
