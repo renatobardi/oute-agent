@@ -4,6 +4,7 @@
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
   reenvia, e a dedupe absorve a repetição.
 - Corpo que não é OTLP JSON = 400 (permanente: reenviar não mudaria nada).
+- Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 """
 import gzip
 import hmac
@@ -16,7 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import otlp
+from . import otlp, state
 
 log = logging.getLogger("agent_studio")
 
@@ -47,7 +48,7 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token):
+def create_app(store, token, surreal=None):
     if not token:
         raise ValueError("token vazio")
     expected = f"Bearer {token}".encode()
@@ -75,8 +76,11 @@ def create_app(store, token):
         except (otlp.BadPayload, ValueError, zlib.error, gzip.BadGzipFile, AttributeError, TypeError) as e:
             log.warning("recusado: %s inválido (%s)", signal, e)
             return JSONResponse({"message": f"OTLP JSON inválido: {e}"}, status_code=400)
+        # estado derivado no SurrealDB dentro da transação do DuckDB: os dois bancos juntos ou nenhum (#187)
+        stmts = state.statements(table, rows) if surreal else []
+        before_commit = (lambda: surreal.apply(stmts)) if stmts else None
         try:
-            written = await run_in_threadpool(store.write, {table: rows})
+            written = await run_in_threadpool(store.write, {table: rows}, before_commit)
         except Exception as e:  # noqa: BLE001 — qualquer falha na gravação é retentável
             log.error("gravação falhou (%s, %d registros): %s", signal, len(rows), e)
             return JSONResponse({"message": "gravação falhou; reenvie"}, status_code=503, headers={"Retry-After": "5"})

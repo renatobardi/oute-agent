@@ -105,19 +105,22 @@ host_secrets() {
 }
 
 # --- agent-studio (ADR-08, #185): só no host que o liga com OUTE_AGENT_STUDIO=1 no .env (o oute-server; no Mac
-# fica desligado). Token do item agent-studio da pasta oute-agent do vault (campo AGENT_STUDIO_TOKEN), via agent.env.
+# fica desligado). Item agent-studio da pasta oute-agent do vault, via agent.env: campos AGENT_STUDIO_TOKEN (token da
+# ingestão e da API) e AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, #187).
 STUDIO_PROFILE=agent-studio
 agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
 # `oute up`: liga o profile do compose quando o host tem o agent-studio e o token existe; sem o item, avisa e sobe
 # o resto (nunca bloqueia a subida)
 agent_studio_up() {
   agent_studio_enabled || return 0
-  if [[ -z "${AGENT_STUDIO_TOKEN:-}" ]]; then
-    echo "aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN não está em $AGENT_ENV_FILE (item agent-studio da pasta" \
+  local v falta=""
+  for v in AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
+  if [[ -n "$falta" ]]; then
+    echo "aviso: OUTE_AGENT_STUDIO=1, mas $falta não está em $AGENT_ENV_FILE (item agent-studio da pasta" \
       "oute-agent do vault). O agent-studio não sobe; crie o item e rode: oute up --refresh-secrets" >&2
     return 0
   fi
-  export AGENT_STUDIO_TOKEN
+  export AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS
   COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
   export COMPOSE_PROFILES
 }

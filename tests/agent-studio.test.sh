@@ -252,23 +252,152 @@ up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -eu
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
   $FUNCS"$'\n'"agent_studio_up; echo \"profiles=\${COMPOSE_PROFILES:-}\"; echo \"token=\${AGENT_STUDIO_TOKEN:-}\"" 2>&1)"; RC=$?; }
 rm -f "$TMP/.env"
-up AGENT_STUDIO_TOKEN=t1
+up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
 check "sem OUTE_AGENT_STUDIO (Mac): não liga, sem aviso" bash -c '[[ "$0" == "profiles="$'"'"'\n'"'"'"token=t1" ]]' "$OUT"
 printf 'OUTE_AGENT_STUDIO=1\n' > "$TMP/.env"
-up AGENT_STUDIO_TOKEN=t1
-check ".env com OUTE_AGENT_STUDIO=1 e token: liga"     grep -qx 'profiles=agent-studio' <<<"$OUT"
+up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
+check ".env com OUTE_AGENT_STUDIO=1, token e senha: liga" grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "…e sem aviso"                                   bash -c '! grep -q aviso <<<"$0"' "$OUT"
-up AGENT_STUDIO_TOKEN=t1 COMPOSE_PROFILES=outro
+up AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1 COMPOSE_PROFILES=outro
 check "soma ao COMPOSE_PROFILES que já existe"         grep -qx 'profiles=outro,agent-studio' <<<"$OUT"
 up
 check "sem o item no vault: não liga"                  grep -qx 'profiles=' <<<"$OUT"
-check "sem o item no vault: avisa e cita o item"       grep -q 'aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN não está em .*item agent-studio' <<<"$OUT"
+check "sem o item no vault: avisa e cita o item"       grep -q 'aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS não está em .*item agent-studio' <<<"$OUT"
 check "sem o item no vault: não bloqueia (rc 0)"       test "$RC" = 0
+up AGENT_STUDIO_TOKEN=t1
+check "item sem a senha do SurrealDB: não liga"        grep -qx 'profiles=' <<<"$OUT"
+check "item sem a senha do SurrealDB: avisa qual falta" grep -q 'mas AGENT_STUDIO_SURREAL_PASS não está em' <<<"$OUT"
 rm -f "$TMP/.env"
-up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_TOKEN=t1
+up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_TOKEN=t1 AGENT_STUDIO_SURREAL_PASS=s1
 check "OUTE_AGENT_STUDIO=1 no ambiente também liga"    grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "up chama agent_studio_up depois dos segredos"   grep -q 'host_secrets "$refresh"; agent_studio_up;' "$ROOT/scripts/oute"
 check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
+
+# ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
+die() { echo "FAIL $*"; exit 1; }
+. "$ROOT/tests/lib/surreal.sh"
+surreal_bin
+surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
+trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
+sq() { surreal_q "$1"; }
+
+# eventos de verdade: oute-emit lendo os artefatos (canal e rodada) -> receptor falso -> repostados ao agent-studio
+E="$TMP/emit"; mkdir -p "$E/outbox" "$E/inbox"; rcv_start "$TMP/r2"
+emit() { HOME="$E" PATH="$BIN:$PATH" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" "$ROOT/docker/oute-emit" "$@"; }
+P1=20260929-074200-ver-disco; P2=20260929-074300-limpar; P3=20260929-074400-pendente; P4=20260929-074500-fora-de-ordem
+for p in $P1 $P2 $P3 $P4; do
+  printf '# oute-propose\n# titulo: pedido %s\n# como: root\n# agente: claude\n# criado: 2026-09-29T07:%s:00Z\n\necho %s\n' \
+    "$p" "${p:11:2}" "$p" > "$E/outbox/$p.sh"
+  emit canal "$p"
+done
+printf '# id: %s\n# rc: 0\n# como: root\n# aprovado: 2026-09-29T07:42:30Z por bardi@oute-server\n# duracao: 3 s\n# saida: 12 bytes\n# sha256: 409eccc983f8\n\nSAIDA-DO-HOST\n' "$P1" > "$E/inbox/$P1.out"
+printf '# id: %s\n# rc: 126\n# recusado: 2026-09-29T07:43:30Z por bardi@oute-mac\n# sha256: aaaaaaaaaaaa\n\nrecusado\n' "$P2" > "$E/inbox/$P2.out"
+printf '# id: %s\n# rc: 1\n# aprovado: 2026-09-29T07:45:30Z por bardi@oute-server\n\n' "$P4" > "$E/inbox/$P4.out"
+for p in $P1 $P2 $P4; do emit canal "$p"; done
+RND=swarm-0929-0742; R="$E/.oute/swarm/$RND"; mkdir -p "$R"
+printf 'repo=/workspace/oute-agent\nmax=2\nlabel=studio-ingestao\nagent=claude\n' > "$R/meta"
+printf '185-logs w1:p1 codex 2026-09-29T07:43:00Z w1:t1 /workspace/oute-agent\n186-spans w1:p2 claude 2026-09-29T07:44:00Z w1:t2 /workspace/oute-agent\n' > "$R/spawned"
+: > "$R/log"
+for l in "2026-09-29T07:42:00Z abertura $RND (repo oute-agent, max 2, label studio-ingestao)" \
+         "2026-09-29T07:43:00Z spawn 185-logs codex" "2026-09-29T07:44:00Z spawn 186-spans claude" \
+         "2026-09-29T08:10:00Z close 185-logs" "2026-09-29T09:00:00Z rodada fechada"; do
+  printf '%s\n' "$l" >> "$R/log"; emit swarm "$RND" "$l"
+done
+rcv_stop
+check "oute-emit: 12 eventos capturados (7 canal, 5 rodada)" test "$(events "$TMP/r2" | grep -c .)" = 12
+# decided do P4 fica à parte, para chegar ANTES do proposed
+DEC4="$(grep -l "\"$P4\"" "$TMP/r2"/*.json | xargs grep -l oute.canal.decided)"
+mkdir -p "$TMP/r2-sem-dec4"; for f in "$TMP/r2"/*.json; do [[ "$f" == "$DEC4" ]] || cp "$f" "$TMP/r2-sem-dec4/"; done
+# sessões do oute-task (#128; o oute-emit ainda não as emite): uma de rodada (worker 185-logs) e uma avulsa removida,
+# e a conversa do Claude que roda na sessão de rodada (identidade da sessão no resource)
+cat > "$TMP/task.json" <<'EOF'
+{"resourceLogs":[{"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"oute.instance","value":{"stringValue":"oute-agent"}},
+  {"key":"service.name","value":{"stringValue":"oute"}},{"key":"oute.agent","value":{"stringValue":"claude"}}]},
+ "scopeLogs":[{"scope":{"name":"oute-emit"},"logRecords":[
+  {"timeUnixNano":"1790668980000000000","eventName":"oute.task.opened","attributes":[{"key":"event.name","value":{"stringValue":"oute.task.opened"}},
+    {"key":"oute.event.id","value":{"stringValue":"task-ev-1"}},{"key":"oute.task.id","value":{"stringValue":"oute-agent-185-logs-20260929074300"}},
+    {"key":"oute.task.repo","value":{"stringValue":"oute-agent"}},{"key":"oute.task.slug","value":{"stringValue":"185-logs"}},
+    {"key":"oute.task.agent","value":{"stringValue":"codex"}},{"key":"oute.swarm.round","value":{"stringValue":"swarm-0929-0742"}},
+    {"key":"oute.swarm.session","value":{"stringValue":"185-logs"}}]},
+  {"timeUnixNano":"1790668000000000000","eventName":"oute.task.opened","attributes":[{"key":"event.name","value":{"stringValue":"oute.task.opened"}},
+    {"key":"oute.event.id","value":{"stringValue":"task-ev-2"}},{"key":"oute.task.id","value":{"stringValue":"lab-conserto-20260929072640"}},
+    {"key":"oute.task.repo","value":{"stringValue":"lab"}},{"key":"oute.task.slug","value":{"stringValue":"conserto"}},{"key":"oute.task.agent","value":{"stringValue":"claude"}}]},
+  {"timeUnixNano":"1790675000000000000","eventName":"oute.task.removed","attributes":[{"key":"event.name","value":{"stringValue":"oute.task.removed"}},
+    {"key":"oute.event.id","value":{"stringValue":"task-ev-3"}},{"key":"oute.task.id","value":{"stringValue":"lab-conserto-20260929072640"}},
+    {"key":"oute.task.reason","value":{"stringValue":"pr-mergeado"}}]}]}]},
+ {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"service.name","value":{"stringValue":"claude-code"}},
+  {"key":"oute.task.id","value":{"stringValue":"oute-agent-185-logs-20260929074300"}},{"key":"oute.swarm.round","value":{"stringValue":"swarm-0929-0742"}}]},
+ "scopeLogs":[{"logRecords":[{"timeUnixNano":"1790669000000000000","body":{"stringValue":"claude_code.api_request"},
+  "attributes":[{"key":"session.id","value":{"stringValue":"conv-185"}},{"key":"oute.agent","value":{"stringValue":"codex"}}]}]}]}]}
+EOF
+
+SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS")
+OUT="$(env AGENT_STUDIO_TOKEN=x AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS= AGENT_STUDIO_DB="$TMP/y.duckdb" \
+  PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio 2>&1)"; RC=$?
+check "SurrealDB sem senha: não sobe e diz o item"     bash -c '[[ $0 -ne 0 ]] && grep -q "AGENT_STUDIO_SURREAL_PASS vazio" <<<"$1"' "$RC" "$OUT"
+DB="$TMP/s2/db.duckdb"
+studio_start "$TMP/s2" "${SENV[@]}" || { cat "$TMP/s2/stderr"; die "agent-studio com SurrealDB não subiu"; }
+check "decided antes do proposed: 200"                 test "$(post logs "$DEC4")" = 200
+postall() { local f rc=0; for f in "$1"/*.json; do [[ "$(post logs "$f")" == 200 ]] || rc=1; done; [[ "$(post logs "$TMP/task.json")" == 200 ]] || rc=1; return $rc; }
+check "eventos e sessões: 200"                         postall "$TMP/r2-sem-dec4"
+p1="$(sq "SELECT * FROM pedido:\`$P1\`" | jq -c '.[0]')"
+check "pedido executado: estado, decisão, rc, aprovador" jqe '.state == "decidido" and .decision == "executado" and .rc == 0 and .approver == "bardi@oute-server" and .decided_by == "human"' <<<"$p1"
+check "pedido executado: título, como, agente, horas"  jqe --arg t "pedido $P1" '.title == $t and .as == "root" and .agent == "claude" and (.proposed_at | startswith("2026-09-29T07:42:00")) and (.decided_at | startswith("2026-09-29T07:42:30"))' <<<"$p1"
+check "pedido executado: duração, saída, sem a saída"  jqe '.duration_s == 3 and .output_bytes == 12 and (tostring | contains("SAIDA-DO-HOST") | not)' <<<"$p1"
+check "pedido executado: liga aos eventos (ids)"       jqe '(.proposed_event | length) == 32 and (.decided_event | length) == 32' <<<"$p1"
+check "pedido recusado"                                jqe '.[0].state == "decidido" and .[0].decision == "recusado" and .[0].rc == 126 and .[0].approver == "bardi@oute-mac"' <<<"$(sq "SELECT * FROM pedido:\`$P2\`")"
+check "pedido sem decisão: pendente"                   jqe '.[0].state == "pendente" and .[0].decision == null' <<<"$(sq "SELECT * FROM pedido:\`$P3\`")"
+check "decided antes do proposed: continua decidido"   jqe --arg t "pedido $P4" '.[0].state == "decidido" and .[0].rc == 1 and .[0].title == $t' <<<"$(sq "SELECT * FROM pedido:\`$P4\`")"
+r="$(sq "SELECT * FROM rodada:\`$RND\`" | jq -c '.[0]')"
+check "rodada: fechada, repo, max, coordenadora, horas" jqe '.state == "fechada" and .repo == "oute-agent" and .max == 2 and .agent == "claude" and (.opened_at | startswith("2026-09-29T07:42")) and (.closed_at | startswith("2026-09-29T09:00"))' <<<"$r"
+w="$(sq "SELECT *, rodada.state AS rodada_state, sessao.repo AS sessao_repo FROM worker:['$RND', '185-logs']" | jq -c '.[0]')"
+check "worker 185: fechado, agente, issue, ligado à rodada" jqe --arg r "$RND" '.state == "fechada" and .agent == "codex" and .issue == 185 and .rodada_state == "fechada" and (.spawned_at | startswith("2026-09-29T07:43")) and (.closed_at | startswith("2026-09-29T08:10"))' <<<"$w"
+check "worker 185: ligado à sessão do oute-task"       jqe '.sessao_repo == "oute-agent" and (.sessao | tostring | contains("oute-agent-185-logs-20260929074300"))' <<<"$w"
+check "worker 186: aberto (spawn sem close)"           jqe '.[0].state == "aberta" and .[0].agent == "claude"' <<<"$(sq "SELECT * FROM worker:['$RND', '186-spans']")"
+check "rodada -> workers (2)"                          test "$(sq "SELECT count() AS n FROM worker WHERE rodada = rodada:\`$RND\` GROUP ALL" | jq '.[0].n')" = 2
+s1="$(sq "SELECT *, rodada.repo AS rodada_repo, worker.slug AS worker_slug FROM sessao:\`oute-agent-185-logs-20260929074300\`" | jq -c '.[0]')"
+check "sessão de rodada: aberta, ligada à rodada e ao worker" jqe '.state == "aberta" and .agent == "codex" and .slug == "185-logs" and .rodada_repo == "oute-agent" and .worker_slug == "185-logs"' <<<"$s1"
+s2="$(sq "SELECT * FROM sessao:\`lab-conserto-20260929072640\`" | jq -c '.[0]')"
+check "sessão avulsa: removida, motivo, sem rodada"    jqe '.state == "removida" and .removed_reason == "pr-mergeado" and .repo == "lab" and .rodada == null and (.removed_at | startswith("2026-09-29T09:43:20"))' <<<"$s2"
+c="$(sq "SELECT *, sessao.slug AS sessao_slug FROM conversa:\`conv-185\`" | jq -c '.[0]')"
+check "conversa ligada à sessão (session.id -> oute.task.id)" jqe '.sessao_slug == "185-logs" and .agent == "codex" and .service == "claude-code"' <<<"$c"
+snap() { local t; for t in pedido rodada worker sessao conversa; do sq "SELECT * FROM $t ORDER BY id"; done; }
+reenvia() { postall "$TMP/r2-sem-dec4" && postall "$TMP/r2-sem-dec4" && [[ "$(post logs "$DEC4")" == 200 ]]; }
+before="$(snap)"
+check "reenvio do mesmo lote (2 vezes): 200"           reenvia
+check "reenvio não duplica nem muda nada no SurrealDB" test "$(snap)" = "$before"
+check "contagens: 4 pedidos, 1 rodada, 2 workers, 2 sessões, 1 conversa" \
+  test "$(for t in pedido rodada worker sessao conversa; do sq "SELECT count() AS n FROM $t GROUP ALL" | jq -r '.[0].n'; done | tr '\n' ' ')" = "4 1 2 2 1 "
+
+# SurrealDB fora: 503 e nada no DuckDB; quando volta, o reenvio grava nos dois
+P5=20260929-080000-com-surreal-fora
+printf '# oute-propose\n# titulo: fora\n# como: user\n# agente: pi\n# criado: 2026-09-29T08:00:00Z\n\necho x\n' > "$E/outbox/$P5.sh"
+rcv_start "$TMP/r3"; emit canal "$P5"; rcv_stop
+EV5="$(ls "$TMP/r3"/*.json | head -1)"
+surreal_stop
+check "SurrealDB fora: 503"                            test "$(post logs "$EV5")" = 503
+check "SurrealDB fora: métrica (sem estado) grava: 200" test "$(post metrics "$TMP/metrics.json")" = 200
+studio_stop
+check "SurrealDB fora: nada do evento no DuckDB"       test "$(count logs "WHERE (attributes->>'oute.canal.id') = '$P5'")" = 0
+surreal_start "$TMP/sdb" || die "SurrealDB não voltou"
+studio_start "$TMP/s2" "${SENV[@]}" || die "agent-studio não voltou"
+check "SurrealDB de volta: o reenvio grava (200)"      test "$(post logs "$EV5")" = 200
+check "SurrealDB de volta: pedido no SurrealDB"        jqe '.[0].state == "pendente" and .[0].agent == "pi"' <<<"$(sq "SELECT * FROM pedido:\`$P5\`")"
+check "SurrealDB de volta: dados antigos continuam"    jqe '.[0].state == "decidido"' <<<"$(sq "SELECT * FROM pedido:\`$P1\`")"
+studio_stop
+check "SurrealDB de volta: evento no DuckDB, uma vez"  test "$(count logs "WHERE (attributes->>'oute.canal.id') = '$P5'")" = 1
+check "DuckDB: eventos da rodada e do canal, uma vez"  test "$(count logs "WHERE event_name LIKE 'oute.%'")" = 16
+
+# serviço surrealdb no compose
+SVC="$(awk '/^  surrealdb:$/ {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
+check "compose: surrealdb fixado por digest"           has '^    image: \$\{OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v[0-9.]+@sha256:[0-9a-f]{64}\}$'
+check "compose: surrealdb só no profile agent-studio"  has '^    profiles: \[agent-studio\]$'
+check "compose: surrealdb sem porta publicada"         bash -c '! grep -qE "^    ports:" <<<"$0"' "$SVC"
+check "compose: surrealdb com mem_limit"               has '^    mem_limit: \$\{OUTE_SURREALDB_MEM:-1g\}$'
+check "compose: surrealdb em RocksDB num volume"       bash -c 'grep -q "rocksdb:///data/surrealdb" <<<"$0" && grep -q "^      - oute-surrealdb:/data/surrealdb$" <<<"$0"' "$SVC"
+check "compose: surrealdb com senha do vault"          has 'SURREAL_PASS: \$\{AGENT_STUDIO_SURREAL_PASS:-\}'
+check "compose: surrealdb sem --unauthenticated"       bash -c '! grep -q unauthenticated <<<"$0"' "$SVC"
+check "compose: volume-init dá o dono do volume"       grep -q '^      - oute-surrealdb:/v/surrealdb$' "$ROOT/docker/compose.yaml"
 
 printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

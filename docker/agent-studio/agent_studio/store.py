@@ -111,9 +111,10 @@ class Store:
         with self.lock:
             self.con.close()
 
-    def write(self, batch):
+    def write(self, batch, before_commit=None):
         """batch = {tabela: [linhas]}. Tudo numa transação: ou grava tudo, ou nada (e levanta a exceção).
 
+        before_commit: chamado depois dos INSERTs e antes do COMMIT (o SurrealDB, #187); se levantar, rollback.
         Devolve {tabela: (gravadas, repetidas)}."""
         result = {}
         with self.lock:
@@ -121,6 +122,8 @@ class Store:
             try:
                 for table, rows in batch.items():
                     result[table] = self._insert(table, rows)
+                if before_commit:
+                    before_commit()
                 self.con.execute("COMMIT")
             except BaseException:
                 self.con.execute("ROLLBACK")

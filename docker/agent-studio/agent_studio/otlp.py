@@ -145,6 +145,9 @@ def log_rows(payload, received_ns):
                     "resource_attributes": canon(res),
                     "attributes": canon(rec),
                     "received_unix_nano": received_ns,
+                    # só para o estado derivado (SurrealDB); não viram coluna
+                    "_attrs": rec,
+                    "_res": res,
                 }
                 rows.append(row)
     return rows
