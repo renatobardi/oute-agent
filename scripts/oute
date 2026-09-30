@@ -400,10 +400,16 @@ approve_deliver() {
   echo "aviso: $AGENT_CTR fora do ar; resultado de $id guardado em $f (o próximo oute approve/watch entrega)" >&2
   return 1
 }
-# resultados que ficaram no host (container fora quando foram decididos): uma tentativa cada, sem espera
+# resultados que ficaram no host (container fora quando foram decididos). $1 = segundos de espera pelo container
+# (default 1 = uma tentativa, em silêncio, a cada volta do --watch); com espera, avisa e, se o primeiro não sair,
+# os demais tentam uma vez só (o container continua fora)
 approve_flush() {
-  local f
-  for f in "$approve_dir"/runs/*.result; do [[ -e "$f" ]] && { approve_deliver "$f" 1 2>/dev/null || true; }; done
+  local tries="${1:-1}" f
+  for f in "$approve_dir"/runs/*.result; do
+    [[ -e "$f" ]] || continue
+    if (( tries > 1 )); then approve_deliver "$f" "$tries" || tries=1
+    else approve_deliver "$f" 1 2>/dev/null || true; fi
+  done
   return 0
 }
 approve_one() {
@@ -454,6 +460,9 @@ approve_one() {
   esac
 }
 approve() {
+  # #210: resultado guardado no host sai antes da guarda. `oute approve` chamado com o container fora (o script
+  # aprovado reiniciou o agent) espera ele voltar por até OUTE_APPROVE_WAIT s e entrega, em vez de recusar de cara
+  compgen -G "$approve_dir/runs/*.result" >/dev/null && approve_flush "${OUTE_APPROVE_WAIT:-90}"
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
   local watch=0 id seen=""; [[ "${1:-}" == --watch || "${1:-}" == -w ]] && watch=1
   while :; do

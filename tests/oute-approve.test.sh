@@ -100,14 +100,30 @@ check "sem container: avisa que o resultado ficou no host" has "resultado de $id
 check "sem container: resultado guardado em runs/<id>.done.result" grep -q '^# rc: 0$' "$runs_dir/$id.done.result"
 check "sem container: approve.log registra mesmo assim" grep -q "$id.*exec.rc=0" "$TMP/host/.oute/approve/approve.log"
 check "sem container: inbox ainda sem .out" test ! -e "$TMP/ctr/inbox/$id.out"
-touch "$F_UP"; : > "$OUTE_APPROVE_TTY"
+# oute approve avulso chamado com o container ainda fora: espera ele voltar e entrega (não morre na guarda)
+: > "$OUTE_APPROVE_TTY"; ( sleep 2; touch "$F_UP" ) >/dev/null 2>&1 &
 run_approve 20
+check "próxima rodada (container fora ao chamar): espera e termina com 0" test "$RC" = 0
 check "próxima rodada: não mostra o pedido de novo" bash -c '! grep -q "pedido $1" <<<"$2"' _ "$id" "$OUT"
 check "próxima rodada: entrega o .out guardado" bash -c 'grep -q "^# rc: 0$" <<<"$1" && grep -q rodou <<<"$1"' _ "$(inbox "$id")"
 check "próxima rodada: pedido em outbox/done e nada pendente" \
   bash -c 'test -f "$1/done/$2.sh" -a ! -e "$1/$2.sh" && ! compgen -G "$3/*.result" >/dev/null' _ "$TMP/ctr/outbox" "$id" "$runs_dir"
 check "próxima rodada: script não rodou de novo" test "$(wc -l < "$F_RUNS" | tr -d ' ')" = 1
 check "próxima rodada: evento canal emitido na entrega" grep -qx "canal $id" "$F_EMITS"
+
+# --- 2b. container fora e não volta: approve avulso tenta, avisa, morre na guarda e o resultado segue no host
+reset; id=20260930-020303-container-nao-volta
+propose "$id" <<'SH'
+echo x >> "$F_RUNS"
+rm -f "$F_UP"
+SH
+echo s > "$OUTE_APPROVE_TTY"
+OUTE_APPROVE_WAIT=1 run_approve 20
+: > "$OUTE_APPROVE_TTY"
+OUTE_APPROVE_WAIT=2 run_approve 20
+check "sem volta: approve avulso sai com erro de container fora" bash -c '[[ $1 != 0 ]] && grep -q "não está rodando" <<<"$2"' _ "$RC" "$OUT"
+check "sem volta: avisou que o resultado segue guardado" has "resultado de $id guardado"
+check "sem volta: resultado continua no host" test -f "$runs_dir/$id.done.result"
 
 # --- 3. recusa: mesma entrega (rc 126, outbox/rejected), nada executado
 reset; id=20260930-030303-recusado
