@@ -1,76 +1,76 @@
-# ADR-02 — Roteamento de modelos (Jev + OpenRouter + guardrail)
+# ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-23 (revisado no mesmo dia: allowlist via hosts neutros; perfis publicados como presets) · 2026-09-25: detecção de divergência com o guardrail (#16), Goose fora, A/B Jev × `openrouter/auto` (#15) — **fica o Jev** · 2026-09-26: presets por papel descartados (#14)
+Status: proposto · 2026-09-30 (#215, gate de `arch` do Bardi) · substitui o roteamento Jev + OpenRouter de 2026-09-23 a 2026-09-26 (ver **Histórico**)
 
 ## Decisão
-Seleção em **2 etapas** por request, para clientes OpenAI-compatible (hoje o Pi):
-1. **Jev** (`typesafe/jev-1.13`, OpenRouter Decisions API `/api/alpha/decisions`) escolhe o **perfil** pela tarefa. Se falhar, vai para o perfil mais barato.
-2. **OpenRouter** escolhe o **modelo** dentro do perfil: `models` (≤ 3, limite do OpenRouter) + `provider.sort = {by, partition: "none"}`, que ordena os endpoints de todos os modelos ao vivo e faz fallback.
+O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **Pi, jev-router, LiteLLM e OpenRouter saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
 
-Cada padrão do perfil contribui com **1 modelo** (o mais novo elegível). Assim os perfis misturam famílias, e o fallback é entre modelos diferentes.
+### Ordem de precedência
+1. **`--model` / `--agent` explícitos** vencem tudo. `--agent codex` força o Codex.
+2. **Exceção por label de tipo** na issue, antes da fase:
+   - `kaizen` → Haiku (issue de lição, de qualquer origem; hoje elas carregam `aidlc:spec` e cairiam no Opus);
+   - `docs` → Haiku (doc que não é ADR: README, `AGENTS.md`, `CONTEXT.md`, guias). ADR segue a fase dele (`arch`).
+3. **Fase**, pelo label `aidlc:<fase>` da issue (tabela abaixo).
+4. **Jev**, só quando não há label de fase: sessão avulsa sem issue, ou issue sem `aidlc:<fase>`. O Jev classifica a fase pelo texto da tarefa e a tabela dá o modelo. Confiança < 0,6 ou falha do Jev → Sonnet.
 
-## A/B Jev × `openrouter/auto` (#15, 2026-09-25) — decisão: fica o Jev (Bardi)
-- **Infra pronta e desligada:** `OUTE_AB_MODE` no jev-router aceita `off` (padrão, em uso), `split` e `auto`. No `split`, o sorteio é estável por conversa (hash da 1ª mensagem) e a fração vai para o `auto` via `OUTE_AB_AUTO_SHARE`.
-- **Braço auto:** modelo `or-auto` (gerado pelo router-sync) → `openrouter/auto` com o plugin `auto-router`. `allowed_models` = o mesmo pool que o Jev teria para aquela request (perfis elegíveis por tools/vision/max_tokens), com ZDR, `data_collection: deny` e `session_id` por conversa.
-- **Medição:** o span `jev.decision` carrega `oute.ab_arm` e `oute.ab_mode`; no Langfuse, o trace é `ab-auto` × `jev:<perfil>`. Custo, modelo e provedor vêm do `/generation`.
-- **Único dado coletado** (mesmo prompt trivial, "resuma em 1 frase o que é um A/B test", com tools):
+### Tabela fase → modelo
+| fase | Claude | reserva (Codex) |
+|---|---|---|
+| `strat` `intent` `arch` `spec` | `claude-opus-5-5` | `gpt-6-astra`, esforço `high` |
+| `build` `qa` `design` `plan` `ship` `iter` | `claude-sonnet-5-5` | `gpt-6-sol`, esforço `high` |
+| `ops` `ctx` `learn` | `claude-haiku-4-5-20251001` | `gpt-6-luna`, esforço `medium` |
+
+- A tabela é indexada só por fase do ADR-07. `kaizen` e `docs` não são fases: entram como exceção (acima), com a reserva da linha do Haiku.
+- `ship` e `iter` ficam no Sonnet: release/deploy e reescrita do que já existe não descem para o Haiku.
+- **Ids exatos, sem alias** (`opus`, `sonnet`): a troca de versão é uma mudança visível na tabela, não um efeito colateral de upgrade do CLI. Todo id da tabela precisa existir no CLI instalado; o check é a #220 (checklist da `oute-aidlc-ship-release` ou nível 0 da #52).
+- A série `gpt-5.x` do Codex fica fora (marcada como antiga pelo próprio CLI).
+- O `"model": "opus"` do `~/.claude/settings.json` continua como padrão **fora do seletor** (Claude aberto na mão, sem `oute-task`).
+- A tabela vive em `config/` (sem release: `git pull` + `oute down/up`).
+
+### Reserva (Codex)
+A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
+- **`indisponivel`:** o Claude falha ao abrir (erro, auth);
+- **`cota`:** qualquer janela da assinatura do Claude ≥ 90% (medição na #55).
+
+### Fable 5.1 fora da tabela
+O `claude-fable-5-1` (um nível acima do Opus, 2,5× o preço dele na API) não entra em nenhuma linha. As fases do Opus são conversa com gate humano, onde o ganho do Fable (tarefa longa e autônoma) pesa pouco, e o consumo maior aproximaria o gatilho de cota. Uso só por `--model claude-fable-5-1`. Reavaliar com o consumo de cota das fases do Opus medido no agent-studio.
+
+### Jev direto na TypeSafe
+- O Jev (`jev-1.13.0`) é chamado **direto na API da TypeSafe** (`POST https://api.typesafe.ai/v1/systemone`, primitivo `choice` → opção + confiança). Sem OpenRouter. US$ 0,042/M tokens de entrada, saída grátis.
+- Só o texto da tarefa vai ao Jev. Nenhum token de assinatura passa por proxy.
+- Chave da TypeSafe no vault (pasta `oute-agent`) → `agent_env`.
+- Skill da TypeSafe (`typesafe-ai/skills`): nada de `claude plugin install`/`npx skills add` (nada do marketplace). Fork revisado e pinado em `addons/skills/`, ou só referência no build.
+
+### Telemetria (ADR-04, ADR-08)
+Cada escolha gera um evento com: fase, origem da escolha (`manual`/`label`/`jev`), confiança do Jev, agente, modelo, esforço e motivo da reserva (`indisponivel`/`cota`). Vai ao bucket e ao agent-studio.
+
+### Fora
+- **Revisão cruzada** (auditoria de um PR pelo outro provedor): descartada.
+- Mudar o comportamento do ai-memory: ele usa provedor próprio (`AI_MEMORY_LLM_PROVIDER`) e não depende do router.
+
+Implementação: #219 (seletor), com #217 (Pi), #218 (router) e #55 (cota).
+
+## Histórico
+
+### Roteamento Jev + OpenRouter (2026-09-23 a 2026-09-30)
+Vigorou para clientes OpenAI-compatible (na prática, só o Pi); Claude Code e Codex sempre ficaram fora, por assinatura. Sai com o Pi (#217, #218).
+
+- **Duas etapas por request:** o **Jev** (`typesafe/jev-1.13`, Decisions API do OpenRouter `/api/alpha/decisions`) escolhia o **perfil** pela tarefa (falha → perfil mais barato); o **OpenRouter** escolhia o **modelo** dentro do perfil (`models` ≤ 3 + `provider.sort = {by, partition: "none"}`, com fallback entre endpoints). Cada padrão do perfil contribuía com 1 modelo, para o fallback ser entre famílias diferentes.
+- **Perfis** (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) publicados como presets `@preset/oute-<perfil>` (ZDR, `data_collection: deny`). Presets por papel (reviewer/architect) foram descartados em 2026-09-26 (#14): papel e perfil são eixos ortogonais; persona fica em prompt versionado.
+- **Guardrail do OpenRouter como fonte de verdade** (US$ 15/mês, ZDR, sem treino), espelhado em `config/litellm/policy.yaml` e checado por `oute router-sync --check-guardrail` com a Management key, que só o host lia (#16). Modelos abertos só por hosts neutros; nada de criadores 1st-party de terceiros; `*:free` e `*:batch` fora.
+- **Catálogo vivo:** `oute router-sync` em todo `oute up` e diariamente às 04:00, gerando `router.yaml`, `config.yaml`, `candidates.json` e `catalog.json` fora do git. LiteLLM fixado por digest (1.103.0).
+- **Lições da API:** `models` > 3 → HTTP 400; `partition` vai dentro de `provider.sort`; o Jev não aparece em `/models` (só dá para validar com chamada real); presets salvam por `POST /api/v1/presets/{slug}/chat/completions` e são usados via `model: "@preset/<slug>"`; guardrails só se leem com Management key.
+- **Por que saiu:** na rodada `swarm-0929-2356`, a sessão Pi da #203 caiu duas vezes por erro do modelo servido (Groq chamando ferramenta inexistente; Moonshot recusando o schema das ferramentas do Pi), sem fallback útil; ajustes no guardrail custaram 8 dry-runs do `router-sync`, e o `oute up` do #211 gravou um roteamento degradado.
+
+### A/B Jev × `openrouter/auto` (#15, 2026-09-25) — ficou o Jev
+- Infra: `OUTE_AB_MODE` no jev-router (`off`, `split`, `auto`), sorteio estável por conversa, fração por `OUTE_AB_AUTO_SHARE`. O braço `auto` usava `openrouter/auto` com `allowed_models` = o pool que o Jev teria.
+- Medição pelo span `jev.decision` (`oute.ab_arm`, `oute.ab_mode`), com custo, modelo e provedor vindos do `/generation`.
+- Único dado coletado (mesmo prompt trivial, com tools):
 
   | braço | escolha | modelo servido | custo |
   |---|---|---|---|
   | auto | — | `moonshotai/kimi-k2.6` (BaseTen) | US$ 0,0118 |
   | Jev | perfil `cheap` | `openai/gpt-oss-20b` (DeepInfra) | US$ 0,00036 |
 
-  Ou seja, o `auto` ficou **~33× mais caro** com a mesma qualidade percebida. Ele escolhe pelo uso da comunidade, não por custo. O Jev ainda cobra ~US$ 0,0001 por decisão, fora da conta.
-- **Não avaliado:** qualidade em tarefas reais. Opções guardadas para quando voltar ao tema: suíte fixa de ~10 tarefas com julgamento cego do Bardi (recomendada), sinais indiretos do uso real, ou LLM como juiz. Também dá para testar o `auto` com `cost_tier: low`.
-- Para retomar: `OUTE_AB_MODE=split` no `.env` do oute-server + `oute down/up`.
-
-## Perfis = presets do OpenRouter (opção A, 2026-09-23)
-- O `router-sync` publica cada perfil como **`@preset/oute-<perfil>`** (model, models, `provider: {data_collection: deny, zdr: true, sort}`).
-- Publica só quando a config mudou (GET compara → POST de nova versão); `--no-presets` desliga.
-- O LiteLLM (`config.yaml`) aponta para `openrouter/@preset/oute-<perfil>`; o `jev_hook` não injeta `extra_body` quando o perfil tem preset. Sem preset (falha na publicação), volta ao modelo primário + `extra_body`.
-- Vantagens: config de roteamento versionada e visível no painel do OpenRouter; ZDR/no-training reforçados por request além do guardrail; histórico de versões por perfil.
-- O modelo real servido, o provedor e o custo vêm do `jev.decision` enriquecido via `/generation` (ADR-04).
-- **Presets por papel (opção B) — descartado (#14 fechada, 2026-09-26).** Papel (reviewer/architect) e perfil (reasoning/coder/cheap) são eixos ortogonais: preset por papel ou fixa modelo (mata o roteamento por tarefa) ou vira matriz papel × perfil. Claude Code/Codex não passam pelo OpenRouter, então system prompt em preset só afetaria o Pi. Persona fica em prompt versionado no repo (`swarm-worker.md`) e, depois, em addons do tipo persona (ADR-06). Se um papel precisar de viés de perfil: header/metadata `x-oute-profile` honrado pelo `jev_hook` — só quando houver caso real.
-
-## Guardrail é a fonte de verdade
-- Guardrail "oute-agent guardrail - core" (US$ 15/mês, ZDR para todos os modelos, sem treino). A key do oute-agent no vault está sob ele (`/models/user` → 175 modelos).
-- **Política de provedores:** nada direto de criadores 1st-party de terceiros (Moonshot, DeepSeek etc.). Modelos abertos vêm por **hosts neutros**: Fireworks, Together, DeepInfra, Baseten, Groq, Cerebras. Criadores que servem os próprios modelos: xAI, Z.ai, Alibaba, Mistral, MiniMax, Xiaomi. TypeSafe = Jev.
-- Anthropic/OpenAI/Google fora do router; Claude Code e Codex seguem por assinatura própria.
-- Exclusões: `*:free` (rate limit, retenção/treino), `*:batch` (assíncrono).
-- Efeito do ZDR: endpoints do xAI que retêm dados ficam fora, então o Grok hoje não entra em nenhum perfil.
-
-### Detecção de divergência `policy.yaml` × guardrail (#16, 2026-09-25)
-- `policy.yaml: guardrail` guarda o nome exato do guardrail.
-- O `router-sync` lê o guardrail via **Management API** (`GET /api/v1/guardrails`) e compara:
-  - `providers_allow` × `allowed_providers`, nos dois sentidos;
-  - provedores do `policy.yaml` que estão em `ignored_providers`;
-  - ZDR desligado.
-- Sync normal: só avisa (também no log do cron diário). `oute router-sync --check-guardrail`: só checa, não grava nem reinicia nada, e retorna 0 (alinhado), 2 (divergente) ou 1 (não verificado).
-- **Credencial:** `OPENROUTER_MGMT_KEY`, na nota `openrouter-mgmt` da pasta **`oute-admin`** do vault. A Management key pode criar chaves e editar guardrails, por isso **nunca vai ao container dos agentes**: só o host a lê, e só para esse GET. Sem ela, o sync avisa que não verificou e segue.
-- Validado em 2026-09-25: alinhado (13 provedores).
-
-## Perfis vigentes (sync 2026-09-25)
-| perfil | sort | modelos |
-|---|---|---|
-| reasoning | ordem | glm-5.3, kimi-k2.6, deepseek-v3.2 |
-| coder | throughput | glm-5.3, kimi-k2.7-code, qwen3-coder-plus |
-| coder-fast | latency | gpt-oss-120b, devstral-2512, qwen3-coder-flash |
-| long-context | price | minimax-m3, qwen-plus, qwen3-coder-plus |
-| cheap | price | gpt-oss-20b, mistral-small-2603, deepseek-v3.2 |
-| vision | price | qwen3-vl-32b, glm-4.6v, llama-4-maverick |
-
-Preferências do Bardi: GLM, Kimi, DeepSeek, Grok. Padrões com `[0-9]` no fim pegam versões "cheias" (sem -flash/-code/-air).
-
-## Catálogo vivo
-- `oute router-sync`: `/providers`, `/models`, `/models/user`, `/models/{id}/endpoints` + probe real do Jev → `router.yaml`, `config.yaml` (inclui `or-auto`), `candidates.json`, `catalog.json` (fora do git; fonte = `policy.yaml`) + publicação dos presets + checagem do guardrail.
-- Roda em todo `oute up` (se falhar, usa o catálogo anterior) e diariamente às 04:00 (`oute schedule`).
-- Imagem usada pelo sync: a mesma do jev-router, LiteLLM fixado por digest (1.103.0).
-
-## Lições da API
-- `models` > 3 → HTTP 400.
-- `partition` vai dentro de `provider.sort` como objeto `{by, partition}`.
-- O LiteLLM repassa `extra_body` para o OpenRouter sem problema (inclusive `plugins` e `session_id` do auto-router).
-- O Jev não aparece em `/models` (é Decisions API), então só dá para validar com chamada real.
-- Presets: `POST /api/v1/presets/{slug}/chat/completions` salva (não executa); `GET /api/v1/presets/{slug}` lê; uso via `model: "@preset/<slug>"`.
-- Guardrails: leitura só com Management API key (`GET /guardrails`, campos `allowed_providers`, `ignored_providers`, `enforce_zdr*`).
-- `openrouter/auto`: pelo LiteLLM é `openrouter/openrouter/auto`; o `allowed_models` aceita curingas e sem custo extra de roteamento.
+  O `auto` saiu ~33× mais caro com a mesma qualidade percebida: escolhe pelo uso da comunidade, não por custo. Qualidade em tarefas reais nunca foi avaliada.
+- Decisão do Bardi: ficou o Jev. O tema acabou com a saída do OpenRouter.
