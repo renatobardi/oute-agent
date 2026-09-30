@@ -101,7 +101,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 
 Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
 
-`claude` e `codex` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo instalador oficial de cada um (`oute-agents-install`), e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex com `codex update` quando avisa. O Pi saiu do stack (#217): `pi`, `oute-task` e `oute-swarm spawn` pedidos com o Pi só respondem com erro; o `~/.pi` antigo fica no volume, sem ser tocado. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
+`claude` e `codex` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo `oute-agents-install` sem `curl | sh` (#199): o claude a partir da reserva da imagem (`claude install`), o codex pelo `install.sh` da release fixa, conferido por sha256, e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex com `codex update` quando avisa. O Pi saiu do stack (#217): `pi`, `oute-task` e `oute-swarm spawn` pedidos com o Pi só respondem com erro; o `~/.pi` antigo fica no volume, sem ser tocado. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, com versão fixa no `Dockerfile` (#200), usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
 
 ## Roteamento de modelos (ADR-02)
 
