@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Instala claude, codex e pi no home pelo instalador oficial de cada um (#195). No home (volume oute-home) cada agente
+# Instala claude e codex no home pelo instalador oficial de cada um (#195). No home (volume oute-home) cada agente
 # se atualiza sozinho como `oute`, sem sudo, e a versão nova sobrevive a `oute down/up`. A imagem só traz uma cópia de
 # reserva em /opt/oute/agents (fora do PATH), que o shim usa enquanto o agente não está em ~/.local/bin.
 # Idempotente: agente já presente em ~/.local/bin fica como está (quem atualiza é ele mesmo). O entrypoint chama em
 # segundo plano; sem rede, só avisa e a próxima subida tenta de novo.
-# Uso: oute-agents-install [claude|codex|pi ...]   (sem argumento: os três). Sai 1 se algum falhou.
+# Uso: oute-agents-install [claude|codex ...]   (sem argumento: os dois). Sai 1 se algum falhou.
 set -uo pipefail
 
 bin="${OUTE_AGENTS_USER_BIN:-$HOME/.local/bin}"
@@ -13,7 +13,7 @@ shims="${OUTE_SHIMS_DIR:-/usr/local/lib/oute/shims}"
 state="$HOME/.oute"
 log() { printf '[oute-agents] %s\n' "$*" >&2; }
 
-# PATH dos instaladores: sem os shims nem a reserva (eles achariam um "claude/codex/pi já instalado" e tentariam migrar
+# PATH dos instaladores: sem os shims nem a reserva (eles achariam um "claude/codex já instalado" e tentariam migrar
 # ou parar) e com ~/.local/bin (assim nenhum instalador mexe em ~/.profile ou ~/.bashrc).
 path=":$PATH:"
 for d in "$shims" "$fallback"; do path="${path//:$d:/:}"; done
@@ -24,7 +24,6 @@ install_one() {
   case "$1" in
     claude) curl -fsSL https://claude.ai/install.sh | bash ;;
     codex)  curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh ;;
-    pi)     curl -fsSL https://pi.dev/install.sh | sh ;;
   esac
 }
 
@@ -32,10 +31,14 @@ mkdir -p "$state" "$bin"
 exec 9>"$state/agents-install.lock"
 flock -n 9 || { log "outra instalação em andamento; saindo"; exit 0; }
 
-[[ $# -gt 0 ]] || set -- claude codex pi
+[[ $# -gt 0 ]] || set -- claude codex
 rc=0
 for a in "$@"; do
-  case "$a" in claude|codex|pi) ;; *) log "agente desconhecido: $a"; rc=1; continue ;; esac
+  case "$a" in
+    claude|codex) ;;
+    pi) log "Pi saiu do stack (#217), use claude ou codex"; rc=1; continue ;;
+    *) log "agente desconhecido: $a"; rc=1; continue ;;
+  esac
   if [[ -x "$bin/$a" ]]; then
     log "$a: já instalado em $bin (atualiza sozinho)"
     continue

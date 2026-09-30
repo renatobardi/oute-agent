@@ -26,7 +26,7 @@ O script é `scripts/verify-host.sh`, nesta pasta da skill (no container: `/opt/
 ```bash
 S=/opt/oute/addons/skills/oute-aidlc-ship-verify/scripts/verify-host.sh
 { printf 'EXPECTED=%q\n' '<esperada>'; cat "$S"; } \
-  | OUTE_PROPOSE_AGENT=<claude|codex|pi> oute-propose "ship: verificar deploy v<esperada>"
+  | OUTE_PROPOSE_AGENT=<claude|codex> oute-propose "ship: verificar deploy v<esperada>"
 ```
 
 `WINDOW_MIN=<min>` na mesma linha do `EXPECTED` muda a janela da telemetria (padrão 60). Anote o `id` impresso e espere: `oute-inbox --wait <id>` (código 3 = ainda pendente ou expirou: avise o Bardi que o pedido está na fila do `oute approve` e espere de novo).

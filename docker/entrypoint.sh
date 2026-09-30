@@ -97,26 +97,17 @@ EOF
 
 # ---------------------------------------------------------------- 3. agentes
 setup_agents() {
-  # Pi -> jev-router via provider custom (~/.pi/agent/models.json). Codex/Claude Code ficam com assinatura própria.
-  mkdir -p "$HOME/.pi/agent"
-  export OUTE_ROUTER_KEY="${LITELLM_MASTER_KEY:-sk-oute-local}"
-  # modelos = perfis gerados por `oute router-sync` (config/litellm/candidates.json)
-  local models='[{"id":"jev-router","name":"Jev router (auto)","contextWindow":200000,"maxTokens":32000}]'
-  [[ -s /etc/oute/candidates.json ]] && models="$(cat /etc/oute/candidates.json)"
-  jq -n --arg url "$OUTE_ROUTER_URL" --argjson models "$models" '{
-    providers: { oute: { baseUrl: $url, apiKey: "$OUTE_ROUTER_KEY", api: "openai-completions",
-                         headers: { "X-Oute-Agent": "pi" }, models: $models } }
-  }' > "$HOME/.pi/agent/models.json"
-  # força provider/model default (merge, preserva o resto do settings.json)
-  local sj="$HOME/.pi/agent/settings.json"; [[ -s "$sj" ]] || echo '{}' > "$sj"
-  jq '. + {defaultProvider:"oute", defaultModel:"jev-router"}' "$sj" > "$sj.tmp" && mv "$sj.tmp" "$sj"
+  # Agentes: Claude Code (principal) e Codex (reserva), os dois por assinatura (ADR-02). O Pi saiu (#217): o que ele
+  # deixou em ~/.pi fica no volume, sem ser tocado.
 
   # ai-memory: hooks + MCP em cada agente (idempotente)
   if command -v ai-memory >/dev/null; then
     local url="${AI_MEMORY_SERVER_URL:-http://ai-memory:49374}"
     local tok=(); [[ -n "${AI_MEMORY_AUTH_TOKEN:-}" ]] && tok=(--auth-token "$AI_MEMORY_AUTH_TOKEN")
-    IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-pi,claude-code,codex}"
+    IFS=',' read -ra AGENTS <<< "${OUTE_AGENTS:-claude-code,codex}"
     for a in "${AGENTS[@]}"; do
+      # OUTE_AGENTS antigo no .env do host ainda pode listar o Pi
+      [[ "$a" != pi ]] || { log "OUTE_AGENTS: Pi saiu do stack (#217); ignorado"; continue; }
       # Claude: bridge stdio "session-aware" (manda o id da sessão em cada chamada MCP; servidor em auto_scope per_session)
       local sa=(); [[ "$a" == claude-code ]] && sa=(--session-aware)
       ai-memory install-mcp   --client "$a" --apply --server-url "$url/mcp" "${sa[@]}" "${tok[@]}" >/dev/null 2>&1 || log "ai-memory mcp: $a não suportado"
@@ -150,8 +141,8 @@ setup_agents() {
 
   # canal de aprovação (oute-propose / oute approve): instrução para os agentes, num bloco gerenciado —
   # o resto de cada arquivo (do usuário ou de outras ferramentas) não é tocado
-  mkdir -p "$HOME/outbox" "$HOME/inbox" "$HOME/.pi/agent"
-  local notes; for notes in "$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md" "$HOME/.pi/agent/AGENTS.md"; do
+  mkdir -p "$HOME/outbox" "$HOME/inbox"
+  local notes; for notes in "$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md"; do
     python3 - "$notes" /usr/local/lib/oute/agent-notes.md <<'PY' || log "AVISO: falha ao atualizar $notes"
 import pathlib, re, sys
 path, src = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).read_text().strip()
@@ -244,14 +235,14 @@ case "$MODE" in
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
       grep -q '.oute_env' "$rc" 2>/dev/null || printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$(cat "$rc" 2>/dev/null)" > "$rc"
     done
-    # claude/codex/pi no checkout principal de um repo -> sessão numa worktree própria (oute-task); só shell interativo
+    # claude/codex no checkout principal de um repo -> sessão numa worktree própria (oute-task); só shell interativo
     grep -q 'agent-wrap.sh' "$HOME/.bashrc" 2>/dev/null \
       || printf '\n%s\n' '[ -f /usr/local/lib/oute/agent-wrap.sh ] && . /usr/local/lib/oute/agent-wrap.sh' >> "$HOME/.bashrc"
 
     # oute-emit (#166, #167): reconcilia a inbox e reenvia o spool em segundo plano (a subida não espera)
     flush_spool </dev/null >/dev/null 2>&1 &
 
-    # agentes no home (#195): claude/codex/pi pelo instalador oficial, para se atualizarem sozinhos (a subida não espera)
+    # agentes no home (#195): claude/codex pelo instalador oficial, para se atualizarem sozinhos (a subida não espera)
     mkdir -p "$HOME/.oute"
     oute-agents-install </dev/null >"$HOME/.oute/agents-install.log" 2>&1 &
 

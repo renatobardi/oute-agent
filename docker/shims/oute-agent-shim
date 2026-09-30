@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Shim de claude/codex/pi (vem antes dos binários reais no PATH): abrir o agente no CHECKOUT PRINCIPAL de um
+# Shim de claude/codex (vem antes dos binários reais no PATH): abrir o agente no CHECKOUT PRINCIPAL de um
 # repo git cria uma worktree própria (oute-task) e abre a sessão lá. Vale para shell, herdr (new/restore) etc.
 # Passa direto: worktree, fora de repo, headless (-p/--print/exec…), resume/continue (num resume com id, entra antes na
 # worktree da sessão), subcomandos, sem terminal, OUTE_NO_WORKTREE=1.
 set -uo pipefail
 a="$(basename "$0")"
+# `pi` segue como shim só para avisar (o binário antigo pode continuar em ~/.local/bin, no volume oute-home)
+[[ "$a" != pi ]] || { echo "oute: Pi saiu do stack (#217), use claude ou codex" >&2; exit 1; }
 shims="$(cd "$(dirname "$0")" && pwd)"
 clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
 # Sem o agente no PATH (ainda não instalado em ~/.local/bin pelo oute-agents-install), usa a cópia de reserva da imagem.
@@ -13,7 +15,7 @@ real="$(PATH="$clean_path" command -v "$a")" || { [[ -x "$fallback/$a" ]] && rea
   || { echo "oute: $a não encontrado" >&2; exit 127; }
 pass() { exec "$real" "$@"; }
 
-# Restore do herdr: relança a sessão (`claude --resume <id>`, `codex resume <id>`, `pi --session <id>`) num shell novo,
+# Restore do herdr: relança a sessão (`claude --resume <id>`, `codex resume <id>`) num shell novo,
 # no cwd salvo do pane (o checkout principal, nas abas abertas por oute-task/oute-swarm), sem a env que o oute-task deu.
 # O shim acha o cwd da sessão no transcript e, se for uma worktree de tarefa do mesmo repo, faz cd para ela (#40).
 # Se a worktree tem a marca do oute-task (<git-dir>/oute-swarm-worker), desliga de novo a sugestão de prompt (#39).
@@ -31,9 +33,6 @@ resume_id() {   # id da sessão retomada (vazio se não é resume com id)
           case "$prev" in -c|--config|-m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|-i|--image|--add-dir|--enable|--disable|--remote|--remote-auth-token-env|--local-provider) ;;
             *) printf '%s' "$x"; return ;; esac
         fi ;;
-      pi)
-        case "$prev" in --session) printf '%s' "$x"; return ;; esac
-        case "$x" in --session=*) printf '%s' "${x#--session=}"; return ;; esac ;;
     esac
     prev="$x"
   done
@@ -44,7 +43,6 @@ resume_cwd() {   # cwd gravado no transcript da sessão <id>
   case "$a" in
     claude) f="$(ls -t "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id.jsonl" 2>/dev/null | head -n1)" ;;
     codex)  f="$(find "${CODEX_HOME:-$HOME/.codex}/sessions" -type f -name "rollout-*$id.jsonl" 2>/dev/null | head -n1)" ;;
-    pi)     f="$(find "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/sessions" -type f -name "*_$id*.jsonl" 2>/dev/null | head -n1)" ;;
   esac
   [[ -n "$f" && -f "$f" ]] || return 0
   grep -m1 -o '"cwd":"[^"]*"' "$f" | sed 's/^"cwd":"//; s/"$//'
@@ -83,7 +81,7 @@ resume_in_worktree "$@"
 [[ -t 0 && -t 1 ]] || pass "$@"
 for x in "$@"; do
   case "$x" in
-    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue|--session|--session=*) pass "$@" ;;
+    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue) pass "$@" ;;
   esac
 done
 case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)

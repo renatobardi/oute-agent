@@ -34,7 +34,7 @@ Decisão (Bardi): a identidade de origem é a dupla **máquina + instância**. A
 | `oute.agent` | ver abaixo | `claude` |
 
 - O `oute` resolve os valores no host e os exporta para o compose.
-- O agente recebe `OTEL_RESOURCE_ATTRIBUTES`, e o collector reforça tudo com `resource` upsert (vale também para o jev-router e para o Pi via router).
+- O agente recebe `OTEL_RESOURCE_ATTRIBUTES`, e o collector reforça tudo com `resource` upsert (vale também para o jev-router).
 - **Bucket:** `otel/<sinal>/host=<máquina>/instance=<instância>/year=…/hour=…/`. Os objetos anteriores à 0.7.5, sem `host=/instance=`, ficam onde estão (nada é movido nem apagado).
 - **Langfuse:** a máquina vira `langfuse.environment` (seletor **Environment** nativo, no topo). Máquina e instância também vão em `metadata.host` e `metadata.instance`. No pipeline do Langfuse, o processor `resource` roda antes do `transform/metadata_only` para que o transform enxergue `host.name`.
 - `oute version` mostra a origem.
@@ -45,17 +45,18 @@ Decisão (Bardi): a identidade de origem é a dupla **máquina + instância**. A
 |---|---|---|
 | Claude Code | collector: `service.name == claude-code` | `claude` |
 | Codex | collector: `service.name` casa `^codex` (`codex_exec`, `codex_cli_rs`) | `codex` |
-| Pi (e qualquer cliente do jev-router) | header **`X-Oute-Agent`** na request ao router (o Pi o manda via `headers` no `~/.pi/agent/models.json`, gerado pelo entrypoint); o hook grava no span `jev.decision` | `pi` |
+| Cliente do jev-router | header **`X-Oute-Agent`** na request ao router; o hook grava no span `jev.decision` | o valor do header |
 | Cliente do router sem header | o hook | `unknown` (valor sanitizado: `[a-z0-9_-]`, até 32 caracteres) |
 | Demais spans do jev-router (LiteLLM) | collector: `service.name == jev-router` | `router` |
 
 - **Onde aparece:**
   - Bucket: resource `oute.agent` em traces, logs e métricas, e `span.attributes["oute.agent"]` nos traces.
   - Langfuse: `metadata.agent` do trace (`langfuse.trace.metadata.agent`), filtrável; `oute.agent` também passa pela allowlist de resource.
-  - Log do router: `served agent=pi profile=… model=… cost=…`.
+  - Log do router: `served agent=<cliente> profile=… model=… cost=…`.
 - **Regra para agente novo:** se falar OTel direto, acrescentar o `service.name` no `transform/agent`; se passar pelo jev-router, mandar o header `X-Oute-Agent`.
 - **Validado (0.7.2):** `served agent=pi profile=cheap via=jev model=openai/gpt-oss-20b provider=DeepInfra cost=0.00037435`.
-- **Lição:** logo depois do `oute up`, o LiteLLM leva ~15–30 s para aceitar conexões (o Pi devolve `Connection error.` nesse intervalo).
+- **Lição:** logo depois do `oute up`, o LiteLLM leva ~15–30 s para aceitar conexões (o Pi devolvia `Connection error.` nesse intervalo).
+- **Pi fora do stack (#217, 2026-09-30, ADR-02):** o valor `pi` deixou de ser emitido. Era o único cliente do router, identificado pelo header que o entrypoint gravava na config do Pi. Fica só nos registros anteriores do bucket (nunca apagados) e do agent-studio; leitor de histórico continua aceitando `pi`. O valor `router` segue até a #218.
 
 ## Adendo 2026-09-27 — eventos operacionais: swarm e canal (#124)
 Decisões do grilling de `arch` da #124 (Bardi). **Evento operacional** = fato de um primitivo (rodada do swarm, pedido do canal de aprovação) registrado como log OTel no bucket, com a origem de sempre e `oute.agent`. Não é consumo de modelo. Motivo: as rodadas (`~/.oute/swarm/<id>/`) e o canal (`~/outbox`, `~/inbox`) ficam no volume de cada host, e a `learn` de um host não enxerga o outro.
@@ -123,7 +124,7 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 - **Toda sessão emite**, de rodada ou avulsa. Sessão avulsa = `oute.task.*` sem `oute.swarm.round`.
 - **Identidade:** `oute.task.id` = `<repo>-<slug>-<AAAAMMDDhhmmss>` (UTC), gerado na criação da worktree e gravado no git-dir dela, como a marca `oute-swarm-worker`. O `reopened`, o `removed` e o shim, no restore do herdr, leem de lá. `repo + slug` não serve: o slug se repete depois do `clean`.
 - **Vínculo com o consumo:** antes do `exec`, o `oute-task` acrescenta ao `OTEL_RESOURCE_ATTRIBUTES` `oute.task.id`, `oute.task.repo`, `oute.task.slug` e, em sessão de rodada, `oute.swarm.round`/`oute.swarm.session`. Toda conversa sai marcada. Vale para Claude Code, e para Codex se o SDK dele ler a variável (conferir no `build`). **Pi fica de fora** (a conversa passa pelo jev-router, que não vê o ambiente): #130. Só no bucket; o Langfuse segue a allowlist.
-- **`oute.agent` = quem chamou**, pelo ambiente (marcador de sessão do agente, `OUTE_SWARM_*`). `human` só com terminal interativo e nenhum marcador; na dúvida, `unknown`. O agente da sessão vai em `oute.task.agent` (`claude|codex|pi|shell`).
+- **`oute.agent` = quem chamou**, pelo ambiente (marcador de sessão do agente, `OUTE_SWARM_*`). `human` só com terminal interativo e nenhum marcador; na dúvida, `unknown`. O agente da sessão vai em `oute.task.agent` (`claude|codex|shell`; `pi` até a #217).
 - **Sem backfill:** as sessões passadas já estão no GitHub (branch, PR). Worktree anterior à release ganha id na próxima reabertura, com `oute.task.legacy=true`; se só for removida, o `removed` sai sem `oute.task.id`.
 - Opções descartadas: fim de sessão por processo que espera o agente (muda o primitivo e o restore do herdr o contorna) ou por hook de fim do harness (o Pi não tem); emitir só nas avulsas (a remoção das worktrees de rodada ficaria sem registro); id pelo branch (renomeado no meio da sessão, sem o `oute-task` saber); backfill com hora aproximada (dado errado com cara de certo); `oute.agent` = agente da sessão (quebra a regra "quem causou").
 

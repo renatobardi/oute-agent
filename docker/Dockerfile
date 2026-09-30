@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && sed -i 's/^# *\(en_US.UTF-8\|pt_BR.UTF-8\)/\1/' /etc/locale.gen && locale-gen
 
-# Node (agentes npm: pi, claude-code, codex, firebase-tools, bitwarden cli)
+# Node (agentes npm: claude-code, codex, firebase-tools, bitwarden cli)
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
@@ -58,11 +58,10 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install -g --no-fund --no-audit \
       firebase-tools \
       @bitwarden/cli@${BW_CLI_VERSION}
-# claude/codex/pi (#195): só uma cópia de reserva, fora do PATH. Cada agente vai para o home pelo instalador oficial
+# claude/codex (#195): só uma cópia de reserva, fora do PATH. Cada agente vai para o home pelo instalador oficial
 # (oute-agents-install, na subida) e se atualiza sozinho lá; o shim usa esta cópia enquanto isso não acontece.
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
-      @earendil-works/pi-coding-agent \
       @anthropic-ai/claude-code \
       @openai/codex
 
@@ -123,7 +122,7 @@ COPY docker/oute-emit /usr/local/bin/
 # agentes no home pelo instalador oficial de cada um (#195)
 COPY docker/oute-agents-install /usr/local/bin/
 COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
-# uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex/pi)
+# uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex)
 COPY docker/oute-task /usr/local/bin/
 # sessões paralelas coordenadas (oute-swarm; prompts da coordenadora e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
@@ -133,6 +132,7 @@ COPY docker/comandos.md /usr/local/lib/oute/comandos.md
 COPY docker/oute-container /usr/local/bin/oute
 COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
 COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
+# `pi` continua como shim só para responder que o Pi saiu do stack (#217), mesmo com o binário antigo em ~/.local/bin
 RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute

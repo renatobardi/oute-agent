@@ -53,19 +53,19 @@ Dois lugares, dois conjuntos de comandos:
 ## CONTAINER — sessões e worktrees
 Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 (/workspace/<repo>) fica sempre na branch padrão.
-  claude | codex | pi               no checkout principal: pergunta o nome da tarefa e abre na worktree
+  claude | codex                    no checkout principal: pergunta o nome da tarefa e abre na worktree
                                     (dentro de worktree, -p/exec, --resume: passa direto)
-  oute-task <slug> [claude|codex|pi|shell] ["prompt"]
+  oute-task <slug> [claude|codex|shell] ["prompt"]
                                     cria/reabre /workspace/.worktrees/<repo>-<slug>, branch sessao/<slug>
   oute-task -r <repo> <slug> …      idem, de fora do repo
   oute-task list                    worktrees de tarefa abertas
   oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
-  oute-agents-install [claude|codex|pi]
+  oute-agents-install [claude|codex]
                                     instala o agente no home (~/.local/bin) pelo instalador oficial, onde ele se
                                     atualiza sozinho; a subida já roda em segundo plano (log: ~/.oute/agents-install.log).
                                     Sem ele, vale a cópia de reserva da imagem (/opt/oute/agents). Update: claude
-                                    automático, `codex update`, `pi update`
+                                    automático, `codex update`. O Pi saiu do stack (#217): `pi` só avisa
 
 ## CONTAINER — rodada paralela (oute-swarm)
   oute-swarm <repo> [--max N] [--label L]
@@ -74,7 +74,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
       Merge só quando você pedir.
-  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex|pi] [--force] [--repo R] [--kaizen]
+  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--force] [--repo R] [--kaizen]
       (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]

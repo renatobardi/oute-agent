@@ -3,7 +3,7 @@
 #
 #   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
-#              [--agent claude|codex|pi] [--force]  oute-task + agente na worktree da issue. --repo: outro repo
+#              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --repo: outro repo
 #              [--repo <repo>] [--kaizen]           (padrão: o da rodada); --kaizen: sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
@@ -75,8 +75,12 @@ cmd_spawn() {
       *) if [[ -z "$task" ]]; then task="$1"; elif [[ -z "$instr" ]]; then instr="$1"; else die "argumento a mais: $1"; fi; shift ;;
     esac
   done
-  [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex|pi]'
-  case "$agent" in claude|codex|pi) ;; *) die "agente inválido: $agent" ;; esac
+  [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex]'
+  case "$agent" in
+    claude|codex) ;;
+    pi) die "Pi saiu do stack (#217), use claude ou codex" ;;
+    *) die "agente inválido: $agent" ;;
+  esac
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
   n="${slug%%-*}"
@@ -134,15 +138,15 @@ round_dir() {
 }
 
 # texto do campo de entrada do agente no pane (sem a sugestão esmaecida), numa linha; exit 1 se não achar o campo.
-# claude/pi: entre as duas últimas linhas horizontais (─; a de cima pode trazer rótulo, ex.: "── ⠦ Working ──" do pi),
+# claude: entre as duas últimas linhas horizontais (─; a de cima pode trazer rótulo, ex.: "── ⠦ Working ──"),
 # sem o marcador ❯/>. codex: bloco do último "›", que também marca a opção de listas/diálogos (confiar na pasta, hooks,
-# command center): aí não há campo (exit 1), porque digitar ali escolhe opções. Idem seletor do pi (/model…).
+# command center): aí não há campo (exit 1), porque digitar ali escolhe opções.
 field_text() {
   local raw
   raw="$(herdr pane read "$1" --source visible --format ansi 2>/dev/null)" || return 1
   # 1) tira os códigos ANSI e o texto esmaecido (SGR 2: sugestão/placeholder) até o reset (0/22), mesmo com outros
   #    códigos no meio (o placeholder do codex vem ESC[2m ESC[48;2;…m texto ESC[0m); 38/48/58;2;r;g;b não são SGR 2
-  # 2) braille (U+2800–28FF): animação do composer vazio do codex e spinner do pi; NBSP (depois do ❯) vira espaço
+  # 2) braille (U+2800–28FF): animação do composer vazio do codex e spinners; NBSP (depois do ❯) vira espaço
   printf '%s\n' "$raw" | LC_ALL=C awk '{
       out = ""; s = $0
       while ((i = index(s, "\033[")) > 0) {
@@ -179,11 +183,7 @@ field_text() {
         for (a = b - 1; a >= 1 && !isrule(l[a]); a--) ;
         if (a < 1) exit 1
         out = ""
-        for (j = a + 1; j < b; j++) {
-          # pi: seletor (/model etc.) entre as réguas no lugar do editor; digitar ali filtra/escolhe
-          if (mode == "pi" && l[j] ~ /Enter to (select|confirm)|(Esc|Escape)[^ ]* to cancel/) exit 1
-          out = out " " clean(l[j])
-        }
+        for (j = a + 1; j < b; j++) out = out " " clean(l[j])
       }
       gsub(/  +/, " ", out); gsub(/^ | $/, "", out); print out
     }'

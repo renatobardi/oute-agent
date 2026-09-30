@@ -164,6 +164,11 @@ sw spawn 9-x "instrução" --repo "$TMP/$CASE/nao-existe" --kaizen
 check "repo inexistente: falha"                          [ "$RC" -ne 0 ]
 check "repo inexistente: mensagem clara"                 grep -q "repo não encontrado: $TMP/$CASE/nao-existe" <<<"$ERR"
 check "repo inexistente: nada registrado nem aberto"     [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 2 ]
+gone=pi   # #217: o Pi saiu do stack
+sw spawn 9-y "instrução" --agent "$gone"
+check "agente Pi: falha"                                 [ "$RC" -ne 0 ]
+check "agente Pi: mensagem clara"                        grep -q "Pi saiu do stack (#217), use claude ou codex" <<<"$ERR"
+check "agente Pi: nada registrado nem aberto"            [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 2 ]
 
 # ---------------------------------------------------------------- #170: --max conta só abas abertas
 # 5b. cadeia de issues numa rodada --max 1: o elo seguinte abre depois do `oute-swarm close` do anterior

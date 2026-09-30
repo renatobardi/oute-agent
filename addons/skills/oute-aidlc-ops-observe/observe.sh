@@ -31,7 +31,7 @@ for n in "$HOURS" "$CHOURS" "$BDAYS"; do [[ "$n" =~ ^[0-9]+$ ]] || { echo "obser
 
 LF="${LANGFUSE_HOST:-https://cloud.langfuse.com}"
 BUCKET="${OUTE_OBS_BUCKET:-oci:oute-observability}/otel"
-AGENTS=(claude codex pi router unknown)
+AGENTS=(claude codex router unknown)
 NOW="$(date -u +%s)"
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 W_FROM="$(iso $((NOW - HOURS * 3600)))"; W_TO="$(iso "$NOW")"
@@ -39,10 +39,10 @@ B_FROM="$(iso $((NOW - HOURS * 3600 - BDAYS * 86400)))"
 RC=0
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT  # lotes baixados do bucket vivem só aqui
 
-# agentes esperados neste host: OUTE_AGENTS (pi,claude-code,codex) no vocabulário do oute.agent
+# agentes esperados neste host: OUTE_AGENTS (claude-code,codex) no vocabulário do oute.agent; o Pi saiu (#217)
 expected() {
   local a; IFS=',' read -r -a list <<<"${OUTE_AGENTS:-}"
-  for a in ${list[@]+"${list[@]}"}; do [[ "$a" == claude-code ]] && a=claude; printf '%s\n' "$a"; done
+  for a in ${list[@]+"${list[@]}"}; do [[ "$a" == pi ]] && continue; [[ "$a" == claude-code ]] && a=claude; printf '%s\n' "$a"; done
 }
 
 # ---------------------------------------------------------------- Langfuse (API v2 de métricas)

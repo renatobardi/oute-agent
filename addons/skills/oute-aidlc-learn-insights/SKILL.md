@@ -23,7 +23,7 @@ Esta skill fecha um **ciclo** (glossário do `CONTEXT.md`; ADR-07, adendo "ciclo
 ### 1. Coletar
 ```bash
 "$HOME/.claude/skills/oute-aidlc-learn-insights/collect.sh" all     # Claude
-"$HOME/.agents/skills/oute-aidlc-learn-insights/collect.sh" all     # Codex e Pi
+"$HOME/.agents/skills/oute-aidlc-learn-insights/collect.sh" all     # Codex
 ```
 - A janela padrão vai do fechamento da última issue de ciclo até agora (sem ciclo anterior: 7 dias). `--desde <data>` troca o início. `--help` mostra as seções.
 - Saem: `ciclos`, `GitHub` (issues e PRs de todos os repos do `/workspace` com remote), `rodadas`, `canal` e `telemetria` (que chama o `observe.sh` da `oute-aidlc-ops-observe`).

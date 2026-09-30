@@ -29,7 +29,6 @@ url="${!#}"
 case "$url" in
   https://claude.ai/install.sh) a=claude ;;
   https://chatgpt.com/codex/install.sh) a=codex ;;
-  https://pi.dev/install.sh) a=pi ;;
   *) exit 22 ;;
 esac
 printf '%s\n' "$a" >> "$HOME/curl.calls"
@@ -44,10 +43,11 @@ printf '%s\n' "\${CODEX_NON_INTERACTIVE:-}" > "\$HOME/nonint.$a"
 EOF
 SH
 chmod +x "$STUB/curl"
-for a in claude codex pi; do
+for a in claude codex; do
   printf '#!/bin/sh\necho %s-fallback\n' "$a" > "$FALLBACK/$a"; chmod +x "$FALLBACK/$a"
-  ln -s "$SHIM" "$SHIMS/$a"
 done
+# pi: só o shim (o Pi saiu do stack, #217), como na imagem
+for a in claude codex pi; do ln -s "$SHIM" "$SHIMS/$a"; done
 
 # caso novo: HOME limpo em $H
 fresh() { H="$TMP/$1"; mkdir -p "$H"; }
@@ -64,13 +64,14 @@ said()      { grep -q -- "$1" <<<"$OUT"; }
 # ---------------------------------------------------------------- casos
 fresh first; run
 check "primeira subida: rc 0"                               [ "$RC" -eq 0 ]
-check "primeira subida: instala os três no home"            bash -c "[[ -x '$H/.local/bin/claude' && -x '$H/.local/bin/codex' && -x '$H/.local/bin/pi' ]]"
-check "primeira subida: um instalador por agente, na ordem"  calls "claude codex pi "
+check "primeira subida: instala os dois no home"            bash -c "[[ -x '$H/.local/bin/claude' && -x '$H/.local/bin/codex' ]]"
+check "primeira subida: um instalador por agente, na ordem"  calls "claude codex "
+check "primeira subida: sem o Pi"                           bash -c "[[ ! -e '$H/.local/bin/pi' ]]"
 check "codex roda sem prompt (CODEX_NON_INTERACTIVE=1)"     grep -qx 1 "$H/nonint.codex"
 check "instalador não herda segredos"                       bash -c "! grep -q segredo-teste '$H'/env.*"
 check "PATH do instalador sem os shims"                     bash -c "! grep -q '$SHIMS' '$H'/path.*"
 check "PATH do instalador sem a reserva da imagem"          bash -c "! grep -q '$FALLBACK' '$H'/path.*"
-check "PATH do instalador com ~/.local/bin"                 grep -q "$H/.local/bin" "$H/path.pi"
+check "PATH do instalador com ~/.local/bin"                 grep -q "$H/.local/bin" "$H/path.codex"
 
 rm -f "$H/curl.calls"; run
 check "segunda subida: rc 0"                                [ "$RC" -eq 0 ]
@@ -78,15 +79,19 @@ check "segunda subida: não reinstala (o agente se atualiza)" bash -c "[[ ! -e '
 check "segunda subida: avisa que já está instalado"         said "claude: já instalado"
 
 fresh partial; mkdir -p "$H/.local/bin"; printf '#!/bin/sh\n' > "$H/.local/bin/codex"; chmod +x "$H/.local/bin/codex"; run
-check "só instala o que falta"                              calls "claude pi "
+check "só instala o que falta"                              calls "claude "
 
 fresh failing; touch "$H/fail.codex"; run
 check "instalador falhou: rc 1"                             [ "$RC" -eq 1 ]
 check "instalador falhou: avisa e cita a reserva"           said "AVISO: codex não foi instalado"
-check "instalador falhou: os outros seguem"                 bash -c "[[ -x '$H/.local/bin/claude' && -x '$H/.local/bin/pi' && ! -e '$H/.local/bin/codex' ]]"
+check "instalador falhou: os outros seguem"                 bash -c "[[ -x '$H/.local/bin/claude' && ! -e '$H/.local/bin/codex' ]]"
 
-fresh one; run pi
-check "argumento: instala só o pedido"                      calls "pi "
+fresh one; run codex
+check "argumento: instala só o pedido"                      calls "codex "
+
+fresh gone; run pi
+check "pi: rc 1, sem instalar"                              bash -c "[[ $RC -eq 1 && ! -e '$H/curl.calls' ]]"
+check "pi: erro claro"                                      said "Pi saiu do stack (#217), use claude ou codex"
 
 fresh unknown; run foo
 check "agente desconhecido: rc 1"                           [ "$RC" -eq 1 ]
@@ -104,9 +109,14 @@ check "shim sem o agente no home: usa a reserva"            [ "$OUT" = claude-fa
 printf '#!/bin/sh\necho claude-home\n' > "$H/.local/bin/claude"; chmod +x "$H/.local/bin/claude"
 shim "$FALLBACK" claude
 check "shim com o agente no home: usa o do home"            [ "$OUT" = claude-home ]
-shim "$TMP/nada" pi
+shim "$TMP/nada" codex
 check "shim sem home nem reserva: rc 127"                   [ "$RC" -eq 127 ]
-check "shim sem home nem reserva: avisa"                    said "pi não encontrado"
+check "shim sem home nem reserva: avisa"                    said "codex não encontrado"
+# pi: o binário antigo pode seguir em ~/.local/bin (volume oute-home); o shim vem antes e só avisa
+printf '#!/bin/sh\necho pi-home\n' > "$H/.local/bin/pi"; chmod +x "$H/.local/bin/pi"
+shim "$FALLBACK" pi
+check "shim pi: rc 1, não abre o binário antigo"            bash -c "[[ $RC -eq 1 && '$OUT' != *pi-home* ]]"
+check "shim pi: erro claro"                                 said "Pi saiu do stack (#217), use claude ou codex"
 
 printf '\n%d ok, %d falhas\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

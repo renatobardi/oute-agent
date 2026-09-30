@@ -535,7 +535,7 @@ case "${1:-}" in
   follow)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs -f "${@:2}" ;;
   status)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" ps; queue_status_line ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
-  ssh)     # com comando: -t quando há terminal (CLIs como `pi -p` leem stdin se não for TTY e ficam esperando EOF)
+  ssh)     # com comando: -t quando há terminal (CLIs em modo headless podem ler stdin se não for TTY e ficar esperando EOF)
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
              exec ssh ${t[@]+"${t[@]}"} -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"
            else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
