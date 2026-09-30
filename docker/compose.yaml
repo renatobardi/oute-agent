@@ -290,3 +290,4 @@ networks:
       config:
         - subnet: ${OUTE_NET_SUBNET:-172.19.0.0/16}
           gateway: ${OUTE_NET_GATEWAY:-172.19.0.1}
+          ip_range: ${OUTE_NET_IP_RANGE:-172.19.128.0/17}
