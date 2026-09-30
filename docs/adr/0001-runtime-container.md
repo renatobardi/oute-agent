@@ -1,6 +1,6 @@
 # ADR-01 — Runtime container do Oute Agent
 
-Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02)
+Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02) · agentes no home sem `curl | sh` (#199/#200, 2026-09-30)
 
 ## Contexto
 Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) MacBook (Apple Silicon), servindo de "casa" para agentes de código operados via terminal.
@@ -123,6 +123,17 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
   - Os agentes aprendem o canal por um bloco gerenciado (`<!-- oute:managed:ops-handoff -->`) em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (até a #217, também no arquivo equivalente do Pi).
   - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal serve para diagnóstico, ajuste pontual e para rodar o deploy de um PR já mergeado.
 - **Risco residual:** fadiga de aprovação. Mitigação: um objetivo por pedido e script curto; `--root` sempre em destaque.
+
+## Adendo 2026-09-30 — agentes no home sem `curl | sh` (#199, #200)
+- **Problema:** o `oute-agents-install` (#195) rodava `curl … | sh` dos instaladores oficiais (`claude.ai/install.sh`, `chatgpt.com/codex/install.sh`) sem conferir nada, como `oute` (sudo sem senha no container). E a reserva npm da imagem ia sem versão: o build da `v0.7.26` pegou um `@openai/codex` publicado 23 s antes, ainda 404 no registry, e a tag ficou sem imagem.
+- **SonarCloud do PR #196** (18 achados): os de segurança são os 2 do `Dockerfile:64`, a reserva npm (dependência sem versão travada; `npm install` sem `--ignore-scripts`). O `curl | sh` não foi apontado. Os outros 16 são estilo (14 no teste, 2 no `Dockerfile`). Revisão um a um no PR desta mudança.
+- **Decisão: trocar, não aceitar.** Os dois fornecedores publicam sha256 da versão: o Claude no `manifest.json` de cada versão (`downloads.claude.ai`), o Codex no `digest` de cada asset da release do GitHub (e no `codex-package_SHA256SUMS`).
+  - **Versões fixas** em `ARG`s do `Dockerfile`: `CLAUDE_CODE_VERSION`, `CODEX_VERSION`, e os sha256 `CLAUDE_CODE_SHA256_ARM64/AMD64` e `CODEX_INSTALLER_SHA256`. A reserva npm usa essas versões; o build confere o binário do claude contra o sha256 do manifest (é o mesmo binário do pacote npm da plataforma).
+  - **claude:** `claude install` da reserva conferida, o que o `install.sh` oficial faz depois de baixar e conferir o binário. Sem script baixado.
+  - **codex:** o `install.sh` da release `rust-v<CODEX_VERSION>` (asset do GitHub), conferido contra `CODEX_INSTALLER_SHA256` antes de rodar. Sha256 diferente ou pin ausente: não roda, avisa, e vale a reserva.
+  - Os dois instalam a versão **mais recente** e ela é conferida pelo código do fornecedor (manifest do Claude, `SHA256SUMS` do Codex), como no auto-update. Fixar a versão da cópia do home desligaria o auto-update (o `claude install <versão>` e o `CODEX_RELEASE=<versão>` travam), e tirar o auto-update está fora de escopo (#195).
+  - A release confere os pins com `scripts/agent-pins` (passo 6 da `oute-aidlc-ship-release`).
+- **Resíduo aceito:** o que entra depois do pin (instalação da mais recente e auto-update) é código e checksum do fornecedor, por TLS; o pin só ancora a entrada. O `postinstall` do pacote npm do claude continua rodando no build (é o que copia o binário nativo; o sha256 conferido em seguida cobre o resultado).
 
 ## LXD
 Container LXC precisa `security.nesting=true` e `security.syscalls.intercept.mknod=true` para Docker dentro. (Hoje o oute-agent roda direto no Docker do host oute-server — exceção registrada no lab.)
