@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linker de addons (#66, ADR-06): um link por skill de <addons>/skills nas pastas que cada harness lê.
-#   Claude: <HOME>/.claude/skills/<nome>    Codex e Pi: <HOME>/.agents/skills/<nome>
+#   Claude: <HOME>/.claude/skills/<nome>    Codex: <HOME>/.agents/skills/<nome>
 #
 # Uso: addons-link <pasta de addons> <HOME>
 # Avisos no stderr; sai 0 também quando a pasta de addons não existe (addon nunca derruba o boot).

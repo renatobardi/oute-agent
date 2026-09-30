@@ -5,7 +5,7 @@ description: Investigate a question against high-trust primary sources and captu
 
 Fase: `strat` (AI-DLC, ADR-07) · Outcome: achados citados em Markdown · Gate: Bardi decide o que vira trabalho.
 
-Sem subagente ou agente em segundo plano (ex.: Pi): faça o mesmo trabalho em sequência, nesta sessão.
+Sem subagente ou agente em segundo plano: faça o mesmo trabalho em sequência, nesta sessão.
 
 Spin up a **background agent** to do the research, so you keep working while it reads.
 

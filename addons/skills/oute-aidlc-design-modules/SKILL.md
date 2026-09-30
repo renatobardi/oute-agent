@@ -7,7 +7,7 @@ description: Shared vocabulary for designing deep modules. Use when the user wan
 
 Fase: `design` (AI-DLC, ADR-07) · Outcome: módulo desenhado (interface, seam) · Gate: Bardi aprova a abordagem.
 
-Sem subagente ou agente em segundo plano (ex.: Pi): faça o mesmo trabalho em sequência, nesta sessão.
+Sem subagente ou agente em segundo plano: faça o mesmo trabalho em sequência, nesta sessão.
 
 Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and testability for everyone.
 

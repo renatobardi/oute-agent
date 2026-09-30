@@ -1,6 +1,6 @@
 # oute-agent
 
-Runtime em container para agentes de código — **herdr + Pi + Claude Code + Codex** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
+Runtime em container para agentes de código — **herdr + Claude Code + Codex** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
 
 Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime-container.md`, `0002-roteamento-modelos.md`, `0003-storage-oci.md`, `0004-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
 
@@ -99,14 +99,14 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute sync-shared` | (re)monta o bucket |
 | `oute lock` / `version` | tranca o vault e apaga a sessão em cache das versões antigas / versão repo × imagem |
 
-Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
+Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
 
-`claude`, `codex` e `pi` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo instalador oficial de cada um (`oute-agents-install`), e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex e o Pi com `codex update` e `pi update` quando avisam. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
+`claude` e `codex` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo instalador oficial de cada um (`oute-agents-install`), e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex com `codex update` quando avisa. O Pi saiu do stack (#217): `pi`, `oute-task` e `oute-swarm spawn` pedidos com o Pi só respondem com erro; o `~/.pi` antigo fica no volume, sem ser tocado. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
 
 ## Roteamento de modelos (ADR-02)
 
 - `claude` e `codex`: assinatura própria (login 1x, persiste no volume `oute-home`). Fora do OpenRouter.
-- `pi` e qualquer cliente OpenAI-compatible → `http://jev-router:4000/v1`:
+- Cliente OpenAI-compatible → `http://jev-router:4000/v1` (nenhum no stack desde a saída do Pi, #217; o router sai na #218):
   - `model: jev-router` → **Jev** (Decisions API) escolhe o perfil (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) → preset **`@preset/oute-<perfil>`** no OpenRouter escolhe o modelo (até 3 + `provider.sort`, com fallback, ZDR).
   - `model: <perfil>` → pula o Jev.
 - Editar perfis/provedores: `config/litellm/policy.yaml` → `oute router-sync --dry-run` → `oute router-sync`.
@@ -115,7 +115,7 @@ Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `a
 ## Observabilidade (ADR-04)
 
 `otel-collector` (sem porta publicada) recebe OTLP de Claude Code (métricas, eventos, traces), Codex (eventos) e jev-router.
-- **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex | pi | router). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
+- **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex | router; `pi` só em registro anterior à #217). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
 - **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/host=<máquina>/instance=<instância>/year=…/hour=…/` (gzip, lotes de 5 min). Até a 0.7.4 não havia `host=/instance=` no caminho; esses objetos ficam onde estão.
 - **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events, sem spans internos do LiteLLM. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
 - Span **`jev.decision`** (trace `jev:<perfil>`): perfil e via do Jev, modelos candidatos, sinais, tokens e — via `GET /api/v1/generation` do OpenRouter, em background — **modelo servido, provedor, custo (US$) e latência**.
@@ -145,7 +145,7 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 ```
 - Mac: aba do terminal com `oute watch` ao lado do herdr. oute-server: `oute watch` no servidor, ou do Mac `oute watch oute-server`. **Nunca dentro do herdr** — ele roda no container, e o agente poderia aprovar a si mesmo.
 - O que roda é exatamente o que foi mostrado (o script é copiado para o host antes de exibir). Registro em `~/.oute/approve/approve.log` e cópia de cada script/saída em `~/.oute/approve/runs/`.
-- Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` e `~/.pi/agent/AGENTS.md` (o resto desses arquivos não é tocado).
+- Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (o resto desses arquivos não é tocado).
 - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal é para diagnóstico, ajuste pontual e rodar o deploy de PR mergeado.
 
 ## Segurança

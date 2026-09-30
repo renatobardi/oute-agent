@@ -23,7 +23,7 @@ services:
       # só loopback por padrão: host tem IP público e o Docker publica portas por fora do ufw (#17)
       - "${OUTE_SSH_BIND:-127.0.0.1}:${OUTE_SSH_PORT:-2222}:2222"
     environment:
-      OUTE_AGENTS: ${OUTE_AGENTS:-pi,claude-code,codex}
+      OUTE_AGENTS: ${OUTE_AGENTS:-claude-code,codex}
       # agentes sem prompts de aprovação dentro do container (ADR-01); 0 = padrão de cada agente
       OUTE_AGENT_YOLO: ${OUTE_AGENT_YOLO:-1}
       AI_MEMORY_SERVER_URL: http://ai-memory:49374
@@ -57,7 +57,6 @@ services:
       # nunca um diretório comum na home do host gravável pelo container
       - ${OUTE_SHARED_DIR:-oute-shared}:/data/shared
       - ${OUTE_SSH_AUTHORIZED_KEYS:-~/.ssh/id_ed25519.pub}:/etc/oute/authorized_keys:ro
-      - ./config/litellm/candidates.json:/etc/oute/candidates.json:ro
       # addons (ADR-06): skills do checkout, read-only (agente em yolo não reescreve as próprias skills);
       # skill nova entra com git pull + oute down/up, sem release. O entrypoint linka em ~/.claude e ~/.agents.
       - ./addons:/opt/oute/addons:ro
@@ -114,7 +113,7 @@ services:
       # o servidor rejeita Host: fora desta lista; "ai-memory" é o nome DNS na rede oute
       AI_MEMORY_ALLOWED_HOSTS: "localhost,127.0.0.1,::1,ai-memory,oute-ai-memory"
       # escopo das chamadas MCP sem workspace/project: por sessão (Claude manda o id via bridge session-aware);
-      # cliente sem id (Codex, Pi) cai no slot compartilhado, como antes — por isso as notas pedem escopo explícito
+      # cliente sem id (Codex) cai no slot compartilhado, como antes — por isso as notas pedem escopo explícito
       AI_MEMORY_AUTO_SCOPE__MODE: per_session
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
       AI_MEMORY_LLM_PROVIDER: ${AI_MEMORY_LLM_PROVIDER:-}

@@ -25,8 +25,7 @@ slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' |
 agent="${OUTE_PROPOSE_AGENT:-}"
 if [[ -z "$agent" ]]; then
   if [[ "${CLAUDECODE:-}" == 1 ]]; then agent=claude
-  elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then agent=codex
-  elif [[ "${PI_CODING_AGENT:-}" == true ]]; then agent=pi; fi
+  elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then agent=codex; fi
 fi
 agent="$(printf '%s' "$agent" | tr -d '\000-\037\177' | cut -c1-32)"
 id="$(date -u +%Y%m%d-%H%M%S)-${slug:-pedido}"

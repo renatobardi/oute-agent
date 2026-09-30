@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Fase: `arch` (AI-DLC, ADR-07) · Outcome: oportunidades de aprofundamento escolhidas · Gate: Bardi escolhe qual seguir.
 
-Sem subagente ou agente em segundo plano (ex.: Pi): faça o mesmo trabalho em sequência, nesta sessão.
+Sem subagente ou agente em segundo plano: faça o mesmo trabalho em sequência, nesta sessão.
 
 Surface architectural friction and propose **deepening opportunities** — refactors that turn shallow modules into deep ones. The aim is testability and AI-navigability.
 

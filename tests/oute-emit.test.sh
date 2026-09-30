@@ -49,8 +49,11 @@ CLAUDECODE=1 propose "$H" "pelo ambiente"
 check "propose: agente pelo ambiente (claude)"         [ "$(n '.attrs["oute.canal.title"] == "pelo ambiente" and .attrs["oute.agent"] == "claude"')" -eq 1 ]
 check "propose: cabeçalho com o agente do ambiente"    grep -qx '# agente: claude' "$H/outbox/$OUT.sh"
 sleep 1
-PI_CODING_AGENT=true propose "$H" "pelo pi"
-check "propose: agente pelo ambiente (pi)"             [ "$(n '.attrs["oute.canal.title"] == "pelo pi" and .attrs["oute.agent"] == "pi"')" -eq 1 ]
+CODEX_THREAD_ID=t1 propose "$H" "pelo codex"
+check "propose: agente pelo ambiente (codex)"          [ "$(n '.attrs["oute.canal.title"] == "pelo codex" and .attrs["oute.agent"] == "codex"')" -eq 1 ]
+sleep 1
+PI_CODING_AGENT=true propose "$H" "ambiente do pi"
+check "propose: Pi fora do stack, sem agente (unknown)" [ "$(n '.attrs["oute.canal.title"] == "ambiente do pi" and .attrs["oute.agent"] == "unknown"')" -eq 1 ]
 sleep 1
 propose "$H" "sem agente"
 check "propose: sem agente = unknown no evento"        [ "$(n '.attrs["oute.canal.title"] == "sem agente" and .attrs["oute.agent"] == "unknown"')" -eq 1 ]
@@ -96,7 +99,7 @@ esac
 SH
 chmod +x "$BIN/docker"
 # pedido <id> <script>: pedido pendente no outbox do container
-pedido() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: 2026-09-27T10:00:00Z\n\n%s\n' "$1" "$2" > "$CH/outbox/$1.sh"; }
+pedido() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: codex\n# criado: 2026-09-27T10:00:00Z\n\n%s\n' "$1" "$2" > "$CH/outbox/$1.sh"; }
 # approve <resposta>: oute approve com a resposta digitada no terminal (pty do script(1)); saída em $OUT
 approve() {
   OUT="$(printf '%s\n' "$1" | env CTR_HOME="$CH" OUTE_HOME="$OH" OUTE_HOST=oute-mac \
@@ -160,8 +163,8 @@ printf '# oute-propose\n# titulo: antigo\n# como: root\n# agente: desconhecido\n
 printf '# id: 20260926-015053-antigo\n# rc: 0\n# como: root\n# aprovado: 2026-09-26T01:51:34Z por ubuntu@oute-server\n# sha256: 409eccc983f8\n\nSEGREDO-DA-SAIDA\n# rc: 99\n' > "$BH/inbox/20260926-015053-antigo.out"
 printf '# oute-propose\n# titulo: recusado\n# como: user\n# agente: claude\n# criado: 2026-09-27T02:26:00Z\n\necho nao\n' > "$BH/outbox/rejected/20260927-022600-rec.sh"
 printf '# id: 20260927-022600-rec\n# rc: 126\n# recusado: 2026-09-27T02:26:23Z por ubuntu@oute-server\n# sha256: aaaaaaaaaaaa\n\nrecusado pelo usuário; nada foi executado.\n' > "$BH/inbox/20260927-022600-rec.out"
-printf '# oute-propose\n# titulo: pendente\n# como: user\n# agente: pi\n# criado: 2026-09-27T11:00:00Z\n\necho p\n' > "$BH/outbox/20260927-110000-pend.sh"
-printf '# oute-propose\n# titulo: novo\n# como: user\n# agente: pi\n# criado: 2026-09-27T12:30:00Z\n\necho n\n' > "$BH/outbox/20260927-123000-novo.sh"
+printf '# oute-propose\n# titulo: pendente\n# como: user\n# agente: codex\n# criado: 2026-09-27T11:00:00Z\n\necho p\n' > "$BH/outbox/20260927-110000-pend.sh"
+printf '# oute-propose\n# titulo: novo\n# como: user\n# agente: codex\n# criado: 2026-09-27T12:30:00Z\n\necho n\n' > "$BH/outbox/20260927-123000-novo.sh"
 
 OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)" HOME="$BH" oute-emit backfill >"$TMP/bf.out" 2>"$TMP/bf.err"; RC=$?
 check "backfill fora do ar: rc 0, sem stdout"          [ "$RC" -eq 0 -a ! -s "$TMP/bf.out" ]
@@ -215,7 +218,7 @@ LINES=("2026-09-28T09:00:00Z abertura $RND (repo lab, max 2)" "2026-09-28T09:01:
 ids() { events "$1" | jq -r "select($2) | \"\(.name) \(.attrs[\"oute.event.id\"])\"" | sort; }
 rcv_start "$TMP/r5"
 for ln in "${LINES[@]}"; do printf '%s\n' "$ln" >> "$IR/log"; HOME="$IH" oute-emit swarm "$RND" "$ln"; done
-pedido5() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: %s\n\necho %s\n' "$2" "$3" "$2" > "$IH/outbox/$1.sh"; }
+pedido5() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: codex\n# criado: %s\n\necho %s\n' "$2" "$3" "$2" > "$IH/outbox/$1.sh"; }
 pedido5 20260928-090000-um um 2026-09-28T09:00:00Z
 pedido5 20260928-090000-dois dois 2026-09-28T09:00:00Z
 HOME="$IH" oute-emit canal 20260928-090000-um; HOME="$IH" oute-emit canal 20260928-090000-dois
@@ -272,7 +275,7 @@ id1="$(spooled true | jq -r '.attrs["oute.event.id"]')"
 check "spool: gravado com id, hora do fato e origem"    jqe '.attrs["oute.event.id"] != null and (.time | tonumber / 1e9 | todate) == "2026-09-28T10:02:00Z"
                                                          and .res["host.name"] == "oute-mac" and .res["oute.agent"] == "codex" and .body == "mesma"' <<<"$(spooled true)"
 printf '%s\n' "$TELL" >> "$SR/log"   # a mesma linha de novo, no mesmo segundo: outro fato
-printf '# oute-propose\n# titulo: t\n# como: user\n# agente: pi\n# criado: 2026-09-28T10:03:00Z\n\necho t\n' > "$SH/outbox/20260928-100300-t.sh"
+printf '# oute-propose\n# titulo: t\n# como: user\n# agente: codex\n# criado: 2026-09-28T10:03:00Z\n\necho t\n' > "$SH/outbox/20260928-100300-t.sh"
 HOME="$SH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-100300-t
 check "spool: segunda falha, segundo arquivo"           [ "$(nspool)" -eq 2 ]
 rcv_start "$TMP/r6"
@@ -282,7 +285,7 @@ check "spool: tudo chega e o spool esvazia"             [ "$(n true)" -eq 3 -a "
 check "spool: reenvio antes do evento novo (ordem)"     [ "$(events "$RCV_DIR" | jq -r '.attrs["oute.event.id"]' | head -1)" == "$id1" ]
 check "spool: os dois tell iguais, ids distintos"       [ "$(ids "$RCV_DIR" '.name == "oute.swarm.tell"' | cut -d' ' -f2 | sort -u | grep -c .)" -eq 2 ]
 check "spool: reenviado com o id gravado (nunca recalculado)" [ "$(n ".attrs[\"oute.event.id\"] == \"$id1\" and .body == \"mesma\"")" -eq 1 ]
-check "spool: reenviado com hora do fato e agente originais" [ "$(n '.name == "oute.canal.proposed" and (.time | tonumber / 1e9 | todate) == "2026-09-28T10:03:00Z" and .attrs["oute.agent"] == "pi"')" -eq 1 ]
+check "spool: reenviado com hora do fato e agente originais" [ "$(n '.name == "oute.canal.proposed" and (.time | tonumber / 1e9 | todate) == "2026-09-28T10:03:00Z" and .attrs["oute.agent"] == "codex"')" -eq 1 ]
 check "spool: todo evento leva spool.bytes e spool.dropped" [ "$(n '.attrs["oute.emit.spool.bytes"] != null and .attrs["oute.emit.spool.dropped"] != null')" -eq 3 ]
 check "spool: evento novo com spool vazio (bytes 0)"    [ "$(n '.attrs["oute.event.id"] != "'"$id1"'" and .name == "oute.swarm.tell" and (.attrs["oute.emit.spool.bytes"] | tonumber) == 0')" -eq 1 ]
 check "spool: guardado leva o spool de quando falhou"   [ "$(n '.name == "oute.canal.proposed" and (.attrs["oute.emit.spool.bytes"] | tonumber) > 0')" -eq 1 ]
@@ -290,7 +293,7 @@ rcv_stop
 
 # spool cheio: descarta o evento novo, conta em spool.dropped, avisa em stderr só com OUTE_EMIT_DEBUG=1
 FH="$TMP/full"; mkdir -p "$FH/outbox"
-printf '# oute-propose\n# titulo: f\n# como: user\n# agente: pi\n# criado: 2026-09-28T11:00:00Z\n\necho f\n' > "$FH/outbox/20260928-110000-f.sh"
+printf '# oute-propose\n# titulo: f\n# como: user\n# agente: codex\n# criado: 2026-09-28T11:00:00Z\n\necho f\n' > "$FH/outbox/20260928-110000-f.sh"
 OUT="$(HOME="$FH" OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f 2>&1)"; RC=$?
 check "cheio: rc 0, nada na tela, nada gravado"         [ "$RC" -eq 0 -a -z "$OUT" -a -z "$(ls "$FH/.oute/emit/spool/" 2>/dev/null)" ]
 check "cheio: dropped = 1"                              [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 1 ]
@@ -342,7 +345,7 @@ rcv_stop
 MH="$TMP/misto"; MS="$MH/.oute/emit/spool"; mkdir -p "$MH/outbox"
 for t in bom1 RUIM bom2; do
   id="20260928-120000-$(tr A-Z a-z <<<"$t")"
-  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: pi\n# criado: 2026-09-28T12:00:00Z\n\necho %s\n' "$t" "$t" > "$MH/outbox/$id.sh"
+  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: codex\n# criado: 2026-09-28T12:00:00Z\n\necho %s\n' "$t" "$t" > "$MH/outbox/$id.sh"
   HOME="$MH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal "$id"
 done
 check "4xx em lote: três arquivos no spool"             [ "$(ls "$MS/"*.json | wc -l)" -eq 3 ]

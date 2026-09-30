@@ -9,7 +9,7 @@ Fase: `qa` (ADR-07) · Outcome: PR auditado, com ação recomendada · Gate: mer
 
 Você audita **evidência**, não a narrativa do PR. O resultado é um relatório único, publicado como comentário no PR, com uma ação recomendada. Até o passo 13, esta skill **não altera o PR**: não faz push, não edita o PR nem a issue, não aprova, não faz merge. A única exceção é o passo 14, que só existe com pedido explícito de merge do Bardi na conversa.
 
-Funciona igual em qualquer agente (Claude, Codex, Pi): só usa `git`, `gh`, o shell e leitura de arquivos, em sequência, por um agente só. Se o seu agente tiver subagentes, você pode paralelizar a leitura dos eixos, mas nada aqui depende disso.
+Funciona igual em qualquer agente (Claude, Codex): só usa `git`, `gh`, o shell e leitura de arquivos, em sequência, por um agente só. Se o seu agente tiver subagentes, você pode paralelizar a leitura dos eixos, mas nada aqui depende disso.
 
 Ordem fixa. Não pule etapa (o passo 14 só existe com pedido de merge, veja o passo 13); se uma não se aplica, diga por quê no relatório.
 

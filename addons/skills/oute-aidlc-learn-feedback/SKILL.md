@@ -7,7 +7,7 @@ description: Interactive QA session where user reports bugs or issues conversati
 
 Fase: `learn` (AI-DLC, ADR-07) · Outcome: issues abertas a partir do relato · Gate: Bardi prioriza.
 
-Sem subagente ou agente em segundo plano (ex.: Pi): faça o mesmo trabalho em sequência, nesta sessão.
+Sem subagente ou agente em segundo plano: faça o mesmo trabalho em sequência, nesta sessão.
 
 Run an interactive QA session. The user describes problems they're encountering. You clarify, explore the codebase for context, and file GitHub issues that are durable, user-focused, and use the project's domain language.
 

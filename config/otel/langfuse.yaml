@@ -33,7 +33,7 @@ processors:
           - set(span.attributes["gen_ai.usage.cache_read_input_tokens"], span.attributes["codex.turn.token_usage.cached_input_tokens"]) where span.attributes["codex.turn.token_usage.cached_input_tokens"] != nil
           - set(span.attributes["gen_ai.request.model"], span.attributes["model"]) where span.name == "session_task.turn" and span.attributes["model"] != nil
           - set(span.attributes["langfuse.observation.type"], "generation") where span.name == "session_task.turn"
-          # agente (claude | codex | pi | …) -> metadata do trace, filtrável no Langfuse
+          # agente (claude | codex | router | …) -> metadata do trace, filtrável no Langfuse
           - set(span.attributes["langfuse.trace.metadata.agent"], span.attributes["oute.agent"]) where span.attributes["oute.agent"] != nil
           # origem: máquina = Environment nativo do Langfuse (seletor no topo); máquina/instância também em metadata
           - set(span.attributes["langfuse.environment"], resource.attributes["host.name"]) where resource.attributes["host.name"] != nil
