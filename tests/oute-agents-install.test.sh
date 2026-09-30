@@ -96,7 +96,7 @@ check "primeira subida: um instalador por agente, na ordem"  calls "claude codex
 check "primeira subida: sem o Pi"                           bash -c "[[ ! -e '$H/.local/bin/pi' ]]"
 check "codex roda sem prompt (CODEX_NON_INTERACTIVE=1)"     grep -qx 1 "$H/nonint.codex"
 # as checagens negativas exigem os registros dos dois instaladores (sem eles, `! grep` passaria sozinho)
-both() { [[ -s "$H/$1.claude" && -s "$H/$1.codex" ]]; return $?; }
+both() { local kind="$1"; [[ -s "$H/$kind.claude" && -s "$H/$kind.codex" ]]; return $?; }
 check "instalador não herda segredos"                       bash -c "$(declare -f both); H='$H'; both env && ! grep -q segredo-teste '$H'/env.*"
 check "PATH do instalador sem os shims"                     bash -c "$(declare -f both); H='$H'; both path && ! grep -q '$SHIMS' '$H'/path.*"
 check "PATH do instalador sem a reserva da imagem"          bash -c "$(declare -f both); H='$H'; both path && ! grep -q '$FALLBACK' '$H'/path.*"
