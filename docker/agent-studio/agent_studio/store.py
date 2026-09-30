@@ -8,7 +8,7 @@ import threading
 
 import duckdb
 
-from . import usage as usage_mod
+from . import alerts as alerts_mod, usage as usage_mod
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -169,3 +169,8 @@ class Store:
         """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila."""
         with self.lock:
             return usage_mod.usage(self.con, from_ns, to_ns, prices)
+
+    def alerts(self, at_ns, cfg):
+        """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
+        with self.lock:
+            return alerts_mod.evaluate(self.con, at_ns, cfg)
