@@ -253,12 +253,14 @@ mount_shared() {
   # sessão própria: o --daemon do rclone fica no grupo de processos e na sessão do terminal que rodou o
   # oute up/update, e um Ctrl+C ou SIGHUP nele matava o mount (/data/shared "Transport endpoint is not
   # connected"). setsid(1) não existe no macOS: lá segue como antes.
+  # stdio no log (#210): o rclone guarda um dup do stderr de quem chamou (fd 7, sem CLOEXEC) e o daemon herda;
+  # se esse stderr fosse um pipe (oute up rodado pelo oute approve, `| tee`), o pipe nunca fechava.
   local detach=(); command -v setsid >/dev/null && detach=(setsid -w)
   ${detach[@]+"${detach[@]}"} rclone mount "oci:$bucket" "$dir" --daemon ${extra[@]+"${extra[@]}"} \
     --uid "$CONTAINER_UID" --gid "$(id -g)" --umask 002 \
     --vfs-cache-mode full --vfs-cache-max-size "${OUTE_SHARED_CACHE:-2G}" --vfs-cache-max-age 24h \
     --dir-cache-time 5m --cache-dir "$OUTE_HOME/rclone-cache" \
-    --log-file "$OUTE_HOME/rclone.log" --log-level NOTICE \
+    --log-file "$OUTE_HOME/rclone.log" --log-level NOTICE </dev/null >>"$OUTE_HOME/rclone.log" 2>&1 \
     || { echo "rclone mount falhou (ver $OUTE_HOME/rclone.log); /data/shared fica local" >&2; return 0; }
   export OUTE_SHARED_DIR="$dir"
   echo "storage: oci:$bucket montado em $dir"
@@ -366,13 +368,46 @@ AGENT_CTR=oute-agent
 approve_dir="$OUTE_HOME/approve"
 ctr() { docker exec "$AGENT_CTR" "$@"; }        # leitura (sem -i: não disputa o teclado com o read)
 ctr_in() { docker exec -i "$AGENT_CTR" "$@"; }  # escrita (stdin -> container)
-approve_pending() { ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true; }
+approve_pending() {
+  local id
+  for id in $(ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true); do
+    # já decidido, resultado ainda não entregue (#210): nunca mostra (nem roda) de novo
+    compgen -G "$approve_dir/runs/$id.*.result" >/dev/null || echo "$id"
+  done
+}
 # evento operacional oute.canal.decided (ADR-04, #124): o oute-emit do container lê o cabeçalho do .out (nunca a
 # saída). Sem -i (não disputa o teclado com o read); imagem sem oute-emit ou coletor fora do ar: segue em silêncio
 approve_emit() { ctr oute-emit canal "$1" </dev/null >/dev/null 2>&1 || true; }
 show_safe() { LC_ALL=C perl -pe 's/[\x00-\x08\x0b-\x1f\x7f]/\xc2\xb7/g; s/\xc2[\x80-\x9f]/\xc2\xb7/g' "$1"; }
+# #210: a decisão fica PRIMEIRO no host (runs/<id>.<done|rejected>.result) e só depois vai ao container. O script
+# aprovado pode ter recriado o próprio oute-agent (oute down/up/restart): o container some e volta no meio do
+# fluxo. Entrega = inbox/<id>.out (rename atômico) + outbox/<id>.sh para done/ ou rejected/; tenta por até $2
+# segundos (default OUTE_APPROVE_WAIT=90) e, se não der, o resultado segue no host e a próxima rodada do
+# approve/watch entrega (o pedido não volta à fila enquanto isso).
+approve_deliver() {
+  local f="$1" tries="${2:-${OUTE_APPROVE_WAIT:-90}}" base id dest i=0
+  base="${f##*/}"; base="${base%.result}"; dest="${base##*.}"; id="${base%.*}"
+  while :; do
+    if ctr_in sh -c 'mkdir -p "$HOME/inbox" "$HOME/outbox/$2" && cat > "$HOME/inbox/.tmp.$1" &&
+        mv "$HOME/inbox/.tmp.$1" "$HOME/inbox/$1.out" &&
+        { [ ! -e "$HOME/outbox/$1.sh" ] || mv "$HOME/outbox/$1.sh" "$HOME/outbox/$2/"; }' _ "$id" "$dest" \
+        < "$f" >/dev/null 2>&1; then
+      rm -f "$f"; approve_emit "$id"; return 0
+    fi
+    i=$((i + 1)); (( i < tries )) || break
+    sleep 1
+  done
+  echo "aviso: $AGENT_CTR fora do ar; resultado de $id guardado em $f (o próximo oute approve/watch entrega)" >&2
+  return 1
+}
+# resultados que ficaram no host (container fora quando foram decididos): uma tentativa cada, sem espera
+approve_flush() {
+  local f
+  for f in "$approve_dir"/runs/*.result; do [[ -e "$f" ]] && { approve_deliver "$f" 1 2>/dev/null || true; }; done
+  return 0
+}
 approve_one() {
-  local id="$1" src title as sha ans rc=0 out t0 dur size
+  local id="$1" src title as sha ans rc=0 out t0 dur size res tailpid
   mkdir -p "$approve_dir/runs"; chmod 700 "$approve_dir"
   src="$approve_dir/runs/$id.sh"; out="$approve_dir/runs/$id.out"
   ctr sh -c 'head -c 65536 "$HOME/outbox/$1.sh"' _ "$id" > "$src" || { echo "não consegui ler $id" >&2; return 1; }
@@ -386,29 +421,34 @@ approve_one() {
   printf 'sha256: %s   linhas: %s\n\033[2m────────────────────────────────────────\033[0m\n' "$sha" "$(wc -l < "$src" | tr -d ' ')"
   show_safe "$src"
   printf '\033[2m────────────────────────────────────────\033[0m\n'
-  read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans </dev/tty || ans=""
+  read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""
   case "$ans" in
     s|S|sim)
       echo "── executando…"
       # set +e: script do agente que falha não pode derrubar o `oute` (pipefail + set -e) antes de devolver o resultado
       set +e
+      # #210: saída direto em arquivo, nunca em pipe (| tee): processo que o script deixa em segundo plano (o
+      # `oute up` sobe daemons) herda o stdout, o pipe nunca fecha e o tee esperava para sempre. O tail -f só
+      # mostra na tela; o fim do script é o fim do bash, não o EOF de quem herdou o descritor.
+      : > "$out"; tail -n +1 -f "$out" & tailpid=$!; trap 'kill "$tailpid" 2>/dev/null' EXIT
       t0="$(date +%s)"
-      if [[ "$as" == root ]]; then sudo bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}
-      else bash "$src" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}; fi
+      if [[ "$as" == root ]]; then sudo bash "$src" >> "$out" 2>&1; rc=$?
+      else bash "$src" >> "$out" 2>&1; rc=$?; fi
       dur=$(( $(date +%s) - t0 )); size="$(wc -c < "$out" | tr -d ' ')"
+      sleep 1; kill "$tailpid" 2>/dev/null; wait "$tailpid" 2>/dev/null; trap - EXIT
       set -e
       echo "── fim (código $rc)"
+      res="$approve_dir/runs/$id.done.result"
       { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n# sha256: %s\n# duracao: %s s\n# saida: %s bytes\n\n' \
-          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" "$dur" "$size"; tail -c 262144 "$out"; } \
-        | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/done" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/done/"' _ "$id"
+          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" "$dur" "$size"; tail -c 262144 "$out"; } > "$res"
       printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log"
-      approve_emit "$id" ;;
+      approve_deliver "$res" || true ;;
     r|R)
+      res="$approve_dir/runs/$id.rejected.result"
       printf '# id: %s\n# rc: 126\n# recusado: %s por %s@%s\n# sha256: %s\n\nrecusado pelo usuário; nada foi executado.\n' \
-          "$id" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" \
-        | ctr_in sh -c 'cat > "$HOME/inbox/$1.out" && mkdir -p "$HOME/outbox/rejected" && mv "$HOME/outbox/$1.sh" "$HOME/outbox/rejected/"' _ "$id"
+          "$id" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" > "$res"
       printf '%s\t%s\t%s\t%s\trecusado\t-\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$title" >> "$approve_dir/approve.log"
-      approve_emit "$id"
+      approve_deliver "$res" || true
       echo "recusado." ;;
     *) echo "fica pendente." ;;
   esac
@@ -417,6 +457,7 @@ approve() {
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
   local watch=0 id seen=""; [[ "${1:-}" == --watch || "${1:-}" == -w ]] && watch=1
   while :; do
+    approve_flush
     local ids; ids="$(approve_pending)"
     for id in $ids; do
       [[ " $seen " == *" $id "* ]] && continue   # 'N' = pula nesta rodada do --watch
