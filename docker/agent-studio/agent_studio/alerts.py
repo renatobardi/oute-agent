@@ -139,18 +139,22 @@ def _alert(kind, host, instance, value, unit, limit, since, evidence):
             "since": iso(since), "evidence": evidence}
 
 
+# pontos de uma métrica do collector por host, instância e exporter (chaves sem nulo: o ASOF JOIN só casa `=`)
+_GAUGE = """SELECT COALESCE(host_name, '') AS host, COALESCE(oute_instance, '') AS instance,
+                   COALESCE(json_extract_string(attributes, '$.exporter'), '') AS exporter,
+                   time_unix_nano AS t, value
+            FROM metrics WHERE metric_name = ? AND time_unix_nano BETWEEN ? AND ?"""
+
+
 def _queue(con, lo, at, cfg):
-    rows = _rows(con, """
-        SELECT s.host_name AS host, s.oute_instance AS instance,
-               json_extract_string(s.attributes, '$.exporter') AS exporter,
-               s.time_unix_nano AS t, s.value AS size, max(c.value) AS capacity
-        FROM metrics s JOIN metrics c
-          ON c.metric_name = ? AND c.time_unix_nano = s.time_unix_nano
-         AND c.host_name IS NOT DISTINCT FROM s.host_name AND c.oute_instance IS NOT DISTINCT FROM s.oute_instance
-         AND json_extract_string(c.attributes, '$.exporter')
-             IS NOT DISTINCT FROM json_extract_string(s.attributes, '$.exporter')
-        WHERE s.metric_name = ? AND s.time_unix_nano BETWEEN ? AND ?
-        GROUP BY ALL ORDER BY host, instance, exporter, t""", [QUEUE_CAPACITY, QUEUE_SIZE, lo, at])
+    # o collector grava tamanho e capacidade da mesma coleta com ns diferentes (a capacidade uns µs antes): cada
+    # tamanho casa com a última capacidade até a hora dele (ASOF JOIN), nunca por hora exata
+    rows = _rows(con, f"""
+        SELECT NULLIF(s.host, '') AS host, NULLIF(s.instance, '') AS instance, NULLIF(s.exporter, '') AS exporter,
+               s.t, s.value AS size, c.value AS capacity
+        FROM ({_GAUGE}) s ASOF LEFT JOIN ({_GAUGE}) c
+          ON c.host = s.host AND c.instance = s.instance AND c.exporter = s.exporter AND s.t >= c.t
+        ORDER BY host, instance, exporter, t""", [QUEUE_SIZE, lo, at, QUEUE_CAPACITY, lo, at])
     out = []
     for (host, instance, exporter), pts in _series(rows, ("host", "instance", "exporter")).items():
         pts = [dict(p, ratio=p["size"] / p["capacity"]) for p in pts if p["capacity"] and p["size"] is not None]
@@ -216,15 +220,18 @@ def _refusing(con, lo, at, cfg):
     return out
 
 
-def last_data(con, at):
-    """{host: (hora do último registro, sinal)} de todo host com dado até `at` (logs, spans e métricas)."""
+def last_data(con, lo, at):
+    """{host: (hora do último registro, sinal)} de todo host com dado em [lo, at] (logs, spans e métricas). Só a
+    janela lida (`lookback_hours`): a consulta não varre o banco inteiro; host sem nada nela fica de fora."""
     rows = _rows(con, """
         SELECT host, max(t) AS t, arg_max(signal, t) AS signal FROM (
           SELECT host_name AS host, max(time_unix_nano) AS t, 'logs' AS signal FROM logs
-           WHERE time_unix_nano <= ? GROUP BY ALL
-          UNION ALL SELECT host_name, max(time_unix_nano), 'traces' FROM spans WHERE time_unix_nano <= ? GROUP BY ALL
-          UNION ALL SELECT host_name, max(time_unix_nano), 'metrics' FROM metrics WHERE time_unix_nano <= ? GROUP BY ALL
-        ) WHERE host IS NOT NULL GROUP BY host""", [at, at, at])
+           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
+          UNION ALL SELECT host_name, max(time_unix_nano), 'traces' FROM spans
+           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
+          UNION ALL SELECT host_name, max(time_unix_nano), 'metrics' FROM metrics
+           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
+        ) WHERE host IS NOT NULL GROUP BY host""", [lo, at] * 3)
     return {r["host"]: (r["t"], r["signal"]) for r in rows}
 
 
@@ -238,7 +245,8 @@ def _no_data(last, at, cfg):
         out.append(_alert(NO_DATA, host, None, None if t is None else (at - t) // 1_000_000_000, "seconds",
                           cfg.no_data_minutes * 60, t, {
                               "last_data": iso(t), "signal": signal,
-                              "note": None if t is not None else "nenhum registro deste host"}))
+                              "note": None if t is not None
+                              else f"nenhum registro nas últimas {cfg.lookback_hours:g} h"}))
     return out
 
 
@@ -299,7 +307,7 @@ def enabled(cfg):
 def evaluate(con, at_ns, cfg):
     """Alertas ativos na hora `at_ns` (ns, hora do fato) e o último dado de cada host. Só lê."""
     lo = max(0, at_ns - int(cfg.lookback_hours * 60 * MIN_NS))
-    last = last_data(con, at_ns)
+    last = last_data(con, lo, at_ns)
     alerts = _queue(con, lo, at_ns, cfg) + _refusing(con, lo, at_ns, cfg) + _no_data(last, at_ns, cfg) \
         + _spool(con, lo, at_ns, cfg)
     if cfg.quota_enabled:

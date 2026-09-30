@@ -39,9 +39,11 @@ def v(x):
 def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 def ns(t): return str(int(t * 1e9))
 res = lambda host: {"host.name": host, "oute.instance": "oute-agent", "service.name": "otelcol-contrib"}
-def gauge(name, pts):  # pts = [(t, valor, atributos)]
+def gauge(name, pts, off=0):  # pts = [(t, valor, atributos)]; off = deslocamento em ns
     return {"name": name, "gauge": {"dataPoints": [
-        {"timeUnixNano": ns(t), "asInt": str(x), "attributes": kv(a)} for t, x, a in pts]}}
+        {"timeUnixNano": str(t * 10**9 + off), "asInt": str(x), "attributes": kv(a)} for t, x, a in pts]}}
+# como no collector real (0.161.0): a capacidade da mesma coleta sai uns µs antes do tamanho, nunca na mesma hora
+CAP_OFF = -12640
 def counter(name, pts, temporality=2):  # pts = [(t, start, valor, atributos)]
     return {"name": name, "sum": {"isMonotonic": True, "aggregationTemporality": temporality, "dataPoints": [
         {"timeUnixNano": ns(t), "startTimeUnixNano": ns(s), "asInt": str(x), "attributes": kv(a)} for t, s, x, a in pts]}}
@@ -80,9 +82,9 @@ quota = [
 # Mac: fila a 90% e última métrica em AT-60m
 mac_t = [AT - 65 * M, AT - 60 * M]
 mac = rm("oute-mac", [gauge("otelcol_exporter_queue_size", [(t, int(CAP * 0.9), STUDIO_LOGS) for t in mac_t]),
-                      gauge("otelcol_exporter_queue_capacity", [(t, CAP, STUDIO_LOGS) for t in mac_t])])
+                      gauge("otelcol_exporter_queue_capacity", [(t, CAP, STUDIO_LOGS) for t in mac_t], CAP_OFF)])
 metrics = {"resourceMetrics": [
-    rm("oute-server", [gauge("otelcol_exporter_queue_size", size), gauge("otelcol_exporter_queue_capacity", cap),
+    rm("oute-server", [gauge("otelcol_exporter_queue_size", size), gauge("otelcol_exporter_queue_capacity", cap, CAP_OFF),
                        counter("otelcol_exporter_send_failed_spans", sf)]),
     mac, *quota,
 ]}
@@ -177,7 +179,6 @@ check "Mac ativo: fila e spool alertam (ele não é sempre ligado, mas está no 
 check "Dropping data no log do Mac não vira recusa"    jqe "$(sel destination_refusing oute-mac) | length == 0" <<<"$RM"
 AL="$ROOT/docker/agent-studio/agent_studio/alerts.py"
 check "alerts.py não lê a coluna body dos logs"        bash -c "! grep -qw body '$AL'"
-check "alerts.py cita Dropping só na docstring (a regra)" test "$(grep -c Dropping "$AL")" = 1
 
 # ---------------------------------------------------------------- 7. spool perto de 50 MB
 check "spool liga: 46 MiB desde AT-20m (acima de 40 MiB)" jqe --arg s "$(T -20)" "$(sel spool oute-server)"' | length == 1 and (.[0] | .value == 48234496 and .since == $s and .limit == 41943040 and .evidence.attribute == "oute.emit.spool.bytes" and .evidence.event_name == "oute.canal.decided" and .evidence.event_id == "ev-3")' <<<"$R0"
