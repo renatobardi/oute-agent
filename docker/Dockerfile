@@ -72,11 +72,10 @@ ARG CLAUDE_CODE_SHA256_ARM64=24fac77749bed3d91365d6b6915aa4b824e14318ecb6bc17adb
 ARG CLAUDE_CODE_SHA256_AMD64=33dad1ec615a2e08cc78b494f05c110e49916de2c79d78ec8799ebf46b233d29
 ARG CODEX_VERSION=0.159.2
 ARG CODEX_INSTALLER_SHA256=150e3cf675682efeaac115aa3747add3f27887896d04ce6d0b56478d8b428bf6
-# --ignore-scripts só no codex: o claude depende do postinstall, que copia o binário nativo por cima do stub
-# (sem ele, `claude --version` falha); o sha256 conferido em seguida cobre o resultado (adendo do ADR-01).
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g --prefix /opt/oute/agents --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    && npm install -g --prefix /opt/oute/agents --no-fund --no-audit --ignore-scripts "@openai/codex@${CODEX_VERSION}" \
+    npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
+      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "@openai/codex@${CODEX_VERSION}" \
     && case "$TARGETARCH" in \
          arm64) sum="$CLAUDE_CODE_SHA256_ARM64" ;; \
          amd64) sum="$CLAUDE_CODE_SHA256_AMD64" ;; \
