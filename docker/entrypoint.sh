@@ -242,7 +242,7 @@ case "$MODE" in
     # oute-emit (#166, #167): reconcilia a inbox e reenvia o spool em segundo plano (a subida não espera)
     flush_spool </dev/null >/dev/null 2>&1 &
 
-    # agentes no home (#195): claude/codex pelo instalador oficial, para se atualizarem sozinhos (a subida não espera)
+    # agentes no home (#195): claude/codex, conferidos por sha256 (#199), para se atualizarem sozinhos (a subida não espera)
     mkdir -p "$HOME/.oute"
     oute-agents-install </dev/null >"$HOME/.oute/agents-install.log" 2>&1 &
 

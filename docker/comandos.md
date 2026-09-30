@@ -62,8 +62,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
   oute-agents-install [claude|codex]
-                                    instala o agente no home (~/.local/bin) pelo instalador oficial, onde ele se
-                                    atualiza sozinho; a subida já roda em segundo plano (log: ~/.oute/agents-install.log).
+                                    instala o agente no home (~/.local/bin), onde ele se atualiza sozinho (claude a
+                                    partir da reserva; codex pelo install.sh da versão fixa, conferido por sha256);
+                                    a subida já roda em segundo plano (log: ~/.oute/agents-install.log).
                                     Sem ele, vale a cópia de reserva da imagem (/opt/oute/agents). Update: claude
                                     automático, `codex update`. O Pi saiu do stack (#217): `pi` só avisa
 
