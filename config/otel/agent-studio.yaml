@@ -1,0 +1,71 @@
+# Pipeline extra: tudo -> agent-studio (ADR-08, #189), pela rede docker "oute" (agent-studio:8430).
+# Mesclado sobre collector.yaml só no host com o agent-studio (OUTE_AGENT_STUDIO=1 + item agent-studio do vault;
+# o `oute up` decide, como no langfuse.yaml). Nos outros hosts entra o none.yaml e nada muda.
+# Sem filtro: o agent-studio guarda tudo, com conteúdo, como o bucket. Mesmos processors do bucket.
+# Sem perda como o bucket (#161, #152): fila em disco própria por exporter (arquivo próprio na mesma file_storage/queue),
+# retry sem prazo e lote formado na fila. O agent-studio só responde 2xx depois do commit e 503 (retentável) se a
+# gravação falha (#185). Teste: tests/otelcol-studio.test.sh.
+exporters:
+  otlp_http/studio_traces:
+    endpoint: http://agent-studio:8430
+    encoding: json
+    headers: &studio_auth
+      Authorization: "Bearer ${env:AGENT_STUDIO_TOKEN}"
+    compression: gzip
+    timeout: 30s
+    # agent-studio fora: retenta para sempre; o limite é o tamanho da fila
+    retry_on_failure: &studio_retry {enabled: true, max_elapsed_time: 0}
+    # 1 GB do destino dividido como no bucket (#161): logs 600 / traces 300 / metrics 100 MB. Um exporter só para os
+    # três sinais daria 1 GB por sinal e estouraria a reserva de 4 GB por host (#163). Fila cheia = 503 para a fonte.
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 314572800  # 300 MB
+      block_on_overflow: false
+      # lote na fila, em segundos (#154). Em bytes (protobuf) para o corpo JSON ficar bem abaixo dos 64 MB que o
+      # agent-studio aceita (acima disso = 400, que não é retentado)
+      batch: &studio_batch {flush_timeout: 10s, sizer: bytes, min_size: 1048576, max_size: 8388608}
+  otlp_http/studio_metrics:
+    endpoint: http://agent-studio:8430
+    encoding: json
+    headers: *studio_auth
+    compression: gzip
+    timeout: 30s
+    retry_on_failure: *studio_retry
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 104857600  # 100 MB
+      block_on_overflow: false
+      batch: *studio_batch
+  otlp_http/studio_logs:
+    endpoint: http://agent-studio:8430
+    encoding: json
+    headers: *studio_auth
+    compression: gzip
+    timeout: 30s
+    retry_on_failure: *studio_retry
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      sizer: bytes
+      queue_size: 629145600  # 600 MB
+      block_on_overflow: false
+      batch: *studio_batch
+
+service:
+  pipelines:
+    traces/studio:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/agent, resource]
+      exporters: [otlp_http/studio_traces]
+    metrics/studio:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/agent, resource]
+      exporters: [otlp_http/studio_metrics]
+    logs/studio:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/agent, resource]
+      exporters: [otlp_http/studio_logs]

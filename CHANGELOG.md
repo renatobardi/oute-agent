@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **Collector do oute-server manda ao agent-studio pela rede docker** (#189, #155, ADR-08). Config à parte `config/otel/agent-studio.yaml`, no padrão do `langfuse.yaml`: o `oute up` põe `OUTE_OTEL_STUDIO=agent-studio` só quando liga o profile `agent-studio` (`OUTE_AGENT_STUDIO=1` no `.env` e o item `agent-studio` do vault); nos outros hosts (Mac) entra o `none.yaml` e nada muda. Três exporters `otlp_http`, um por sinal, para `http://agent-studio:8430`, `encoding: json`, gzip e `Authorization: Bearer` com o `AGENT_STUDIO_TOKEN` (o compose passa o token ao `otel-collector`). Sem perda como o bucket: fila em disco na `file_storage/queue` (arquivo próprio por exporter, `sizer: bytes`, logs 600 / traces 300 / metrics 100 MB, dentro da reserva de 4 GB do #163), `block_on_overflow: false`, retry sem prazo e lote na fila com `flush_timeout: 10s` (1 a 8 MB, para o JSON ficar abaixo dos 64 MB da ingestão). Pipelines `traces|metrics|logs/studio` com os processors do bucket, sem filtro. Teste `tests/otelcol-studio.test.sh`: roda a config real com o receptor OTLP falso (que ganha `RCV_TOKEN` e `RCV_PORT`) e confere os três sinais com o token, `kill -9` com lote pendente sem perda e receptor fora com a fila crescendo e esvaziando na volta, além do liga/desliga do `oute up`. ADR-08 (Implementação). Sem release (`config/otel/`, `scripts/oute` e compose entram com `git pull` + `oute down/up`). Depois do deploy no oute-server: dado novo no agent-studio em segundos.
+
 ## [0.7.27] - 2026-09-29
 
 ### Added

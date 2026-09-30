@@ -123,6 +123,12 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - **Sem laço:** quando a telemetria do agent-studio volta a ele pela ingestão (#155), gravar é só somar contadores; nenhum registro novo nasce por registro recebido. Com a ingestão falhando, os avisos têm teto por minuto.
 - Na parada (SIGTERM), o lifespan do app exporta o que ficou no lote e fecha o DuckDB antes de o processo sair.
 
+### Collector → agent-studio no oute-server (#189)
+- `config/otel/agent-studio.yaml`, mesclado sobre o `collector.yaml` como o `langfuse.yaml`: o `oute up` exporta `OUTE_OTEL_STUDIO=agent-studio` só quando liga o profile `agent-studio` (`OUTE_AGENT_STUDIO=1` e o item do vault); senão, `none` e o collector não muda.
+- Três `otlp_http` (`studio_traces`, `studio_metrics`, `studio_logs`) para `http://agent-studio:8430` na rede `oute`, `encoding: json`, gzip, `Authorization: Bearer ${AGENT_STUDIO_TOKEN}` (o compose passa o token ao collector).
+- Sem perda como o bucket: fila em disco na mesma `file_storage/queue` (arquivo próprio por exporter), `sizer: bytes`, logs 600 / traces 300 / metrics 100 MB, `block_on_overflow: false`, retry sem prazo. Lote na fila com `flush_timeout: 10s`, em bytes (1 a 8 MB de protobuf), para o corpo JSON ficar abaixo dos 64 MB da ingestão (acima disso seria 400, que não é retentado).
+- Pipelines `traces|metrics|logs/studio` com os processors do bucket (`memory_limiter`, `transform/agent`, `resource`), sem filtro. As métricas do collector (#162) passam a trazer também a fila dos três exporters. Teste `tests/otelcol-studio.test.sh`.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.
