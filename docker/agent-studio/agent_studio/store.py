@@ -8,6 +8,8 @@ import threading
 
 import duckdb
 
+from . import usage as usage_mod
+
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
     "logs": [
@@ -162,3 +164,8 @@ class Store:
             cols = sql["columns"]
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)
+
+    def usage(self, from_ns, to_ns, prices):
+        """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila."""
+        with self.lock:
+            return usage_mod.usage(self.con, from_ns, to_ns, prices)

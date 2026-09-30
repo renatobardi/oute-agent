@@ -1,0 +1,47 @@
+# Config do agent-studio (ADR-08, #203). Montada só leitura no container (/etc/oute/agent-studio/config.toml):
+# mudança entra com `git pull` + `oute down/up`, sem release. O #204 põe aqui os hosts e os limites dos alertas.
+
+# Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (hoje, o
+# Codex). Claude Code e jev.decision (OpenRouter) mandam o custo real e não dependem desta tabela.
+#   input          = entrada não cacheada        output         = saída
+#   cache_read     = entrada lida do cache       cache_creation = escrita no cache
+# `input` e `output` são obrigatórios; cache ausente = preço de `input` (estima para cima, nunca de graça).
+# O nome é o modelo do span (sem diferenciar maiúsculas; `openai/gpt-5` também acha `gpt-5`).
+# Modelo sem entrada = sem custo estimado (nunca zero): o `/v1/usage` lista esses modelos em `unpriced_models`;
+# é a deixa para acrescentar o preço aqui.
+# Fonte: preços de lista da OpenAI (API, tier padrão).
+
+[prices."gpt-5"]
+input = 1.25
+output = 10.0
+cache_read = 0.125
+
+[prices."gpt-5-codex"]
+input = 1.25
+output = 10.0
+cache_read = 0.125
+
+[prices."gpt-5.1"]
+input = 1.25
+output = 10.0
+cache_read = 0.125
+
+[prices."gpt-5.1-codex"]
+input = 1.25
+output = 10.0
+cache_read = 0.125
+
+[prices."gpt-5-mini"]
+input = 0.25
+output = 2.0
+cache_read = 0.025
+
+[prices."gpt-5.1-codex-mini"]
+input = 0.25
+output = 2.0
+cache_read = 0.025
+
+[prices."gpt-5-nano"]
+input = 0.05
+output = 0.4
+cache_read = 0.005

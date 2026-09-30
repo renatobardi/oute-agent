@@ -169,6 +169,8 @@ services:
       AGENT_STUDIO_DB: /data/agent-studio/agent-studio.duckdb
       AGENT_STUDIO_PORT: "8430"
       PYTHONPATH: /opt/agent-studio/app
+      # config (#203: preços do custo estimado; #204: hosts e limites), montada só leitura logo abaixo
+      AGENT_STUDIO_CONFIG: /etc/oute/agent-studio/config.toml
       # estado derivado (#187): o SurrealDB pela rede oute; os dois bancos juntos ou nenhum (503)
       AGENT_STUDIO_SURREAL_URL: http://surrealdb:8000
       AGENT_STUDIO_SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
@@ -186,6 +188,8 @@ services:
     volumes:
       # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
       - oute-agent-studio:/data/agent-studio
+      # pasta, não arquivo: o `git pull` troca o arquivo e o `oute down/up` pega o novo, sem release
+      - ./config/agent-studio:/etc/oute/agent-studio:ro
     healthcheck:
       test: ["CMD", "/opt/agent-studio/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8430/healthz', timeout=3)"]
       interval: 30s

@@ -5,6 +5,7 @@ import sys
 
 import uvicorn
 
+from . import config as config_mod
 from .app import create_app
 from .store import Store
 from .surreal import Surreal
@@ -33,7 +34,11 @@ def main():
     db = os.environ.get("AGENT_STUDIO_DB", "/data/agent-studio/agent-studio.duckdb")
     store = Store(db)
     tel = telemetry.setup()
-    app = create_app(store, token, surreal, tel, on_shutdown=store.close)
+    # config/agent-studio/config.toml, montada só leitura (#203): problema nela não impede a subida
+    config = config_mod.load()
+    for err in config.errors:
+        print(f"agent-studio: {err}", file=sys.stderr)
+    app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config)
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)
