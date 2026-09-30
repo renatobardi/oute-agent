@@ -110,8 +110,10 @@ host_secrets() {
 STUDIO_PROFILE=agent-studio
 agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
 # `oute up`: liga o profile do compose quando o host tem o agent-studio e o token existe; sem o item, avisa e sobe
-# o resto (nunca bloqueia a subida)
+# o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio (config/otel/agent-studio.yaml,
+# #189); nos outros hosts, none.yaml e o collector não muda.
 agent_studio_up() {
+  export OUTE_OTEL_STUDIO=none
   agent_studio_enabled || return 0
   local v falta=""
   for v in AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
@@ -120,7 +122,7 @@ agent_studio_up() {
       "oute-agent do vault). O agent-studio não sobe; crie o item e rode: oute up --refresh-secrets" >&2
     return 0
   fi
-  export AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS
+  export AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS OUTE_OTEL_STUDIO=agent-studio
   COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
   export COMPOSE_PROFILES
 }

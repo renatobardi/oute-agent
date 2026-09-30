@@ -237,6 +237,8 @@ services:
     command:
       - --config=/etc/otelcol/collector.yaml
       - --config=/etc/otelcol/${OUTE_OTEL_LANGFUSE:-none}.yaml
+      # agent-studio (#189): o `oute up` põe agent-studio só no host que o roda (OUTE_AGENT_STUDIO=1); nos outros, none
+      - --config=/etc/otelcol/${OUTE_OTEL_STUDIO:-none}.yaml
     environment:
       # origem de tudo que passa pelo collector: host.name / oute.instance (+ partição host=/instance= no bucket)
       OUTE_HOST: ${OUTE_HOST:-oute}
@@ -252,9 +254,11 @@ services:
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
       OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
+      # token da ingestão do agent-studio (item agent-studio do vault), só com o pipeline do agent-studio ligado
+      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_TOKEN:-}
     volumes:
       - ./config/otel:/etc/otelcol:ro
-      # fila em disco dos exporters do bucket (#161): sobrevive a oute down/up e a kill -9
+      # fila em disco dos exporters do bucket (#161) e do agent-studio (#189): sobrevive a oute down/up e a kill -9
       - oute-otel-queue:/var/lib/otelcol/queue
     depends_on:
       volume-init:
