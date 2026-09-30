@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.27] - 2026-09-29
+
 ### Added
 - **Claude Code, Codex e Pi se atualizam sozinhos no container** (#195). Antes, os três vinham do `npm install -g` da imagem em `/usr` (root) e o auto-update do Claude Code falhava com `no write permission to npm prefix` (`claude doctor`: `failed (no_permissions)`). Agora a subida roda em segundo plano o `oute-agents-install`, que instala no home (`~/.local/bin`, volume `oute-home`) quem ainda não está lá, pelo instalador oficial de cada um: `claude.ai/install.sh` (native), `chatgpt.com/codex/install.sh` (standalone, `CODEX_NON_INTERACTIVE=1`) e `pi.dev/install.sh` (managed). Os instaladores rodam com ambiente limpo (sem os segredos do entrypoint), sem os shims nem a reserva no PATH e com trava; agente já presente fica como está (quem atualiza é ele), e a versão nova sobrevive a `oute down/up`. Log em `~/.oute/agents-install.log`. Update: Claude Code automático; `codex update` e `pi update` quando avisam, sem sudo. A imagem passa a instalar os três em `/opt/oute/agents`, fora do PATH, só como reserva: o shim usa essa cópia enquanto o agente não está no home (primeira subida sem rede). `firebase-tools` e `@bitwarden/cli` seguem em `/usr`. Teste `tests/oute-agents-install.test.sh` (`curl` falso). `oute help` e README. **Precisa de release** (`Dockerfile`, `entrypoint.sh`, `oute-agents-install`, shim e `comandos.md` vão na imagem). Depois do deploy: `claude doctor` sem o aviso de auto-update em cada host.
 
