@@ -9,7 +9,7 @@ Fase: `ship` (AI-DLC, ADR-07) · Outcome: release conferida, com versão propost
 
 Você **confere e propõe**; a release é do Bardi. Nada aqui roda `scripts/release`, cria tag, faz push na `main` nem edita `VERSION` (quem muda `VERSION` e fecha o `[Unreleased]` é o `scripts/release`). Correção que o checklist achar vira PR à parte, pelo fluxo normal.
 
-Trabalhe numa worktree própria, na `main` atualizada (`git fetch --tags origin`, `git switch --detach origin/main`). Os passos são em ordem; cada um termina num item do relatório (passo 6).
+Trabalhe numa worktree própria, na `main` atualizada (`git fetch --tags origin`, `git switch --detach origin/main`). Os passos são em ordem; cada um termina num item do relatório (passo 7).
 
 ## 1. Ponto de partida
 
@@ -31,7 +31,7 @@ git diff --name-only "$LAST"..origin/main
 
 Feito quando: cada arquivo do diff está num dos dois grupos e a resposta é **sim** (com os arquivos que obrigam) ou **não**.
 
-Resposta **não**: o deploy é `git pull` + `oute down/up` nos hosts, sem versão nova. Pule para o passo 6 (sem os passos 4 e 5) e recomende isso.
+Resposta **não**: o deploy é `git pull` + `oute down/up` nos hosts, sem versão nova. Pule para o passo 7 (sem os passos 4 a 6) e recomende isso.
 
 ## 3. CHANGELOG `[Unreleased]`
 
@@ -61,7 +61,21 @@ O script recusa sem estas; confira antes, na `main`:
 
 Feito quando: as duas pré-condições e o CI dos PRs estão ok ou o que falhou está no relatório.
 
-## 6. Relatório para o Bardi
+## 6. Versões fixas de claude e codex
+
+A reserva de claude/codex na imagem tem versão fixa e sha256 em `ARG`s do `docker/Dockerfile` (#200, #199, adendo do ADR-01). O build recusa sha256 errado, e versão que o npm ainda não serve derruba o CI `image` e deixa a tag sem imagem (foi o que aconteceu na `v0.7.26`). Confira na `main`:
+
+```bash
+scripts/agent-pins
+```
+
+- Linha `DIFERENTE` (sha256 que não bate com o publicado, versão fora do npm): achado que **bloqueia** a release até um PR corrigir os `ARG`s.
+- Tudo `ok`: a release pode sair com essas versões. A última linha mostra as mais recentes; se estiverem à frente, diga quanto e proponha (não exija) um PR de bump antes da tag, com os `ARG`s de `scripts/agent-pins --print`. Escolha uma versão publicada no npm há pelo menos 1 hora (a data vem no comentário do `--print`).
+- A cópia no home não depende disso (se atualiza sozinha); só a reserva e a primeira instalação do home usam essas versões.
+
+Feito quando: `scripts/agent-pins` saiu 0, ou o que deu `DIFERENTE` está no relatório como bloqueio.
+
+## 7. Relatório para o Bardi
 
 Uma mensagem, nesta ordem:
 
@@ -69,12 +83,13 @@ Uma mensagem, nesta ordem:
 2. **Versão:** `LAST` → proposta (e o motivo, se não for patch).
 3. **CHANGELOG:** ok, ou a lista de achados (commit sem entrada, entrada incoerente, fora do lugar), com a correção sugerida. Achado bloqueia a release até virar PR mergeado: diga isso.
 4. **Pré-condições:** ok ou o que falhou.
-5. **Comandos do Bardi** (no checkout da `main`, no Mac ou no oute-server):
+5. **Versões de claude/codex:** as dos `ARG`s, `ok` ou o `DIFERENTE` (bloqueio), e as mais recentes, se estiverem à frente.
+6. **Comandos do Bardi** (no checkout da `main`, no Mac ou no oute-server):
    ```bash
    scripts/release <nova> && git push && git push origin v<nova>
    ```
    Depois do CI `image` da tag terminar (Actions → image), em cada host: `oute update`.
    Sem release: em cada host, `git pull` + `oute down` + `oute up`.
-6. **Próximo passo:** depois do deploy, `oute-aidlc-ship-verify` em cada host.
+7. **Próximo passo:** depois do deploy, `oute-aidlc-ship-verify` em cada host.
 
-Pare aqui. Não rode os comandos do item 5.
+Pare aqui. Não rode os comandos do item 6.

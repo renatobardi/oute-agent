@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Instala claude e codex no home pelo instalador oficial de cada um (#195). No home (volume oute-home) cada agente
-# se atualiza sozinho como `oute`, sem sudo, e a versão nova sobrevive a `oute down/up`. A imagem só traz uma cópia de
-# reserva em /opt/oute/agents (fora do PATH), que o shim usa enquanto o agente não está em ~/.local/bin.
+# Instala claude e codex no home (#195), sem `curl | sh` (#199, ADR-01). No home (volume oute-home) cada agente se
+# atualiza sozinho como `oute`, sem sudo, e a versão nova sobrevive a `oute down/up`. A imagem traz uma cópia de
+# reserva em /opt/oute/agents (fora do PATH), com versão fixa (#200), que o shim usa enquanto o agente não está em
+# ~/.local/bin.
+# - claude: `claude install` da reserva (o binário nativo, conferido por sha256 no build) copia a si mesmo para o home,
+#   como o install.sh oficial faz depois de baixar e conferir o binário. Sem download.
+# - codex: o install.sh oficial da release fixa (OUTE_CODEX_VERSION, asset do GitHub), conferido contra
+#   OUTE_CODEX_INSTALLER_SHA256 antes de rodar. Ele instala a versão mais recente, conferindo o pacote contra o SHA256SUMS
+#   da release; fixar a versão desligaria o auto-update do codex.
 # Idempotente: agente já presente em ~/.local/bin fica como está (quem atualiza é ele mesmo). O entrypoint chama em
 # segundo plano; sem rede, só avisa e a próxima subida tenta de novo.
 # Uso: oute-agents-install [claude|codex ...]   (sem argumento: os dois). Sai 1 se algum falhou.
@@ -20,10 +26,32 @@ for d in "$shims" "$fallback"; do path="${path//:$d:/:}"; done
 path="${path#:}"; path="${path%:}"
 case ":$path:" in *":$bin:"*) ;; *) path="$bin:$path" ;; esac
 
+# Roda sob `env -i`: recebe só o que está na linha do env (OUTE_CLAUDE_BIN, OUTE_CODEX_VERSION,
+# OUTE_CODEX_INSTALLER_SHA256).
 install_one() {
   case "$1" in
-    claude) curl -fsSL https://claude.ai/install.sh | bash ;;
-    codex)  curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh ;;
+    claude)
+      [[ -x "$OUTE_CLAUDE_BIN" ]] || { echo "reserva do claude ausente: $OUTE_CLAUDE_BIN" >&2; return 1; }
+      "$OUTE_CLAUDE_BIN" install
+      ;;
+    codex)
+      local v="$OUTE_CODEX_VERSION" sum="$OUTE_CODEX_INSTALLER_SHA256" f rc
+      if [[ ! "$v" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ || ! "$sum" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "versão ou sha256 do instalador do codex ausente ou inválido (OUTE_CODEX_VERSION, OUTE_CODEX_INSTALLER_SHA256)" >&2
+        return 1
+      fi
+      f="$(mktemp)" || return 1
+      if ! curl -fsSL --proto '=https' --tlsv1.2 -o "$f" "https://github.com/openai/codex/releases/download/rust-v$v/install.sh"; then
+        echo "download do instalador do codex $v falhou" >&2; rm -f "$f"; return 1
+      fi
+      if ! printf '%s  %s\n' "$sum" "$f" | sha256sum -c --status -; then
+        echo "sha256 do instalador do codex $v não confere; não roda" >&2; rm -f "$f"; return 1
+      fi
+      CODEX_NON_INTERACTIVE=1 sh "$f"; rc=$?
+      rm -f "$f"
+      return "$rc"
+      ;;
+    *) return 1 ;;
   esac
 }
 
@@ -43,9 +71,11 @@ for a in "$@"; do
     log "$a: já instalado em $bin (atualiza sozinho)"
     continue
   fi
-  log "$a: instalando pelo instalador oficial"
-  # ambiente limpo: o instalador (script baixado) não herda os segredos que o entrypoint carregou
+  log "$a: instalando no home"
+  # ambiente limpo: o instalador não herda os segredos que o entrypoint carregou
   if env -i HOME="$HOME" USER="${USER:-oute}" LANG="${LANG:-C.UTF-8}" TERM=dumb PATH="$path" \
+       OUTE_CLAUDE_BIN="$fallback/claude" OUTE_CODEX_VERSION="${OUTE_CODEX_VERSION:-}" \
+       OUTE_CODEX_INSTALLER_SHA256="${OUTE_CODEX_INSTALLER_SHA256:-}" \
        timeout 900 bash -c "$(declare -f install_one); install_one $a" </dev/null && [[ -x "$bin/$a" ]]; then
     log "$a: instalado em $bin/$a"
   else

@@ -58,12 +58,30 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install -g --no-fund --no-audit \
       firebase-tools \
       @bitwarden/cli@${BW_CLI_VERSION}
-# claude/codex (#195): só uma cópia de reserva, fora do PATH. Cada agente vai para o home pelo instalador oficial
-# (oute-agents-install, na subida) e se atualiza sozinho lá; o shim usa esta cópia enquanto isso não acontece.
+# claude/codex (#195): só uma cópia de reserva, fora do PATH. Cada agente vai para o home (oute-agents-install, na
+# subida) e se atualiza sozinho lá; o shim usa esta cópia enquanto isso não acontece.
+# Versões fixas (#200) e sha256 publicados pelos fornecedores (#199, ADR-01); conferir na release
+# (oute-aidlc-ship-release, `scripts/agent-pins`):
+# - CLAUDE_CODE_SHA256_*: `checksum` do binário no manifest.json da versão (downloads.claude.ai), que é o mesmo binário
+#   do pacote npm por plataforma; o build confere o bin/claude.exe. O oute-agents-install instala o claude no home a
+#   partir desta cópia (`claude install`).
+# - CODEX_INSTALLER_SHA256: `digest` do asset install.sh da release rust-v<versão> do openai/codex. O oute-agents-install
+#   baixa esse instalador e confere antes de rodar.
+ARG CLAUDE_CODE_VERSION=2.1.285
+ARG CLAUDE_CODE_SHA256_ARM64=24fac77749bed3d91365d6b6915aa4b824e14318ecb6bc17adbc192f01c9173d
+ARG CLAUDE_CODE_SHA256_AMD64=33dad1ec615a2e08cc78b494f05c110e49916de2c79d78ec8799ebf46b233d29
+ARG CODEX_VERSION=0.159.2
+ARG CODEX_INSTALLER_SHA256=150e3cf675682efeaac115aa3747add3f27887896d04ce6d0b56478d8b428bf6
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
-      @anthropic-ai/claude-code \
-      @openai/codex
+      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "@openai/codex@${CODEX_VERSION}" \
+    && case "$TARGETARCH" in \
+         arm64) sum="$CLAUDE_CODE_SHA256_ARM64" ;; \
+         amd64) sum="$CLAUDE_CODE_SHA256_AMD64" ;; \
+         *) echo "TARGETARCH sem sha256 do claude: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && echo "$sum  /opt/oute/agents/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe" | sha256sum -c -
 
 # --- binários ----------------------------------------------------------------
 # herdr
@@ -135,13 +153,17 @@ COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
 # `pi` continua como shim só para responder que o Pi saiu do stack (#217), mesmo com o binário antigo em ~/.local/bin
 RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
+RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
+      /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
+      /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
 ENV HOME=/home/${OUTE_USER} \
     PATH=/usr/local/lib/oute/shims:/home/${OUTE_USER}/.local/bin:$PATH \
     AI_MEMORY_DATA_DIR=/data/ai-memory \
+    OUTE_CODEX_VERSION=${CODEX_VERSION} \
+    OUTE_CODEX_INSTALLER_SHA256=${CODEX_INSTALLER_SHA256} \
     OUTE_ROUTER_URL=http://jev-router:4000/v1
 
 # ARG da versão só aqui no fim: ARG declarado antes de um RUN vira env dele e o bump de versão

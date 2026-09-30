@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# agent-pins — confere as versões fixas de claude/codex no docker/Dockerfile (#200) contra o sha256 que cada
+# fornecedor publica (#199, ADR-01) e mostra a versão mais recente de cada um. Só lê (metadados públicos, sem token).
+# Uso:
+#   scripts/agent-pins                     confere os ARGs do Dockerfile; sai 1 se algum não bate
+#   scripts/agent-pins --print [CLAUDE CODEX]
+#                                          imprime os ARGs para as versões dadas (padrão: as mais recentes)
+# Precisa de curl e jq. Roda também no bash 3.2 do macOS.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCKERFILE="$ROOT/docker/Dockerfile"
+CLAUDE_DL="https://downloads.claude.ai/claude-code-releases"
+NPM="https://registry.npmjs.org"
+GH_API="https://api.github.com/repos/openai/codex/releases"
+
+get() { curl -fsSL --proto '=https' "$@"; }
+die() { echo "agent-pins: $*" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || die "precisa de jq"
+
+# sha256 publicado: binário do claude por plataforma (manifest.json) e install.sh da release do codex (digest do asset)
+claude_sum() { get "$CLAUDE_DL/$1/manifest.json" | jq -r --arg p "$2" '.platforms[$p].checksum // empty'; }
+codex_sum() {
+  get "$GH_API/tags/rust-v$1" | jq -r '.assets[] | select(.name == "install.sh") | .digest // empty' | sed 's/^sha256://'
+}
+# data de publicação no npm (vazio se a versão não existe lá: a reserva da imagem vem do npm)
+npm_time() { get "$NPM/$1" | jq -r --arg v "$2" '.time[$v] // empty'; }
+latest_claude() { get "$CLAUDE_DL/latest"; }
+latest_codex() { get "$GH_API/latest" | jq -r '.tag_name' | sed 's/^rust-v//'; }
+
+if [[ "${1:-}" == "--print" ]]; then
+  cv="${2:-$(latest_claude)}"; xv="${3:-$(latest_codex)}"
+  a="$(claude_sum "$cv" linux-arm64)"; b="$(claude_sum "$cv" linux-x64)"; c="$(codex_sum "$xv")"
+  [[ -n "$a" && -n "$b" ]] || die "claude $cv sem checksum publicado"
+  [[ -n "$c" ]] || die "codex $xv sem install.sh na release"
+  echo "# claude $cv no npm: $(npm_time @anthropic-ai/claude-code "$cv")  ·  codex $xv no npm: $(npm_time @openai/codex "$xv")"
+  echo "ARG CLAUDE_CODE_VERSION=$cv"
+  echo "ARG CLAUDE_CODE_SHA256_ARM64=$a"
+  echo "ARG CLAUDE_CODE_SHA256_AMD64=$b"
+  echo "ARG CODEX_VERSION=$xv"
+  echo "ARG CODEX_INSTALLER_SHA256=$c"
+  exit 0
+fi
+[[ $# -eq 0 ]] || die "uso: agent-pins [--print [CLAUDE CODEX]]"
+
+arg() { sed -n "s/^ARG $1=//p" "$DOCKERFILE"; }
+rc=0
+check() { # descrição, esperado (publicado), valor do Dockerfile
+  if [[ -n "$2" && "$2" == "$3" ]]; then echo "ok        $1"; else echo "DIFERENTE $1: Dockerfile=$3 publicado=${2:-(nada)}"; rc=1; fi
+  return 0
+}
+cv="$(arg CLAUDE_CODE_VERSION)"; xv="$(arg CODEX_VERSION)"
+[[ -n "$cv" && -n "$xv" ]] || die "ARGs de versão não encontrados em $DOCKERFILE"
+check "claude $cv linux-arm64" "$(claude_sum "$cv" linux-arm64)" "$(arg CLAUDE_CODE_SHA256_ARM64)"
+check "claude $cv linux-x64" "$(claude_sum "$cv" linux-x64)" "$(arg CLAUDE_CODE_SHA256_AMD64)"
+check "codex $xv install.sh" "$(codex_sum "$xv")" "$(arg CODEX_INSTALLER_SHA256)"
+check_npm() {
+  local t
+  t="$(npm_time "$1" "$2")"
+  if [[ -n "$t" ]]; then echo "ok        npm $1@$2 publicado em $t"; else echo "DIFERENTE npm $1@$2 não existe"; rc=1; fi
+  return 0
+}
+check_npm @anthropic-ai/claude-code "$cv"
+check_npm @openai/codex "$xv"
+echo "mais recentes: claude $(latest_claude) · codex $(latest_codex)  (ARGs: scripts/agent-pins --print)"
+exit "$rc"
