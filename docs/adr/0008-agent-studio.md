@@ -133,6 +133,20 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - Mesmo `agent-studio.yaml`, com o destino em `AGENT_STUDIO_URL`, escolhido pelo `oute up`: no host com `OUTE_AGENT_STUDIO=1`, `http://agent-studio:8430` (rede `oute`); nos outros (Mac), `https://agent-studio.oute.pro`, o vhost só na tailnet (lab#244), com o mesmo token. `OUTE_AGENT_STUDIO_URL` no `.env` troca o vhost.
 - Sem `AGENT_STUDIO_TOKEN` no `agent.env`, o pipeline não liga (`none`, a fila não enche de 401) e o `oute up` avisa. Mesma fila em disco, retry e lote: sem tailnet, o dado espera na fila e chega com a hora do fato quando a rede volta.
 
+### Consulta agregada de uso: `GET /v1/usage` (#203)
+- **Só leitura**, com o mesmo token (`Authorization: Bearer`); sem ele ou errado = **401**. Outro método = 405.
+- **Janela** `[from, to)`, sempre pela **hora do fato** (`time_unix_nano`; nos spans, o início): `from` e `to` juntos em ISO 8601 (`2026-09-29` ou `2026-09-29T12:00:00Z`; sem fuso = UTC), **ou** `hours` (padrão 24, até 8784) terminando agora. Janela inválida, `from` sem `to`, `from >= to` ou `from`/`to` junto com `hours` = **400**. Leitura que falha = **500** (causa só no stderr).
+- **Resposta:** `from`, `to`, `time`, `prices` (`models` carregados e `errors` da config), `totals`, `unpriced_models`, `rows` (host × agente × modelo) e `series` (dia UTC × host × agente × modelo). Cada grupo:
+  `calls`; `tokens` {`input`, `output`, `cache_read`, `cache_creation`}; `cost` {`real_usd`, `estimated_usd`, `real_calls`, `estimated_calls`, `unpriced_calls`}; `errors` {`spans`, `logs`, `total`}; `latency_p95_ms`.
+- **Chamada ao modelo** = span `claude_code.llm_request`, `session_task.turn` (Codex) ou `jev.decision`. Tokens, custo, `calls` e p95 saem só delas.
+- **Sem contar duas vezes:** spans do LiteLLM (`oute.agent=router`) ficam fora das somas; o `jev.decision` conta uma vez (dedupe por trace + span), mesmo quando chega sem o `oute.agent` do cliente.
+- **Custo real** (`real_usd`) = soma do `cost_usd` dos spans; `null` quando nenhuma chamada do grupo trouxe custo. **Estimado** (`estimated_usd`) = tabela de preços sobre os tokens das chamadas **sem** custo real; `null` quando não há o que estimar. **Modelo sem preço nunca vira zero**: a chamada entra em `unpriced_calls` (fora das duas somas) e o modelo em `unpriced_models`. `real_calls + estimated_calls + unpriced_calls = calls`.
+- **Erros** = spans com status de erro (qualquer span, inclusive os do LiteLLM: o `jev.decision` só nasce de chamada que deu certo) + logs com severidade ERROR ou acima (sem modelo: grupo com `model` nulo).
+- **p95** = quantil 0,95 (interpolado) da duração das chamadas ao modelo do grupo, em ms; `null` sem chamada.
+- **Tabela de preços:** `config/agent-studio/config.toml`, seção `[prices."<modelo>"]` com `input`, `output`, `cache_read`, `cache_creation` em USD por 1M tokens (`input`/`output` obrigatórios; cache ausente = preço de `input`). A pasta é montada **só leitura** em `/etc/oute/agent-studio` (`AGENT_STUDIO_CONFIG`); preço novo entra com `git pull` + `oute down/up`, sem release. Busca sem diferenciar maiúsculas e, sem entrada exata, sem o prefixo do provedor. Config ausente ou inválida não impede a subida: sem estimado, motivo no stderr e em `prices.errors`; entrada inválida fica de fora (o modelo aparece sem preço). O #204 põe hosts e limites no mesmo arquivo.
+- **Reuso:** regras e preço em `agent_studio/cost.py` (puro), leitura da config em `config.py`, agregação em `usage.aggregate(con, from_ns, to_ns, prices, keys)` com qualquer combinação de `day`/`host`/`agent`/`model` (o custo estimado é calculado por modelo e depois somado). Alertas (#204), tray (#205) e tela (#206) usam essas peças.
+- Teste: `tests/agent-studio-usage.test.sh` (DuckDB de exemplo montado pela ingestão).
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.
