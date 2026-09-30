@@ -251,6 +251,10 @@ case "$MODE" in
     # oute-emit (#166, #167): reconcilia a inbox e reenvia o spool em segundo plano (a subida não espera)
     flush_spool </dev/null >/dev/null 2>&1 &
 
+    # agentes no home (#195): claude/codex/pi pelo instalador oficial, para se atualizarem sozinhos (a subida não espera)
+    mkdir -p "$HOME/.oute"
+    oute-agents-install </dev/null >"$HOME/.oute/agents-install.log" 2>&1 &
+
     log "iniciando herdr server"
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &
     log "iniciando sshd :2222"

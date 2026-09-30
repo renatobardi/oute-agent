@@ -101,6 +101,8 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 
 Dentro do container: `pi`, `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
 
+`claude`, `codex` e `pi` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo instalador oficial de cada um (`oute-agents-install`), e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex e o Pi com `codex update` e `pi update` quando avisam. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
+
 ## Roteamento de modelos (ADR-02)
 
 - `claude` e `codex`: assinatura própria (login 1x, persiste no volume `oute-home`). Fora do OpenRouter.

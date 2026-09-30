@@ -56,11 +56,15 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 # --- agentes e CLIs (npm) ----------------------------------------------------
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g --no-fund --no-audit \
-      @earendil-works/pi-coding-agent \
-      @anthropic-ai/claude-code \
-      @openai/codex \
       firebase-tools \
       @bitwarden/cli@${BW_CLI_VERSION}
+# claude/codex/pi (#195): só uma cópia de reserva, fora do PATH. Cada agente vai para o home pelo instalador oficial
+# (oute-agents-install, na subida) e se atualiza sozinho lá; o shim usa esta cópia enquanto isso não acontece.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
+      @earendil-works/pi-coding-agent \
+      @anthropic-ai/claude-code \
+      @openai/codex
 
 # --- binários ----------------------------------------------------------------
 # herdr
@@ -116,6 +120,8 @@ COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
 # eventos operacionais do swarm e do canal (ADR-04, #124): emissor único, python3 stdlib, só ao bucket
 COPY docker/oute-emit /usr/local/bin/
+# agentes no home pelo instalador oficial de cada um (#195)
+COPY docker/oute-agents-install /usr/local/bin/
 COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
 # uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex/pi)
 COPY docker/oute-task /usr/local/bin/
@@ -129,7 +135,7 @@ COPY docker/agent-wrap.sh /usr/local/lib/oute/agent-wrap.sh
 COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
 RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
+RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install /usr/local/bin/oute-task /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
