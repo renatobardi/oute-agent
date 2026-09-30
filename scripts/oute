@@ -108,13 +108,27 @@ host_secrets() {
 # fica desligado). Item agent-studio da pasta oute-agent do vault, via agent.env: campos AGENT_STUDIO_TOKEN (token da
 # ingestão e da API) e AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, #187).
 STUDIO_PROFILE=agent-studio
+# destino do collector (#190): no host com o agent-studio, a rede docker; nos outros (Mac), o vhost só na tailnet
+# (lab#244), com o mesmo token. OUTE_AGENT_STUDIO_URL no .env troca o vhost.
+STUDIO_LOCAL_URL=http://agent-studio:8430
+STUDIO_REMOTE_URL=https://agent-studio.oute.pro
 agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
 # `oute up`: liga o profile do compose quando o host tem o agent-studio e o token existe; sem o item, avisa e sobe
 # o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio (config/otel/agent-studio.yaml,
-# #189); nos outros hosts, none.yaml e o collector não muda.
+# #189): pela rede docker no host com o agent-studio, pelo vhost nos outros (#190). Sem o token, none.yaml e o
+# collector não muda (a fila não enche de 401).
 agent_studio_up() {
-  export OUTE_OTEL_STUDIO=none
-  agent_studio_enabled || return 0
+  export OUTE_OTEL_STUDIO=none AGENT_STUDIO_URL="$STUDIO_LOCAL_URL"
+  if ! agent_studio_enabled; then
+    if [[ -z "${AGENT_STUDIO_TOKEN:-}" ]]; then
+      echo "aviso: AGENT_STUDIO_TOKEN não está em $AGENT_ENV_FILE (item agent-studio da pasta oute-agent do vault)." \
+        "O collector não manda ao agent-studio do oute-server; crie o item e rode: oute up --refresh-secrets" >&2
+      return 0
+    fi
+    AGENT_STUDIO_URL="${OUTE_AGENT_STUDIO_URL:-$(env_get OUTE_AGENT_STUDIO_URL || true)}"
+    export AGENT_STUDIO_TOKEN AGENT_STUDIO_URL="${AGENT_STUDIO_URL:-$STUDIO_REMOTE_URL}" OUTE_OTEL_STUDIO=agent-studio
+    return 0
+  fi
   local v falta=""
   for v in AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
   if [[ -n "$falta" ]]; then
@@ -520,7 +534,8 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up [--refresh-secrets]  sobe agent + jev-router + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
-               (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08)
+               (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08;
+                nos outros, o collector manda ao agent-studio.oute.pro pela tailnet com o mesmo token, #190)
                (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)
   secrets refresh  relê o Vaultwarden (pede a master password), regrava ~/.oute/agent.env e tranca a sessão
   down|restart
