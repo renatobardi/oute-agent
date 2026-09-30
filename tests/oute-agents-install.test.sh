@@ -85,8 +85,8 @@ run() {
     PATH="$SHIMS:$FALLBACK:$STUB:$SYS" "$INSTALL" "$@" 2>&1)"; RC=$?
   return 0
 }
-calls()     { [[ "$(cat "$H/install.calls" 2>/dev/null | tr '\n' ' ')" == "$1" ]]; }
-said()      { grep -q -- "$1" <<<"$OUT"; }
+calls()     { local want="$1"; [[ "$(cat "$H/install.calls" 2>/dev/null | tr '\n' ' ')" == "$want" ]]; return $?; }
+said()      { local pat="$1"; grep -q -- "$pat" <<<"$OUT"; return $?; }
 
 # ---------------------------------------------------------------- casos
 fresh first; run
