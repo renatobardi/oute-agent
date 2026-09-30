@@ -7,7 +7,10 @@ set -uo pipefail
 a="$(basename "$0")"
 shims="$(cd "$(dirname "$0")" && pwd)"
 clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
-real="$(PATH="$clean_path" command -v "$a")" || { echo "oute: $a não encontrado" >&2; exit 127; }
+# Sem o agente no PATH (ainda não instalado em ~/.local/bin pelo oute-agents-install), usa a cópia de reserva da imagem.
+fallback="${OUTE_AGENTS_FALLBACK:-/opt/oute/agents/bin}"
+real="$(PATH="$clean_path" command -v "$a")" || { [[ -x "$fallback/$a" ]] && real="$fallback/$a"; } \
+  || { echo "oute: $a não encontrado" >&2; exit 127; }
 pass() { exec "$real" "$@"; }
 
 # Restore do herdr: relança a sessão (`claude --resume <id>`, `codex resume <id>`, `pi --session <id>`) num shell novo,

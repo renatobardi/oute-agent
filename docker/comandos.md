@@ -61,6 +61,11 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task list                    worktrees de tarefa abertas
   oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
+  oute-agents-install [claude|codex|pi]
+                                    instala o agente no home (~/.local/bin) pelo instalador oficial, onde ele se
+                                    atualiza sozinho; a subida já roda em segundo plano (log: ~/.oute/agents-install.log).
+                                    Sem ele, vale a cópia de reserva da imagem (/opt/oute/agents). Update: claude
+                                    automático, `codex update`, `pi update`
 
 ## CONTAINER — rodada paralela (oute-swarm)
   oute-swarm <repo> [--max N] [--label L]
