@@ -3,7 +3,8 @@
 # contra o receptor OTLP falso (tests/lib/otlp-receiver.py, no lugar do agent-studio) e confere que os três sinais
 # chegam com o token, que `kill -9` com lote pendente não perde nada (aceitos = recebidos depois do restart) e que,
 # com o receptor fora, a fila cresce e esvazia quando ele volta. Confere também o liga/desliga do `oute up`
-# (OUTE_AGENT_STUDIO=1 + item do vault) e o compose. Mesmo binário fixado do tests/otelcol-queue.test.sh.
+# (OUTE_AGENT_STUDIO=1 + item do vault), a escolha do destino por host (rede docker × vhost da tailnet, #190), o caso
+# sem token e o compose. Mesmo binário fixado do tests/otelcol-queue.test.sh.
 # Precisa de python3, jq e curl. Uso: tests/otelcol-studio.test.sh
 set -uo pipefail
 
@@ -28,7 +29,8 @@ check "otelcol-contrib $V"                              bash -c '"$1" --version 
 TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
 export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT="http://127.0.0.1:$(closed_port)" \
   LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
-  AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AGENT_STUDIO_TOKEN="$TOKEN"
+  AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AGENT_STUDIO_TOKEN="$TOKEN" \
+  AGENT_STUDIO_URL=http://agent-studio:8430
 C="$ROOT/config/otel"; CFG="$C/collector.yaml"; STUDIO="$C/agent-studio.yaml"
 check "validate collector + none + agent-studio"        "$OTELCOL" validate --config="$CFG" --config="$C/none.yaml" --config="$STUDIO"
 check "validate collector + langfuse + agent-studio"    "$OTELCOL" validate --config="$CFG" --config="$C/langfuse.yaml" --config="$STUDIO"
@@ -55,6 +57,10 @@ check "bucket continua igual (três pipelines archive)"  jqp '[.service.pipeline
 # o print-config não mostra o sizer: confere na fonte (bytes nas filas e no lote, que é âncora única)
 check "sizer: bytes nas três filas"                     [ "$(grep -c '^      sizer: bytes$' "$STUDIO")" -eq 3 ]
 check "lote em bytes, até 8 MB (corpo JSON < 64 MB)"    grep -q 'batch: &studio_batch {flush_timeout: [0-9]*s, sizer: bytes, min_size: [0-9]*, max_size: 8388608}' "$STUDIO"
+check "destino só pelo ambiente (o oute up escolhe, #190)" [ "$(grep -c '^    endpoint: ${env:AGENT_STUDIO_URL}$' "$STUDIO")" -eq 3 ]
+P2="$(AGENT_STUDIO_URL=https://agent-studio.oute.pro "$OTELCOL" print-config --mode=unredacted --format=json --config="$CFG" --config="$C/none.yaml" --config="$STUDIO" 2>/dev/null)"
+check "vhost da tailnet nos três exporters"             jq -e '[.exporters | to_entries[] | select(.key | startswith("otlp_http/studio_")) | .value.endpoint]
+  | length == 3 and all(. == "https://agent-studio.oute.pro")' <<<"$P2" >/dev/null
 check "token só pelo ambiente (nada fixo no arquivo)"   grep -q 'Authorization: "Bearer ${env:AGENT_STUDIO_TOKEN}"' "$STUDIO"
 
 # ---------------------------------------------------------------- 2. `oute up` liga só com o agent-studio; compose
@@ -63,13 +69,28 @@ FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^router_sync()/p' "$ROOT/scripts
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
-  $FUNCS"$'\n'"agent_studio_up; echo \"otel=\${OUTE_OTEL_STUDIO-unset}\"" 2>&1)"; }
+  $FUNCS"$'\n'"agent_studio_up; echo \"otel=\${OUTE_OTEL_STUDIO-unset}\"; echo \"url=\${AGENT_STUDIO_URL-unset}\"" 2>&1)"; RC=$?; }
 rm -f "$TMP/.env"
-up AGENT_STUDIO_TOKEN=t AGENT_STUDIO_SURREAL_PASS=s
-check "sem OUTE_AGENT_STUDIO (Mac): collector sem o agent-studio" grep -qx 'otel=none' <<<"$OUT"
+up AGENT_STUDIO_TOKEN=t
+check "sem OUTE_AGENT_STUDIO (Mac), com o token: pipeline do agent-studio" grep -qx 'otel=agent-studio' <<<"$OUT"
+check "…pelo vhost da tailnet (#190)"                   grep -qx 'url=https://agent-studio.oute.pro' <<<"$OUT"
+check "…sem aviso"                                     bash -c '! grep -q aviso <<<"$0"' "$OUT"
+up AGENT_STUDIO_TOKEN=t AGENT_STUDIO_URL=http://outro:1
+check "…AGENT_STUDIO_URL do ambiente não manda"        grep -qx 'url=https://agent-studio.oute.pro' <<<"$OUT"
+printf 'OUTE_AGENT_STUDIO_URL=https://studio.exemplo.ts.net\n' > "$TMP/.env"
+up AGENT_STUDIO_TOKEN=t
+check "…OUTE_AGENT_STUDIO_URL no .env troca o vhost"   grep -qx 'url=https://studio.exemplo.ts.net' <<<"$OUT"
+rm -f "$TMP/.env"
+up
+check "sem OUTE_AGENT_STUDIO e sem o token: collector sem o agent-studio" grep -qx 'otel=none' <<<"$OUT"
+check "…avisa e cita o item do vault"                  grep -q 'aviso: AGENT_STUDIO_TOKEN não está em .*item agent-studio' <<<"$OUT"
+check "…não bloqueia (rc 0)"                           test "$RC" = 0
+up OUTE_OTEL_STUDIO=agent-studio
+check "…mesmo com OUTE_OTEL_STUDIO vindo do ambiente"  grep -qx 'otel=none' <<<"$OUT"
 printf 'OUTE_AGENT_STUDIO=1\n' > "$TMP/.env"
 up AGENT_STUDIO_TOKEN=t AGENT_STUDIO_SURREAL_PASS=s
 check "OUTE_AGENT_STUDIO=1 com o item: pipeline do agent-studio" grep -qx 'otel=agent-studio' <<<"$OUT"
+check "…pela rede docker (agent-studio:8430)"           grep -qx 'url=http://agent-studio:8430' <<<"$OUT"
 up
 check "OUTE_AGENT_STUDIO=1 sem o item: collector sem o agent-studio" grep -qx 'otel=none' <<<"$OUT"
 up OUTE_OTEL_STUDIO=agent-studio
@@ -77,6 +98,7 @@ check "…mesmo com OUTE_OTEL_STUDIO vindo do ambiente"  grep -qx 'otel=none' <<
 rm -f "$TMP/.env"
 COMPOSE="$ROOT/docker/compose.yaml"
 check "compose: config do agent-studio escolhida pelo oute up" grep -q -- '- --config=/etc/otelcol/${OUTE_OTEL_STUDIO:-none}.yaml' "$COMPOSE"
+check "compose: destino do agent-studio no collector (rede docker por padrão)" bash -c 'sed -n "/^  otel-collector:/,/^  [a-z]/p" "$0" | grep -q "AGENT_STUDIO_URL: \${AGENT_STUDIO_URL:-http://agent-studio:8430}"' "$COMPOSE"
 check "compose: token do agent-studio no collector"    bash -c 'sed -n "/^  otel-collector:/,/^  [a-z]/p" "$0" | grep -q "AGENT_STUDIO_TOKEN: \${AGENT_STUDIO_TOKEN:-}"' "$COMPOSE"
 check "arquivo do pipeline = nome que o oute up exporta" test -f "$C/agent-studio.yaml"
 

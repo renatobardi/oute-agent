@@ -129,6 +129,10 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - Sem perda como o bucket: fila em disco na mesma `file_storage/queue` (arquivo próprio por exporter), `sizer: bytes`, logs 600 / traces 300 / metrics 100 MB, `block_on_overflow: false`, retry sem prazo. Lote na fila com `flush_timeout: 10s`, em bytes (1 a 8 MB de protobuf), para o corpo JSON ficar abaixo dos 64 MB da ingestão (acima disso seria 400, que não é retentado).
 - Pipelines `traces|metrics|logs/studio` com os processors do bucket (`memory_limiter`, `transform/agent`, `resource`), sem filtro. As métricas do collector (#162) passam a trazer também a fila dos três exporters. Teste `tests/otelcol-studio.test.sh`.
 
+### Collector → agent-studio nos outros hosts (#190)
+- Mesmo `agent-studio.yaml`, com o destino em `AGENT_STUDIO_URL`, escolhido pelo `oute up`: no host com `OUTE_AGENT_STUDIO=1`, `http://agent-studio:8430` (rede `oute`); nos outros (Mac), `https://agent-studio.oute.pro`, o vhost só na tailnet (lab#244), com o mesmo token. `OUTE_AGENT_STUDIO_URL` no `.env` troca o vhost.
+- Sem `AGENT_STUDIO_TOKEN` no `agent.env`, o pipeline não liga (`none`, a fila não enche de 401) e o `oute up` avisa. Mesma fila em disco, retry e lote: sem tailnet, o dado espera na fila e chega com a hora do fato quando a rede volta.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.
