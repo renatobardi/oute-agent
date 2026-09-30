@@ -29,9 +29,11 @@ latest_codex() { get "$GH_API/latest" | jq -r '.tag_name' | sed 's/^rust-v//'; }
 
 if [[ "${1:-}" == "--print" ]]; then
   cv="${2:-$(latest_claude)}"; xv="${3:-$(latest_codex)}"
-  a="$(claude_sum "$cv" linux-arm64)"; b="$(claude_sum "$cv" linux-x64)"; c="$(codex_sum "$xv")"
-  [[ -n "$a" && -n "$b" ]] || die "claude $cv sem checksum publicado"
-  [[ -n "$c" ]] || die "codex $xv sem install.sh na release"
+  a="$(claude_sum "$cv" linux-arm64 2>/dev/null)" || a=""
+  b="$(claude_sum "$cv" linux-x64 2>/dev/null)" || b=""
+  c="$(codex_sum "$xv" 2>/dev/null)" || c=""
+  [[ -n "$a" && -n "$b" ]] || die "claude $cv sem checksum publicado (versão existe?)"
+  [[ -n "$c" ]] || die "codex $xv sem install.sh na release (versão existe?)"
   echo "# claude $cv no npm: $(npm_time @anthropic-ai/claude-code "$cv")  ·  codex $xv no npm: $(npm_time @openai/codex "$xv")"
   echo "ARG CLAUDE_CODE_VERSION=$cv"
   echo "ARG CLAUDE_CODE_SHA256_ARM64=$a"

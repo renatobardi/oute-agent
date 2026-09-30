@@ -95,11 +95,13 @@ check "primeira subida: instala os dois no home"            bash -c "[[ -x '$H/.
 check "primeira subida: um instalador por agente, na ordem"  calls "claude codex "
 check "primeira subida: sem o Pi"                           bash -c "[[ ! -e '$H/.local/bin/pi' ]]"
 check "codex roda sem prompt (CODEX_NON_INTERACTIVE=1)"     grep -qx 1 "$H/nonint.codex"
-check "instalador não herda segredos"                       bash -c "! grep -q segredo-teste '$H'/env.*"
-check "PATH do instalador sem os shims"                     bash -c "! grep -q '$SHIMS' '$H'/path.*"
-check "PATH do instalador sem a reserva da imagem"          bash -c "! grep -q '$FALLBACK' '$H'/path.*"
+# as checagens negativas exigem os registros dos dois instaladores (sem eles, `! grep` passaria sozinho)
+both() { [[ -s "$H/$1.claude" && -s "$H/$1.codex" ]]; return $?; }
+check "instalador não herda segredos"                       bash -c "$(declare -f both); H='$H'; both env && ! grep -q segredo-teste '$H'/env.*"
+check "PATH do instalador sem os shims"                     bash -c "$(declare -f both); H='$H'; both path && ! grep -q '$SHIMS' '$H'/path.*"
+check "PATH do instalador sem a reserva da imagem"          bash -c "$(declare -f both); H='$H'; both path && ! grep -q '$FALLBACK' '$H'/path.*"
 check "PATH do instalador com ~/.local/bin"                 grep -q "$H/.local/bin" "$H/path.codex"
-check "claude sai da reserva, sem download"                 bash -c "! grep -q claude '$H/curl.calls'"
+check "claude sai da reserva, sem curl"                     bash -c "[[ -s '$H/curl.calls' ]] && ! grep -q claude '$H/curl.calls'"
 check "codex: só o install.sh da versão fixa"               bash -c "[[ \"\$(cat '$H/curl.calls')\" == https://github.com/openai/codex/releases/download/rust-v$CODEX_V/install.sh ]]"
 
 rm -f "$H/install.calls" "$H/curl.calls"; run

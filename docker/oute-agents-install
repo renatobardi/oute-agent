@@ -3,8 +3,9 @@
 # atualiza sozinho como `oute`, sem sudo, e a versão nova sobrevive a `oute down/up`. A imagem traz uma cópia de
 # reserva em /opt/oute/agents (fora do PATH), com versão fixa (#200), que o shim usa enquanto o agente não está em
 # ~/.local/bin.
-# - claude: `claude install` da reserva (o binário nativo, conferido por sha256 no build) copia a si mesmo para o home,
-#   como o install.sh oficial faz depois de baixar e conferir o binário. Sem download.
+# - claude: `claude install` da reserva (o binário nativo, conferido por sha256 no build), o que o install.sh oficial faz
+#   depois de baixar e conferir o binário. Sem script baixado: se a reserva já é a versão mais recente, ela se copia
+#   para o home; se não, o próprio binário baixa a mais recente e confere pelo manifest da versão (precisa de rede).
 # - codex: o install.sh oficial da release fixa (OUTE_CODEX_VERSION, asset do GitHub), conferido contra
 #   OUTE_CODEX_INSTALLER_SHA256 antes de rodar. Ele instala a versão mais recente, conferindo o pacote contra o SHA256SUMS
 #   da release; fixar a versão desligaria o auto-update do codex.
