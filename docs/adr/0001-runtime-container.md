@@ -1,6 +1,6 @@
 # ADR-01 — Runtime container do Oute Agent
 
-Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda)
+Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02)
 
 ## Contexto
 Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) MacBook (Apple Silicon), servindo de "casa" para agentes de código operados via terminal.
@@ -12,8 +12,8 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Base | Ubuntu 24.04, imagem multi-arch (arm64 primário, amd64 build opcional) | Compat. binários dos agentes; mesmo artefato nas duas máquinas |
 | Multiplexador | **herdr** server em background, sessões persistentes | Sobrevive a desconexão; agentes se orquestram entre panes |
 | Acesso | **sshd dentro do container** (porta 2222, só chave pública, sem senha) | Um hop; `oute` (sem argumento) abre o herdr de qualquer lugar |
-| Agentes | **Pi, Claude Code, Codex** (+ extensível). Goose removido na 0.5.7 | Regra de entrada: funcionar com o ai-memory (hooks + handoff) **e** mandar consumo ao bucket + Langfuse (ver `estudos/memoria-diagnostico.md`) |
-| Roteamento LLM | **Híbrido**: Claude Code/Codex com assinatura própria; Pi e tarefas genéricas via **jev-router** (LiteLLM proxy) → OpenRouter, o Jev escolhe o modelo | Não degrada CLIs com assinatura; o Jev decide onde faz sentido |
+| Agentes | **Claude Code** (principal) e **Codex** (reserva), por assinatura (+ extensível). Goose removido na 0.5.7; Pi removido na #217 (ADR-02) | Regra de entrada: funcionar com o ai-memory (hooks + handoff) **e** mandar consumo ao bucket + Langfuse (ver `estudos/memoria-diagnostico.md`) |
+| Roteamento LLM | *(substituído: ADR-02)* Seleção de agente e modelo por sessão, pela fase. O roteamento híbrido (Pi via **jev-router** → OpenRouter) saiu com o Pi (#217); o jev-router sai na #218 | Ver ADR-02 (Histórico) |
 | Memória | **ai-memory** (Akita) como serviço, hooks+MCP instalados em todos os agentes, dados em volume | Handoff entre agentes, SQLite embutido, arm64 nativo |
 | Storage comum | **OCI Object Storage** (bucket `oute-shared`) montado via **rclone** em `/data/shared` nos dois hosts | Já está na cloud dele, free tier, S3-compat |
 | Segredos | **Vaultwarden (vault.oute.pro) obrigatório, lido só pelo HOST.** O `oute up` resolve a pasta `oute-agent` e grava `~/.oute/agent.env` (0600); o container recebe só esses valores via docker secret em `/run/secrets/agent_env`. **O container não tem sessão, API key nem estado do `bw`** (0.7.0). **Decisão 2026-09-26 (#21): o host também não guarda sessão** — `agent.env` é o cache; o vault só é aberto quando um segredo muda (`--refresh-secrets`) ou em comando admin, com senha digitada e sessão descartada | Fonte única; agentes em yolo não alcançam segredos de outros projetos nem o `oute-admin`; nenhuma chave viva do cofre em disco/backup |
@@ -22,7 +22,7 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Usuário do container | uid/gid **10001** fixos, que não existem no host (0.7.3) | Nada que o agente grava vira arquivo de usuário do host |
 | Integrações | gh, oci-cli, gcloud, aws-cli v2, firebase-tools pré-instalados; credenciais vêm da pasta `oute-agent` | |
 | Sandbox dos agentes | **O container é a fronteira de isolamento.** Codex com `sandbox_mode = "danger-full-access"` | Ver adendo 2026-09-24 |
-| Aprovações dos agentes | **Yolo dentro do container por padrão** (`OUTE_AGENT_YOLO=1`): Claude Code `bypassPermissions`, Codex `approval_policy = "never"`, Pi sem prompts | Ver adendo 2026-09-25 |
+| Aprovações dos agentes | **Yolo dentro do container por padrão** (`OUTE_AGENT_YOLO=1`): Claude Code `bypassPermissions`, Codex `approval_policy = "never"` | Ver adendo 2026-09-25 |
 | Config dos agentes | Edição **estrutural** apenas (tomlkit para `~/.codex/config.toml`, jq para JSON; `~/.ssh/config` só ganha um `Include` no topo; notas dos agentes num bloco gerenciado entre marcadores). Nunca `sed`/texto | ai-memory e os próprios agentes escrevem nos mesmos arquivos (bug 0.5.3–0.5.8) |
 | Versões de terceiros | Fixadas: LiteLLM por digest, ai-memory `2.4.0` (servidor e cliente), otel-collector `0.161.0`; upgrade deliberado | Reprodutibilidade |
 | Repo | Monorepo `renatobardi/oute-agent`; addons (skills etc.) em `addons/`, montado read-only (ADR-06) | |
@@ -120,7 +120,7 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
   - Container: `oute-propose "título" [--root]` (script pela entrada padrão) grava `~/outbox/<id>.sh` com rename atômico; `oute-inbox [--wait] <id>` lê o resultado.
   - Host: `oute approve [--watch]`. Copia o script para `~/.oute/approve/runs/` **antes** de exibir (o que roda = o que foi visto), mostra com os caracteres de controle neutralizados (ESC, CR, C1), destaca `--root` e pergunta `[s]im / [N]ão agora / [r]ecusar`. Roda com `sudo bash` (`--root`) ou como o usuário do host, devolve saída + `# rc:` em `~/inbox/<id>.out` (recusa = 126) e registra em `~/.oute/approve/approve.log`.
   - **Nunca dentro do herdr**: ele roda no container, e o agente poderia aprovar o próprio pedido. No Mac, uma aba com `oute approve --watch`; no servidor, `ssh -t oute-server 'oute approve --watch'`.
-  - Os agentes aprendem o canal por um bloco gerenciado (`<!-- oute:managed:ops-handoff -->`) em `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` e `~/.pi/agent/AGENTS.md`.
+  - Os agentes aprendem o canal por um bloco gerenciado (`<!-- oute:managed:ops-handoff -->`) em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (até a #217, também no arquivo equivalente do Pi).
   - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal serve para diagnóstico, ajuste pontual e para rodar o deploy de um PR já mergeado.
 - **Risco residual:** fadiga de aprovação. Mitigação: um objetivo por pedido e script curto; `--root` sempre em destaque.
 
