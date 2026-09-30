@@ -67,7 +67,7 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 
 ### 8. Alertas do pipeline (#136, #150)
 - Cada collector manda as **próprias métricas** (`service.telemetry`: tamanho e capacidade da fila, envios que falharam, dados recusados) ao pipeline; o `oute-emit` põe o tamanho do spool e os descartes em cada evento.
-- O agent-studio calcula: **fila > 50%**, **destino recusando**, **host sem dado há muito tempo**, **spool perto de 50 MB**. O tray e o agent-studio mostram.
+- O agent-studio calcula: **fila > 50%**, **destino recusando**, **host sem dado há muito tempo**, **spool perto de 50 MB**. O tray e o agent-studio mostram. Critérios e limites em "Alertas do pipeline: `GET /v1/alerts` (#204)".
 - **Nunca** com base na linha `Exporting failed. Dropping data` do log do collector: ela aparece na parada mesmo sem perda (#137).
 
 ### 9. Escopo do v1 e troca do Langfuse (#143, #144)
@@ -146,6 +146,22 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - **Tabela de preços:** `config/agent-studio/config.toml`, seção `[prices."<modelo>"]` com `input`, `output`, `cache_read`, `cache_creation` em USD por 1M tokens (`input`/`output` obrigatórios; cache ausente = preço de `input`). A pasta é montada **só leitura** em `/etc/oute/agent-studio` (`AGENT_STUDIO_CONFIG`); preço novo entra com `git pull` + `oute down/up`, sem release. Busca sem diferenciar maiúsculas e, sem entrada exata, sem o prefixo do provedor. Config ausente ou inválida não impede a subida: sem estimado, motivo no stderr e em `prices.errors`; entrada inválida fica de fora (o modelo aparece sem preço). O #204 põe hosts e limites no mesmo arquivo.
 - **Reuso:** regras e preço em `agent_studio/cost.py` (puro), leitura da config em `config.py`, agregação em `usage.aggregate(con, from_ns, to_ns, prices, keys)` com qualquer combinação de `day`/`host`/`agent`/`model` (o custo estimado é calculado por modelo e depois somado). Alertas (#204), tray (#205) e tela (#206) usam essas peças.
 - Teste: `tests/agent-studio-usage.test.sh` (DuckDB de exemplo montado pela ingestão).
+
+### Alertas do pipeline: `GET /v1/alerts` (#204)
+- **Só leitura**, com o mesmo token do `/v1/usage` (sem ele ou errado = **401**; outro método = 405). `at` (ISO 8601, opcional) avalia numa hora passada; padrão = agora. `at` inválido = **400**; leitura que falha = **500** (causa só no stderr).
+- **Sem estado:** cada consulta calcula do DuckDB, pela **hora do fato**. O alerta liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte não mostra mais. "Desde quando" volta no máximo `lookback_hours` (24).
+- **Critérios** (tipo no JSON):
+  - `queue` (**fila > 50%**): último `otelcol_exporter_queue_size` ÷ `otelcol_exporter_queue_capacity` do mesmo ponto, por host, instância e exporter (#162) acima de `queue_max_ratio` (0,5). Desde = início da sequência final de pontos acima.
+  - `destination_refusing` (**destino recusando**): `otelcol_exporter_send_failed_{spans,metric_points,log_records}` de um exporter subiu nos últimos `refused_window_minutes` (15). Contador acumulado: diferença entre pontos seguidos; valor menor ou `start` diferente = reinício do collector, conta desde o zero; o primeiro ponto lido só conta se o contador começou dentro da janela lida. Valor = quanto subiu na janela; desde = primeira subida da sequência (subidas a até 15 min uma da outra).
+  - `host_no_data` (**host sem dado**): só os hosts de `always_on_hosts` (hoje `oute-server`), sem nenhum registro (log, span ou métrica) há mais de `no_data_minutes` (30). Valor = segundos sem dado (`null` se o host nunca mandou nada); desde = o último registro.
+  - `spool` (**spool perto de 50 MB**): no último evento do `oute-emit` do host, `oute.emit.spool.bytes` acima de `spool_max_bytes` (40 MiB), **ou** `oute.emit.spool.dropped` subiu entre dois eventos seguidos nos últimos `spool_dropped_window_minutes` (60; os eventos são esparsos). O contador do spool nunca zera: sem evento anterior lido, o valor não é subida.
+  - `quota` (**cota**, previsto para a #55, **desligado**): com `quota_enabled = true`, último ponto de `quota_metric` (nome provisório `oute.quota.used_pct`, a #55 fixa) por host, agente e atributos em `quota_max_pct` (90) ou acima.
+- **Host parado** = sem registro há mais de `no_data_minutes`. Host parado não liga `queue`, `destination_refusing`, `spool` nem `quota` (valor velho): o **Mac fechado não alerta** e aparece só em `hosts` com o último dado; o host sempre ligado parado alerta só `host_no_data`.
+- **Nunca** a linha `Exporting failed. Dropping data` do log do collector (§8, #137): nenhum alerta lê o corpo de log.
+- **Resposta:** `at`, `time`, `alerts`, `hosts`, `checks` (tipo → ligado) e `config.errors`. Cada alerta: `type`, `host`, `instance`, `value`, `unit` (`ratio`, `failed_items`, `seconds`, `bytes`, `dropped_events`, `pct`), `limit` (0 nos que ligam com qualquer subida), `since` e `evidence` (métrica ou atributo, exporter, pontos, evento com `event_name`/`event_id`). `hosts`: todo host com dado mais os sempre ligados, com `always_on`, `last_data` e `idle_seconds` (o "último dado há X" do Mac).
+- **Config:** seção `[alerts]` do `config/agent-studio/config.toml` (o mesmo arquivo dos preços, montado só leitura: muda com `git pull` + `oute down/up`, sem release). Os padrões do código são os valores do arquivo do repo; chave desconhecida ou valor inválido fica com o padrão e vai a `config.errors`; arquivo ausente = todos os padrões.
+- **Reuso:** `agent_studio/alerts.py` (`evaluate(con, at_ns, cfg)`, `AlertConfig.parse`), para o tray (#205) e a tela (#208).
+- Teste: `tests/agent-studio-alerts.test.sh` (DuckDB de exemplo montado pela ingestão; cada alerta liga e desliga, o Mac parado não alerta).
 
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.

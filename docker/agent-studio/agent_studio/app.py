@@ -1,5 +1,6 @@
 """API do agent-studio: recebe OTLP/HTTP JSON do collector e grava no DuckDB (ADR-08 §4 e §6), e serve a
-consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203).
+consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203) e os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
+#204).
 
 - `Authorization: Bearer <token>` (item `agent-studio` do vault); sem token ou com token errado = 401.
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
@@ -7,6 +8,7 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203).
 - Corpo que não é OTLP JSON = 400 (permanente: reenviar não mudaria nada).
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, mesmo token; janela inválida = 400; leitura que falha = 500.
+- `GET /v1/alerts`: só leitura, mesmo token; `at` inválido = 400; leitura que falha = 500.
 """
 import contextlib
 import gzip
@@ -158,6 +160,27 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             "prices": {"models": len(config.prices), "errors": config.errors},
             **result,
         })
+
+    # ------------------------------------------------ alertas do pipeline (#204)
+    @app.get("/v1/alerts")
+    async def v1_alerts(request: Request):
+        """Alertas ativos e último dado de cada host (ADR-08 §8, contrato na seção #204)."""
+        if not authorized(request):
+            tel.warn("unauthorized", "recusado: token ausente ou errado (alerts)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        try:
+            at_ns = _parse_time(request.query_params["at"], "at") if "at" in request.query_params else time.time_ns()
+        except ValueError as e:
+            return JSONResponse({"message": str(e)}, status_code=400)
+        try:
+            result = await run_in_threadpool(store.alerts, at_ns, config.alerts)
+        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+            tel.warn("alerts-failed", "consulta de alertas falhou, respondi 500: %s", type(e).__name__,
+                     level=logging.ERROR)
+            detail.exception("consulta de alertas falhou")
+            return JSONResponse({"message": "consulta falhou"}, status_code=500)
+        return JSONResponse({"at": _iso(at_ns), "time": "hora do fato (UTC)", **result,
+                             "config": {"errors": config.errors}})
 
     return app
 

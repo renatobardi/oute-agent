@@ -1,5 +1,5 @@
 # Config do agent-studio (ADR-08, #203). Montada só leitura no container (/etc/oute/agent-studio/config.toml):
-# mudança entra com `git pull` + `oute down/up`, sem release. O #204 põe aqui os hosts e os limites dos alertas.
+# mudança entra com `git pull` + `oute down/up`, sem release. Preços (#203) e alertas (#204).
 
 # Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (hoje, o
 # Codex). Claude Code e jev.decision (OpenRouter) mandam o custo real e não dependem desta tabela.
@@ -45,3 +45,27 @@ cache_read = 0.025
 input = 0.05
 output = 0.4
 cache_read = 0.005
+
+# Alertas do pipeline (ADR-08 §8, #204), devolvidos pelo `GET /v1/alerts`. Chave ausente = o valor abaixo (que é
+# também o padrão do código); chave desconhecida ou valor inválido = o padrão, com o motivo em `config.errors`.
+[alerts]
+# Hosts sempre ligados: só eles alertam "host sem dado". Os outros (Mac) só mostram o último dado em `hosts`.
+always_on_hosts = ["oute-server"]
+# Host sem dado: minutos sem nenhum registro (log, span ou métrica, pela hora do fato). Host assim está parado e não
+# liga os outros alertas (valor velho): o Mac fechado não alerta; o sempre ligado alerta só "host sem dado".
+no_data_minutes = 30
+# Fila > 50%: otelcol_exporter_queue_size ÷ otelcol_exporter_queue_capacity de cada exporter do collector (#162).
+queue_max_ratio = 0.5
+# Destino recusando: otelcol_exporter_send_failed_* de um exporter subiu nestes últimos minutos.
+refused_window_minutes = 15
+# Spool do oute-emit perto dos 50 MB (#166): oute.emit.spool.bytes acima disto (40 MiB)…
+spool_max_bytes = 41943040
+# …ou oute.emit.spool.dropped subiu nestes últimos minutos (os eventos do oute-emit são esparsos: janela maior).
+spool_dropped_window_minutes = 60
+# Até onde a consulta olha para trás (spool, "desde quando").
+lookback_hours = 24
+# Cota das assinaturas (#55): previsto, desligado até a #55 emitir a métrica (nome provisório; a #55 fixa).
+# Ligado: alerta quando o último ponto da métrica (por host, agente e atributos, ex.: a janela) chega a quota_max_pct.
+quota_enabled = false
+quota_max_pct = 90
+quota_metric = "oute.quota.used_pct"
