@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- **`tests/agent-studio.test.sh` passa dentro do container** (#227). O `AGENT_STUDIO_TOKEN` do `agent.env` vazava para o teste: o app subia com o token de verdade e o `post` mandava o token do teste, 401 onde se esperava 200 (55 ok, 109 falhas; no CI, sem a variável, passava). O teste agora faz `unset AGENT_STUDIO_TOKEN` no começo, como o `agent-studio-usage` e o `agent-studio-alerts`; os casos de token vazio e do `oute up` já montam o próprio ambiente e não mudam. Só teste. Sem release.
+
 ## [0.7.29] - 2026-09-30
 
 ### Added
