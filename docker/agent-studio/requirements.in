@@ -4,3 +4,5 @@ uvicorn==0.54.0
 # telemetria própria (#188): SDK OTel -> otel-collector (OTLP/HTTP protobuf)
 opentelemetry-sdk==1.45.0
 opentelemetry-exporter-otlp-proto-http==1.45.0
+# tela (#206): templates HTML gerados no servidor, com autoescape
+jinja2==3.1.6
