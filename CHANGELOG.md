@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Fixed
+- **Guia do `oute help`: teclas do `oute approve` como no prompt** (#231). O `docker/comandos.md` dizia `N = recusa, r = relê`; o prompt do `scripts/oute` é `[s]im / [N]ão agora / [r]ecusar`: `s` executa, `N` (padrão, também Enter) deixa o pedido pendente e `r` recusa (não existe "relê"). Quem seguia o guia apertava `N` achando que recusava, ou `r` achando que relia. Só o guia muda; teclas e comportamento do `oute approve` ficam como estão. README, `agent-notes.md`, `swarm.md` e skills conferidos: já batiam com o prompt. Teste novo `tests/comandos-approve.test.sh` compara a linha do guia com o prompt e os ramos do `scripts/oute`. **Precisa de release** (`comandos.md` vai na imagem; no host, o `oute help` lê do repo e muda com `git pull`).
+
 ## [0.7.29] - 2026-09-30
 
 ### Added
