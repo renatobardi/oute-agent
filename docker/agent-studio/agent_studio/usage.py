@@ -1,5 +1,5 @@
 """Agregação de uso (ADR-08 §9, #203): custo real e estimado, tokens, erros, p95 e série diária, com qualquer
-agrupamento de `day`/`host`/`agent`/`model`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
+agrupamento de `day`/`host`/`agent`/`model`/`conversation`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dias em UTC. As regras de escopo e de custo estão no `cost.py`.
 
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206); `usage` monta a resposta do `/v1/usage`.
@@ -10,9 +10,10 @@ from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_S
                    estimate_cost_usd)
 
 DAY_NS = 86_400_000_000_000
-KEYS = ("day", "host", "agent", "model")
+KEYS = ("day", "host", "agent", "model", "conversation")
+# conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206)
 _COLS = {"day": f"CAST(time_unix_nano // {DAY_NS} AS BIGINT)", "host": "host_name", "agent": "oute_agent",
-         "model": "model"}
+         "model": "model", "conversation": "session_id"}
 # logs não têm modelo: agrupados por modelo, caem no modelo nulo
 _LOG_COLS = {**_COLS, "model": "CAST(NULL AS VARCHAR)"}
 _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"
@@ -126,6 +127,11 @@ def render(key, a, keys):
         "latency_p95_ms": None if a["p95"] is None else round(a["p95"], 3),
     })
     return out
+
+
+def rendered(groups, key):
+    """O grupo `key` de um `aggregate` no formato do `render`, sem as chaves; zerado se o grupo não existe."""
+    return render((), groups.get(key) or _empty(), ())
 
 
 def _sorted(groups):
