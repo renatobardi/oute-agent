@@ -52,6 +52,8 @@ SH
 cat > "$BIN/oute-task" <<'SH'
 #!/usr/bin/env bash
 [[ "${1:-}" == list ]] && echo "(worktrees falsas)"
+# o último argumento (prompt da rodada, na abertura) fica em $FAKE/oute-task.last
+[[ -z "${FAKE:-}" ]] || printf '%s' "${@: -1}" > "$FAKE/oute-task.last"
 exit 0
 SH
 # sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
@@ -83,7 +85,7 @@ round() {
   FAKE="$FAKE" "$BIN/fake-tabs" working
 }
 gitrepo() { mkdir -p "$1" && git -C "$1" init -q 2>/dev/null; }
-# sw <args>: roda o oute-swarm como a coordenadora da rodada (dentro do herdr); stdout em $OUT, stderr em $ERR
+# sw <args>: roda o oute-swarm como o dispatcher da rodada (dentro do herdr); stdout em $OUT, stderr em $ERR
 sw() {
   OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
          OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX="${MAX:-3}" \
@@ -226,6 +228,7 @@ sw tell 7-bar "pode seguir"
 check "tell: código 0"                                   [ "$RC" -eq 0 ]
 check "tell: Enter no pane da sessão"                    grep -q 'pane send-keys w1:p2 enter' "$FAKE/herdr.log"
 check "tell: registrado no log, com a mensagem"          grep -q " tell 7-bar ok"$'\t'"pode seguir\$" "$STATE/log"
+check "tell: prefixo do dispatcher (#214)"               [ "$(cat "$FAKE/field")" == "[dispatcher swarm-test, repassando o Bardi] pode seguir" ]
 sw list
 check "list: mostra a sessão de outro repo"              grep -q "7-bar w1:p2 claude .* $LAB kaizen" <<<"$OUT"
 # aba renomeada: o close acha pelo id gravado no spawn (5º campo, antes do repo)
@@ -237,7 +240,7 @@ check "close: marca a sessão fechada"                    grep -qx '7-bar' "$STA
 sw list
 check "list: sessão fechada marcada"                     grep -q "$LAB kaizen (fechada)" <<<"$OUT"
 
-# ---------------------------------------------------------------- #239: coordenadora que reiniciou sem OUTE_SWARM_ID
+# ---------------------------------------------------------------- #239: dispatcher que reiniciou sem OUTE_SWARM_ID
 # swc <dir> <args>: roda o oute-swarm em <dir> sem OUTE_SWARM_ID/REPO/MAX no ambiente (WATCHING=1: o sleep falso vira
 # o gancho do watch). coord <dir> <branch>: pasta git com o HEAD em <branch>.
 swc() {
@@ -248,7 +251,7 @@ swc() {
          ${g[@]+"${g[@]}"} "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
 coord() { gitrepo "$1" && git -C "$1" symbolic-ref HEAD "refs/heads/$2"; }
-ASSUME='OUTE_SWARM_ID ausente; assumindo a rodada swarm-test (worktree da coordenadora)'
+ASSUME='OUTE_SWARM_ID ausente; assumindo a rodada swarm-test (worktree do dispatcher)'
 
 # 7b. spawn na worktree sessao/swarm-<id>: assume a rodada, com o max e o repo do meta, e avisa em stderr
 CASE=assume; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
@@ -285,7 +288,7 @@ OUT="$(cd "$WT" && env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/
 check "variável ganha: grava na rodada do OUTE_SWARM_ID" [ "$RC" -eq 0 ] && grep -q '^9-baz ' "$STATE/spawned"
 check "variável ganha: sem aviso"                        [ -z "$ERR" ]
 
-# 7d. fora de worktree de coordenadora (ou com branch swarm sem meta): avulso, como antes, sem aviso
+# 7d. fora de worktree de dispatcher (ou com branch swarm sem meta): avulso, como antes, sem aviso
 CASE=avulso; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-sem-meta
 swc "$REPO" spawn 8-bar "instrução"
 check "avulso: código 0, sem aviso"                      [ "$RC" -eq 0 -a -z "$ERR" ]
@@ -295,7 +298,7 @@ check "avulso: a rodada não recebe nada"                 [ "$(wc -l < "$STATE/s
 swc "$WT" spawn 9-baz "instrução"
 check "branch swarm sem meta: avulso, sem aviso"         [ "$RC" -eq 0 -a -z "$ERR" ] && grep -q '^9-baz ' "$H/.oute/swarm/avulso/spawned"
 
-# 7e. spawn, tell, close e watch sem a variável, na worktree da coordenadora: a mesma rodada, mesmo com outra mais recente
+# 7e. spawn, tell, close e watch sem a variável, na worktree do dispatcher: a mesma rodada, mesmo com outra mais recente
 CASE=mesma; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
 swc "$WT" spawn 8-bar "instrução"
 NEW="$H/.oute/swarm/swarm-nova"; mkdir -p "$NEW"; cp "$STATE/meta" "$NEW/meta"
@@ -494,7 +497,10 @@ CASE=eventos-op; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
 OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 "$SWARM" "$REPO" --max 2 --label bug 2>&1)"; RC=$?
 nr="$(ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1)"
 check "abertura: código 0"                               [ "$RC" -eq 0 -a -n "$nr" ]
-check "abertura: meta com o agente da coordenadora"      grep -qx 'agent=claude' "$H/.oute/swarm/$nr/meta"
+check "abertura: meta com o agente do dispatcher"      grep -qx 'agent=claude' "$H/.oute/swarm/$nr/meta"
+check "abertura: aviso com o dispatcher (#214)"          grep -qxF "dispatcher $nr · repo repo · max 2 · label bug" <<<"$OUT"
+check "abertura: prompt do dispatcher (#214)"            grep -qF "Você é o **dispatcher** da rodada \`$nr\`" "$FAKE/oute-task.last"
+check "abertura: limpeza reconhece os dois nomes (#214)" grep -q '"dispatcher da rodada `<id>`".*"coordenadora da rodada `<id>`"' "$FAKE/oute-task.last"
 check "abertura: linha no log"                           grep -q " abertura $nr (repo repo, max 2, label bug)$" "$H/.oute/swarm/$nr/log"
 check "abertura: oute.swarm.round.opened"                [ "$(ev '.name == "oute.swarm.round.opened"' | jq -c --arg r "$nr" 'select(.attrs["oute.swarm.round"] == $r and .attrs["oute.swarm.repo"] == "repo"
                                                               and .attrs["oute.swarm.max"] == "2" and .attrs["oute.swarm.label"] == "bug" and .attrs["oute.agent"] == "claude")' | grep -c .)" -eq 1 ]
@@ -503,7 +509,7 @@ e="$(ev '.name == "oute.swarm.session.spawned"')"
 check "spawn: código 0 e linha no log"                   [ "$RC" -eq 0 ] && grep -q ' spawn 8-bar codex$' "$STATE/log"
 check "spawn: sessão, issue, agente da sessão, repo"     jq -e '.attrs["oute.swarm.round"] == "swarm-test" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.issue"] == "8"
                                                               and .attrs["oute.swarm.session.agent"] == "codex" and .attrs["oute.swarm.repo"] == "repo" and .attrs["oute.swarm.kaizen"] == false' <<<"$e" >/dev/null
-check "spawn: oute.agent = coordenadora, origem"         jq -e '.attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e" >/dev/null
+check "spawn: oute.agent = dispatcher, origem"         jq -e '.attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e" >/dev/null
 check "spawn: corpo = prompt da sessão"                  jq -e '.body | startswith("faça a issue 8\n\n")' <<<"$e" >/dev/null
 FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
 echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"

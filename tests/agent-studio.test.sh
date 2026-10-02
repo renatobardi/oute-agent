@@ -344,7 +344,7 @@ check "pedido recusado"                                jqe '.[0].state == "decid
 check "pedido sem decisão: pendente"                   jqe '.[0].state == "pendente" and .[0].decision == null' <<<"$(sq "SELECT * FROM pedido:\`$P3\`")"
 check "decided antes do proposed: continua decidido"   jqe --arg t "pedido $P4" '.[0].state == "decidido" and .[0].rc == 1 and .[0].title == $t' <<<"$(sq "SELECT * FROM pedido:\`$P4\`")"
 r="$(sq "SELECT * FROM rodada:\`$RND\`" | jq -c '.[0]')"
-check "rodada: fechada, repo, max, coordenadora, horas" jqe '.state == "fechada" and .repo == "oute-agent" and .max == 2 and .agent == "claude" and (.opened_at | startswith("2026-09-29T07:42")) and (.closed_at | startswith("2026-09-29T09:00"))' <<<"$r"
+check "rodada: fechada, repo, max, dispatcher, horas" jqe '.state == "fechada" and .repo == "oute-agent" and .max == 2 and .agent == "claude" and (.opened_at | startswith("2026-09-29T07:42")) and (.closed_at | startswith("2026-09-29T09:00"))' <<<"$r"
 w="$(sq "SELECT *, rodada.state AS rodada_state, sessao.repo AS sessao_repo FROM worker:['$RND', '185-logs']" | jq -c '.[0]')"
 check "worker 185: fechado, agente, issue, ligado à rodada" jqe --arg r "$RND" '.state == "fechada" and .agent == "codex" and .issue == 185 and .rodada_state == "fechada" and (.spawned_at | startswith("2026-09-29T07:43")) and (.closed_at | startswith("2026-09-29T08:10"))' <<<"$w"
 check "worker 185: ligado à sessão do oute-task"       jqe '.sessao_repo == "oute-agent" and (.sessao | tostring | contains("oute-agent-185-logs-20260929074300"))' <<<"$w"

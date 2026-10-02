@@ -38,7 +38,7 @@ A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
 Cota desconhecida (leitura falhou) não troca de agente: abre no Claude e avisa. Os dois esgotados: aviso claro, nunca bloqueio em silêncio.
 
 ### Sessão do dispatcher
-A sessão que coordena uma rodada do swarm (a coordenadora; "dispatcher" a partir da #214) abre na fase **`plan`** fixa, sem Jev: triagem e acompanhamento são planejamento, e o `swarm.md` inteiro não é texto de tarefa para classificar.
+A sessão que coordena uma rodada do swarm (o dispatcher) abre na fase **`plan`** fixa, sem Jev: triagem e acompanhamento são planejamento, e o `swarm.md` inteiro não é texto de tarefa para classificar.
 
 ### Fable 5.1 fora da tabela
 O `claude-fable-5-1` (um nível acima do Opus, 2,5× o preço dele na API) não entra em nenhuma linha. As fases do Opus são conversa com gate humano, onde o ganho do Fable (tarefa longa e autônoma) pesa pouco, e o consumo maior aproximaria o gatilho de cota. Uso só por `--model claude-fable-5-1`. Reavaliar com o consumo de cota das fases do Opus medido no agent-studio.

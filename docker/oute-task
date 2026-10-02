@@ -61,7 +61,7 @@ mark_env() {
   [[ -z "$v" && -z "${OTEL_RESOURCE_ATTRIBUTES+x}" ]] || export OTEL_RESOURCE_ATTRIBUTES="$v"
 }
 # oute.agent dos eventos = quem chamou, em $WHO: o marcador que o harness põe no shell dele; ambiente do swarm = o
-# agente da coordenadora (meta da rodada; sem ele, claude); `human` só com terminal e nenhum marcador; na dúvida,
+# agente do dispatcher (meta da rodada; sem ele, claude); `human` só com terminal e nenhum marcador; na dúvida,
 # unknown. Sem $(…): o -t 1 olha o stdout
 WHO=unknown
 who_called() {
@@ -98,7 +98,7 @@ removed() {   # <base> <merged|empty|detached>, depois do task_of
   emit removed "id=$T_ID" "repo=$T_REPO" "slug=$T_SLUG" "base=$1" "reason=$2" "round=$T_ROUND" "session=$T_SESS" || true
 }
 # abertura: id estável na marca da worktree, evento e marca nas conversas. Chamada com `|| true`: nada daqui
-# interrompe a abertura. Rodada: a do ambiente (coordenadora ou spawn; o worker leva o slug como sessão) ou, sem ele
+# interrompe a abertura. Rodada: a do ambiente (dispatcher ou spawn; o worker leva o slug como sessão) ou, sem ele
 # (restore, reabertura na mão), a que a marca guardou
 session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
   local ev="$1" wt="$2" rname slug="$4" agent="$5" base="$6" mf="" id="" mid round eround mround="" sess msess="" legacy=""
