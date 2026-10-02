@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# release <x.y.z> — bump VERSION, fecha seção do CHANGELOG, commit e tag anotada. Não faz push.
+# release <x.y.z> — bump VERSION, monta a seção do CHANGELOG com os fragmentos de changelog.d/ (#121), commit
+# e tag anotada. Não faz push. Roda também no bash 3.2 do macOS.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NEW="${1:-}"
@@ -15,16 +16,12 @@ grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "CHANGELOG sem seção [Unre
 
 OLD="$(tr -d '[:space:]' < VERSION)"
 DATE="$(date +%Y-%m-%d)"
+# [Unreleased] + fragmentos -> seção [NEW] - data, com o [Unreleased] vazio; fragmento inválido para aqui, sem mudar nada
+scripts/changelog release "$NEW" "$DATE"
 printf '%s\n' "$NEW" > VERSION
-# [Unreleased] -> nova seção vazia + [NEW] - data
-python3 - "$NEW" "$DATE" <<'PY'
-import re,sys,pathlib
-new,date=sys.argv[1:]
-p=pathlib.Path('CHANGELOG.md'); s=p.read_text()
-s=s.replace('## [Unreleased]\n', f'## [Unreleased]\n\n## [{new}] - {date}\n',1)
-p.write_text(s)
-PY
 git add VERSION CHANGELOG.md
+# os fragmentos saem no mesmo commit (o changelog.d/README.md fica)
+if git ls-files -- changelog.d | grep -q .; then git add -A -- changelog.d; fi
 git commit -q -m "chore(release): v$NEW (de $OLD)"
 git tag -a "v$NEW" -m "oute-agent v$NEW"
 echo "v$NEW criada. Publicar: git push && git push origin v$NEW"

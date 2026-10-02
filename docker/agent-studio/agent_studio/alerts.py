@@ -19,6 +19,7 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
 de log. Tudo pela hora do fato; "desde quando" volta no máximo `lookback_hours`.
 
 `evaluate(con, at_ns, cfg)` é a peça reusável (tray #205, tela #208); `AlertConfig.parse` lê a seção `[alerts]`.
+O tray reusa também `last_data`, `stopped` e `hosts` para as máquinas (pela hora de chegada).
 """
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
@@ -220,27 +221,51 @@ def _refusing(con, lo, at, cfg):
     return out
 
 
-def last_data(con, lo, at):
-    """{host: (hora do último registro, sinal)} de todo host com dado em [lo, at] (logs, spans e métricas). Só a
-    janela lida (`lookback_hours`): a consulta não varre o banco inteiro; host sem nada nela fica de fora."""
-    rows = _rows(con, """
+# coluna da hora de cada registro: a do fato (os alertas) ou a de chegada ao agent-studio (as máquinas do tray, #205)
+FACT, RECEIVED = "time_unix_nano", "received_unix_nano"
+
+
+def last_data(con, lo, at, by=FACT):
+    """{host: (hora do último registro, sinal)} de todo host com dado em [lo, at] (logs, spans e métricas), pela
+    hora do fato ou, com `by=RECEIVED`, pela de chegada. Só a janela lida (`lookback_hours`): a consulta não varre
+    o banco inteiro; host sem nada nela fica de fora."""
+    if by not in (FACT, RECEIVED):
+        raise ValueError(f"coluna de hora inválida: {by}")
+    rows = _rows(con, f"""
         SELECT host, max(t) AS t, arg_max(signal, t) AS signal FROM (
-          SELECT host_name AS host, max(time_unix_nano) AS t, 'logs' AS signal FROM logs
-           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
-          UNION ALL SELECT host_name, max(time_unix_nano), 'traces' FROM spans
-           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
-          UNION ALL SELECT host_name, max(time_unix_nano), 'metrics' FROM metrics
-           WHERE time_unix_nano BETWEEN ? AND ? GROUP BY ALL
+          SELECT host_name AS host, max({by}) AS t, 'logs' AS signal FROM logs
+           WHERE {by} BETWEEN ? AND ? GROUP BY ALL
+          UNION ALL SELECT host_name, max({by}), 'traces' FROM spans
+           WHERE {by} BETWEEN ? AND ? GROUP BY ALL
+          UNION ALL SELECT host_name, max({by}), 'metrics' FROM metrics
+           WHERE {by} BETWEEN ? AND ? GROUP BY ALL
         ) WHERE host IS NOT NULL GROUP BY host""", [lo, at] * 3)
     return {r["host"]: (r["t"], r["signal"]) for r in rows}
 
 
+def lookback(at_ns, cfg):
+    """Início da janela lida (`lookback_hours` antes de `at_ns`)."""
+    return max(0, at_ns - int(cfg.lookback_hours * 60 * MIN_NS))
+
+
+def stopped(t, at_ns, cfg):
+    """Host parado = sem nenhum registro há mais de `no_data_minutes` (`t` = hora do último; `None` = nenhum)."""
+    return t is None or at_ns - t > int(cfg.no_data_minutes * MIN_NS)
+
+
+def hosts(last, at_ns, cfg):
+    """Todo host de `last` (o `last_data`) mais os sempre ligados, com o último dado e há quanto tempo."""
+    always_on = set(cfg.always_on_hosts)
+    return [{"host": h, "always_on": h in always_on, "last_data": iso(last.get(h, (None,))[0]),
+             "idle_seconds": None if h not in last else (at_ns - last[h][0]) // 1_000_000_000}
+            for h in sorted(set(last) | always_on)]
+
+
 def _no_data(last, at, cfg):
     out = []
-    limit = int(cfg.no_data_minutes * MIN_NS)
     for host in cfg.always_on_hosts:
         t, signal = last.get(host, (None, None))
-        if t is not None and at - t <= limit:
+        if not stopped(t, at, cfg):
             continue
         out.append(_alert(NO_DATA, host, None, None if t is None else (at - t) // 1_000_000_000, "seconds",
                           cfg.no_data_minutes * 60, t, {
@@ -306,19 +331,14 @@ def enabled(cfg):
 
 def evaluate(con, at_ns, cfg):
     """Alertas ativos na hora `at_ns` (ns, hora do fato) e o último dado de cada host. Só lê."""
-    lo = max(0, at_ns - int(cfg.lookback_hours * 60 * MIN_NS))
+    lo = lookback(at_ns, cfg)
     last = last_data(con, lo, at_ns)
     alerts = _queue(con, lo, at_ns, cfg) + _refusing(con, lo, at_ns, cfg) + _no_data(last, at_ns, cfg) \
         + _spool(con, lo, at_ns, cfg)
     if cfg.quota_enabled:
         alerts += _quota(con, lo, at_ns, cfg)
-    idle = int(cfg.no_data_minutes * MIN_NS)
-    stopped = {h for h, (t, _) in last.items() if at_ns - t > idle}
-    alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in stopped]
+    idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
+    alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]
     alerts.sort(key=lambda a: (TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
                                str(a["evidence"].get("exporter") or a["evidence"].get("attribute") or "")))
-    always_on = set(cfg.always_on_hosts)
-    hosts = [{"host": h, "always_on": h in always_on, "last_data": iso(last.get(h, (None,))[0]),
-              "idle_seconds": None if h not in last else (at_ns - last[h][0]) // 1_000_000_000}
-             for h in sorted(set(last) | always_on)]
-    return {"alerts": alerts, "hosts": hosts, "checks": enabled(cfg)}
+    return {"alerts": alerts, "hosts": hosts(last, at_ns, cfg), "checks": enabled(cfg)}

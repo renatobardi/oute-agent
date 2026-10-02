@@ -90,11 +90,8 @@ def _usd(v):
 
 def _ago(iso):
     """Datetime do SurrealDB -> idade até agora (`3 min 05 s`)."""
-    try:
-        then = datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return "—"
-    return _dur(max(0, int((datetime.now(timezone.utc) - then).total_seconds())) * 1_000_000_000)
+    age = prop_mod.age_seconds(iso, time.time_ns())
+    return "—" if age is None else _dur(age * 1_000_000_000)
 
 
 def _mib(n):
@@ -134,7 +131,7 @@ def _env():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
     env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd, ago=_ago,
-                       alert_title=_alert_title, alert_value=_alert_value)
+                       alert_title=_alert_title, alert_value=_alert_value, proposal_path=prop_mod.page_path)
     return env
 
 

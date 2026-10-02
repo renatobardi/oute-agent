@@ -1,6 +1,6 @@
 """API do agent-studio: recebe OTLP/HTTP JSON do collector e grava no DuckDB (ADR-08 §4 e §6), e serve a
 consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
-#204) e a tela (`web.py`, #206, #207 e #208).
+#204), o endpoint do tray (`GET /v1/tray`, ADR-08 §10, #205) e a tela (`web.py`, #206, #207 e #208).
 
 - `Authorization: Bearer <token>` (item `agent-studio` do vault); sem token ou com token errado = 401.
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
@@ -9,9 +9,12 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, mesmo token; janela inválida = 400; leitura que falha = 500.
 - `GET /v1/alerts`: só leitura, mesmo token; `at` inválido = 400; leitura que falha = 500.
-- Leitura (`GET /v1/usage`, `GET /v1/alerts` e as páginas) aceita o `Bearer` ou o cookie do login (#206); a
-  ingestão, só o `Bearer`.
+- `GET /v1/tray`: só leitura, mesmo token; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
+  `proposals.available` = `false` (o resto do menu segue).
+- Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
+  (#206); a ingestão, só o `Bearer`.
 """
+import asyncio
 import contextlib
 import gzip
 import json
@@ -24,7 +27,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import auth as auth_mod, config as config_mod, otlp, state, telemetry, web
+from . import auth as auth_mod, config as config_mod, otlp, state, telemetry, tray as tray_mod, web
 
 log = logging.getLogger("agent_studio")
 detail = logging.getLogger("agent_studio_detail")
@@ -179,6 +182,38 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         return JSONResponse({"at": _iso(at_ns), "time": "hora do fato (UTC)", **result,
                              "config": {"errors": config.errors}})
+
+    # ------------------------------------------------ endpoint do tray (#205)
+    def _tray_pending(at_ns):
+        """Pedidos pendentes do SurrealDB; `None` sem ele ou se a leitura falha (a causa só no stderr): o tray
+        segue com o resto do menu e sem o número de pedidos."""
+        if surreal is None:
+            return None
+        try:
+            return tray_mod.pending(surreal, at_ns)
+        except Exception as e:  # noqa: BLE001 — o estado dos pedidos não derruba o menu inteiro
+            tel.warn("tray-state-failed", "tray: pedidos pendentes (SurrealDB) falhou, respondi sem eles: %s",
+                     type(e).__name__, level=logging.ERROR)
+            detail.exception("tray: pedidos pendentes falhou")
+            return None
+
+    @app.get("/v1/tray")
+    async def v1_tray(request: Request):
+        """Tudo o que o menu do tray mostra, numa chamada (ADR-08 §10, contrato na seção #205)."""
+        if not auth.reader(request):
+            tel.warn("unauthorized", "recusado: token ausente ou errado (tray)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        at_ns = time.time_ns()
+        try:
+            # os dois bancos ao mesmo tempo: o SurrealDB lento não soma ao tempo do DuckDB
+            snap, pending = await asyncio.gather(
+                run_in_threadpool(store.tray, at_ns, config.prices, config.alerts),
+                run_in_threadpool(_tray_pending, at_ns))
+        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+            tel.warn("tray-failed", "consulta do tray falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
+            detail.exception("consulta do tray falhou")
+            return JSONResponse({"message": "consulta falhou"}, status_code=500)
+        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors))
 
     # ------------------------------------------------ tela: login e conversas (#206), sessões (#207), pedidos e
     # alertas (#208)

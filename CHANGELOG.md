@@ -5,14 +5,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 ## [Unreleased]
 
 ### Added
-- **Sessões do `oute-task` no bucket: eventos `oute.task.*` e a sessão marcada nas conversas** (#128, ADR-04 "Sessões"). **Precisa de release** (`oute-task`, `oute-emit`, `oute-swarm` e o shim vão na imagem).
-  - `oute-task` emite pelo `oute-emit` (verbo novo `oute-emit task`) `oute.task.opened` (worktree criada), `oute.task.reopened` e, no `clean --yes`, `oute.task.removed` com `oute.task.reason` = `merged`, `empty` ou `detached`. Atributos: `oute.task.id`, `oute.task.repo`, `oute.task.slug`, `oute.task.agent`, `oute.task.base` e, em sessão de rodada, `oute.swarm.round`/`oute.swarm.session`. Nunca levam corpo. Simulação do `clean` e `list` não emitem.
-  - **`oute.task.id`** = `<repo>-<slug>-<AAAAMMDDhhmmss>` (UTC), gravado em `<git-dir da worktree>/oute-task` e o mesmo da abertura à remoção. Worktree anterior a esta versão ganha id na primeira reabertura (`oute.task.legacy=true`); removida sem reabrir, o `removed` sai sem id.
-  - **Conversas marcadas:** antes do `exec` do agente, o `OTEL_RESOURCE_ATTRIBUTES` leva a origem que já estava + `oute.task.id`, `oute.task.repo`, `oute.task.slug` (+ `oute.swarm.*` em sessão de rodada). O shim refaz a marca quando `claude`/`codex` rodam de dentro de uma worktree com id (restore do herdr, `--resume`, `-c`, `-p`). **Codex conferido** (0.159.2): logs e traces saem com a marca no resource.
-  - **`oute.agent` = quem chamou:** marcador do agente (`CLAUDECODE=1`, `CODEX_THREAD_ID`), senão o agente da coordenadora (ambiente do swarm), senão `human` (terminal) ou `unknown`. O `oute-swarm spawn` passa `OUTE_SWARM_ROUND` ao worker.
-  - **O `oute-task` não muda:** mesma saída, mesmo `exec`, mesmos códigos, também com o coletor fora do ar (o evento vai ao spool) ou sem `oute-emit`. Só há uma linha nova, de aviso em stderr, quando o id não pôde ser gravado (a sessão abre sem id).
-  - Lacuna conhecida (#250): `oute-task` chamado por um agente Claude não emite, porque o shell do Claude Code não herda as `OTEL_*`; a marca nas conversas não é afetada.
-  - Teste novo `tests/oute-task.test.sh` (receptor OTLP falso + agente falso no PATH). `ev`/`n` foram para `tests/lib/otlp.sh` e `has_pty` para `tests/lib/check.sh` (eram cópias em `oute-emit.test.sh` e `oute-swarm.test.sh`).
+- **agent-studio: endpoint do tray, `GET /v1/tray`** (#205, #156, ADR-08 §10). **Precisa de release** (o agent-studio vai na imagem). Tudo o que o menu do tray no Mac (#158) mostra, numa chamada, para o polling de 15 s. Só leitura, com o token de sempre (`Bearer` ou o cookie do login; sem ele = 401; outro método = 405).
+  - `bar`: nº de pedidos pendentes e nº de alertas (os contadores da barra).
+  - `machines`: host, `active`/`stopped`, sempre ligado ou não e o "último dado há X", pela **hora de chegada** do registro mais recente (qualquer sinal); parado = a regra de host parado do #204 (`no_data_minutes`).
+  - `proposals`: os pedidos pendentes do SurrealDB (até 50, com o total): id, título, `root`/`user`, agente, host de origem, hora, idade e o caminho da página "ver script" (`/pedido?id=…`, #208). O script não vem na resposta.
+  - `cost_today`: custo do dia (UTC), total e por agente, com real e estimado separados e `estimated` marcando o valor que tem parte estimada; modelo sem preço fica fora da soma (`unpriced_calls`), nunca zero.
+  - `errors_last_hour`: erros da última hora por host × agente (spans e logs).
+  - `alerts`: os mesmos do `GET /v1/alerts`.
+  - **Sem regra nova:** custo e erros saem do `usage.aggregate` (#203), alertas e host parado do `alerts.py` (#204), pedidos e link do `proposals.py` (#208).
+  - **SurrealDB fora:** a resposta segue 200 com o resto do menu, `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por palpite). Leitura do DuckDB que falha = 500.
+  - **Tempo de resposta:** ~0,2 s estimado na produção de hoje (soma das peças medidas no oute-server); 0,43 s num banco de exemplo com mais volume, 0,49 s com dez vezes mais histórico. Detalhe e contrato inteiro no ADR-08, "Endpoint do tray".
+  - Teste novo `tests/agent-studio-tray.test.sh` fixa o contrato da resposta. `tests/lib/otlp_json.py` ganhou `span`, `rl`, `event`, `canal_proposed`, `canal_decided` e `queue_metrics`, que saíram de dentro dos testes de uso, da tela e dos pedidos.
 
 ## [0.7.30] - 2026-10-02
 
