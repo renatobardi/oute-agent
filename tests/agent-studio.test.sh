@@ -10,6 +10,8 @@ TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/agent-studio.sh"
 . "$ROOT/tests/lib/otlp.sh"
 trap 'studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
+# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
+unset AGENT_STUDIO_TOKEN
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
