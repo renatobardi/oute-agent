@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% from "_macros.html" import span_detail %}
+{% block title %}{{ span.name or span.span_id }} · agent-studio{% endblock %}
+{% block main %}
+{% if span.session_id %}<p><a href="/conversa?id={{ span.session_id|urlencode }}">← Conversa <code>{{ span.session_id }}</code></a></p>{% endif %}
+<h1>Span <code>{{ span.name or "(sem nome)" }}</code></h1>
+{{ span_detail(span) }}
+{% endblock %}

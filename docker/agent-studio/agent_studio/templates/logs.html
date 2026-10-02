@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_macros.html" import log_table %}
+{% block title %}Logs · {{ id }} · agent-studio{% endblock %}
+{% block main %}
+<p><a href="/conversa?id={{ id|urlencode }}">← Conversa <code>{{ id }}</code></a></p>
+<h1>Logs a partir do {{ offset + 1 }}º</h1>
+{% if logs %}
+{{ log_table(logs, id, next_offset) }}
+{% else %}
+<p class="aviso">Sem mais logs.</p>
+{% endif %}
+{% endblock %}

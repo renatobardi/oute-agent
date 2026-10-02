@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import cost %}
+{% block title %}Conversas · agent-studio{% endblock %}
+{% block main %}
+<h1>Conversas</h1>
+<form class="filtro" method="get" action="/conversas" hx-get="/conversas" hx-trigger="change" hx-target="#conteudo"
+      hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true">
+  {% if range.from %}
+  <label>De <input name="from" value="{{ range.from }}"></label>
+  <label>Até <input name="to" value="{{ range.to }}"></label>
+  {% else %}
+  <label>Janela
+    <select name="hours">
+      {% for value, label in windows %}<option value="{{ value }}"{% if value == hours %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      {% if hours not in windows|map("first") %}<option value="{{ hours }}" selected>{{ hours }} h</option>{% endif %}
+    </select>
+  </label>
+  {% endif %}
+  <label>Host
+    <select name="host">
+      <option value="">todos</option>
+      {% for h in hosts %}<option value="{{ h }}"{% if h == host %} selected{% endif %}>{{ h }}</option>{% endfor %}
+      {% if host and host not in hosts %}<option value="{{ host }}" selected>{{ host }}</option>{% endif %}
+    </select>
+  </label>
+  <label>Agente
+    <select name="agent">
+      <option value="">todos</option>
+      {% for a in agents %}<option value="{{ a }}"{% if a == agent %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      {% if agent and agent not in agents %}<option value="{{ agent }}" selected>{{ agent }}</option>{% endif %}
+    </select>
+  </label>
+  <button type="submit">Aplicar</button>
+</form>
+<p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, UTC), da mais recente
+  para a mais antiga. Os números são da conversa inteira.
+  {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
+{% if conversations %}
+<table class="conversas">
+  <thead><tr>
+    <th>Início (UTC)</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
+    <th class="n">Entrada</th><th class="n">Saída</th><th class="n" title="tokens de cache: leitura / escrita">Cache</th>
+    <th class="n">Custo</th><th class="n">Erros</th>
+  </tr></thead>
+  <tbody>
+  {% for c in conversations %}
+  {% set u = c.usage %}
+  <tr data-conversa="{{ c.id }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}" data-start-ns="{{ c.start_ns }}"
+      data-duration-ns="{{ c.duration_ns }}" data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}"
+      data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}"
+      data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
+      data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
+      data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-errors="{{ u.errors.total }}">
+    <td class="hora">{{ c.start_ns|ts }}</td>
+    <td>{{ c.host or "—" }}</td>
+    <td>{{ c.agent or "—" }}</td>
+    <td><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a></td>
+    <td class="n">{{ c.duration_ns|dur }}</td>
+    <td class="n">{{ u.calls|num }}</td>
+    <td class="n">{{ u.tokens.input|num }}</td>
+    <td class="n">{{ u.tokens.output|num }}</td>
+    <td class="n">{{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</td>
+    <td class="n custo">{{ cost(u.cost) }}</td>
+    <td class="n{% if u.errors.total %} erro{% endif %}">{{ u.errors.total|num }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="aviso" id="vazio">Nenhuma conversa nessa janela.</p>
+{% endif %}
+{% endblock %}

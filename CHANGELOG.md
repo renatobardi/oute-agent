@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **agent-studio: tela com login por token e conversas** (#206, #156, ADR-08 §9). Primeira fatia da tela, em HTML gerado no servidor (Jinja2) + htmx 2.0.11 servido pelo próprio agent-studio: sem SPA, sem build de front-end, sem CDN. **Login:** `/login` recebe o token e grava um cookie `HttpOnly`, `Secure`, `SameSite=Lax` (90 dias; leva um HMAC do token, não o token; trocar o token no vault invalida os cookies); token errado = 401; "Sair" apaga o cookie. Sem cookie nem `Bearer`, página redireciona para o login e API responde 401. `GET /v1/usage` e `GET /v1/alerts` passam a aceitar também o cookie; a ingestão segue só com `Bearer`. **Conversas** (`/conversas`): lista por host e agente (`session.id`), com janela (24 h, 7, 30 ou 366 dias, ou `from`/`to`) pela hora do fato, início, duração, chamadas, tokens, erros e custo real e estimado (o estimado marcado). **Detalhe** (`/conversa?id=`): árvore de spans (pai → filhos; pai ausente marcado) com nome, duração, modelo, tokens, custo e status, o conteúdo de cada span (atributos, eventos) aberto pelo htmx, e os logs da conversa em ordem, com corpo e atributos (200 por página). Custo pela lógica do #203, sem regra duplicada: `usage.aggregate` ganha a chave `conversation` e o `cost.py` o `call_cost`. Conteúdo sempre escapado e CSP que só aceita script e estilo do próprio servidor. Dependência nova: `jinja2` (hash fixado no `requirements.txt`). ADR-08 com o contrato. Teste novo `tests/agent-studio-web.test.sh`. **Precisa de release** (`docker/agent-studio/` vai na imagem: código, templates, htmx e dependência nova).
+
 ## [0.7.29] - 2026-09-30
 
 ### Added

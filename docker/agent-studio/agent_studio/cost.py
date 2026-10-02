@@ -93,3 +93,12 @@ def estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_crea
             + max(output_tokens or 0, 0) * price.output
             + max(cache_read_tokens or 0, 0) * price.cache_read
             + max(cache_creation_tokens or 0, 0) * price.cache_creation) / 1e6
+
+
+def call_cost(cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price):
+    """Custo de UMA chamada ao modelo, pela mesma regra das somas do `usage.aggregate`: `("real", usd)` quando o
+    span trouxe custo; senão `("estimated", usd)` pela tabela; modelo sem preço = `("unpriced", None)`, nunca zero."""
+    if cost_usd is not None:
+        return "real", cost_usd
+    est = estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price)
+    return ("unpriced", None) if est is None else ("estimated", est)
