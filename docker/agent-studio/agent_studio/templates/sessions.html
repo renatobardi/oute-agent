@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
+{% block title %}Sessões · agent-studio{% endblock %}
+{% block main %}
+<h1>Sessões</h1>
+{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}
+<p class="nota">Sessões do <code>oute-task</code> (<code>oute.task.id</code>) com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }}
+  (hora do fato, UTC), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
+  inteira.
+  {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
+{{ state_warning(state_read) }}
+{% if sessions %}
+{% call session_table() %}
+  {% for s in sessions %}
+  <tbody>
+  {{ session_row(s) }}
+  {% if s.hidden %}
+  <tr class="mais"><td colspan="13"><a href="/sessao?id={{ s.id|urlencode }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
+  {% endif %}
+  {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
+  </tbody>
+  {% endfor %}
+{% endcall %}
+{% else %}
+<p class="aviso" id="vazio">Nenhuma sessão nessa janela.</p>
+{% endif %}
+
+<h2>Conversas sem sessão</h2>
+<p class="nota">Conversas sem <code>oute.task.id</code> (agente aberto fora do <code>oute-task</code>), uma por
+  <code>session.id</code>.
+  {% if loose_total > loose|length %}Mostrando as {{ loose|length }} mais recentes de {{ loose_total }}.{% endif %}</p>
+{% if loose %}
+{% call session_table() %}
+  <tbody>
+  {% for c in loose %}{{ conversation_row(c) }}{% endfor %}
+  </tbody>
+{% endcall %}
+{% else %}
+<p class="aviso" id="vazio-sem-sessao">Nenhuma conversa sem sessão nessa janela.</p>
+{% endif %}
+{% endblock %}

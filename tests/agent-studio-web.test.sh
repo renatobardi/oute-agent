@@ -28,36 +28,7 @@ hdr() { local name="$1"; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' | gr
 # dinheiro em micro-dólar inteiro: compara float sem erro de arredondamento
 usd() { printf '(%s | tonumber * 1e6 | round)' "$1"; }
 # HTML -> JSON: um objeto por elemento com atributo data-*, com os data-* e o texto (espaços colapsados)
-cat > "$TMP/data.py" <<'PY'
-import json, sys
-from html.parser import HTMLParser
-VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
-class P(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.stack, self.out = [], []
-    def handle_starttag(self, tag, attrs):
-        data = {k[5:]: v for k, v in attrs if k.startswith("data-")}
-        item = {**data, "tag": tag, "_text": []} if data else None
-        if item is not None:
-            self.out.append(item)
-        if tag not in VOID:
-            self.stack.append((tag, item))
-    def handle_endtag(self, tag):
-        while self.stack:
-            t, _ = self.stack.pop()
-            if t == tag:
-                break
-    def handle_data(self, text):
-        for _, item in self.stack:
-            if item is not None:
-                item["_text"].append(text)
-p = P(); p.feed(sys.stdin.read())
-for item in p.out:
-    item["text"] = " ".join(" ".join(item.pop("_text")).split())
-json.dump(p.out, sys.stdout, ensure_ascii=False)
-PY
-data() { python3 "$TMP/data.py"; }
+data() { python3 "$ROOT/tests/lib/html-data.py"; }
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as conversas na janela de 2025.

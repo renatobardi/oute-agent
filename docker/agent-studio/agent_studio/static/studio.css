@@ -1,4 +1,4 @@
-/* agent-studio: tela (#206). Um arquivo só, sem build; a CSP só aceita estilo daqui (nada de style inline). */
+/* agent-studio: tela (#206, #207). Um arquivo só, sem build; a CSP só aceita estilo daqui (nada de style inline). */
 :root {
   color-scheme: light dark;
   --fundo: #fbfbfa; --painel: #ffffff; --texto: #1c1d1f; --fraco: #63676d; --linha: #dfe1e4;
@@ -53,6 +53,14 @@ td.erro, tr.erro td:last-child { color: var(--erro); }
 .d1 { padding-left: 1.6rem; } .d2 { padding-left: 2.6rem; } .d3 { padding-left: 3.6rem; } .d4 { padding-left: 4.6rem; }
 .d5 { padding-left: 5.6rem; } .d6 { padding-left: 6.6rem; } .d7 { padding-left: 7.6rem; } .d8 { padding-left: 8.6rem; }
 .d9 { padding-left: 9.6rem; } .d10 { padding-left: 10.6rem; } .d11 { padding-left: 11.6rem; } .d12 { padding-left: 12.6rem; }
+/* sessões: a linha da sessão em destaque e as conversas dela recuadas */
+.topo nav { display: flex; gap: 1rem; }
+tr.sessao > td { background: var(--fundo); font-weight: 600; border-top: 2px solid var(--linha); }
+td.da-sessao { padding-left: 1.6rem; }
+.sub, .etiqueta { color: var(--fraco); font-size: .8rem; font-weight: 400; margin-left: .4rem; }
+.etiqueta { border: 1px solid var(--linha); border-radius: 3px; padding: 0 .3rem; white-space: nowrap; }
+.modelo { display: block; white-space: nowrap; }
+.modelos .modelo { display: inline; margin-right: .75rem; }
 .conteudo-linha td { padding: 0; border: 0; }
 .conteudo-linha td:not(:empty) { padding: .5rem 1rem 1rem 2rem; border-bottom: 1px solid var(--linha); background: var(--fundo); }
 .span-detalhe dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: 0; }

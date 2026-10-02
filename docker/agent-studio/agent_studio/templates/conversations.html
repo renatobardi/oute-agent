@@ -1,37 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import cost %}
+{% from "_macros.html" import cost, filter %}
 {% block title %}Conversas · agent-studio{% endblock %}
 {% block main %}
 <h1>Conversas</h1>
-<form class="filtro" method="get" action="/conversas" hx-get="/conversas" hx-trigger="change" hx-target="#conteudo"
-      hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true">
-  {% if range.from %}
-  <label>De <input name="from" value="{{ range.from }}"></label>
-  <label>Até <input name="to" value="{{ range.to }}"></label>
-  {% else %}
-  <label>Janela
-    <select name="hours">
-      {% for value, label in windows %}<option value="{{ value }}"{% if value == hours %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      {% if hours not in windows|map("first") %}<option value="{{ hours }}" selected>{{ hours }} h</option>{% endif %}
-    </select>
-  </label>
-  {% endif %}
-  <label>Host
-    <select name="host">
-      <option value="">todos</option>
-      {% for h in hosts %}<option value="{{ h }}"{% if h == host %} selected{% endif %}>{{ h }}</option>{% endfor %}
-      {% if host and host not in hosts %}<option value="{{ host }}" selected>{{ host }}</option>{% endif %}
-    </select>
-  </label>
-  <label>Agente
-    <select name="agent">
-      <option value="">todos</option>
-      {% for a in agents %}<option value="{{ a }}"{% if a == agent %} selected{% endif %}>{{ a }}</option>{% endfor %}
-      {% if agent and agent not in agents %}<option value="{{ agent }}" selected>{{ agent }}</option>{% endif %}
-    </select>
-  </label>
-  <button type="submit">Aplicar</button>
-</form>
+{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}
 <p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, UTC), da mais recente
   para a mais antiga. Os números são da conversa inteira.
   {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
