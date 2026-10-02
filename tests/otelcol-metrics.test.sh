@@ -13,11 +13,7 @@ TMP="$(mktemp -d)"
 CPID=""; S3PID=""; RCV_PID=""
 cleanup() { for p in $CPID $S3PID; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; rcv_stop; rm -rf "$TMP"; }
 trap cleanup EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-die() { echo "FAIL $*"; exit 1; }
+. "$ROOT/tests/lib/check.sh"
 for c in python3 jq curl tar; do command -v "$c" >/dev/null || die "precisa de $c"; done
 
 . "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, V
@@ -165,5 +161,4 @@ done
 stop
 
 [[ "$fail" -eq 0 ]] || { echo "# log do collector:"; tail -30 "$TMP/collector.log"; }
-echo "# $pass ok, $fail falha(s)"
-[[ "$fail" -eq 0 ]]
+check_end

@@ -1,13 +1,24 @@
-# Funções dos testes do agent-studio (ADR-08, #185), para `source`. Precisa de python3; as dependências (duckdb,
-# fastapi, uvicorn) vêm do docker/agent-studio/requirements.txt (hashes fixados), num venv em cache.
-# studio_venv: prepara o venv e define STUDIO_PY. studio_start <dir> [env…]: sobe o app em 127.0.0.1 (porta livre),
-# DuckDB em <dir>/db.duckdb, e define STUDIO_URL; studio_stop: derruba. studio_sql <db> <sql>: uma linha JSON por
-# registro (com o servidor parado: o DuckDB aceita um processo só). post <sinal> <arquivo> [curl args…]: POST com o
-# token certo; imprime o código HTTP.
+# Funções dos testes do agent-studio (ADR-08, #185), para `source` depois do tests/lib/check.sh (usa o die).
+# Precisa de python3; as dependências (duckdb, fastapi, uvicorn) vêm do docker/agent-studio/requirements.txt (hashes
+# fixados), num venv em cache. O AGENT_STUDIO_TOKEN do ambiente sai: vale o token do teste (STUDIO_TOKEN).
+# studio_init: confere jq, python3 e curl e prepara o venv (studio_venv, que define STUDIO_PY); sem eles, sai com 1.
+# studio_start <dir> [env…]: sobe o app em 127.0.0.1 (porta livre), DuckDB em <dir>/db.duckdb, e define STUDIO_URL;
+# studio_stop: derruba. studio_sql <db> <sql>: uma linha JSON por registro (com o servidor parado: o DuckDB aceita um
+# processo só). post <sinal> <arquivo> [curl args…]: POST com o token certo; imprime o código HTTP.
+# code [curl args…]: só o código HTTP. hdr <nome> [curl args…]: o valor de um cabeçalho da resposta, sem \r.
+# data: HTML (stdin) -> JSON dos elementos com data-* (tests/lib/html-data.py). enc <texto>: para a query string.
+# usd <filtro jq>: filtro jq do valor em micro-dólar inteiro. studio_prices <arquivo>: tabela de preços de exemplo.
+# compose_service <serviço>: o bloco do serviço no docker/compose.yaml.
 STUDIO_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STUDIO_ROOT="$(cd "$STUDIO_LIB/../.." && pwd)"
 # token só do teste, aleatório a cada execução
 STUDIO_TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
+# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
+unset AGENT_STUDIO_TOKEN
+studio_init() {
+  command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null || die "precisa de jq, python3 e curl"
+  studio_venv || die "não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"
+}
 studio_venv() {
   local req="$STUDIO_ROOT/docker/agent-studio/requirements.txt" h d
   h="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:12])' "$req")"
@@ -53,3 +64,21 @@ post() {
   curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $STUDIO_TOKEN" \
     -H 'Content-Type: application/json' --data-binary "@$f" "$@" "$STUDIO_URL/v1/$sig"
 }
+code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+hdr() { local name="$1"; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' | grep -i "^$name:" | sed 's/^[^:]*: *//'; }
+data() { python3 "$STUDIO_LIB/html-data.py"; }
+enc() { jq -rn --arg s "$1" '$s | @uri'; }
+# dinheiro em micro-dólar inteiro: compara float sem erro de arredondamento (número da API ou texto de um data-*)
+usd() { printf '(%s | tonumber * 1e6 | round)' "$1"; }
+studio_prices() {
+  cat > "$1" <<'EOF'
+[prices."claude-sonnet-5"]
+input = 3.0
+output = 15.0
+[prices."gpt-5-codex"]
+input = 1.25
+output = 10.0
+cache_read = 0.125
+EOF
+}
+compose_service() { awk -v s="  $1:" '$0 == s {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$STUDIO_ROOT/docker/compose.yaml"; }

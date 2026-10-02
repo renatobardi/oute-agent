@@ -10,10 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL="$ROOT/docker/oute-agents-install"
 SHIM="$ROOT/docker/shims/oute-agent-shim"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; return 0; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; return 0; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; return 0; }
+. "$ROOT/tests/lib/check.sh"
 
 # ---------------------------------------------------------------- fixture
 STUB="$TMP/stub"; SHIMS="$TMP/shims"; FALLBACK="$TMP/fallback"; SYS="$TMP/sys"
@@ -169,5 +166,4 @@ shim "$FALLBACK" pi
 check "shim pi: rc 1, não abre o binário antigo"            bash -c "[[ $RC -eq 1 && '$OUT' != *pi-home* ]]"
 check "shim pi: erro claro"                                 said "Pi saiu do stack (#217), use claude ou codex"
 
-printf '\n%d ok, %d falhas\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+check_end

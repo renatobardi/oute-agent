@@ -8,35 +8,19 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null \
-  || { echo "FAIL precisa de jq, python3 e curl"; exit 1; }
-studio_venv || { echo "FAIL não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"; exit 1; }
+studio_init
 usage() { curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/usage${1:-}"; }
-ucode() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-# dinheiro em micro-dólar inteiro: compara float sem erro de arredondamento
-usd() { printf '(%s * 1e6 | round)' "$1"; }
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # D1 = 2025-09-27T19:06:40Z, D2 = D1 + 1 dia. Tudo chega agora: a janela de 2025 só acha os fatos pela hora do fato.
-python3 - "$TMP" <<'PY'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
+from otlp_json import kv, rs
 tmp = sys.argv[1]
 D1, D2 = 1759000000, 1759000000 + 86400
-def v(x):
-    if isinstance(x, bool): return {"boolValue": x}
-    if isinstance(x, int): return {"intValue": str(x)}
-    if isinstance(x, float): return {"doubleValue": x}
-    return {"stringValue": x}
-def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 n = 0
 def span(name, start, dur, attrs, err=False):
     global n; n += 1
@@ -45,7 +29,6 @@ def span(name, start, dur, attrs, err=False):
          "attributes": kv(attrs)}
     if err: s["status"] = {"code": 2, "message": "falhou"}
     return s
-def rs(res, spans): return {"resource": {"attributes": kv(res)}, "scopeSpans": [{"spans": spans}]}
 claude = {"host.name": "oute-server", "service.name": "claude-code", "oute.agent": "claude"}
 codex = {"host.name": "oute-mac", "service.name": "codex_exec", "oute.agent": "codex"}
 router = {"host.name": "oute-server", "service.name": "jev-router", "oute.agent": "router"}
@@ -87,17 +70,8 @@ logs = {"resourceLogs": [{"resource": {"attributes": kv(codex)}, "scopeLogs": [{
   log(D1, 17, "erro"), log(D2, 21, "fatal"), log(D1, 9, "info"), log(1735689600, 17, "erro fora da janela")]}]}]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
 PY
-cat > "$TMP/prices.toml" <<'EOF'
-[prices."claude-sonnet-5"]
-input = 3.0
-output = 15.0
-[prices."gpt-5-codex"]
-input = 1.25
-output = 10.0
-cache_read = 0.125
-[prices."ruim"]
-input = 1.0
-EOF
+studio_prices "$TMP/prices.toml"
+printf '[prices."ruim"]\ninput = 1.0\n' >> "$TMP/prices.toml"
 WIN='?from=2025-09-27T00:00:00Z&to=2025-09-29'
 
 studio_start "$TMP/s" AGENT_STUDIO_CONFIG="$TMP/prices.toml" || { echo "FAIL agent-studio não subiu"; cat "$TMP/s/stderr"; exit 1; }
@@ -106,20 +80,20 @@ check "ingestão: mesmo lote reenviado = 200"           test "$(post traces "$TM
 check "ingestão: logs = 200"                           test "$(post logs "$TMP/logs.json")" = 200
 
 # ---------------------------------------------------------------- 1. token e janela
-check "sem token: 401"                                 test "$(ucode "$STUDIO_URL/v1/usage$WIN")" = 401
-check "token errado: 401"                              test "$(ucode -H "Authorization: Bearer ${STUDIO_TOKEN}x" "$STUDIO_URL/v1/usage$WIN")" = 401
+check "sem token: 401"                                 test "$(code "$STUDIO_URL/v1/usage$WIN")" = 401
+check "token errado: 401"                              test "$(code -H "Authorization: Bearer ${STUDIO_TOKEN}x" "$STUDIO_URL/v1/usage$WIN")" = 401
 A=(-H "Authorization: Bearer $STUDIO_TOKEN")
-check "com token: 200"                                 test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage$WIN")" = 200
-check "padrão (24 h): 200"                             test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage")" = 200
-check "from sem to: 400"                               test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-27")" = 400
-check "from inválido: 400"                             test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?from=ontem&to=2025-09-29")" = 400
-check "from antes de 1970: 400"                        test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?from=1900-01-01&to=2025-09-29")" = 400
-check "to além de 2262: 400"                           test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-27&to=9999-01-01")" = 400
-check "from depois de to: 400"                         test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-29&to=2025-09-27")" = 400
-check "from/to junto com hours: 400"                   test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage$WIN&hours=3")" = 400
-check "hours inválido: 400"                            test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?hours=x")" = 400
-check "hours fora do limite: 400"                      test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage?hours=0")" = 400
-check "POST no /v1/usage: 405 (só leitura)"            test "$(ucode -X POST "${A[@]}" "$STUDIO_URL/v1/usage")" = 405
+check "com token: 200"                                 test "$(code "${A[@]}" "$STUDIO_URL/v1/usage$WIN")" = 200
+check "padrão (24 h): 200"                             test "$(code "${A[@]}" "$STUDIO_URL/v1/usage")" = 200
+check "from sem to: 400"                               test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-27")" = 400
+check "from inválido: 400"                             test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?from=ontem&to=2025-09-29")" = 400
+check "from antes de 1970: 400"                        test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?from=1900-01-01&to=2025-09-29")" = 400
+check "to além de 2262: 400"                           test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-27&to=9999-01-01")" = 400
+check "from depois de to: 400"                         test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?from=2025-09-29&to=2025-09-27")" = 400
+check "from/to junto com hours: 400"                   test "$(code "${A[@]}" "$STUDIO_URL/v1/usage$WIN&hours=3")" = 400
+check "hours inválido: 400"                            test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?hours=x")" = 400
+check "hours fora do limite: 400"                      test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?hours=0")" = 400
+check "POST no /v1/usage: 405 (só leitura)"            test "$(code -X POST "${A[@]}" "$STUDIO_URL/v1/usage")" = 405
 
 # ---------------------------------------------------------------- 2. totais, custo, não contar duas vezes
 R="$(usage "$WIN")"
@@ -165,11 +139,11 @@ check "últimas 24 h: nada (tudo chegou agora, fato em 2025)" jqe '.totals.calls
 studio_stop
 
 # ---------------------------------------------------------------- 6. lógica reusável (#204-#206), direto no módulo
-PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/prices.toml" "$ROOT/config/agent-studio/config.toml" > "$TMP/py.out" 2>&1 <<'PY'
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/prices.toml" "$ROOT/config/agent-studio/config.toml" > "$TMP/py.out" 2>&1 <<'PY'
 import sys, duckdb
 from agent_studio import config, cost, usage
+from pycheck import check as out
 db, test_cfg, repo_cfg = sys.argv[1:]
-def out(name, cond): print(("ok   " if cond else "FAIL ") + name)
 P = cost.ModelPrice
 out("estimativa sem preço = None", cost.estimate_cost_usd(10, 10, 0, 0, None) is None)
 out("estimativa pelos 4 eixos", round(cost.estimate_cost_usd(1e6, 1e6, 1e6, 1e6, P(1, 2, 0.5, 4)), 9) == 7.5)
@@ -204,7 +178,7 @@ try:
 except ValueError:
     out("chave inválida recusada", True)
 PY
-while IFS= read -r line; do case "$line" in "ok   "*) ok "${line#ok   }";; "FAIL "*) bad "${line#FAIL }";; *) bad "python: $line";; esac; done < "$TMP/py.out"
+check_py_lines "$TMP/py.out"
 
 # ---------------------------------------------------------------- 7. sem config e leitura que falha
 studio_start "$TMP/n" AGENT_STUDIO_CONFIG="$TMP/nao-existe.toml" || { echo "FAIL agent-studio não subiu sem config"; exit 1; }
@@ -215,13 +189,12 @@ check "sem config: sem estimado, custo real intacto"   jqe ".totals.cost.estimat
 studio_stop
 check "sem config: motivo no stderr"                   grep -q "config não encontrada" "$TMP/n/stderr"
 studio_start "$TMP/f" STUDIO_FAIL_USAGE=1 AGENT_STUDIO_CONFIG="$TMP/prices.toml" || { echo "FAIL agent-studio não subiu"; exit 1; }
-check "leitura que falha: 500"                         test "$(ucode "${A[@]}" "$STUDIO_URL/v1/usage$WIN")" = 500
+check "leitura que falha: 500"                         test "$(code "${A[@]}" "$STUDIO_URL/v1/usage$WIN")" = 500
 studio_stop
 
 # ---------------------------------------------------------------- 8. compose: config montada só leitura
-SVC="$(awk '/^  agent-studio:$/ {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
+SVC="$(compose_service agent-studio)"
 check "compose: config/agent-studio montada só leitura" grep -qx '      - ./config/agent-studio:/etc/oute/agent-studio:ro' <<<"$SVC"
 check "compose: AGENT_STUDIO_CONFIG aponta o arquivo"  grep -qx '      AGENT_STUDIO_CONFIG: /etc/oute/agent-studio/config.toml' <<<"$SVC"
 
-echo "---- $pass ok, $fail falha(s)"
-[[ $fail -eq 0 ]]
+check_end

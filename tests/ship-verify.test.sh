@@ -7,10 +7,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/addons/skills/oute-aidlc-ship-verify/scripts/verify-host.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; printf '%s\n' "$OUT" | sed 's/^/     | /'; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
+CHECK_OUT=+1   # o bad mostra a saída inteira
 has() { grep -q -- "$1" <<<"$OUT"; }
 hasnt() { ! has "$1"; }
 
@@ -90,5 +88,4 @@ check "sem EXPECTED: código 0"                [ "$RC" -eq 0 ]
 OUT="$( { printf 'EXPECTED=%q\n' 0.7.26; cat "$SCRIPT"; } | env PATH="$BIN:/usr/bin:/bin" OUTE_BIN="$BIN/oute" bash 2>&1)"; RC=$?
 check "via stdin com EXPECTED na frente: código 0" [ "$RC" -eq 0 ]
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ $fail -eq 0 ]]
+check_end

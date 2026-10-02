@@ -8,10 +8,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTE="${OUTE:-$ROOT/scripts/oute}"
 GUIDE="${GUIDE:-$ROOT/docker/comandos.md}"
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
 
 # ---------------------------------------------------------------- a fonte: scripts/oute
 # corpo do approve_one, do prompt até o fim do case
@@ -30,5 +27,4 @@ check "guia: r = recusa"                  grep -qE '[(, ]r = recusa' <<<"$line"
 check "guia: N não recusa"                bash -c '! grep -qE "N[^,)]*= recusa" <<<"$1"' _ "$line"
 check "guia: não existe relê no approve"  bash -c '! grep -qi "rel[eê]" <<<"$1"' _ "$line"
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+check_end

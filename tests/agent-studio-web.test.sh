@@ -8,27 +8,12 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null \
-  || { echo "FAIL precisa de jq, python3 e curl"; exit 1; }
-studio_venv || { echo "FAIL não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"; exit 1; }
+studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-# cabeçalho da resposta (sem o corpo), em minúsculas e sem \r
-hdr() { local name="$1"; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' | grep -i "^$name:" | sed 's/^[^:]*: *//'; }
-# dinheiro em micro-dólar inteiro: compara float sem erro de arredondamento
-usd() { printf '(%s | tonumber * 1e6 | round)' "$1"; }
-# HTML -> JSON: um objeto por elemento com atributo data-*, com os data-* e o texto (espaços colapsados)
-data() { python3 "$ROOT/tests/lib/html-data.py"; }
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as conversas na janela de 2025.
@@ -37,16 +22,11 @@ data() { python3 "$ROOT/tests/lib/html-data.py"; }
 #   conv-b (codex, oute-mac): uma chamada estimada e 205 logs (duas páginas).
 #   "conv d/1&x=é" (claude, oute-mac): começou 2 dias antes e segue na janela (os números são da conversa inteira).
 #   conv-c (janeiro de 2025): fora da janela. Um span sem session.id: fora de toda conversa.
-python3 - "$TMP" <<'PY'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
+from otlp_json import kv, rs
 tmp = sys.argv[1]
 D1 = 1759000000
-def v(x):
-    if isinstance(x, bool): return {"boolValue": x}
-    if isinstance(x, int): return {"intValue": str(x)}
-    if isinstance(x, float): return {"doubleValue": x}
-    return {"stringValue": x}
-def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 def span(trace, sid, parent, name, start, dur, attrs, err=False):
     s = {"traceId": f"{trace:032x}", "spanId": f"{sid:016x}", "name": name,
          "startTimeUnixNano": str(int(start * 1e9)), "endTimeUnixNano": str(int((start + dur) * 1e9)),
@@ -54,7 +34,6 @@ def span(trace, sid, parent, name, start, dur, attrs, err=False):
     if parent: s["parentSpanId"] = f"{parent:016x}"
     if err: s["status"] = {"code": 2, "message": "comando falhou"}
     return s
-def rs(res, spans): return {"resource": {"attributes": kv(res)}, "scopeSpans": [{"spans": spans}]}
 claude = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "claude-code", "oute.agent": "claude",
           "oute.task.id": "oute-agent-206"}
 codex = {"host.name": "oute-mac", "service.name": "codex_exec", "oute.agent": "codex"}
@@ -104,15 +83,7 @@ logs = {"resourceLogs": [
 ]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
 PY
-cat > "$TMP/prices.toml" <<'EOF'
-[prices."claude-sonnet-5"]
-input = 3.0
-output = 15.0
-[prices."gpt-5-codex"]
-input = 1.25
-output = 10.0
-cache_read = 0.125
-EOF
+studio_prices "$TMP/prices.toml"
 WIN='from=2025-09-27T00:00:00Z&to=2025-09-29'
 
 studio_start "$TMP/s" AGENT_STUDIO_CONFIG="$TMP/prices.toml" || { echo "FAIL agent-studio não subiu"; cat "$TMP/s/stderr"; exit 1; }
@@ -289,10 +260,8 @@ import sys
 import duckdb
 from agent_studio import auth, conversations, cost, web
 from agent_studio.app import create_app
-from studio_asgi import TOKEN, get
-
-def check(desc, cond):
-    print(("ok   " if cond else "FAIL ") + desc)
+from pycheck import check
+from studio_asgi import TOKEN, Broken, get
 
 # árvore: ciclo de pais (dado ruim) não some nem trava
 def s(sid, parent, trace="t"):
@@ -339,19 +308,13 @@ check("safe_next: só caminho deste servidor", [web.safe_next(x) for x in
       == ["/conversa?id=a"] + ["/conversas"] * 7)
 
 # leitura que falha: página 500, sem a causa
-class Broken:
-    def __getattr__(self, name):
-        def boom(*args):
-            raise RuntimeError("segredo-da-falha")
-        return boom
 app = create_app(Broken(), TOKEN)
 for path, query in (("/conversas", ""), ("/conversa", "id=a"), ("/conversa/logs", "id=a"), ("/conversa/span", "trace=a&span=b")):
     status, body = get(app, path, query)
     check(f"leitura que falha em {path}: 500, sem a causa na página", status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body)
 PY
 cat "$TMP/py.out" | grep -v '^Traceback\|^  \|^RuntimeError\|^$\|tela: .* falhou' || true
-n_ok="$(grep -c '^ok   ' "$TMP/py.out")"; n_fail="$(grep -c '^FAIL ' "$TMP/py.out")"
-pass=$((pass + n_ok)); fail=$((fail + n_fail))
+check_py "$TMP/py.out"
 check "lógica em Python: os 16 casos rodaram"          test "$((n_ok + n_fail))" = 16
 
 # ---------------------------------------------------------------- 6. imagem e compose
@@ -360,6 +323,4 @@ check "htmx do repo = o fixado"                        test "$(sha256sum "$PKG/s
 check "jinja2 fixado por hash no requirements.txt"     grep -q '^jinja2==' "$ROOT/docker/agent-studio/requirements.txt"
 check "compose: agent-studio só em 127.0.0.1"          bash -c 'grep -A40 "^  agent-studio:" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
 
-echo
-echo "agent-studio-web: $pass ok, $fail falhas"
-[[ "$fail" -eq 0 ]]
+check_end

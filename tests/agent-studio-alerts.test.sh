@@ -8,35 +8,21 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null \
-  || { echo "FAIL precisa de jq, python3 e curl"; exit 1; }
-studio_venv || { echo "FAIL não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"; exit 1; }
-ucode() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # AT = 2025-09-28T12:00:00Z. oute-server (sempre ligado) manda métricas do collector de 5 em 5 min de AT-120m a
 # AT+40m; oute-mac (não é sempre ligado) para em AT-60m.
 AT=1759060800
-python3 - "$TMP" "$AT" <<'PY'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$AT" <<'PY'
 import json, sys
+from otlp_json import kv
 tmp, AT = sys.argv[1], int(sys.argv[2])
 M = 60
 MiB = 2**20
-def v(x):
-    if isinstance(x, bool): return {"boolValue": x}
-    if isinstance(x, int): return {"intValue": str(x)}
-    if isinstance(x, float): return {"doubleValue": x}
-    return {"stringValue": x}
-def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 def ns(t): return str(int(t * 1e9))
 res = lambda host: {"host.name": host, "oute.instance": "oute-agent", "service.name": "otelcol-contrib"}
 def gauge(name, pts, off=0):  # pts = [(t, valor, atributos)]; off = deslocamento em ns
@@ -134,12 +120,12 @@ T() { iso $((AT + $1 * 60)); }
 sel() { printf '[.alerts[] | select(.type == "%s"%s)]' "$1" "${2:+ and .host == \"$2\"}"; }
 
 # ---------------------------------------------------------------- 1. token, método e `at`
-check "sem token: 401"                                 test "$(ucode "$STUDIO_URL/v1/alerts")" = 401
-check "token errado: 401"                              test "$(ucode -H "Authorization: Bearer ${STUDIO_TOKEN}x" "$STUDIO_URL/v1/alerts")" = 401
-check "com token, sem at (agora): 200"                 test "$(ucode "${A[@]}" "$STUDIO_URL/v1/alerts")" = 200
-check "at inválido: 400"                               test "$(ucode "${A[@]}" "$STUDIO_URL/v1/alerts?at=ontem")" = 400
-check "at antes de 1970: 400"                          test "$(ucode "${A[@]}" "$STUDIO_URL/v1/alerts?at=1900-01-01")" = 400
-check "POST no /v1/alerts: 405 (só leitura)"           test "$(ucode -X POST "${A[@]}" "$STUDIO_URL/v1/alerts")" = 405
+check "sem token: 401"                                 test "$(code "$STUDIO_URL/v1/alerts")" = 401
+check "token errado: 401"                              test "$(code -H "Authorization: Bearer ${STUDIO_TOKEN}x" "$STUDIO_URL/v1/alerts")" = 401
+check "com token, sem at (agora): 200"                 test "$(code "${A[@]}" "$STUDIO_URL/v1/alerts")" = 200
+check "at inválido: 400"                               test "$(code "${A[@]}" "$STUDIO_URL/v1/alerts?at=ontem")" = 400
+check "at antes de 1970: 400"                          test "$(code "${A[@]}" "$STUDIO_URL/v1/alerts?at=1900-01-01")" = 400
+check "POST no /v1/alerts: 405 (só leitura)"           test "$(code -X POST "${A[@]}" "$STUDIO_URL/v1/alerts")" = 405
 
 R0="$(at 0)"
 echo "$R0" > "$TMP/at0.json"
@@ -196,11 +182,11 @@ check "agora (2026): só host sem dado dos sempre ligados" jqe '[.alerts[] | .ty
 studio_stop
 
 # ---------------------------------------------------------------- 10. lógica reusável (tray #205, tela #208)
-PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$ROOT/config/agent-studio/config.toml" "$AT" > "$TMP/py.out" 2>&1 <<'PY'
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$ROOT/config/agent-studio/config.toml" "$AT" > "$TMP/py.out" 2>&1 <<'PY'
 import sys, dataclasses, duckdb
 from agent_studio import alerts, config
+from pycheck import check as out
 db, repo_cfg, AT = sys.argv[1], sys.argv[2], int(sys.argv[3])
-def out(name, cond): print(("ok   " if cond else "FAIL ") + name)
 C = alerts.AlertConfig
 c = config.load(repo_cfg)
 out("config do repo: [alerts] sem erro, oute-server sempre ligado", not c.errors and c.alerts.always_on_hosts == ("oute-server",))
@@ -225,7 +211,7 @@ r = alerts.evaluate(con, at, C())
 out("evaluate: tipos na ordem fixa", [a["type"] for a in r["alerts"]] == ["queue", "destination_refusing", "spool"])
 out("evaluate: host sem host_name nunca quebra (hosts só com nome)", all(h["host"] for h in r["hosts"]))
 PY
-while IFS= read -r line; do case "$line" in "ok   "*) ok "${line#ok   }";; "FAIL "*) bad "${line#FAIL }";; *) bad "python: $line";; esac; done < "$TMP/py.out"
+check_py_lines "$TMP/py.out"
 
 # ---------------------------------------------------------------- 11. sem config e leitura que falha
 studio_start "$TMP/n" AGENT_STUDIO_CONFIG="$TMP/nao-existe.toml" || { echo "FAIL agent-studio não subiu sem config"; exit 1; }
@@ -234,9 +220,8 @@ R="$(at 0)"
 check "sem config: 200 com o motivo e os padrões (oute-server sempre ligado)" jqe '(.config.errors[0] | test("não encontrada")) and ([.hosts[] | select(.always_on) | .host] == ["oute-server"])' <<<"$R"
 studio_stop
 studio_start "$TMP/f" STUDIO_FAIL_USAGE=1 AGENT_STUDIO_CONFIG="$TMP/config.toml" || { echo "FAIL agent-studio não subiu"; exit 1; }
-check "leitura que falha: 500"                         test "$(ucode "${A[@]}" "$STUDIO_URL/v1/alerts")" = 500
+check "leitura que falha: 500"                         test "$(code "${A[@]}" "$STUDIO_URL/v1/alerts")" = 500
 studio_stop
 check "leitura que falha: causa no stderr"             grep -q "consulta de alertas falhou" "$TMP/f/stderr"
 
-echo "---- $pass ok, $fail falha(s)"
-[[ $fail -eq 0 ]]
+check_end

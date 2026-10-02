@@ -8,10 +8,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LINKER="${LINKER:-$ROOT/docker/addons-link}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
 
 # ---------------------------------------------------------------- fixture
 # skill(<pasta de addons> <pasta> [name do frontmatter]): SKILL.md no formato agentskills.io
@@ -206,5 +203,4 @@ else
   check "ln falha: toda linha com o prefixo"     [ -z "$(grep -v '^\[oute\] addons: ' <<<"$ERR")" ]
 fi
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+check_end

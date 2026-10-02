@@ -10,28 +10,15 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-die() { echo "FAIL $*"; exit 1; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null || die "precisa de jq, python3 e curl"
-studio_venv || die "não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"
+studio_init
 . "$ROOT/tests/lib/surreal.sh"
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-hdr() { local name="$1"; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' | grep -i "^$name:" | sed 's/^[^:]*: *//'; }
-# dinheiro em micro-dólar inteiro: compara float sem erro de arredondamento
-usd() { printf '(%s | tonumber * 1e6 | round)' "$1"; }
-data() { python3 "$ROOT/tests/lib/html-data.py"; }
 
 # ---------------------------------------------------------------- DuckDB e SurrealDB de exemplo
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as sessões na janela de 2025.
@@ -45,19 +32,14 @@ data() { python3 "$ROOT/tests/lib/html-data.py"; }
 #   Sem sessão: solta-1 (claude), "solta 2/&é" (codex, oute-mac) e solta-jan (fora da janela).
 S1=oute-agent-207-tela-20250927190000; S2=lab-ajuste-20250927191000; S3='repo <b>x</b>&y=é'; S4=oute-agent-vazia-20250927192000
 RND=swarm-0927-1900
-python3 - "$TMP" <<'PY'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
+from otlp_json import kv, rs
 tmp = sys.argv[1]
 D1 = 1759000000
 S1, S2, S3, S4, S0 = ("oute-agent-207-tela-20250927190000", "lab-ajuste-20250927191000", "repo <b>x</b>&y=é",
                       "oute-agent-vazia-20250927192000", "oute-agent-antiga-20250101000000")
 RND = "swarm-0927-1900"
-def v(x):
-    if isinstance(x, bool): return {"boolValue": x}
-    if isinstance(x, int): return {"intValue": str(x)}
-    if isinstance(x, float): return {"doubleValue": x}
-    return {"stringValue": x}
-def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 n = [0]
 def call(conv, start, dur, attrs, name="claude_code.llm_request", err=False):
     n[0] += 1
@@ -66,7 +48,6 @@ def call(conv, start, dur, attrs, name="claude_code.llm_request", err=False):
          "attributes": kv({"session.id": conv, **attrs})}
     if err: s["status"] = {"code": 2, "message": "comando falhou"}
     return s
-def rs(res, spans): return {"resource": {"attributes": kv(res)}, "scopeSpans": [{"spans": spans}]}
 server = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "claude-code", "oute.agent": "claude"}
 mac = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "codex_exec", "oute.agent": "codex"}
 sonnet, opus = {"model": "claude-sonnet-5"}, {"model": "claude-opus-5"}
@@ -127,17 +108,8 @@ logs = {"resourceLogs": [
 ]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
 PY
-cat > "$TMP/prices.toml" <<'EOF'
-[prices."claude-sonnet-5"]
-input = 3.0
-output = 15.0
-[prices."gpt-5-codex"]
-input = 1.25
-output = 10.0
-cache_read = 0.125
-EOF
+studio_prices "$TMP/prices.toml"
 WIN='from=2025-09-27T00:00:00Z&to=2025-09-29'
-enc() { jq -rn --arg s "$1" '$s | @uri'; }
 
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$TMP/prices.toml")
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
@@ -289,10 +261,8 @@ import sys
 import duckdb
 from agent_studio import cost, sessions, usage, web
 from agent_studio.app import create_app
-from studio_asgi import TOKEN, get
-
-def check(desc, cond):
-    print(("ok   " if cond else "FAIL ") + desc)
+from pycheck import check
+from studio_asgi import TOKEN, Broken, Odd, get
 
 con = duckdb.connect(sys.argv[1], read_only=True)
 D1 = 1759000000 * 10**9
@@ -371,26 +341,17 @@ check("sem SurrealDB: /sessoes 200, sem aviso e sem estado",
 status, body = get(app, "/sessao", f"id={S1}")
 check("sem SurrealDB: página da sessão 200, sem o bloco do registro", status == 200 and "Repositório" not in body and 'data-calls="4"' in body)
 check("sem SurrealDB: sessão que o DuckDB não tem = 404", get(app, "/sessao", "id=so-no-surreal")[0] == 404)
-class Broken:
-    def __getattr__(self, name):
-        def boom(*args):
-            raise RuntimeError("segredo-da-falha")
-        return boom
 app = create_app(Broken(), TOKEN)
 for path, query in (("/sessoes", ""), ("/sessao", "id=a")):
     status, body = get(app, path, query)
     check(f"leitura que falha em {path}: 500, sem a causa na página", status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body)
 # SurrealDB que responde fora do formato: a página segue, com aviso
-class Odd:
-    def query(self, sql, variables):
-        return [{"status": "OK", "result": "não é lista"}]
 app = create_app(ReadOnly(), TOKEN, surreal=Odd())
 status, body = get(app, "/sessoes", "from=2025-09-27&to=2025-09-29")
 check("SurrealDB com resposta inesperada: 200 com aviso", status == 200 and "data-estado-indisponivel" in body and f'data-sessao="{S1}"' in body)
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^$\|tela: .* falhou' "$TMP/py.out" || true
-n_ok="$(grep -c '^ok   ' "$TMP/py.out")"; n_fail="$(grep -c '^FAIL ' "$TMP/py.out")"
-pass=$((pass + n_ok)); fail=$((fail + n_fail))
+check_py "$TMP/py.out"
 check "lógica em Python: os 24 casos rodaram"          test "$((n_ok + n_fail))" = 24
 
 # ---------------------------------------------------------------- 7. imagem
@@ -398,6 +359,4 @@ PKG="$ROOT/docker/agent-studio/agent_studio"
 check "templates das sessões vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/sessions.html" && test -f "$1/templates/session.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"
 check "compose: agent-studio só em 127.0.0.1"          bash -c 'grep -A40 "^  agent-studio:" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
 
-echo
-echo "agent-studio-sessions: $pass ok, $fail falhas"
-[[ "$fail" -eq 0 ]]
+check_end
