@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.30] - 2026-10-02
+
 ### Added
 - **agent-studio: tela de pedidos ("ver script") e alertas no topo das páginas** (#208, #156, ADR-08 §8 e §10). **Precisa de release** (o agent-studio vai na imagem).
   - `/pedido?id=<id>` é a página de um pedido do canal de aprovação, com **URL estável pelo id** (a que o tray vai abrir): título, `root`/`user`, agente, host, estado (pendente ou decidido), hora e o **script inteiro** (o corpo do `oute.canal.proposed`); se decidido, decisão, rc, duração, tamanho da saída, aprovador e sha256. **A saída do host nunca aparece** (ela não chega ao pipeline). `/pedidos` lista os pendentes (com a idade) e os decididos recentes; o menu ganha "Pedidos".
