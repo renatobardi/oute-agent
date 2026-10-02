@@ -61,7 +61,7 @@ check "token só pelo ambiente (nada fixo no arquivo)"   grep -q 'Authorization:
 
 # ---------------------------------------------------------------- 2. `oute up` liga só com o agent-studio; compose
 # só as funções do agent-studio (o script inteiro roda o case no fim), como no tests/agent-studio.test.sh
-FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^router_sync()/p' "$ROOT/scripts/oute" | sed '$d')"
+FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$ROOT/scripts/oute" | sed '$d')"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
@@ -172,6 +172,35 @@ r = next(iter(v for k in ("resourceLogs", "resourceSpans", "resourceMetrics") fo
 a = {x["key"]: list(x["value"].values())[0] for x in r["resource"]["attributes"]}
 sys.exit(0 if a.get("host.name") == "oute-test" and a.get("oute.instance") == "oute-agent" and a.get("service.namespace") == "oute-agent" else 1)
 PY' "$RCV"
+
+# ---------------------------------------------------------------- 3b. oute.agent pelo service.name (#218)
+# o collector marca claude e codex; o service.name do roteador de modelos, que saiu do stack, não ganha mais marca
+# (o nome antigo vai partido, como no scripts/oute, para não voltar a aparecer no repo)
+OLD_SVC="jev""-router"
+for svc in claude-code codex_exec "$OLD_SVC"; do
+  curl -fs -o /dev/null -H 'Content-Type: application/json' "127.0.0.1:$HTTP/v1/traces" -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"'"$svc"'"}}]},"scopeSpans":[{"spans":[{"traceId":"5b8efff798038103d269b633813fc60c","spanId":"eee19b7ec3c1b174","name":"marca-'"$svc"'","startTimeUnixNano":"1759000000000000000","endTimeUnixNano":"1759000001000000000"}]}]}]}' \
+    || bad "collector recusou o span de $svc"
+done
+# agent_of <service.name>: oute.agent do resource e do span que chegaram ao receptor ("-" = sem o atributo)
+agent_of() {
+  python3 - "$RCV" "$1" <<'PY'
+import glob, gzip, json, sys
+# valor vazio conta como ausente: o transform copia o oute.agent do resource para o span mesmo quando ele não existe
+def attrs(l): return {x["key"]: v[0] for x in l or [] for v in [list(x.get("value", {}).values())] if v}
+for f in glob.glob(sys.argv[1] + "/*.json"):
+    raw = open(f, "rb").read(); j = json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+    for r in j.get("resourceSpans", []):
+        a = attrs(r.get("resource", {}).get("attributes"))
+        if a.get("service.name") != sys.argv[2]: continue
+        sp = [x for s in r.get("scopeSpans", []) for x in s.get("spans", [])]
+        print(a.get("oute.agent", "-"), attrs(sp[0].get("attributes")).get("oute.agent", "-")); sys.exit(0)
+sys.exit(1)
+PY
+}
+for _ in $(seq 1 80); do agent_of "$OLD_SVC" >/dev/null 2>&1 && agent_of claude-code >/dev/null 2>&1 && agent_of codex_exec >/dev/null 2>&1 && break; sleep 0.5; done
+check "oute.agent: claude-code vira claude (resource e span)" test "$(agent_of claude-code)" = "claude claude"
+check "oute.agent: codex_exec vira codex"                test "$(agent_of codex_exec)" = "codex codex"
+check "oute.agent: service.name do roteador não é mais marcado (#218)" test "$(agent_of "$OLD_SVC")" = "- -"
 
 # ---------------------------------------------------------------- 4. kill -9 com lote pendente
 python3 "$ROOT/tests/lib/otlp-send.py" "$HTTP" k9 "$N" "$TMP/accepted-k9.txt" >/dev/null

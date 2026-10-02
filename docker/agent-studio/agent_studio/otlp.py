@@ -154,7 +154,8 @@ def log_rows(payload, received_ns):
 
 
 # modelo, tokens e custo nas colunas fixas de `spans`: primeiro atributo presente, na ordem
-# (Claude Code: claude_code.llm_request; Codex: session_task.turn; jev-router: jev.decision e spans do LiteLLM)
+# (Claude Code: claude_code.llm_request; Codex: session_task.turn). Histórico até 2026-09-30 (#218): jev.decision e
+# spans do LiteLLM, do jev-router que saiu do stack; as chaves deles ficam para reingerir o que está no bucket
 SPAN_MODEL = ("gen_ai.response.model", "oute.served_model", "model", "gen_ai.request.model", "llm.model_name")
 SPAN_TOKENS = {
     "input_tokens": ("gen_ai.usage.input_tokens", "input_tokens", "codex.turn.token_usage.non_cached_input_tokens"),
@@ -163,7 +164,8 @@ SPAN_TOKENS = {
                           "codex.turn.token_usage.cached_input_tokens"),
     "cache_creation_tokens": ("gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"),
 }
-# custo real (Claude manda cost_usd; o jev.decision traz o do OpenRouter); estimado fica para a API (#156)
+# custo real (Claude manda cost_usd; oute.cost_usd = OpenRouter no jev.decision, histórico até 2026-09-30);
+# estimado fica para a API (#156)
 SPAN_COST = ("oute.cost_usd", "cost_usd", "gen_ai.usage.cost")
 
 

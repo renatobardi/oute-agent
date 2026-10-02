@@ -13,7 +13,7 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Multiplexador | **herdr** server em background, sessões persistentes | Sobrevive a desconexão; agentes se orquestram entre panes |
 | Acesso | **sshd dentro do container** (porta 2222, só chave pública, sem senha) | Um hop; `oute` (sem argumento) abre o herdr de qualquer lugar |
 | Agentes | **Claude Code** (principal) e **Codex** (reserva), por assinatura (+ extensível). Goose removido na 0.5.7; Pi removido na #217 (ADR-02) | Regra de entrada: funcionar com o ai-memory (hooks + handoff) **e** mandar consumo ao bucket + Langfuse (ver `estudos/memoria-diagnostico.md`) |
-| Roteamento LLM | *(substituído: ADR-02)* Seleção de agente e modelo por sessão, pela fase. O roteamento híbrido (Pi via **jev-router** → OpenRouter) saiu com o Pi (#217); o jev-router sai na #218 | Ver ADR-02 (Histórico) |
+| Roteamento LLM | *(substituído: ADR-02)* Seleção de agente e modelo por sessão, pela fase. O roteamento híbrido do Pi saiu com ele (#217) e o roteador de modelos na #218 | Ver ADR-02 (Histórico) |
 | Memória | **ai-memory** (Akita) como serviço, hooks+MCP instalados em todos os agentes, dados em volume | Handoff entre agentes, SQLite embutido, arm64 nativo |
 | Storage comum | **OCI Object Storage** (bucket `oute-shared`) montado via **rclone** em `/data/shared` nos dois hosts | Já está na cloud dele, free tier, S3-compat |
 | Segredos | **Vaultwarden (vault.oute.pro) obrigatório, lido só pelo HOST.** O `oute up` resolve a pasta `oute-agent` e grava `~/.oute/agent.env` (0600); o container recebe só esses valores via docker secret em `/run/secrets/agent_env`. **O container não tem sessão, API key nem estado do `bw`** (0.7.0). **Decisão 2026-09-26 (#21): o host também não guarda sessão** — `agent.env` é o cache; o vault só é aberto quando um segredo muda (`--refresh-secrets`) ou em comando admin, com senha digitada e sessão descartada | Fonte única; agentes em yolo não alcançam segredos de outros projetos nem o `oute-admin`; nenhuma chave viva do cofre em disco/backup |
@@ -24,7 +24,7 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Sandbox dos agentes | **O container é a fronteira de isolamento.** Codex com `sandbox_mode = "danger-full-access"` | Ver adendo 2026-09-24 |
 | Aprovações dos agentes | **Yolo dentro do container por padrão** (`OUTE_AGENT_YOLO=1`): Claude Code `bypassPermissions`, Codex `approval_policy = "never"` | Ver adendo 2026-09-25 |
 | Config dos agentes | Edição **estrutural** apenas (tomlkit para `~/.codex/config.toml`, jq para JSON; `~/.ssh/config` só ganha um `Include` no topo; notas dos agentes num bloco gerenciado entre marcadores). Nunca `sed`/texto | ai-memory e os próprios agentes escrevem nos mesmos arquivos (bug 0.5.3–0.5.8) |
-| Versões de terceiros | Fixadas: LiteLLM por digest, ai-memory `2.4.0` (servidor e cliente), otel-collector `0.161.0`; upgrade deliberado | Reprodutibilidade |
+| Versões de terceiros | Fixadas: ai-memory `2.4.0` (servidor e cliente), otel-collector `0.161.0`; upgrade deliberado | Reprodutibilidade |
 | Repo | Monorepo `renatobardi/oute-agent`; addons (skills etc.) em `addons/`, montado read-only (ADR-06) | |
 
 ## Topologia (compose)
@@ -33,7 +33,6 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 rede oute: 172.19.0.0/16, gateway 172.19.0.1 (= host visto do container)
 volume-init    one-shot (root)          chown dos volumes para 10001 quando preciso
 agent          herdr + sshd + CLIs      172.19.0.5 · :2222 (ssh, bind 127.0.0.1)   vols: workspace, home, shared · secret: agent_env
-jev-router     litellm + hook Jev       :4000 (interno)               env do host: OPENROUTER_API_KEY
 ai-memory      akitaonrails/ai-memory   :49374 (interno)              vol: oute-memory
 otel-collector                          (interno)                     → bucket oute-observability + Langfuse (ADR-04)
 ```
@@ -50,8 +49,8 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 **Host (`oute up`):**
 1. Com `~/.oute/agent.env` presente, **não abre o vault** (#21). Sem ele, ou com `--refresh-secrets` / `oute secrets refresh`, lê o vault com a master password digitada; a sessão fica só no processo e é trancada (`bw lock`) em seguida. Sem `bw` nativo, o `bw` roda via `docker run` da imagem oute-agent **local** (a atual ou a mais nova, `--pull never`), com o uid do host.
 2. Grava `~/.oute/agent.env`: uma linha `export NOME=<%q>` por variável da pasta `oute-agent`, sem `BW_*`.
-3. Exporta para o compose só o que jev-router e otel-collector usam, mais a origem (`OUTE_HOST`, `OUTE_INSTANCE`).
-4. `router-sync` → `compose up`.
+3. Exporta para o compose só o que ai-memory e otel-collector usam, mais a origem (`OUTE_HOST`, `OUTE_INSTANCE`).
+4. `compose up`.
 
 **Container (entrypoint):**
 1. Carrega `/run/secrets/agent_env` (via sudo; recusa linha fora do formato) e apaga os restos do `bw` no volume home.
@@ -80,9 +79,9 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 - **Próximo:** #21 — ver adendo 2026-09-26. OpenBao só se surgir necessidade de auditoria, credenciais dinâmicas ou vários hosts.
 
 ## Adendo 2026-09-26 — sessão do cofre não fica no host (#21, passo 2; implementado no PR #43)
-- **Problema real:** `~/.oute/bw_session` + `~/.oute/bwcli/` = chave viva para o cofre inteiro (todos os projetos + `oute-admin`), em disco permanentemente e copiada nos backups (restic → Google Drive, boot volume OCI). Alcançável por root/ubuntu no host e por quem restaurar backup; o agente não (oute-ops). A sessão só era cacheada por conveniência (cron `router-sync`, `oute pull`, rclone) — e tudo que esses caminhos precisam já está em `agent.env`.
+- **Problema real:** `~/.oute/bw_session` + `~/.oute/bwcli/` = chave viva para o cofre inteiro (todos os projetos + `oute-admin`), em disco permanentemente e copiada nos backups (restic → Google Drive, boot volume OCI). Alcançável por root/ubuntu no host e por quem restaurar backup; o agente não (oute-ops). A sessão só era cacheada por conveniência (cron do roteador de modelos, `oute pull`, rclone) — e tudo que esses caminhos precisam já está em `agent.env`.
 - **Conta de máquina no Vaultwarden (ideia original) descartada:** encolhe o que a chave abre, mas mantém chave viva + master password em arquivo, adiciona org/coleção/usuário/migração de itens, e a coleção teria exatamente o conteúdo de `agent.env` — ganho ≈ zero para esses segredos.
-- **Decisão:** eliminar a chave, não encolher. `agent.env` é o cache do host. Vault aberto só em `oute up --refresh-secrets` (ou 1º `up`), `oci-bootstrap` e `router-sync --check-guardrail`, com master password digitada e sessão descartada em seguida (`bw lock`, nada gravado). Cron/pull/rclone lêem só de `agent.env`. Reboot do host não depende disso (`restart: unless-stopped` + `agent.env` em disco).
+- **Decisão:** eliminar a chave, não encolher. `agent.env` é o cache do host. Vault aberto só em `oute up --refresh-secrets` (ou 1º `up`) e `oci-bootstrap` (e, até a #218, na conferência do guardrail do roteador de modelos), com master password digitada e sessão descartada em seguida (`bw lock`, nada gravado). Cron/pull/rclone lêem só de `agent.env`. Reboot do host não depende disso (`restart: unless-stopped` + `agent.env` em disco).
 - **Resíduo aceito:** `agent.env` em texto (0600) no host e nos backups — inerente, é o que o container consome. Rotação/expiração de segredos é tema separado.
 - A conta do vault usa e-mail fictício e só guarda projetos (não é cofre pessoal).
 

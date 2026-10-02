@@ -124,6 +124,7 @@ check "AGENT_STUDIO_TOKEN vazio: não cria o banco"     test ! -e "$TMP/x.duckdb
 
 # ---------------------------------------------------------------- 6b. spans e métricas (#186)
 # spans do Claude Code (claude_code.llm_request), do Codex (session_task.turn) e o jev.decision do jev-router
+# (histórico até 2026-09-30, #218: o jev-router saiu do stack; a ingestão continua lendo o registro antigo)
 cat > "$TMP/traces.json" <<'EOF'
 {"resourceSpans":[
  {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"oute.instance","value":{"stringValue":"oute-agent"}},
@@ -239,7 +240,7 @@ check "Dockerfile: copia o pacote e instala por hash"  bash -c 'grep -q "COPY do
 
 # ---------------------------------------------------------------- 8. `oute up`: item do vault -> profile
 # só as funções do agent-studio (o script inteiro roda o case no fim)
-FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^router_sync()/p' "$ROOT/scripts/oute" | sed '$d')"
+FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$ROOT/scripts/oute" | sed '$d')"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 envf="$TMP/env"; : > "$envf"
 T1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"; S1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"

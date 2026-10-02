@@ -29,8 +29,8 @@ Estimativa: US$0 no início; ~US$0,77 (50 GB) a ~US$2 (100 GB). Risco é request
 
 3. **Identidades (menor privilégio)**
    - Admin: API key do Bardi no vault, pasta **`oute-admin`**, item `oci-admin` — **nunca exportada pro container** (a pasta `oute-agent` inteira vira env dos agentes). Só o bootstrap lê.
+   - ~~Broadcast do OpenRouter (#13): chave própria, só escrita no `oute-observability` (definir na #13).~~ *(histórico: nunca foi criada; o ADR-04 ficou com o pull via API, e o OpenRouter saiu do stack na #218)*
    - Usuário de serviço `oute-agent-storage` (grupo homônimo; só Customer Secret Key). Policies na raiz: `read buckets` + `manage objects` só nos 2 buckets do compartment. Mais `Allow service objectstorage-sa-saopaulo-1 to manage object-family in compartment oute-agent` (lifecycle).
-   - Broadcast do OpenRouter (#13): chave própria, só escrita no `oute-observability` (definir na #13).
 4. **Segredos** — item `oci-storage` (pasta `oute-agent`), **criado pelo bootstrap** (JSON → `bw encode` → `bw create item` por stdin; nada em log/argv): `OCI_S3_ACCESS_KEY`, `OCI_S3_SECRET_KEY`, `OCI_S3_ENDPOINT`, `OCI_S3_REGION`, `OCI_NAMESPACE`.
    rclone **só por env** (`RCLONE_CONFIG_OCI_TYPE=s3`, `PROVIDER=Other`, `FORCE_PATH_STYLE=true`, `NO_CHECK_BUCKET=true`) no host e no container → sem `rclone.conf` com segredo.
 5. **Montagem** — `oute up` monta, `oute down` desmonta:

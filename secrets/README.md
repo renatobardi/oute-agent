@@ -4,7 +4,6 @@ Nenhum valor real vive neste repo. Estrutura esperada no vault, pasta `oute-agen
 
 | item        | tipo | campos (custom fields)                                                       |
 |-------------|------|-------------------------------------------------------------------------------|
-| openrouter  | Note | OPENROUTER_API_KEY                                                            |
 | github      | Note | GH_TOKEN; GHCR_TOKEN (token clássico só `read:packages` — `oute pull` da imagem privada no ghcr) |
 | oci         | Note | OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM — opcional, usuário **restrito** p/ os agentes (nunca o admin) |
 | oci-storage | Note | OCI_S3_ACCESS_KEY, OCI_S3_SECRET_KEY, OCI_S3_ENDPOINT, OCI_S3_REGION, OCI_NAMESPACE — **criado pelo `oute oci-bootstrap`**, não à mão |
@@ -27,4 +26,4 @@ No host (Mac / LXC), só dois arquivos fora do repo:
 ~/.ssh/id_ed25519.pub     # chave que entra no container
 ```
 
-`~/.oute/agent.env` (0600, gerado pelo host) é o cache: `oute up`, `pull`, `sync-shared`/`storage` e o cron do `router-sync` leem só ele, sem vault e sem senha. A master password é pedida só quando o vault é aberto — `oute secrets refresh` (ou `up --refresh-secrets`, ou `up` sem `agent.env`), `oute router-sync --check-guardrail` (pasta `oute-admin`) e `oute oci-bootstrap` — e a sessão é trancada (`bw lock`) logo depois; nada de sessão em disco. Mudou um segredo no vault? `oute secrets refresh` e `oute restart`. `BW_PASSWORD` no ambiente pula o prompt.
+`~/.oute/agent.env` (0600, gerado pelo host) é o cache: `oute up`, `pull` e `sync-shared`/`storage` leem só ele, sem vault e sem senha. A master password é pedida só quando o vault é aberto — `oute secrets refresh` (ou `up --refresh-secrets`, ou `up` sem `agent.env`) e `oute oci-bootstrap` — e a sessão é trancada (`bw lock`) logo depois; nada de sessão em disco. Mudou um segredo no vault? `oute secrets refresh` e `oute restart`. `BW_PASSWORD` no ambiente pula o prompt.

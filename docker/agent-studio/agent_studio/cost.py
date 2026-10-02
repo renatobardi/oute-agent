@@ -4,11 +4,15 @@ Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`) e, depois, 
 tela (#205, #206), que reusam este módulo e o `usage.aggregate`.
 
 - **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex) ou
-  `jev.decision` (hook do jev-router, com o custo real do OpenRouter). Tokens, custo e p95 saem só delas.
-- **Sem contar duas vezes:** os spans do LiteLLM (`oute.agent=router`) ficam fora das somas; o `jev.decision` da
-  mesma chamada já traz tokens e custo. O `jev.decision` sempre conta (uma vez: a dedupe da ingestão é por
-  trace + span), mesmo se chegar sem o `oute.agent` do cliente.
-- **Custo real** = `cost_usd` do span (OpenRouter no `jev.decision`, Claude Code).
+  `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
+- **Histórico até 2026-09-30 (#218):** o jev-router (LiteLLM + OpenRouter) saiu do stack e ninguém mais emite
+  `jev.decision` nem `oute.agent=router`. As regras desses registros ficam só para o que já está gravado, para o
+  custo passado não sumir do `/v1/usage`:
+  - o `jev.decision` (hook do jev-router) traz o custo real do OpenRouter e sempre conta (uma vez: a dedupe da
+    ingestão é por trace + span), mesmo se chegou sem o `oute.agent` do cliente;
+  - os spans do LiteLLM (`oute.agent=router`) ficam fora das somas, para não contar duas vezes: o `jev.decision`
+    da mesma chamada já traz tokens e custo.
+- **Custo real** = `cost_usd` do span (Claude Code; OpenRouter no `jev.decision` histórico).
 - **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real (Codex). Modelo sem
   preço = **sem estimativa** (`None`), nunca zero.
 - **Erros** = spans com status de erro (qualquer span, inclusive os do LiteLLM: o `jev.decision` só nasce de
@@ -18,6 +22,7 @@ from dataclasses import dataclass
 
 # nomes exatos dos spans que representam uma chamada ao modelo
 MODEL_CALL_SPANS = ("claude_code.llm_request", "session_task.turn", "jev.decision")
+# histórico até 2026-09-30 (#218): só existem em registro já gravado, ninguém mais emite
 ROUTER_AGENT = "router"
 DECISION_SPAN = "jev.decision"
 

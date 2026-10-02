@@ -112,7 +112,6 @@ git diff "$BASE_SHA...$HEAD_SHA" | LC_ALL=C.UTF-8 grep -nP '[\x{200B}-\x{200F}\x
 - `.github/workflows/` e `scripts/release`: CI, tag, publicação de imagem (passo 5);
 - segredos: `agent_env`, `/run/secrets`, `BW_*`, tokens, `.env`, chaves; qualquer leitura, log, `echo`, arquivo ou envio de rede de um valor secreto;
 - telemetria (`config/otel/`): nada pode apagar dados do bucket `oute-observability` nem mandar conteúdo ao Langfuse fora da allowlist de metadados;
-- roteamento (`config/litellm/policy.yaml`): ZDR, `data_collection: deny`, modelos e presets;
 - `addons/`: skill é instrução que os agentes carregam; texto novo ali é prompt que vai rodar em yolo;
 - `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, `docs/adr/`: mudam regra de agente.
 
@@ -132,7 +131,7 @@ Resultado: `livre` ou `bloqueado por <achado>`. Sinal de exfiltração, rede esc
 
 Para cada dependência, ferramenta ou action nova ou alterada:
 - **Nome:** confira que o pacote/imagem/action é o esperado, sem typosquatting (letra trocada, hífen, escopo parecido, org diferente da oficial). Na dúvida, abra a página do registro com `gh` ou pelo nome exato e compare dono e histórico.
-- **Pin:** versão exata; imagem por digest quando o repo já faz isso (o LiteLLM do oute-agent é fixado por digest); action de terceiros por SHA completo de commit, com a tag em comentário. Tag móvel (`@v4`, `@main`, `latest`) em código novo é achado.
+- **Pin:** versão exata; imagem por digest quando o repo já faz isso; action de terceiros por SHA completo de commit, com a tag em comentário. Tag móvel (`@v4`, `@main`, `latest`) em código novo é achado.
 - **Lockfile:** manifesto e lockfile mudam juntos e batem; lockfile alterado sem mudança de manifesto precisa de explicação; nada de registro alternativo não declarado.
 - **Download em build:** `curl | sh`, binário baixado sem checksum/assinatura, script de instalação de terceiros. Script de `postinstall`/`prepare` novo em dependência.
 - **Workflows** (`.github/workflows/`):

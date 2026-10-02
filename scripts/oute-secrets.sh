@@ -5,14 +5,13 @@
 #   cada item "Secure Note" ou "Login" vira variáveis:
 #     - item.name em MAIÚSCULO com '-' -> '_' recebe: login.password (se Login) ou notes (se Note)
 #     - cada custom field vira <NOME_DO_CAMPO> (já em maiúsculo)
-#   ex.: item "openrouter"  (Login, password=sk-or-...)      -> OPENROUTER_API_KEY via field OPENROUTER_API_KEY
-#        item "oci"         (Note, fields OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM)
+#   ex.: item "oci"         (Note, fields OCI_USER_OCID, OCI_TENANCY_OCID, OCI_FINGERPRINT, OCI_REGION, OCI_KEY_PEM)
 #        item "gcp"         (Note, field GCP_SA_JSON)
 #        item "aws"         (Note, fields AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 #        item "github"      (Note, field GH_TOKEN)
 #
 # uso:  eval "$(oute-secrets export)"
-#       oute-secrets get OPENROUTER_API_KEY
+#       oute-secrets get GH_TOKEN
 #       BW_SESSION="$(oute-secrets session)"  # sessão para quem chama; quem chama faz `bw lock` depois
 #       oute-secrets lock                     # bw lock + apaga resto legado ($OUTE_HOME/bw_session)
 # sessão (#21): nunca vai para disco. Com BW_SESSION válido no ambiente, usa e deixa como está (o dono tranca);

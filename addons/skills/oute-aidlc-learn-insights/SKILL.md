@@ -54,7 +54,7 @@ Pronto quando: cada insight tem padrão, ocorrências e evidência.
 ### 4. Priorizar (rubrica fixa)
 Ordene por, nesta ordem:
 1. **Segurança:** toca segredo, isolamento, host ou canal de aprovação → topo.
-2. **Impacto** `alto`/`médio`/`baixo`, citando o número: custo real em US$ (do router; o de Claude e Codex é preço de lista, não gasto), retrabalho (commits depois da auditoria, CI vermelho, sessão bloqueada) e tempo parado (issue estagnada, handoff esquecido).
+2. **Impacto** `alto`/`médio`/`baixo`, citando o número: custo em US$ (o de Claude e Codex é preço de lista, não gasto: os dois rodam por assinatura), retrabalho (commits depois da auditoria, CI vermelho, sessão bloqueada) e tempo parado (issue estagnada, handoff esquecido).
 3. **Recorrência:** quantas rodadas, fontes ou ciclos. Se voltou depois de virar lição, sobe um degrau.
 4. **Esforço** `P`/`M`/`G`, só para desempate.
 

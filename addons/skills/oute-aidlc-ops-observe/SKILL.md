@@ -26,7 +26,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no Langfuse nem no b
    Padrões: janela de 24 h (`--hours`), base de 7 dias antes dela (`--baseline-days`) e metadados das últimas 6 h do bucket (`--content-hours`, `0` = só listagem). `langfuse` ou `bucket` no lugar de `all` roda uma fonte só. Código ≠ 0 = uma fonte não pôde ser lida: a linha `ERRO` diz qual e por quê.
 2. **Ler as seções.**
    - Langfuse, por `host` (= `environment`) × agente (`metadata.agent`): observações, erros (`level=ERROR`), custo, tokens, latência p95 e custo médio por dia da base. Depois, custo por modelo.
-   - Bucket: último lote por sinal (`traces`, `logs`, `metrics`) × host × instância, com idade e volume na janela; depois, por host × agente (`oute.agent`), spans, spans com erro, logs, logs de erro e custo (`oute.cost_usd` do `jev.decision` + `cost_usd` do `api_request` do Claude).
+   - Bucket: último lote por sinal (`traces`, `logs`, `metrics`) × host × instância, com idade e volume na janela; depois, por host × agente (`oute.agent`), spans, spans com erro, logs, logs de erro e custo (`cost_usd` do `api_request` do Claude).
 3. **Tratar cada `ANOMALIA`** (o script marca; você confirma):
 
    | Marca | O que significa | Confira antes de reportar |
@@ -35,7 +35,6 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no Langfuse nem no b
    | `sinal-faltando` | o host mandou algum sinal, mas não os três | Codex não emite `metrics` (ADR-04); Claude sem traces: confira `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA` e `OTEL_TRACES_EXPORTER` no ambiente do agente daquele host (`docker/compose.yaml`) e a versão da imagem. |
    | `agente-sem-telemetria` | agente em `OUTE_AGENTS` deste host sem registro no bucket nas horas lidas | ocioso é normal; se houve uso, é falha. |
    | `sem-oute.agent` | registro sem `oute.agent` | `service.name` novo, fora do `transform/agent` (regra do ADR-04 para agente novo e upgrade). |
-   | `agente-unknown` | cliente do router sem o header `X-Oute-Agent` | qual cliente chama o router sem o header. |
    | `erro-alto` | > 5 % de erro (mín. 5) | o tipo de erro vem do Langfuse (nome da observação, `statusMessage`) sem abrir conteúdo; causa → `oute-aidlc-ops-diagnose`. |
    | `custo-alto` | custo da janela > 3 × a média diária da base e > US$ 1 (só com uso na base: sem histórico, leia a coluna de custo) | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. |
 
@@ -50,7 +49,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no Langfuse nem no b
 
 ## Lembretes de leitura
 
-- **Custo de Claude e Codex é preço de lista da API**, não gasto real: os dois rodam por assinatura (ADR-04). Gasto real é o do router (OpenRouter: clientes do jev-router; o Pi, único cliente, saiu na #217 e `oute.agent=pi` só aparece em registro antigo).
+- **Custo de Claude e Codex é preço de lista da API**, não gasto real: os dois rodam por assinatura (ADR-04), e desde 2026-09-30 não há gasto real por chamada. `oute.agent=pi` e `oute.agent=router` só aparecem em registro até essa data (o roteador de modelos saiu, #218): não são agentes esperados, e a falta deles não é anomalia.
 - O bucket grava em lotes de 5 min por host; sem atividade não há lote. Idade grande sozinha não é falha.
 - O Langfuse só recebe traces (não logs nem metrics) e guarda 30 dias (plano Hobby, 50 mil unidades/mês: vale citar se o volume do mês estiver perto). Horário do bucket e do Langfuse em UTC.
 - `environment` no Langfuse = `host.name`. `production` é o environment dos traces anteriores à 0.7.5: aparece na tabela e não gera anomalia.

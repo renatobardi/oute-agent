@@ -58,9 +58,38 @@ check "imagem antiga: FALHA da imagem"        has "FALHA  imagem rodando '0.7.25
 run F_REPO=0.7.25
 check "repo atrasado: FALHA do repo"          has "FALHA  repo em '0.7.25', esperado 0.7.26"
 
-run F_DOWN=oute-jev-router
+run F_DOWN=oute-otel-collector
 check "serviço parado: código 1"              [ "$RC" -eq 1 ]
-check "serviço parado: FALHA do serviço"      has 'FALHA  oute-jev-router: exited'
+check "serviço parado: FALHA do serviço"      has 'FALHA  oute-otel-collector: exited'
+
+# #218: o roteador saiu do stack; agent-studio e SurrealDB só onde o profile agent-studio está ligado
+run
+check "roteador não é mais conferido"         hasnt 'router:'
+check "profile desligado: studio não conferido" has 'profile agent-studio desligado neste host'
+check "profile desligado: nenhuma linha do studio" hasnt 'OK     oute-agent-studio'
+run F_MISSING="oute-agent-studio oute-surrealdb"
+check "profile desligado, sem os containers: código 0" [ "$RC" -eq 0 ]
+run OUTE_AGENT_STUDIO=1
+check "profile ligado (ambiente): código 0"   [ "$RC" -eq 0 ]
+check "profile ligado: confere o agent-studio" has 'OK     oute-agent-studio: running'
+check "profile ligado: confere o SurrealDB"   has 'OK     oute-surrealdb: running'
+run OUTE_AGENT_STUDIO=1 F_MISSING=oute-surrealdb
+check "profile ligado, SurrealDB ausente: código 1" [ "$RC" -eq 1 ]
+check "profile ligado, SurrealDB ausente: FALHA" has 'FALHA  oute-surrealdb: container não existe'
+run OUTE_AGENT_STUDIO=1 F_DOWN=oute-agent-studio
+check "profile ligado, agent-studio parado: FALHA" has 'FALHA  oute-agent-studio: exited'
+# profile lido do .env do checkout, achado pelo link do `oute install` (como no host)
+CK="$TMP/checkout"; mkdir -p "$CK/scripts" "$TMP/link"
+cp "$BIN/oute" "$CK/scripts/oute"; ln -s "$CK/scripts/oute" "$TMP/link/oute"
+printf 'OUTE_SSH_PORT=2222\nOUTE_AGENT_STUDIO=1   # só no oute-server\n' > "$CK/.env"
+run OUTE_BIN="$TMP/link/oute" F_MISSING=oute-agent-studio
+check ".env com o profile: FALHA do agent-studio ausente" has 'FALHA  oute-agent-studio: container não existe'
+printf 'OUTE_SSH_PORT=2222\n# OUTE_AGENT_STUDIO=1\n' > "$CK/.env"
+run OUTE_BIN="$TMP/link/oute" F_MISSING=oute-agent-studio
+check ".env com o profile comentado: não confere" [ "$RC" -eq 0 ]
+rm -f "$CK/.env"
+run OUTE_BIN="$TMP/link/oute"
+check "checkout sem .env: profile desligado, código 0" bash -c '[ "$1" -eq 0 ] && grep -q "profile agent-studio desligado" <<<"$0"' "$OUT" "$RC"
 
 run F_MISSING=oute-ai-memory
 check "container ausente: FALHA"              has 'FALHA  oute-ai-memory: container não existe'

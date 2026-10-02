@@ -70,7 +70,6 @@ vault_to_agent_env() {
   echo "lendo o Vaultwarden (pasta ${OUTE_VAULT_FOLDER:-oute-agent})…" >&2
   local envs; envs="$("$ROOT/scripts/oute-secrets.sh" export)" || die "não consegui ler o vault"
   eval "$envs"
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || die "OPENROUTER_API_KEY ausente no vault"
   # #6: o container dos agentes NÃO recebe acesso ao cofre (sem BW_SESSION, estado do bw ou API key).
   # Recebe só os VALORES da pasta oute-agent, num arquivo 0600 montado como docker secret (read-only).
   # Em disco (não tmpfs) para o container voltar sozinho depois de reboot do host.
@@ -90,9 +89,8 @@ host_secrets() {
     rm -f "$OUTE_HOME/bw_session"
   fi
   if [[ "${1:-0}" == 1 || ! -s "$AGENT_ENV_FILE" ]]; then vault_to_agent_env; else load_agent_env; fi
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || no_secret OPENROUTER_API_KEY
   export OUTE_AGENT_ENV_FILE="$AGENT_ENV_FILE"
-  export OPENROUTER_API_KEY AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
+  export AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
   export OCI_S3_ACCESS_KEY="${OCI_S3_ACCESS_KEY:-}" OCI_S3_SECRET_KEY="${OCI_S3_SECRET_KEY:-}" \
          OCI_S3_ENDPOINT="${OCI_S3_ENDPOINT:-}" OCI_S3_REGION="${OCI_S3_REGION:-}"
   # Langfuse (item "langfuse": LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST opcional) liga o pipeline de metadados
@@ -141,35 +139,27 @@ agent_studio_up() {
   export COMPOSE_PROFILES
 }
 
-router_sync() {
-  # cron/up: só env ou agent.env, sem vault e sem tty (#21)
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || load_agent_env
-  [[ -n "${OPENROUTER_API_KEY:-}" ]] || no_secret OPENROUTER_API_KEY
-  export OPENROUTER_API_KEY
-  # #16: Management key (pasta oute-admin do vault) só para ler o guardrail; nunca vai ao container dos agentes.
-  # #21: só o --check-guardrail manual abre o vault (master password; sessão trancada ao sair). Sync normal sem ela: só avisa.
-  if [[ -z "${OPENROUTER_MGMT_KEY:-}" && " $* " == *" --check-guardrail "* ]]; then
-    need jq
-    export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-    OPENROUTER_MGMT_KEY="$(OUTE_VAULT_FOLDER=oute-admin "$ROOT/scripts/oute-secrets.sh" get OPENROUTER_MGMT_KEY)" \
-      || die "não li OPENROUTER_MGMT_KEY da pasta oute-admin do vault"
+# --- restos do roteador de modelos, que saiu do stack na #218 (ADR-02, Histórico). Chamado em todo `up` e `down`;
+# idempotente: host sem os restos não muda. Os padrões levam [-] para o nome antigo não voltar a aparecer no repo.
+legacy_cleanup() {
+  # entrada diária (04:00) que as versões <= 0.7.30 punham no crontab do host. Só regrava se a entrada existe;
+  # crontab que ficaria vazio é removido (como estava antes da entrada)
+  if command -v crontab >/dev/null; then
+    local cur new
+    cur="$(crontab -l 2>/dev/null || true)"
+    if grep -q 'oute router[-]sync' <<<"$cur"; then
+      new="$(grep -v 'oute router[-]sync' <<<"$cur" || true)"
+      if [[ -n "$new" ]]; then printf '%s\n' "$new" | crontab -; else crontab -r; fi
+      echo "crontab: entrada diária do roteador removida (#218)" >&2
+    fi
   fi
-  export OPENROUTER_MGMT_KEY="${OPENROUTER_MGMT_KEY:-}"
-  docker run --rm -e OPENROUTER_API_KEY -e OPENROUTER_MGMT_KEY -v "$ROOT:/w" -w /w --user "$(id -u):$(id -g)" \
-    --entrypoint python3 "${OUTE_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest@sha256:114aca7726c311915c8ea5120fcc44d32a0648c3ae3aec41a1014f0e846b16d1}" scripts/router_sync.py "$@"
-}
-
-# gerados pelo router-sync; sem eles o compose montaria diretórios vazios
-router_files_ok() {
-  local f; for f in router.yaml config.yaml candidates.json; do [[ -s "$ROOT/config/litellm/$f" ]] || return 1; done
-}
-
-# router-sync diário às 04:00 (hora do host); idempotente, chamado em todo `up`
-schedule_sync() {
-  command -v crontab >/dev/null || { echo "crontab ausente; agende router-sync manualmente" >&2; return 0; }
-  local line="0 4 * * * cd $ROOT && ./scripts/oute router-sync >> $OUTE_HOME/router-sync.log 2>&1"
-  # sem crontab prévio, `crontab -l` e `grep -v` retornam != 0; com pipefail+errexit isso mataria o `up` em silêncio
-  { crontab -l 2>/dev/null || true; } | { grep -v 'oute router-sync' || true; } | { cat; echo "$line"; } | crontab -
+  # container do serviço que saiu do compose: ficaria órfão, de pé e preso à rede (o `down` não removeria a rede)
+  if docker ps -aq -f 'name=^oute-jev[-]router$' 2>/dev/null | grep -q .; then
+    docker rm -f "$(docker ps -aq -f 'name=^oute-jev[-]router$')" >/dev/null 2>&1 \
+      && echo "container do roteador removido (#218)" >&2 \
+      || echo "aviso: não consegui remover o container do roteador (#218); remova à mão com docker rm -f" >&2
+  fi
+  return 0
 }
 
 # sshd só sobe no fim do entrypoint (segredos, configs); espera o banner SSH pra `attach` logo depois não falhar
@@ -519,9 +509,7 @@ case "${1:-}" in
     refresh=0; up_args=()
     for a in "${@:2}"; do if [[ "$a" == --refresh-secrets ]]; then refresh=1; else up_args+=("$a"); fi; done
     host_secrets "$refresh"; agent_studio_up; ensure_dirs; mount_shared
-    # catálogo do router sempre fresco; se o OpenRouter falhar, segue com o último gerado
-    router_sync || { router_files_ok && echo "router-sync falhou; usando catálogo anterior" >&2 || die "router-sync falhou e não há catálogo gerado"; }
-    schedule_sync
+    legacy_cleanup
     ensure_image
     queue_reserve_check
     "${COMPOSE[@]}" up -d --no-build ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
@@ -529,7 +517,7 @@ case "${1:-}" in
     docker image prune -f >/dev/null 2>&1 || true
     ;;
   # --profile: down/logs/status enxergam também o agent-studio, quando ele existe (no Mac não há nada dele)
-  down)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" down "${@:2}"; umount_shared ;;
+  down)    legacy_cleanup; "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" down "${@:2}"; umount_shared ;;
   restart) "$0" down; "$0" up ;;
   logs)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs --tail=100 "${@:2}" ;;
   follow)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs -f "${@:2}" ;;
@@ -552,17 +540,6 @@ case "${1:-}" in
     host_secrets 1
     docker ps -q -f name='^oute-agent$' -f status=running | grep -q . && echo "o container lê agent.env ao subir: oute restart"
     exit 0 ;;
-  router-sync)
-    # consulta OpenRouter (modelos elegíveis pela key/guardrail) e regenera config do router a partir de policy.yaml
-    rc=0; router_sync "${@:2}" || rc=$?
-    # só a checagem do guardrail (#16): nada foi gravado, não reinicia; devolve 0/2/1
-    [[ " ${*:2} " == *" --check-guardrail "* ]] && exit "$rc"
-    (( rc == 0 )) || exit "$rc"
-    if [[ " ${*:2} " != *" --dry-run "* ]] && docker ps -q -f name=oute-jev-router | grep -q .; then
-      "${COMPOSE[@]}" restart jev-router agent >/dev/null && echo "jev-router e agent reiniciados"
-    fi
-    ;;
-  schedule) schedule_sync; echo "agendado: router-sync diário 04:00 (log: $OUTE_HOME/router-sync.log)" ;;
   version)
     echo "repo:    $VERSION ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?'))"
     img="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' oute-agent 2>/dev/null || true)"
@@ -583,7 +560,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
-  up [--refresh-secrets]  sobe agent + jev-router + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
+  up [--refresh-secrets]  sobe agent + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
                (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08;
                 nos outros, o collector manda ao agent-studio.oute.pro pela tailnet com o mesmo token, #190)
                (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)
@@ -598,10 +575,6 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas
-  router-sync  consulta OpenRouter e regenera router.yaml/config.yaml a partir de policy.yaml [--dry-run]
-               [--check-guardrail]: só confere o guardrail (lê oute-admin do vault, pede a senha)
-               (roda sozinho em todo `up`)
-  schedule     agenda router-sync diário (crontab do host, 04:00) — `up` já faz isso
   version      versão do repo e da imagem em execução
 EOF
     ;;

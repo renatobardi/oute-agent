@@ -31,7 +31,7 @@ for n in "$HOURS" "$CHOURS" "$BDAYS"; do [[ "$n" =~ ^[0-9]+$ ]] || { echo "obser
 
 LF="${LANGFUSE_HOST:-https://cloud.langfuse.com}"
 BUCKET="${OUTE_OBS_BUCKET:-oci:oute-observability}/otel"
-AGENTS=(claude codex router unknown)
+AGENTS=(claude codex)
 NOW="$(date -u +%s)"
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
 W_FROM="$(iso $((NOW - HOURS * 3600)))"; W_TO="$(iso "$NOW")"
@@ -88,8 +88,6 @@ langfuse() {
               | ["ANOMALIA","erro-alto","\(.env)/\(.agent)","\(.err) de \(.obs) observações com level=ERROR"] | @tsv),
         ($w[] | ($b["\(.env)/\(.agent)"].cost // 0) as $bc | select(.cost > 1 and ($b["\(.env)/\(.agent)"].obs // 0) > 0 and .cost > 3 * $bc / $bdays)
               | ["ANOMALIA","custo-alto","\(.env)/\(.agent)","US$ \(.cost*100|round/100) na janela; base US$ \($bc/$bdays*100|round/100)/dia"] | @tsv),
-        ($w[] | select(.agent == "unknown")
-              | ["ANOMALIA","agente-unknown","\(.env)","\(.obs) observações de cliente do router sem X-Oute-Agent"] | @tsv),
         ($b | to_entries[] | select(.value.obs > 0 and (.key | startswith("production/") | not)) | .key as $k
               | select([$w[] | "\(.env)/\(.agent)"] | index($k) | not)
               | ["ANOMALIA","sem-telemetria","\($k)","\(.value.obs) observações na base e nenhuma na janela"] | @tsv)

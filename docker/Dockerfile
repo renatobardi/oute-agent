@@ -163,8 +163,7 @@ ENV HOME=/home/${OUTE_USER} \
     PATH=/usr/local/lib/oute/shims:/home/${OUTE_USER}/.local/bin:$PATH \
     AI_MEMORY_DATA_DIR=/data/ai-memory \
     OUTE_CODEX_VERSION=${CODEX_VERSION} \
-    OUTE_CODEX_INSTALLER_SHA256=${CODEX_INSTALLER_SHA256} \
-    OUTE_ROUTER_URL=http://jev-router:4000/v1
+    OUTE_CODEX_INSTALLER_SHA256=${CODEX_INSTALLER_SHA256}
 
 # ARG da versão só aqui no fim: ARG declarado antes de um RUN vira env dele e o bump de versão
 # invalidava o cache de todos os passos pesados (release = rebuild completo de ~7 min)

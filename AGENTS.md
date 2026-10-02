@@ -14,7 +14,7 @@ Runtime em container para agentes de código (herdr + Claude Code, o principal, 
   - collector: `otelcol.sh` (binário fixado do `otelcol-contrib`) e `fakes3.py` (S3 falso);
   - agent-studio: `agent-studio.sh` (venv, sobe e derruba o app, `post`/`code`/`hdr`/`data`/`enc`/`usd`, preços de exemplo, bloco de um serviço do compose) + `agent-studio-run.py` (app com falha injetada), `surreal.sh` (SurrealDB fixado), `html-data.py` (HTML → JSON dos `data-*`) e `studio_asgi.py` (chama o app pelo ASGI; store e SurrealDB de mentira).
 - `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
-- `config/litellm/`: `policy.yaml` é a fonte do roteador; os demais arquivos são gerados pelo `oute router-sync` e ficam fora do git. `config/otel/`: pipelines do collector.
+- `config/otel/`: pipelines do collector. `config/agent-studio/`: preços e alertas do agent-studio.
 - `.github/ISSUE_TEMPLATE/aidlc.md`: template de issue (AI-DLC).
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.
 
