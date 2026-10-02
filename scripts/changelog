@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""changelog: fragmentos do changelog.d/ (#121). Formato dos fragmentos: changelog.d/README.md.
+
+  changelog check                    confere os fragmentos e o [Unreleased]; imprime a seção que a release montaria
+  changelog release <x.y.z> <data>   grava a seção da versão no CHANGELOG.md e apaga os fragmentos do disco
+
+Quem chama o `release` é o scripts/release, que faz o commit. Saída: 0 ok; 1 fragmento ou CHANGELOG
+inválido (nada é gravado nem apagado); 2 uso errado.
+"""
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+CHANGELOG = ROOT / "CHANGELOG.md"
+FRAGMENTS = ROOT / "changelog.d"
+# subseções do Keep a Changelog, na ordem em que saem na seção da versão
+SECTIONS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+NAME = re.compile(r"^([0-9]+)-[a-z0-9][a-z0-9._-]*\.md$")
+UNRELEASED = re.compile(r"^## \[Unreleased\][ \t]*\n", re.M)
+
+
+def parse(text, origin, errors):
+    """Linhas de cada subseção de um fragmento (ou do [Unreleased]), sem as linhas em branco das pontas."""
+    blocks = {}
+    current = None
+    for n, line in enumerate(text.splitlines(), 1):
+        where = f"{origin}:{n}"
+        if line.startswith("### "):
+            current = line[4:].strip()
+            if current not in SECTIONS:
+                errors.append(f"{where}: subseção desconhecida '{line}' (use {', '.join(SECTIONS)})")
+            blocks.setdefault(current, [])
+        elif re.match(r"^##? ", line):
+            errors.append(f"{where}: título de nível 1 ou 2 quebra o CHANGELOG: '{line}'")
+        elif current is None:
+            if line.strip():
+                errors.append(f"{where}: texto fora de subseção (falta a linha '### <subseção>' antes): '{line}'")
+        else:
+            blocks[current].append(line.rstrip())
+    for section, lines in blocks.items():
+        while lines and not lines[0]:
+            lines.pop(0)
+        while lines and not lines[-1]:
+            lines.pop()
+        if not lines:
+            errors.append(f"{origin}: subseção '### {section}' sem entrada")
+        elif not lines[0].startswith("- "):
+            errors.append(f"{origin}: a entrada de '### {section}' tem que começar com '- ': '{lines[0]}'")
+    return blocks
+
+
+def fragments(errors):
+    """Fragmentos em ordem de issue (numérica) e nome. README.md e arquivos ocultos não são fragmentos."""
+    found = []
+    if not FRAGMENTS.is_dir():
+        return found
+    for path in FRAGMENTS.iterdir():
+        if path.name == "README.md" or path.name.startswith("."):
+            continue
+        m = NAME.match(path.name)
+        if not m or not path.is_file():
+            errors.append(f"changelog.d/{path.name}: nome fora do padrão <issue>-<slug>.md (minúsculas, sem espaço)")
+            continue
+        found.append((int(m.group(1)), path.name, path))
+    return [path for _, _, path in sorted(found)]
+
+
+def assemble():
+    """(texto do CHANGELOG, início e fim do corpo do [Unreleased], subseções montadas, fragmentos, erros)."""
+    errors = []
+    text = CHANGELOG.read_text(encoding="utf-8") if CHANGELOG.is_file() else ""
+    head = UNRELEASED.search(text)
+    start = end = 0
+    merged = {}
+    if not head:
+        errors.append("CHANGELOG.md sem seção [Unreleased]")
+    else:
+        start = head.end()
+        following = re.search(r"^## ", text[start:], re.M)
+        end = start + following.start() if following else len(text)
+        # transição: o que ainda foi escrito direto no [Unreleased] entra antes dos fragmentos
+        merged = parse(text[start:end], "CHANGELOG.md [Unreleased]", errors)
+    paths = fragments(errors)
+    for path in paths:
+        origin = f"changelog.d/{path.name}"
+        before = len(errors)
+        blocks = parse(path.read_text(encoding="utf-8"), origin, errors)
+        if not blocks and len(errors) == before:
+            errors.append(f"{origin}: fragmento sem subseção")
+        for section, lines in blocks.items():
+            merged.setdefault(section, []).extend(lines)
+    body = "\n".join(f"### {s}\n" + "\n".join(merged[s]) + "\n" for s in SECTIONS if merged.get(s))
+    return text, start, end, body, paths, errors
+
+
+def main(argv):
+    if argv[:1] == ["check"] and len(argv) == 1:
+        version = None
+    elif argv[:1] == ["release"] and len(argv) == 3:
+        version, date = argv[1:]
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    text, start, end, body, paths, errors = assemble()
+    if errors:
+        for error in errors:
+            print(f"changelog: {error}", file=sys.stderr)
+        return 1
+    if version is None:
+        sys.stdout.write(body)
+        print(f"changelog: {len(paths)} fragmento(s) ok", file=sys.stderr)
+        return 0
+    section = f"\n## [{version}] - {date}\n\n" + (body + "\n" if body else "")
+    CHANGELOG.write_text(text[:start] + section + text[end:], encoding="utf-8")
+    for path in paths:
+        path.unlink()
+    if paths and not any(FRAGMENTS.iterdir()):
+        FRAGMENTS.rmdir()
+    print(f"changelog: seção [{version}] montada com {len(paths)} fragmento(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
