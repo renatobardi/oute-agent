@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# Testes do `GET /v1/tray` do agent-studio (#205, ADR-08 §10): o contrato da resposta que o tray no Mac (#158) lê a
+# cada 15 s. Máquinas (pela hora de chegada), pedidos pendentes do SurrealDB com o link do "ver script", custo de hoje
+# (total e por agente, estimado marcado), erros na última hora por host × agente, alertas e os contadores da barra.
+# O DuckDB e o SurrealDB de exemplo nascem pela ingestão de verdade (POST /v1/traces, /v1/logs e /v1/metrics), com as
+# horas em volta de agora; o custo e os alertas são conferidos contra o `/v1/usage` e o `/v1/alerts` (mesma regra).
+# Mais a lógica direto em Python (host parado, outro dia, limite de pedidos), o SurrealDB fora e o tempo de resposta
+# com um banco de volume parecido com o de produção. Sem Docker; o SurrealDB é o binário fixado de tests/lib/surreal.sh.
+# Uso: tests/agent-studio-tray.test.sh   (sai != 0 se algum caso falhar)
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/agent-studio.sh"
+trap 'studio_stop; rm -rf "$TMP"' EXIT
+studio_init
+. "$ROOT/tests/lib/surreal.sh"
+surreal_bin
+surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
+trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+
+# "hoje" é o dia UTC: perto da virada, os fatos de agora cairiam em dias diferentes no meio do teste. Espera passar.
+while s=$(( $(date +%s) % 86400 )); (( s < 120 || s > 86400 - 300 )); do sleep 20; done
+
+# ---------------------------------------------------------------- DuckDB e SurrealDB de exemplo
+# Tudo chega agora; a hora do fato é relativa a NOW.
+#   custo de hoje: claude (oute-server) 0,03 real + 3,00 estimado (uma chamada sem custo); codex (oute-mac) só
+#   estimado (2,50 + 0,01) e uma chamada de modelo sem preço; pi (jev.decision) 0,0004 real. Um span de ontem com
+#   US$ 100 fica fora.
+#   erros na última hora: codex no oute-mac (1 span + 1 log) e claude no oute-server (1 span); um erro de 2 h atrás
+#   fica fora.
+#   pedidos: P1 (pendente, root, claude, oute-server, há 5 min), P5 (pendente, user, codex, oute-mac, há 1 min, id
+#   com HTML) e P2 (decidido: não entra).
+#   alerta: fila do collector do oute-server a 80%.
+#   oute-velho: um log com a hora do fato de 3 dias atrás, que chegou agora (máquina ativa pela hora de chegada).
+NOW="$(date +%s)"
+P1=20260930-120000-reiniciar-nginx; P2=20260930-110000-listar-backups; P5='p <b>5</b>&x=é'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
+import json, sys
+from otlp_json import canal_decided, canal_proposed, kv, queue_metrics, rl, rs, span
+tmp, NOW = sys.argv[1], int(sys.argv[2])
+DAY = NOW // 86400 * 86400
+P1, P2, P5 = "20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "p <b>5</b>&x=é"
+claude = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "claude-code", "oute.agent": "claude"}
+codex = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "codex_exec", "oute.agent": "codex"}
+router = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "jev-router", "oute.agent": "router"}
+cl = lambda **a: {"model": "claude-sonnet-5", **a}
+cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,
+                               "codex.turn.token_usage.output_tokens": o, "codex.turn.token_usage.cached_input_tokens": c}
+traces = {"resourceSpans": [
+  rs(claude, [
+    span("claude_code.llm_request", NOW - 30, 2, cl(input_tokens=100, output_tokens=50, cost_usd=0.01)),
+    span("claude_code.llm_request", NOW - 20, 4, cl(input_tokens=200, output_tokens=20, cost_usd=0.02)),
+    span("claude_code.llm_request", NOW - 15, 3, cl(input_tokens=1_000_000)),                # sem custo: 3,00 estimado
+    span("claude_code.llm_request", DAY - 3600, 1, cl(input_tokens=5, cost_usd=100.0)),       # ontem
+    span("claude_code.tool", NOW - 40, 1, {}, err=True),
+    span("claude_code.tool", NOW - 7200, 1, {}, err=True),                                    # há 2 h
+  ]),
+  rs(codex, [
+    span("session_task.turn", NOW - 25, 10, cx("gpt-5-codex", 1_000_000, 100_000, 2_000_000)),  # 1,25 + 1,00 + 0,25
+    span("session_task.turn", NOW - 10, 5, cx("gpt-5-codex", o=1000), err=True),                # 0,01
+    span("session_task.turn", NOW - 12, 1, cx("gpt-9-sem-preco", 500)),
+  ]),
+  rs(router, [span("jev.decision", NOW - 18, 0.5, {"oute.agent": "pi", "gen_ai.response.model": "openai/gpt-oss-20b",
+       "gen_ai.usage.input_tokens": 50, "gen_ai.usage.output_tokens": 10, "oute.cost_usd": 0.0004})]),
+]}
+json.dump(traces, open(f"{tmp}/traces.json", "w"))
+oute = lambda host, agent: {"host.name": host, "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": agent}
+logs = {"resourceLogs": [
+  rl(oute("oute-server", "claude"), [canal_proposed(NOW - 300, P1, "ev-p1", "Reiniciar <b>nginx</b> & cia", "root", "sudo systemctl reload nginx\n")]),
+  rl(oute("oute-mac", "codex"), [canal_proposed(NOW - 60, P5, "ev-p5", "Pedido de id estranho", "user", "true\n"),
+                                 canal_proposed(NOW - 3600, P2, "ev-p2", "Listar backups", "user", "ls -la /backup\n")]),
+  rl(oute("oute-mac", "human"), [canal_decided(NOW - 3500, P2, "ev-d2", "executado", **{"oute.canal.rc": 0})]),
+  rl(codex, [{"timeUnixNano": str((NOW - 15) * 10**9), "severityNumber": 17, "body": {"stringValue": "erro"}},
+             {"timeUnixNano": str((NOW - 16) * 10**9), "severityNumber": 9, "body": {"stringValue": "info"}}]),
+  rl({"host.name": "oute-velho", "service.name": "oute"},
+     [{"timeUnixNano": str((NOW - 3 * 86400) * 10**9), "severityNumber": 9, "body": {"stringValue": "atrasado"}}]),
+]}
+json.dump(logs, open(f"{tmp}/logs.json", "w"))
+json.dump(queue_metrics("oute-server", NOW - 120, 800), open(f"{tmp}/metrics.json", "w"))
+PY
+studio_prices "$TMP/config.toml"
+printf '[alerts]\nalways_on_hosts = ["oute-server"]\nfoo = 1\n' >> "$TMP/config.toml"
+
+SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$TMP/config.toml")
+studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
+C=(-H "Authorization: Bearer $STUDIO_TOKEN")
+tray() { curl -s "${C[@]}" "$STUDIO_URL/v1/tray"; }
+iso() { python3 -c 'import sys, datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
+
+# ---------------------------------------------------------------- 1. quem lê; só leitura
+check "sem token: 401"                                 test "$(code "$STUDIO_URL/v1/tray")" = 401
+check "token errado: 401"                              test "$(code -H "Authorization: Bearer ${STUDIO_TOKEN}x" "$STUDIO_URL/v1/tray")" = 401
+check "401 não leva bloco nenhum do menu"              jqe 'keys == ["message"]' <<<"$(curl -s "$STUDIO_URL/v1/tray")"
+check "com token: 200"                                 test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 200
+COOKIE="$(python3 -c 'import hashlib, hmac, sys; print(hmac.new(sys.argv[1].encode(), b"agent-studio cookie v1", hashlib.sha256).hexdigest())' "$STUDIO_TOKEN")"
+check "com o cookie do login: 200"                     test "$(code -H "Cookie: agent_studio=$COOKIE" "$STUDIO_URL/v1/tray")" = 200
+for m in POST PUT PATCH DELETE; do
+  check "$m no /v1/tray: 405 (só leitura)"             test "$(code -X "$m" "${C[@]}" "$STUDIO_URL/v1/tray")" = 405
+done
+
+# ---------------------------------------------------------------- 2. banco vazio: o menu inteiro, zerado
+E="$(tray)"
+check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "errors_last_hour", "machines", "proposals"]' <<<"$E"
+check "vazio: nenhum pedido (a tabela ainda não existe no SurrealDB)" jqe '.proposals == {available: true, total: 0, pending: []} and .bar.pending == 0' <<<"$E"
+check "vazio: custo nulo (nunca zero), sem agente"     jqe '.cost_today | .usd == null and .real_usd == null and .estimated_usd == null and .estimated == false and .unpriced_calls == 0 and .agents == []' <<<"$E"
+check "vazio: nenhum erro"                             jqe '.errors_last_hour | .total == 0 and .rows == []' <<<"$E"
+check "vazio: o sempre ligado aparece parado, sem dado, e alerta" jqe '.machines == [{host: "oute-server", always_on: true, last_data: null, idle_seconds: null, state: "stopped"}] and ([.alerts[].type] == ["host_no_data"]) and .bar.alerts == 1' <<<"$E"
+
+check "ingestão: traces = 200"                         test "$(post traces "$TMP/traces.json")" = 200
+check "ingestão: logs = 200"                           test "$(post logs "$TMP/logs.json")" = 200
+check "ingestão: métricas = 200"                       test "$(post metrics "$TMP/metrics.json")" = 200
+
+# ---------------------------------------------------------------- 3. contrato da resposta (o que o #158 consome)
+R="$(tray)"
+echo "$R" > "$TMP/tray.json"
+check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "errors_last_hour", "machines", "proposals"]' <<<"$R"
+check "at: a hora da resposta (UTC, ISO)"              jqe --argjson now "$NOW" '(.at | fromdateiso8601) as $t | $t >= $now and $t < $now + 300' <<<"$R"
+check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 1}' <<<"$R"
+check "bar: iguais ao tamanho dos blocos"              jqe '.bar.pending == .proposals.total and .bar.alerts == (.alerts | length)' <<<"$R"
+check "config: erros da config (chave desconhecida)"   jqe '.config | keys == ["errors"] and (.errors | length == 1 and (.[0] | test("foo")))' <<<"$R"
+
+# máquinas
+check "máquinas: campos de cada uma"                   jqe '.machines | length == 3 and all(keys == ["always_on", "host", "idle_seconds", "last_data", "state"])' <<<"$R"
+check "máquinas: em ordem de host, ativas, com o sempre ligado marcado" jqe '[.machines[] | [.host, .state, .always_on]] == [["oute-mac", "active", false], ["oute-server", "active", true], ["oute-velho", "active", false]]' <<<"$R"
+check "máquinas: último dado = hora de chegada (agora), há poucos segundos" jqe --argjson now "$NOW" '.machines | all((.last_data | fromdateiso8601) >= $now and .idle_seconds >= 0 and .idle_seconds < 300)' <<<"$R"
+AL="$(curl -s "${C[@]}" "$STUDIO_URL/v1/alerts")"
+check "máquinas: fato de 3 dias atrás que chegou agora conta (no /v1/alerts, pela hora do fato, o host nem aparece)" jqe '[.hosts[].host] == ["oute-mac", "oute-server"]' <<<"$AL"
+
+# pedidos pendentes
+check "pedidos: disponível, total e lista"             jqe '.proposals | keys == ["available", "pending", "total"] and .available == true and .total == 2 and (.pending | length == 2)' <<<"$R"
+check "pedidos: campos de cada um"                     jqe '.proposals.pending | all(keys == ["age_seconds", "agent", "as", "host", "id", "instance", "proposed_at", "title", "url"])' <<<"$R"
+check "pedidos: do mais novo para o mais antigo; o decidido não entra" jqe --arg p1 "$P1" --arg p5 "$P5" '[.proposals.pending[].id] == [$p5, $p1]' <<<"$R"
+check "pedido: título, root, agente, host e instância" jqe --arg t "$(iso $((NOW - 300)))" '.proposals.pending[1] | .title == "Reiniciar <b>nginx</b> & cia" and .as == "root" and .agent == "claude" and .host == "oute-server" and .instance == "oute-agent" and .proposed_at == $t' <<<"$R"
+check "pedido: user, codex, oute-mac"                  jqe '.proposals.pending[0] | .as == "user" and .agent == "codex" and .host == "oute-mac"' <<<"$R"
+check "pedido: idade em segundos desde a proposta"     jqe '.proposals.pending | (.[1].age_seconds >= 300 and .[1].age_seconds < 600) and (.[0].age_seconds >= 60 and .[0].age_seconds < 360)' <<<"$R"
+check "pedido: link do ver script (caminho estável por id)" jqe --arg p1 "$P1" '.proposals.pending[1].url == "/pedido?id=" + $p1' <<<"$R"
+check "pedido: id estranho codificado no link"         jqe '.proposals.pending[0].url == "/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9"' <<<"$R"
+for i in 0 1; do
+  U="$(jq -r ".proposals.pending[$i].url" <<<"$R")"
+  check "pedido $i: o link abre a página do pedido (200, com o script)" bash -c 'grep -q "data-script" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL$U")"
+done
+check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r '.proposals.pending[0].url' <<<"$R")\"" <<<"$(curl -s "${C[@]}" "$STUDIO_URL/pedidos")"
+check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep -q "systemctl" "$1"' _ "$TMP/tray.json"
+
+# custo de hoje
+DAY=$((NOW / 86400 * 86400))
+check "custo: campos do bloco"                         jqe '.cost_today | keys == ["agents", "day", "estimated", "estimated_usd", "from", "real_usd", "to", "unpriced_calls", "usd"]' <<<"$R"
+check "custo: hoje = o dia UTC inteiro"                jqe --arg f "$(iso "$DAY")" --arg t "$(iso $((DAY + 86400)))" '.cost_today | .day == $f[:10] and .from == $f and .to == $t' <<<"$R"
+check "custo total: real + estimado, estimado marcado; ontem fora" jqe ".cost_today | $(usd .usd) == 5540400 and $(usd .real_usd) == 30400 and $(usd .estimated_usd) == 5510000 and .estimated == true and .unpriced_calls == 1" <<<"$R"
+check "custo por agente: campos"                       jqe '.cost_today.agents | all(keys == ["agent", "calls", "estimated", "estimated_usd", "real_usd", "unpriced_calls", "usd"])' <<<"$R"
+check "custo por agente: em ordem de agente"           jqe '[.cost_today.agents[].agent] == ["claude", "codex", "pi"]' <<<"$R"
+check "claude: real + estimado, marcado"               jqe ".cost_today.agents[0] | .calls == 3 and $(usd .usd) == 3030000 and $(usd .real_usd) == 30000 and $(usd .estimated_usd) == 3000000 and .estimated == true and .unpriced_calls == 0" <<<"$R"
+check "codex: só estimado; modelo sem preço fora da soma" jqe ".cost_today.agents[1] | .calls == 3 and $(usd .usd) == 2510000 and .real_usd == null and .estimated == true and .unpriced_calls == 1" <<<"$R"
+check "pi: só real, sem a marca de estimado"           jqe ".cost_today.agents[2] | .calls == 1 and $(usd .usd) == 400 and .estimated_usd == null and .estimated == false" <<<"$R"
+US="$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?from=$(iso "$DAY")&to=$(iso $((DAY + 86400)))")"
+check "custo: o mesmo do /v1/usage do dia (#203)"      jqe --argjson u "$US" '.cost_today | .real_usd == $u.totals.cost.real_usd and .estimated_usd == $u.totals.cost.estimated_usd and .unpriced_calls == $u.totals.cost.unpriced_calls' <<<"$R"
+
+# erros na última hora
+check "erros: campos do bloco e de cada linha"         jqe '.errors_last_hour | keys == ["from", "rows", "to", "total"] and (.rows | all(keys == ["agent", "host", "logs", "spans", "total"]))' <<<"$R"
+check "erros: janela de uma hora até agora"            jqe '.at as $at | .errors_last_hour | .to == $at and ((.to | fromdateiso8601) - (.from | fromdateiso8601) == 3600)' <<<"$R"
+check "erros: por host × agente, em ordem; o de 2 h atrás fora" jqe '.errors_last_hour | .total == 3 and .rows == [{host: "oute-mac", agent: "codex", spans: 1, logs: 1, total: 2}, {host: "oute-server", agent: "claude", spans: 1, logs: 0, total: 1}]' <<<"$R"
+check "erros: os mesmos do /v1/usage da última hora"   jqe --argjson r "$R" '.totals.errors.total == $r.errors_last_hour.total' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?hours=1")"
+
+# alertas
+check "alertas: os do /v1/alerts (#204), iguais"       jqe --argjson a "$AL" '.alerts == $a.alerts and (.alerts | length == 1)' <<<"$R"
+check "alerta: fila do collector do oute-server a 80%" jqe '.alerts[0] | .type == "queue" and .host == "oute-server" and .value == 0.8 and .limit == 0.5 and .unit == "ratio" and (has("since") and has("evidence") and has("instance"))' <<<"$R"
+
+# ---------------------------------------------------------------- 4. SurrealDB fora: o menu segue, sem os pedidos
+surreal_stop
+D="$(tray)"
+check "SurrealDB fora: 200"                            test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 200
+check "SurrealDB fora: pedidos indisponíveis, contador nulo (nunca zero)" jqe '.proposals == {available: false, total: null, pending: []} and .bar.pending == null' <<<"$D"
+check "SurrealDB fora: o resto do menu igual"          jqe --argjson r "$R" '.bar.alerts == 1 and .cost_today == $r.cost_today and .errors_last_hour.rows == $r.errors_last_hour.rows and ([.machines[].host] == [$r.machines[].host]) and .alerts == $r.alerts' <<<"$D"
+studio_stop
+check "SurrealDB fora: causa só no stderr"             grep -q "tray: pedidos pendentes falhou" "$TMP/s/stderr"
+check "SurrealDB fora: a resposta não leva a causa"    bash -c '! grep -qi "surreal\|refused\|urlopen" <<<"$1"' _ "$D"
+
+# ---------------------------------------------------------------- 5. lógica direto (hora escolhida, limites, falhas)
+cp "$TMP/s/db.duckdb" "$TMP/copy.duckdb"
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/copy.duckdb" "$TMP/config.toml" "$NOW" > "$TMP/py.out" 2>&1 <<'PY'
+import dataclasses, logging, sys, duckdb
+logging.disable(logging.CRITICAL)  # as falhas provocadas aqui não vão para a saída (só os casos)
+from agent_studio import alerts, config, proposals, tray
+from agent_studio.app import create_app
+from pycheck import check as out
+from studio_asgi import TOKEN, Odd, get
+import json
+db, cfg_path, NOW = sys.argv[1], sys.argv[2], int(sys.argv[3])
+cfg = config.load(cfg_path)
+con = duckdb.connect(db)
+at = (NOW + 60) * 10**9
+H = 3600 * 10**9
+# o oute-mac parou de mandar há 2 h (hora de chegada), com a hora do fato de agora
+for t in ("logs", "spans", "metrics"):
+    con.execute(f"UPDATE {t} SET received_unix_nano = ? WHERE host_name = 'oute-mac'", [at - 2 * H])
+on = dataclasses.replace(cfg.alerts, always_on_hosts=("oute-server", "oute-nunca"))
+s = tray.snapshot(con, at, cfg.prices, on)
+m = {x["host"]: x for x in s["machines"]}
+out("parado: sem chegada há mais de no_data_minutes (o fato recente não conta)", m["oute-mac"]["state"] == "stopped" and m["oute-mac"]["idle_seconds"] == 7200)
+out("ativo: quem chegou dentro de no_data_minutes", m["oute-server"]["state"] == "active" and m["oute-velho"]["state"] == "active")
+out("sempre ligado sem dado nenhum: parado, último dado nulo", m["oute-nunca"] == {"host": "oute-nunca", "always_on": True, "last_data": None, "idle_seconds": None, "state": "stopped"})
+out("limite do parado = o no_data_minutes do [alerts] (#204)", {x["host"]: x["state"] for x in tray.snapshot(con, at, cfg.prices, dataclasses.replace(on, no_data_minutes=121))["machines"]}["oute-mac"] == "active")
+out("máquina sai da lista depois de lookback_hours sem chegada (a sempre ligada fica)", [x["host"] for x in tray.snapshot(con, at + 30 * H, cfg.prices, cfg.alerts)["machines"]] == ["oute-server"])
+tomorrow = tray.snapshot(con, at + 24 * H, cfg.prices, cfg.alerts)
+out("amanhã: custo de hoje nulo e sem agente (nunca zero)", tomorrow["cost_today"]["usd"] is None and tomorrow["cost_today"]["agents"] == [] and not tomorrow["cost_today"]["estimated"])
+out("amanhã: nenhum erro na última hora", tomorrow["errors_last_hour"] == {**tomorrow["errors_last_hour"], "total": 0, "rows": []})
+day = NOW // 86400 * 86400
+y = tray.snapshot(con, (day - 1800) * 10**9, cfg.prices, cfg.alerts)["cost_today"]
+out("ontem: só o custo do dia de ontem", y["usd"] == 100.0 and [a["agent"] for a in y["agents"]] == ["claude"] and not y["estimated"])
+con.execute("UPDATE logs SET oute_agent = NULL WHERE severity_number >= 17")
+out("erro de log sem agente: linha própria, com o agente nulo depois dos nomeados do host",
+    tray.snapshot(con, at, cfg.prices, cfg.alerts)["errors_last_hour"]["rows"][:2]
+    == [{"host": "oute-mac", "agent": "codex", "spans": 1, "logs": 0, "total": 1}, {"host": "oute-mac", "agent": None, "spans": 0, "logs": 1, "total": 1}])
+try:
+    alerts.last_data(con, 0, at, by="body")
+    refused = False
+except ValueError:
+    refused = True
+out("last_data: só a hora do fato ou a de chegada (outra coluna é recusada)", refused)
+con.close()
+
+# pedidos: limite, total e hora que não é hora
+class Fake:
+    def __init__(self, rows, n): self.rows, self.n, self.vars = rows, n, None
+    def query(self, sql, variables):
+        self.vars = variables
+        return [{"status": "OK", "result": self.rows}, {"status": "OK", "result": [{"n": self.n}] if self.n else []}]
+rows = [{"id": "a/b c", "title": None, "as": "root", "agent": "claude", "host": "h", "proposed_at": "2026-09-29T07:43:00.5Z"},
+        {"id": "sem-hora", "proposed_at": None}]
+f = Fake(rows, 77)
+p = tray.pending(f, 1790667790 * 10**9)  # 2026-09-29T07:43:10Z
+out("pedidos: pede só os 50 mais novos e devolve o total", f.vars == {"pending": 50} and p["total"] == 77 and p["available"] is True)
+out("pedido: hora do SurrealDB com fração -> ISO em segundos e idade", p["pending"][0]["proposed_at"] == "2026-09-29T07:43:00Z" and p["pending"][0]["age_seconds"] == 10)
+out("pedido: barra do id fica no link, o espaço é codificado", p["pending"][0]["url"] == "/pedido?id=a/b%20c")
+out("pedido sem hora e sem título: campos nulos, sem quebrar", p["pending"][1] == {"id": "sem-hora", "title": None, "as": None, "agent": None, "host": None, "instance": None, "proposed_at": None, "age_seconds": None, "url": "/pedido?id=sem-hora"})
+out("pedido proposto no futuro (relógio do host): idade zero, nunca negativa", proposals.age_seconds("2030-01-01T00:00:00Z", 0) == 0)
+out("nenhum pendente: total zero", tray.pending(Fake([], 0), 0) == {"available": True, "total": 0, "pending": []})
+
+# o app com um SurrealDB que responde fora do formato, e sem SurrealDB
+class Snap:
+    def tray(self, at_ns, prices, cfg):
+        return {"machines": [], "cost_today": {}, "errors_last_hour": {}, "alerts": [{"type": "queue"}, {"type": "spool"}]}
+for name, surreal in (("resposta fora do formato", Odd()), ("este processo sem SurrealDB", None)):
+    status, body = get(create_app(Snap(), TOKEN, surreal), "/v1/tray")
+    r = json.loads(body)
+    out(f"{name}: 200, pedidos indisponíveis e o resto do menu", status == 200 and r["proposals"] == tray.UNAVAILABLE and r["bar"] == {"pending": None, "alerts": 2})
+PY
+check_py_lines "$TMP/py.out"
+
+# ---------------------------------------------------------------- 6. leitura do DuckDB que falha
+studio_start "$TMP/f" STUDIO_FAIL_USAGE=1 AGENT_STUDIO_CONFIG="$TMP/config.toml" || die "agent-studio não subiu"
+check "leitura que falha: 500"                         test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 500
+check "leitura que falha: a resposta não leva a causa" jqe '. == {message: "consulta falhou"}' <<<"$(tray)"
+studio_stop
+check "leitura que falha: causa no stderr"             grep -q "consulta do tray falhou" "$TMP/f/stderr"
+
+# ---------------------------------------------------------------- 7. tempo de resposta (polling de 15 s)
+# Banco com volume acima do de produção de hoje (2026-10: 2 hosts, ~3 dias de dado): 3 dias, uma coleta do collector
+# por minuto (2 hosts × 7 exporters × 5 métricas) + 30 séries de métrica por host, 10 spans e 15 logs por minuto.
+# As linhas entram direto no DuckDB (pela ingestão levaria minutos). O limite é folgado (máquina de CI): o que se
+# quer pegar é a consulta que passa a varrer o banco inteiro. O valor medido fica no ADR-08 (#205).
+mkdir -p "$TMP/v"
+PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP/v/db.duckdb" 3 > "$TMP/gen.out" 2>&1 <<'PY'
+import sys, time
+from agent_studio.store import Store
+path, days = sys.argv[1], int(sys.argv[2])
+now = time.time_ns()
+MIN = 60 * 10**9
+mins = days * 1440
+st = Store(path)
+c = st.con
+c.execute("BEGIN")
+TS = "make_timestamp_ns(t::BIGINT) AT TIME ZONE 'UTC'"
+# métricas do collector: 1 coleta por minuto, 2 hosts, 7 exporters, 5 métricas (fila: tamanho e capacidade; 3 send_failed)
+c.execute(f"""
+INSERT INTO metrics (dedupe_key, time, time_unix_nano, start_unix_nano, host_name, oute_instance, service_name, metric_name,
+                     metric_type, value, is_monotonic, aggregation_temporality, attributes, received_at, received_unix_nano)
+SELECT 'h:' || m || '-' || h || '-' || e || '-' || k, {TS}, t, {now} - {mins} * {MIN}, 'oute-' || ['server', 'mac'][h], 'oute-agent',
+       'otelcol-contrib', name, CASE WHEN k <= 2 THEN 'gauge' ELSE 'sum' END,
+       CASE k WHEN 1 THEN 1000 + e WHEN 2 THEN 629145600 ELSE 0 END, k > 2, CASE WHEN k > 2 THEN 2 END,
+       json_object('exporter', 'exp/' || e), {TS}, t
+FROM (SELECT m, h, e, k, {now} - m * {MIN} - k * 1000 AS t,
+             ['otelcol_exporter_queue_size', 'otelcol_exporter_queue_capacity', 'otelcol_exporter_send_failed_spans',
+              'otelcol_exporter_send_failed_metric_points', 'otelcol_exporter_send_failed_log_records'][k] AS name
+      FROM range({mins}) a(m), range(1, 3) b(h), range(7) d(e), range(1, 6) f(k))""")
+# outras métricas (agentes, receivers): 30 séries por host por minuto
+c.execute(f"""
+INSERT INTO metrics (dedupe_key, time, time_unix_nano, host_name, oute_instance, oute_agent, service_name, metric_name, metric_type,
+                     value, attributes, received_at, received_unix_nano)
+SELECT 'o:' || m || '-' || h || '-' || k, {TS}, t, 'oute-' || ['server', 'mac'][h], 'oute-agent', ['claude', 'codex'][1 + k % 2],
+       'claude-code', 'claude_code.metric.' || k, 'sum', k, json_object('type', 'x' || k), {TS}, t
+FROM (SELECT m, h, k, {now} - m * {MIN} - k * 1000 AS t FROM range({mins}) a(m), range(1, 3) b(h), range(30) d(k))""")
+# spans: 10 por minuto (1 em 10 é chamada ao modelo; 1 em 200 com erro); logs: 15 por minuto, com o estado do spool
+c.execute(f"""
+INSERT INTO spans (dedupe_key, time, time_unix_nano, duration_ns, host_name, oute_instance, oute_agent, service_name, session_id,
+                   trace_id, span_id, name, status_code, model, input_tokens, output_tokens, cost_usd, attributes,
+                   received_at, received_unix_nano)
+SELECT 's:' || i, {TS}, t, 1000000 * (1 + i % 5000), 'oute-' || ['server', 'mac'][1 + i % 2], 'oute-agent',
+       ['claude', 'codex', 'pi'][1 + i % 3], 'x', 'conv-' || (i // 500), 't' || i, 's' || i,
+       CASE WHEN i % 10 = 0 THEN ['claude_code.llm_request', 'session_task.turn', 'jev.decision'][1 + i % 3] ELSE 'claude_code.tool' END,
+       CASE WHEN i % 200 = 7 THEN 2 ELSE 0 END, ['claude-sonnet-5', 'gpt-5-codex', 'openai/gpt-oss-20b'][1 + i % 3],
+       1000 + i % 9000, 100 + i % 900, CASE WHEN i % 3 = 1 THEN NULL ELSE 0.01 END, '{{}}', {TS}, t
+FROM (SELECT i, {now} - i * 6 * 1000000000 AS t FROM range({mins * 10}) a(i))""")
+c.execute(f"""
+INSERT INTO logs (dedupe_key, time, time_unix_nano, host_name, oute_instance, oute_agent, service_name, session_id, event_name,
+                  oute_event_id, severity_number, body, attributes, received_at, received_unix_nano)
+SELECT 'l:' || i, {TS}, t, 'oute-' || ['server', 'mac'][1 + i % 2], 'oute-agent', ['claude', 'codex'][1 + i % 2], 'x',
+       'conv-' || (i // 500), 'claude_code.api_request', 'ev-' || i, CASE WHEN i % 300 = 3 THEN 17 ELSE 9 END,
+       repeat('texto do log ', 20),
+       CASE WHEN i % 50 = 0 THEN json_object('oute.emit.spool.bytes', 1000, 'oute.emit.spool.dropped', 0) ELSE '{{}}' END,
+       {TS}, t
+FROM (SELECT i, {now} - i * 4 * 1000000000 AS t FROM range({mins * 15}) a(i))""")
+c.execute("COMMIT")
+print(" ".join(f"{t}={c.execute(f'SELECT count(*) FROM {t}').fetchone()[0]}" for t in ("metrics", "spans", "logs")))
+st.close()
+PY
+check "volume de exemplo montado ($(tail -1 "$TMP/gen.out"))" grep -q '^metrics=561600 spans=43200 logs=64800$' "$TMP/gen.out"
+studio_start "$TMP/v" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml" || { cat "$TMP/v/stderr"; die "agent-studio não subiu"; }
+check "volume: 200, com máquinas, custo e erros"       jqe '(.machines | length == 2) and .cost_today.usd > 0 and (.cost_today.agents | length == 3) and .errors_last_hour.total > 0' <<<"$(tray)"
+for i in 1 2 3 4 5 6 7; do curl -s -o /dev/null -w '%{time_total}\n' "${C[@]}" "$STUDIO_URL/v1/tray"; done | sort -n > "$TMP/times"
+studio_stop
+MED="$(sed -n 4p "$TMP/times")"; MAX="$(tail -1 "$TMP/times")"
+echo "# /v1/tray com o volume de exemplo: mediana ${MED} s, máximo ${MAX} s (7 chamadas)"
+check "tempo: bem abaixo dos 15 s do polling (máximo < 3 s)" awk -v m="$MAX" 'BEGIN { exit !(m > 0 && m < 3) }'
+
+check_end
