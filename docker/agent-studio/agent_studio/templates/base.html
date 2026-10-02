@@ -12,10 +12,32 @@
 <header class="topo">
   <a class="marca" href="/conversas">agent-studio</a>
   {% block nav %}
-  <nav><a href="/conversas">Conversas</a> <a href="/sessoes">Sessões</a></nav>
+  <nav><a href="/conversas">Conversas</a> <a href="/sessoes">Sessões</a> <a href="/pedidos">Pedidos</a></nav>
   <form method="post" action="/logout"><button type="submit">Sair</button></form>
   {% endblock %}
 </header>
+{# alertas do pipeline (#204) no topo de toda página de quem entrou; fora do #conteudo, que o htmx troca #}
+{% if alerts_shown is defined and alerts_shown %}
+{% if alerts is none %}
+<section class="alertas" id="alertas" data-alertas="" role="alert">
+  <p>Os alertas do pipeline não puderam ser calculados. A causa está no log do agent-studio.</p>
+</section>
+{% elif alerts %}
+<section class="alertas" id="alertas" data-alertas="{{ alerts|length }}" role="alert">
+  <h2>{{ alerts|length }} {{ "alerta" if alerts|length == 1 else "alertas" }} do pipeline</h2>
+  <ul>
+    {% for a in alerts %}
+    <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
+      <strong>{{ a|alert_title }}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
+      {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} UTC{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% else %}
+<div id="alertas" data-alertas="0" hidden></div>
+{% endif %}
+{% endif %}
 <main id="conteudo">
 {% block main %}{% endblock %}
 </main>

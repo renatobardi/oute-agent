@@ -1,4 +1,4 @@
-/* agent-studio: tela (#206, #207). Um arquivo só, sem build; a CSP só aceita estilo daqui (nada de style inline). */
+/* agent-studio: tela (#206, #207, #208). Um arquivo só, sem build; a CSP só aceita estilo daqui (nada de style inline). */
 :root {
   color-scheme: light dark;
   --fundo: #fbfbfa; --painel: #ffffff; --texto: #1c1d1f; --fraco: #63676d; --linha: #dfe1e4;
@@ -69,3 +69,13 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24r
 .corpo summary { color: var(--fraco); cursor: pointer; font-size: .8rem; }
 .mais td { text-align: center; }
 .htmx-request { opacity: .6; }
+/* alertas do pipeline no topo das páginas */
+.alertas { margin: 0; padding: .6rem 1.25rem; border-bottom: 1px solid var(--erro); background: var(--erro-fundo);
+           color: var(--erro); }
+.alertas h2 { margin: 0 0 .25rem; font-size: .95rem; }
+.alertas p, .alertas ul { margin: 0; }
+.alertas ul { padding-left: 1.2rem; }
+/* pedidos: o script inteiro à vista, sem rolagem própria */
+pre.script { max-height: none; padding: .8rem; background: var(--painel); border: 1px solid var(--linha); border-radius: 4px; }
+.root { color: var(--erro); font-weight: 600; }
+dd.erro { color: var(--erro); }

@@ -284,11 +284,12 @@ check "a tela não derrubou o servidor (sem 500 no stderr)" bash -c '! grep -q "
 studio_stop
 
 # ---------------------------------------------------------------- 5. lógica direto em Python
-PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP/s/db.duckdb" > "$TMP/py.out" 2>&1 <<'PY'
-import asyncio, sys
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" > "$TMP/py.out" 2>&1 <<'PY'
+import sys
 import duckdb
 from agent_studio import auth, conversations, cost, web
 from agent_studio.app import create_app
+from studio_asgi import TOKEN, get
 
 def check(desc, cond):
     print(("ok   " if cond else "FAIL ") + desc)
@@ -343,20 +344,9 @@ class Broken:
         def boom(*args):
             raise RuntimeError("segredo-da-falha")
         return boom
-app = create_app(Broken(), "token-um")
-def get(path, query=""):
-    msgs = []
-    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http",
-             "path": path, "raw_path": path.encode(), "query_string": query.encode(), "root_path": "",
-             "headers": [(b"authorization", b"Bearer token-um")], "server": ("t", 80), "client": ("t", 1)}
-    async def receive():
-        return {"type": "http.request", "body": b"", "more_body": False}
-    async def send(m):
-        msgs.append(m)
-    asyncio.run(app(scope, receive, send))
-    return msgs[0]["status"], b"".join(m.get("body", b"") for m in msgs[1:]).decode()
+app = create_app(Broken(), TOKEN)
 for path, query in (("/conversas", ""), ("/conversa", "id=a"), ("/conversa/logs", "id=a"), ("/conversa/span", "trace=a&span=b")):
-    status, body = get(path, query)
+    status, body = get(app, path, query)
     check(f"leitura que falha em {path}: 500, sem a causa na página", status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body)
 PY
 cat "$TMP/py.out" | grep -v '^Traceback\|^  \|^RuntimeError\|^$\|tela: .* falhou' || true

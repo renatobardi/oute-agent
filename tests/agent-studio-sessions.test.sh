@@ -284,11 +284,12 @@ check "SurrealDB fora: aviso no stderr, sem 500"       bash -c 'grep -q "estado 
 studio_stop
 
 # ---------------------------------------------------------------- 6. lógica direto em Python
-PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP/s/db.duckdb" > "$TMP/py.out" 2>&1 <<'PY'
-import asyncio, sys
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" > "$TMP/py.out" 2>&1 <<'PY'
+import sys
 import duckdb
 from agent_studio import cost, sessions, usage, web
 from agent_studio.app import create_app
+from studio_asgi import TOKEN, get
 
 def check(desc, cond):
     print(("ok   " if cond else "FAIL ") + desc)
@@ -356,23 +357,14 @@ sessions.with_state(fake, [])
 check("estado: sem sessão, sem consulta", fake.asked is None)
 
 # app sem SurrealDB (só DuckDB): a página sai sem estado e sem aviso; leitura do DuckDB que falha = 500
-def get(app, path, query=""):
-    msgs = []
-    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http",
-             "path": path, "raw_path": path.encode(), "query_string": query.encode(), "root_path": "",
-             "headers": [(b"authorization", b"Bearer token-um")], "server": ("t", 80), "client": ("t", 1)}
-    async def receive():
-        return {"type": "http.request", "body": b"", "more_body": False}
-    async def send(m):
-        msgs.append(m)
-    asyncio.run(app(scope, receive, send))
-    return msgs[0]["status"], b"".join(m.get("body", b"") for m in msgs[1:]).decode()
 class ReadOnly:
+    def alerts(self, *a):  # o topo de toda página (#208)
+        return {"alerts": []}
     def sessions(self, *a):
         return sessions.listing(con, *a)
     def session(self, *a):
         return sessions.detail(con, *a)
-app = create_app(ReadOnly(), "token-um")
+app = create_app(ReadOnly(), TOKEN)
 status, body = get(app, "/sessoes", "from=2025-09-27&to=2025-09-29")
 check("sem SurrealDB: /sessoes 200, sem aviso e sem estado",
       status == 200 and "data-estado-indisponivel" not in body and f'data-sessao="{S1}"' in body and 'data-state="aberta"' not in body)
@@ -384,7 +376,7 @@ class Broken:
         def boom(*args):
             raise RuntimeError("segredo-da-falha")
         return boom
-app = create_app(Broken(), "token-um")
+app = create_app(Broken(), TOKEN)
 for path, query in (("/sessoes", ""), ("/sessao", "id=a")):
     status, body = get(app, path, query)
     check(f"leitura que falha em {path}: 500, sem a causa na página", status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body)
@@ -392,7 +384,7 @@ for path, query in (("/sessoes", ""), ("/sessao", "id=a")):
 class Odd:
     def query(self, sql, variables):
         return [{"status": "OK", "result": "não é lista"}]
-app = create_app(ReadOnly(), "token-um", surreal=Odd())
+app = create_app(ReadOnly(), TOKEN, surreal=Odd())
 status, body = get(app, "/sessoes", "from=2025-09-27&to=2025-09-29")
 check("SurrealDB com resposta inesperada: 200 com aviso", status == 200 and "data-estado-indisponivel" in body and f'data-sessao="{S1}"' in body)
 PY

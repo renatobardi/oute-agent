@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Pedidos · agent-studio{% endblock %}
+{% macro proposal_data(p) %}data-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}" data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}" data-rc="{{ '' if p.rc is none else p.rc }}"{% endmacro %}
+{% macro proposal_link(p) %}<a href="/pedido?id={{ p.id|urlencode }}">{{ p.title or p.id }}</a>{% if p.title %} <span class="sub">{{ p.id }}</span>{% endif %}{% endmacro %}
+{% block main %}
+<h1>Pedidos</h1>
+<p class="nota">Pedidos do canal de aprovação (<code>oute-propose</code>). Esta tela só mostra: aprovar e recusar continuam
+  no host, com o <code>oute approve</code>.</p>
+
+<h2>Pendentes ({{ pending_total|num }})</h2>
+{% if pending_total > pending|length %}<p class="aviso">Mostrando os {{ pending|length|num }} mais recentes de {{ pending_total|num }}.</p>{% endif %}
+{% if pending %}
+<table class="pedidos">
+  <thead><tr><th>Proposto em (UTC)</th><th class="n">Idade</th><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th></tr></thead>
+  <tbody>
+  {% for p in pending %}
+  <tr {{ proposal_data(p) }}>
+    <td class="hora">{{ p.proposed_at|when }}</td>
+    <td class="n">{{ p.proposed_at|ago }}</td>
+    <td>{{ proposal_link(p) }}</td>
+    <td{% if p.as == "root" %} class="root"{% endif %}>{{ p.as or "—" }}</td>
+    <td>{{ p.agent or "—" }}</td>
+    <td>{{ p.host or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="aviso" id="sem-pendentes">Nenhum pedido pendente.</p>
+{% endif %}
+
+<h2>Decididos recentes</h2>
+{% if recent %}
+<table class="pedidos">
+  <thead><tr><th>Decidido em (UTC)</th><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th><th>Decisão</th>
+    <th class="n" title="código de saída do script no host">rc</th><th class="n">Duração</th><th>Aprovador</th></tr></thead>
+  <tbody>
+  {% for p in recent %}
+  <tr {{ proposal_data(p) }}{% if p.rc %} class="erro"{% endif %}>
+    <td class="hora">{{ p.decided_at|when }}</td>
+    <td>{{ proposal_link(p) }}</td>
+    <td{% if p.as == "root" %} class="root"{% endif %}>{{ p.as or "—" }}</td>
+    <td>{{ p.agent or "—" }}</td>
+    <td>{{ p.host or "—" }}</td>
+    <td>{{ p.decision or "—" }}</td>
+    <td class="n">{{ "—" if p.rc is none else p.rc }}</td>
+    <td class="n">{{ "—" if p.duration_s is none else (p.duration_s * 1000)|ms }}</td>
+    <td>{{ p.approver or "—" }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="aviso" id="sem-decididos">Nenhum pedido decidido.</p>
+{% endif %}
+{% endblock %}
