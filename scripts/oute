@@ -159,6 +159,19 @@ legacy_cleanup() {
       && echo "container do roteador removido (#218)" >&2 \
       || echo "aviso: não consegui remover o container do roteador (#218); remova à mão com docker rm -f" >&2
   fi
+  # pasta dos gerados do roteador no checkout (#271): saiu do repo e do .gitignore, os gerados ficaram não rastreados
+  # e sujam a árvore. Só sai inteira se nada nela está no índice (rastreado, modificado ou staged); fora de um
+  # checkout git não há como saber, então fica
+  local rel="config/lite""llm"
+  if [[ -d "$ROOT/$rel" ]] && command -v git >/dev/null && git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    if [[ -n "$(git -C "$ROOT" ls-files -- "$rel" 2>/dev/null)" ]]; then
+      echo "aviso: $rel tem arquivo rastreado; não removi a pasta do roteador (#271)" >&2
+    elif rm -rf "${ROOT:?}/$rel"; then
+      echo "checkout: pasta $rel do roteador removida (#271)" >&2
+    else
+      echo "aviso: não consegui remover $rel do checkout (#271); remova à mão" >&2
+    fi
+  fi
   return 0
 }
 

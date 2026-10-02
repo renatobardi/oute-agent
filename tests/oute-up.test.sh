@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Testes do `oute up`/`oute down` do scripts/oute depois da saída do roteador de modelos (#218): a subida não pede
 # mais a key do roteador no agent.env, e a limpeza dos restos (entrada diária no crontab do host e o container do
-# serviço que saiu do compose) é idempotente. Bash puro, sem Docker: `docker` e `crontab` são falsos, com o estado
-# em arquivos, e um sshd de mentira devolve o banner que o `up` espera.
+# serviço que saiu do compose; a pasta dos gerados do roteador no checkout, #271) é idempotente. Bash puro, sem
+# Docker: `docker` e `crontab` são falsos, com o estado em arquivos, e um sshd de mentira devolve o banner que o `up`
+# espera. O scripts/oute roda de uma cópia num checkout git temporário: a limpeza mexe no checkout, nunca no real.
 # Os nomes antigos levam [-] nos padrões, como no scripts/oute, para não voltarem a aparecer no repo.
 # Uso: tests/oute-up.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
@@ -64,6 +65,15 @@ echo "ssh-ed25519 AAAA teste" > "$TMP/home/.ssh/id_ed25519.pub"
 ROUTER_LINE="0 4 * * * cd /repo && ./scripts/oute router""-sync >> /home/x/.oute/router""-sync.log 2>&1"
 OTHER_LINE="15 3 * * * /usr/local/bin/backup"
 
+# checkout de mentira: o scripts/oute desta árvore (com as mudanças ainda não commitadas) num repo git em $TMP
+REPO="$TMP/repo"; mkdir -p "$REPO/scripts" "$REPO/docker" "$REPO/config"
+cp "$ROOT/scripts/oute" "$REPO/scripts/oute"; cp "$ROOT/VERSION" "$REPO/VERSION"; : > "$REPO/docker/compose.yaml"
+echo "# config" > "$REPO/config/README.md"
+GIT=(git -C "$REPO" -c user.name=teste -c user.email=teste@exemplo.invalid -c commit.gpgsign=false)
+"${GIT[@]}" init -q && "${GIT[@]}" add -A && "${GIT[@]}" commit -qm base || die "checkout de mentira não montou"
+OLDDIR="config/lite""llm"   # pasta dos gerados do roteador (#271), com o nome partido como no scripts/oute
+gerados() { mkdir -p "$REPO/$OLDDIR"; for f in router.yaml config.yaml candidates.json catalog.json; do echo x > "$REPO/$OLDDIR/$f"; done; }
+
 # oute <cmd>: roda o scripts/oute de verdade com os falsos; guarda saída em $OUT e código em $RC. Sem OCI_S3_* no
 # ambiente: com eles (e rclone no host) o `up` montaria o bucket de verdade dentro de $TMP
 oute() {
@@ -71,14 +81,14 @@ oute() {
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/id_ed25519.pub" \
-    "$ROOT/scripts/oute" "$@" 2>&1)"; RC=$?
+    "$REPO/scripts/oute" "$@" 2>&1)"; RC=$?
 }
 ncron() { grep -c . "$F_CRON_LOG" || true; }
 
-check "sintaxe (bash -n)" bash -n "$ROOT/scripts/oute"
+check "sintaxe (bash -n)" bash -n "$REPO/scripts/oute"
 
 # ---------------------------------------------------------------- 1. sobe sem a key; limpa crontab e container
-printf '%s\n%s\n' "$OTHER_LINE" "$ROUTER_LINE" > "$F_CRON"; : > "$F_LEGACY"
+printf '%s\n%s\n' "$OTHER_LINE" "$ROUTER_LINE" > "$F_CRON"; : > "$F_LEGACY"; gerados
 oute up
 check "up sem a key do roteador: rc 0"                 [ "$RC" -eq 0 ]
 check "up: não pede a key do roteador"                 hasnt "$OLD_KEY"
@@ -90,6 +100,10 @@ check "crontab: avisa o que fez"                       has 'crontab: entrada di�
 check "container antigo removido antes do compose up"  bash -c 'test "$(grep -n "^rm -f abc123$" "$F_LOG" | cut -d: -f1)" -lt "$(grep -n " up -d --no-build" "$F_LOG" | cut -d: -f1)"'
 check "container antigo: avisa o que fez"              has 'container do roteador removido'
 check "up não chama mais docker run do roteador"       bash -c '! grep -q "router" <(grep "^run " "$F_LOG")'
+check "checkout: pasta dos gerados removida"           test ! -e "$REPO/$OLDDIR"
+check "checkout: avisa o que fez, em uma linha"        test "$(grep -c "pasta $OLDDIR do roteador removida" <<<"$OUT")" = 1
+check "checkout: árvore limpa"                         test -z "$(git -C "$REPO" status --porcelain)"
+check "checkout: o resto do config fica"               test -f "$REPO/config/README.md"
 
 # ---------------------------------------------------------------- 2. de novo: host limpo não muda
 N="$(ncron)"; : > "$F_LOG"
@@ -99,6 +113,7 @@ check "segunda subida: crontab não é regravado"        test "$(ncron)" = "$N"
 check "segunda subida: crontab igual"                  test "$(cat "$F_CRON")" = "$OTHER_LINE"
 check "segunda subida: nenhum docker rm"               bash -c '! grep -q "^rm " "$F_LOG"'
 check "segunda subida: sem aviso de limpeza"           hasnt 'removid'
+check "segunda subida: checkout igual"                 test -z "$(git -C "$REPO" status --porcelain)" -a ! -e "$REPO/$OLDDIR"
 
 # ---------------------------------------------------------------- 3. crontab só com a entrada: some inteiro
 printf '%s\n' "$ROUTER_LINE" > "$F_CRON"
@@ -127,17 +142,60 @@ check "down: rc 0"                                     [ "$RC" -eq 0 ]
 check "down: container antigo removido antes do compose down" bash -c 'test "$(grep -n "^rm -f abc123$" "$F_LOG" | cut -d: -f1)" -lt "$(grep -n " down$" "$F_LOG" | cut -d: -f1)"'
 check "down: crontab limpo"                            test "$(cat "$F_CRON")" = "$OTHER_LINE"
 
+# ---------------------------------------------------------------- 6b. down também tira a pasta dos gerados
+gerados
+oute down
+check "down: pasta dos gerados removida"               test ! -e "$REPO/$OLDDIR"
+check "down: avisa o que fez"                          has "pasta $OLDDIR do roteador removida"
+
+# ---------------------------------------------------------------- 6c. pasta com arquivo rastreado: nada sai
+gerados; "${GIT[@]}" add "$OLDDIR/router.yaml" && "${GIT[@]}" commit -qm rastreado
+oute up
+check "rastreado: rc 0"                                [ "$RC" -eq 0 ]
+check "rastreado: pasta inteira fica"                  test -f "$REPO/$OLDDIR/router.yaml" -a -f "$REPO/$OLDDIR/catalog.json"
+check "rastreado: avisa que não removeu"               has "$OLDDIR tem arquivo rastreado; não removi"
+echo y > "$REPO/$OLDDIR/router.yaml"
+oute down
+check "modificado: pasta inteira fica"                 test "$(cat "$REPO/$OLDDIR/router.yaml")" = y -a -f "$REPO/$OLDDIR/catalog.json"
+"${GIT[@]}" rm -qrf --cached "$OLDDIR"; "${GIT[@]}" commit -qm volta; rm -rf "${REPO:?}/$OLDDIR"
+gerados; "${GIT[@]}" add "$OLDDIR/config.yaml"
+oute up
+check "staged (nunca commitado): pasta fica"           test -f "$REPO/$OLDDIR/config.yaml" -a -f "$REPO/$OLDDIR/router.yaml"
+"${GIT[@]}" rm -qrf --cached "$OLDDIR"; rm -rf "${REPO:?}/$OLDDIR"
+
+# ---------------------------------------------------------------- 6d. rm falha: avisa e sobe
+if [[ "$(id -u)" != 0 ]]; then
+  gerados; chmod a-w "$REPO/$OLDDIR"
+  oute up
+  chmod u+w "$REPO/$OLDDIR"
+  check "rm falha: rc 0 (não bloqueia a subida)"       [ "$RC" -eq 0 ]
+  check "rm falha: aviso"                              has "não consegui remover $OLDDIR"
+  check "rm falha: sem aviso de removida"              hasnt "pasta $OLDDIR do roteador removida"
+  rm -rf "${REPO:?}/$OLDDIR"
+else
+  echo "# rm falha: pulado (root ignora a permissão da pasta)"
+fi
+
+# ---------------------------------------------------------------- 6e. fora de um checkout git: a pasta fica
+NOGIT="$TMP/nogit"; mkdir -p "$NOGIT/scripts" "$NOGIT/docker" "$NOGIT/$OLDDIR"
+cp "$REPO/scripts/oute" "$REPO/VERSION" "$NOGIT/scripts/"; mv "$NOGIT/scripts/VERSION" "$NOGIT/VERSION"
+: > "$NOGIT/docker/compose.yaml"; echo x > "$NOGIT/$OLDDIR/router.yaml"
+SAVED_REPO="$REPO"; REPO="$NOGIT"; oute down; REPO="$SAVED_REPO"
+check "sem git: rc 0"                                  [ "$RC" -eq 0 ]
+check "sem git: pasta fica"                            test -f "$NOGIT/$OLDDIR/router.yaml"
+
 # ---------------------------------------------------------------- 7. host sem o comando crontab
 # só a função, com um PATH mínimo (sem crontab): o script inteiro precisa de mais ferramentas
 FUNCS="$(sed -n '/^legacy_cleanup() {/,/^}/p' "$ROOT/scripts/oute")"
 [[ -n "$FUNCS" ]] || die "legacy_cleanup não achada em scripts/oute"
 MIN="$TMP/min"; mkdir -p "$MIN"; cp "$BIN/docker" "$MIN/docker"
 for t in bash grep rm cat; do ln -s "$(command -v "$t")" "$MIN/$t"; done
-: > "$F_LEGACY"; N="$(ncron)"
-OUT="$(PATH="$MIN" "$BASH" -c "set -euo pipefail; $FUNCS"$'\n'"legacy_cleanup" 2>&1)"; RC=$?
+: > "$F_LEGACY"; N="$(ncron)"; mkdir -p "$TMP/vazio/$OLDDIR"   # sem git no PATH: a pasta fica
+OUT="$(ROOT="$TMP/vazio" PATH="$MIN" "$BASH" -c "set -euo pipefail; $FUNCS"$'\n'"legacy_cleanup" 2>&1)"; RC=$?
 check "sem o comando crontab: rc 0"                    [ "$RC" -eq 0 ]
 check "sem o comando crontab: crontab intocado"        test "$(ncron)" = "$N"
 check "sem o comando crontab: container removido"      test ! -e "$F_LEGACY"
+check "sem o comando git: pasta fica"                  test -d "$TMP/vazio/$OLDDIR"
 
 # ---------------------------------------------------------------- 8. comandos que saíram
 oute schedule
