@@ -4,6 +4,19 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+### Added
+- **agent-studio: endpoint do tray, `GET /v1/tray`** (#205, #156, ADR-08 §10). **Precisa de release** (o agent-studio vai na imagem). Tudo o que o menu do tray no Mac (#158) mostra, numa chamada, para o polling de 15 s. Só leitura, com o token de sempre (`Bearer` ou o cookie do login; sem ele = 401; outro método = 405).
+  - `bar`: nº de pedidos pendentes e nº de alertas (os contadores da barra).
+  - `machines`: host, `active`/`stopped`, sempre ligado ou não e o "último dado há X", pela **hora de chegada** do registro mais recente (qualquer sinal); parado = a regra de host parado do #204 (`no_data_minutes`).
+  - `proposals`: os pedidos pendentes do SurrealDB (até 50, com o total): id, título, `root`/`user`, agente, host de origem, hora, idade e o caminho da página "ver script" (`/pedido?id=…`, #208). O script não vem na resposta.
+  - `cost_today`: custo do dia (UTC), total e por agente, com real e estimado separados e `estimated` marcando o valor que tem parte estimada; modelo sem preço fica fora da soma (`unpriced_calls`), nunca zero.
+  - `errors_last_hour`: erros da última hora por host × agente (spans e logs).
+  - `alerts`: os mesmos do `GET /v1/alerts`.
+  - **Sem regra nova:** custo e erros saem do `usage.aggregate` (#203), alertas e host parado do `alerts.py` (#204), pedidos e link do `proposals.py` (#208).
+  - **SurrealDB fora:** a resposta segue 200 com o resto do menu, `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por palpite). Leitura do DuckDB que falha = 500.
+  - **Tempo de resposta:** ~0,2 s estimado na produção de hoje (soma das peças medidas no oute-server); 0,43 s num banco de exemplo com mais volume, 0,49 s com dez vezes mais histórico. Detalhe e contrato inteiro no ADR-08, "Endpoint do tray".
+  - Teste novo `tests/agent-studio-tray.test.sh` fixa o contrato da resposta. `tests/lib/otlp_json.py` ganhou `span`, `rl`, `event`, `canal_proposed`, `canal_decided` e `queue_metrics`, que saíram de dentro dos testes de uso, da tela e dos pedidos.
+
 ## [0.7.30] - 2026-10-02
 
 ### Added
