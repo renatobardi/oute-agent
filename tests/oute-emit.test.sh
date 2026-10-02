@@ -10,10 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
 trap 'rcv_stop; rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null || { echo "FAIL precisa de jq e python3"; exit 1; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -24,7 +21,6 @@ unset CLAUDECODE CODEX_THREAD_ID PI_CODING_AGENT OUTE_PROPOSE_AGENT OUTE_INBOX O
 # ev <jq-select>: registros recebidos que casam o filtro; n <jq-select>: quantos
 ev() { events "$RCV_DIR" | jq -c "select($1)"; }
 n() { ev "$1" | grep -c . || true; }
-jqe() { jq -e "$@" >/dev/null; }
 posts() { ls "$RCV_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; }
 # propose <home> <título> [args]: roda o oute-propose com o script de $SCRIPT; stdout em $OUT, código em $RC
 propose() { local h="$1"; shift; OUT="$(HOME="$h" "$ROOT/docker/oute-propose" "$@" <<<"$SCRIPT" 2>/dev/null)"; RC=$?; }
@@ -456,5 +452,4 @@ HOME="$NH" oute-emit reconcile
 check "reconcile sem corte: nada sai, nada marca"       [ "$(posts)" -eq 0 -a ! -e "$NH/.oute/emit/decided" ]
 rcv_stop
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+check_end

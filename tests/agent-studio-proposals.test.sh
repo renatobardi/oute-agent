@@ -11,18 +11,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-die() { echo "FAIL $*"; exit 1; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null || die "precisa de jq, python3 e curl"
-studio_venv || die "não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"
+studio_init
 . "$ROOT/tests/lib/otlp.sh"
 . "$ROOT/tests/lib/surreal.sh"
 surreal_bin
@@ -30,10 +22,6 @@ surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-hdr() { local name="$1"; shift; curl -s -o /dev/null -D - "$@" | tr -d '\r' | grep -i "^$name:" | sed 's/^[^:]*: *//'; }
-data() { python3 "$ROOT/tests/lib/html-data.py"; }
-enc() { jq -rn --arg s "$1" '$s | @uri'; }
 # o script que a página mostra, como texto (o conteúdo do <pre data-script>, sem o escape do HTML)
 script_of() { python3 -c 'import html, re, sys
 m = re.search(r"<pre class=\"script\" data-script>(.*?)</pre>", sys.stdin.read(), re.S)
@@ -52,14 +40,12 @@ sys.stdout.write(html.unescape(m.group(1)) if m else "")'; }
 NOW="$(date +%s)"
 P1=20260930-120000-reiniciar-nginx; P2=20260930-110000-listar-backups; P3=20260930-100000-apagar-tudo
 P4=20260930-130000-so-decidido; P5='p <b>5</b>&x=é'
-python3 - "$TMP" "$NOW" <<'PY'
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import json, sys
+from otlp_json import kv
 tmp, NOW = sys.argv[1], int(sys.argv[2])
 P1, P2, P3, P4, P5 = ("20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "20260930-100000-apagar-tudo",
                       "20260930-130000-so-decidido", "p <b>5</b>&x=é")
-def v(x):
-    return {"intValue": str(x)} if isinstance(x, int) else {"stringValue": x}
-def kv(d): return [{"key": k, "value": v(x)} for k, x in d.items()]
 def ev(t, name, eid, attrs, body=None):
     r = {"timeUnixNano": str(t * 10**9), "severityNumber": 9, "eventName": name,
          "attributes": kv({"event.name": name, "oute.event.id": eid, **attrs})}
@@ -266,10 +252,8 @@ import duckdb
 from agent_studio import alerts, proposals, web
 from agent_studio.app import create_app
 from agent_studio.surreal import Surreal
-from studio_asgi import TOKEN, get
-
-def check(desc, cond):
-    print(("ok   " if cond else "FAIL ") + desc)
+from pycheck import check
+from studio_asgi import TOKEN, Odd, get
 
 con = duckdb.connect(sys.argv[1], read_only=True)
 script = open(sys.argv[2]).read()
@@ -345,9 +329,6 @@ status, body = get(create_app(Broken(), TOKEN), "/pedido", f"id={P1}")
 check("leitura do DuckDB que falha: 500, sem a causa, com os alertas",
       status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body and 'id="alertas"' in body)
 # SurrealDB que responde fora do formato
-class Odd:
-    def query(self, sql, variables):
-        return [{"status": "OK", "result": "não é lista"}]
 app = create_app(Store(), TOKEN, surreal=Odd())
 status, body = get(app, "/pedidos")
 check("SurrealDB com resposta inesperada: lista 503", status == 503 and "não pôde ser lido" in body)
@@ -387,14 +368,11 @@ check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o a
       and "store.alerts" in src)
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^AttributeError\|^$\|tela: .* falhou' "$TMP/py.out" || true
-n_ok="$(grep -c '^ok   ' "$TMP/py.out")"; n_fail="$(grep -c '^FAIL ' "$TMP/py.out")"
-pass=$((pass + n_ok)); fail=$((fail + n_fail))
+check_py "$TMP/py.out"
 check "lógica em Python: os 34 casos rodaram"          test "$((n_ok + n_fail))" = 34
 
 # ---------------------------------------------------------------- 10. imagem
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"
 check "compose: agent-studio só em 127.0.0.1"          bash -c 'grep -A40 "^  agent-studio:" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
 
-echo
-echo "agent-studio-proposals: $pass ok, $fail falhas"
-[[ "$fail" -eq 0 ]]
+check_end

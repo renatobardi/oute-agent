@@ -7,19 +7,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 . "$ROOT/tests/lib/otlp.sh"
 trap 'studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
-# o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
-jqe() { jq -e "$@" >/dev/null; }
-command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null \
-  || { echo "FAIL precisa de jq, python3 e curl"; exit 1; }
-studio_venv || { echo "FAIL não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"; exit 1; }
+studio_init
 DB="$TMP/s/db.duckdb"
 count() { studio_sql "$DB" "SELECT count(*) AS n FROM $1 ${2:-}" | jq -r .n; }
 
@@ -59,10 +51,10 @@ jq -c '.resourceLogs[0].scopeLogs[0].logRecords[0].observedTimeUnixNano = "1"' "
 
 # ---------------------------------------------------------------- 1. autenticação
 studio_start "$TMP/s" || { echo "FAIL agent-studio não subiu"; cat "$TMP/s/stderr"; exit 1; }
-code() { curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/claude.json" "$@"; }
-check "sem token: 401"                                 test "$(code "$STUDIO_URL/v1/logs")" = 401
-check "token errado: 401"                              test "$(code -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs")" = 401
-check "token sem 'Bearer': 401"                        test "$(code -H "Authorization: $STUDIO_TOKEN" "$STUDIO_URL/v1/logs")" = 401
+pcode() { code -X POST -H 'Content-Type: application/json' --data-binary "@$TMP/claude.json" "$@"; }
+check "sem token: 401"                                 test "$(pcode "$STUDIO_URL/v1/logs")" = 401
+check "token errado: 401"                              test "$(pcode -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs")" = 401
+check "token sem 'Bearer': 401"                        test "$(pcode -H "Authorization: $STUDIO_TOKEN" "$STUDIO_URL/v1/logs")" = 401
 check "GET /healthz sem token: 200 (só 'ok')"          test "$(curl -s "$STUDIO_URL/healthz")" = ok
 
 # ---------------------------------------------------------------- 2. gravação e dedupe
@@ -231,7 +223,7 @@ check "traces: 503 = nada gravado"                     test "$(count spans)" = 3
 check "metrics: 503 = nada gravado"                    test "$(count metrics)" = 6
 
 # ---------------------------------------------------------------- 7. serviço no compose
-SVC="$(awk '/^  agent-studio:$/ {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
+SVC="$(compose_service agent-studio)"
 has() { grep -qE -- "$1" <<<"$SVC"; }
 check "compose: serviço agent-studio existe"           test -n "$SVC"
 check "compose: só com o profile agent-studio"         has '^    profiles: \[agent-studio\]$'
@@ -277,7 +269,6 @@ check "up chama agent_studio_up depois dos segredos"   grep -q 'host_secrets "$r
 check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
 
 # ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
-die() { echo "FAIL $*"; exit 1; }
 . "$ROOT/tests/lib/surreal.sh"
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
@@ -392,7 +383,7 @@ check "SurrealDB de volta: evento no DuckDB, uma vez"  test "$(count logs "WHERE
 check "DuckDB: eventos da rodada e do canal, uma vez"  test "$(count logs "WHERE event_name LIKE 'oute.%'")" = 16
 
 # serviço surrealdb no compose
-SVC="$(awk '/^  surrealdb:$/ {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
+SVC="$(compose_service surrealdb)"
 check "compose: surrealdb fixado por digest"           has '^    image: \$\{OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v[0-9.]+@sha256:[0-9a-f]{64}\}$'
 check "compose: surrealdb só no profile agent-studio"  has '^    profiles: \[agent-studio\]$'
 check "compose: surrealdb sem porta publicada"         bash -c '! grep -qE "^    ports:" <<<"$0"' "$SVC"
@@ -418,9 +409,9 @@ TENV=(OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent,d
 rcv_start "$TMP/r4"; TEL_EP="$OTEL_EXPORTER_OTLP_ENDPOINT"; unset OTEL_EXPORTER_OTLP_ENDPOINT
 studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" || { cat "$TMP/s3/stderr"; die "agent-studio com telemetria não subiu"; }
 post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude.json" >/dev/null; post logs "$TMP/claude-2.json" >/dev/null
-for i in 1 2 3; do code -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs" >/dev/null; done
+for i in 1 2 3; do pcode -H "Authorization: Bearer ${STUDIO_TOKEN}errado" "$STUDIO_URL/v1/logs" >/dev/null; done
 sleep 1.2
-code "$STUDIO_URL/v1/logs" >/dev/null
+pcode "$STUDIO_URL/v1/logs" >/dev/null
 post logs "$TMP/lixo" >/dev/null
 studio_stop   # SIGTERM: o SDK exporta o que ficou no lote
 studio_start "$TMP/s3" "${TENV[@]}" OTEL_EXPORTER_OTLP_ENDPOINT="$TEL_EP" STUDIO_FAIL=1 || die "agent-studio (falha injetada) não subiu"
@@ -464,5 +455,4 @@ check "métricas do agent-studio no DuckDB"             test "$(count metrics "W
 check "compose: telemetria ao otel-collector local"    bash -c 'grep -q "OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318" <<<"$0" && grep -q "OTEL_SERVICE_NAME: agent-studio" <<<"$0" && grep -q "OTEL_RESOURCE_ATTRIBUTES: host.name=\${OUTE_HOST:-oute},oute.instance=\${OUTE_INSTANCE:-oute-agent}" <<<"$0"' \
                                                          "$(awk '/^  agent-studio:$/ {on=1; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ $fail -eq 0 ]]
+check_end

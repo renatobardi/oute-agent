@@ -12,10 +12,8 @@ OUTE="$ROOT/scripts/oute"
 TMP="$(mktemp -d)"
 cleanup() { [[ -s "$TMP/daemons" ]] && kill $(cat "$TMP/daemons") 2>/dev/null; rm -rf "$TMP"; }
 trap cleanup EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; printf '%s\n' "$OUT" | tail -n 30 | sed 's/^/     | /'; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
+CHECK_OUT=30   # o bad mostra o fim da saída
 has() { grep -q -- "$1" <<<"$OUT"; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -161,5 +159,4 @@ check "mount: pipe de quem chamou fecha com o daemon do rclone vivo" test "$i" -
 check "mount: montou" has "storage: oci:oute-shared montado"
 rm -f "$BIN/rclone" "$BIN/uname"
 
-printf '\n%s ok, %s falha(s)\n' "$pass" "$fail"
-(( fail == 0 ))
+check_end

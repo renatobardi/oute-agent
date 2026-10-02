@@ -7,10 +7,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; printf '%s\n' "$OUT" | sed 's/^/     | /'; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
+CHECK_OUT=+1   # o bad mostra a saída inteira
 has() { grep -q -- "$1" <<<"$OUT"; }
 hasnt() { ! has "$1"; }
 
@@ -76,5 +74,4 @@ OUT="$(F_NOIMAGE=1 "$ROOT/scripts/oute" status 2>&1)"; RC=$?
 check "status sem imagem: rc 0 e diz que não mediu" test "$RC" = 0
 check "status sem imagem: texto" has "disco do Docker: não medido"
 
-printf '\n%d ok, %d falha(s)\n' "$pass" "$fail"
-[[ $fail -eq 0 ]]
+check_end

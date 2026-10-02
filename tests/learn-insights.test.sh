@@ -7,10 +7,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/addons/skills/oute-aidlc-learn-insights/collect.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s\n' "$1"; printf '%s\n' "$OUT" | sed 's/^/     | /'; }
-check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+. "$ROOT/tests/lib/check.sh"
+CHECK_OUT=+1   # o bad mostra a saída inteira
 has() { grep -q -- "$1" <<<"$OUT"; }
 hasnt() { ! has "$1"; }
 
@@ -129,5 +127,4 @@ check "gh fora: lacuna dos ciclos na janela"   has 'LACUNA	ciclos'
 run bash "$SCRIPT" --desde amanhã-talvez
 check "data inválida: código 2"                [ "$RC" -eq 2 ]
 
-printf '\n%s ok, %s falha(s)\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+check_end
