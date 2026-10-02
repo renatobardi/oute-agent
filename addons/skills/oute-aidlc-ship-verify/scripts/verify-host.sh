@@ -3,14 +3,15 @@
 # Não roda sozinho: o agente manda este texto pelo canal de aprovação, com a versão esperada na frente:
 #   { printf 'EXPECTED=%q\n' 0.7.26; cat verify-host.sh; } | oute-propose "ship: verificar deploy v0.7.26"
 # Roda como o usuário do host (sem --root). Confere: versão (repo e imagem rodando), serviços do compose
-# e PRESENÇA de telemetria recente no bucket oute-observability. Análise da telemetria não é daqui.
+# (com oute-agent-studio e oute-surrealdb onde o profile agent-studio está ligado, ADR-08) e PRESENÇA de telemetria recente no bucket oute-observability. Análise da telemetria não é daqui.
 # Saída: uma linha por item (OK | AVISO | FALHA) e um resumo. Código 1 se houver FALHA.
 # bash 3.2 (macOS): sem mapfile, sem timeout, sem ${v,,}.
 set -euo pipefail
 
 EXPECTED="${EXPECTED:-}"
 WINDOW_MIN="${WINDOW_MIN:-60}"   # janela da telemetria (minutos)
-SERVICES="oute-agent oute-jev-router oute-ai-memory oute-otel-collector"
+SERVICES="oute-agent oute-ai-memory oute-otel-collector"
+STUDIO_SERVICES="oute-agent-studio oute-surrealdb"   # profile agent-studio do compose (ADR-08): só no oute-server
 nfail=0; nwarn=0
 ok()   { printf 'OK     %s\n' "$*"; }
 warn() { nwarn=$((nwarn + 1)); printf 'AVISO  %s\n' "$*"; }
@@ -27,6 +28,18 @@ if [[ -z "$OUTE_BIN" ]]; then
 fi
 [[ -n "$OUTE_BIN" ]] || { fail "não achei o comando oute (PATH, ~/.local/bin, ~/oute-agent/scripts)"; echo "== resumo: $nfail falha(s), $nwarn aviso(s)"; exit 1; }
 command -v docker >/dev/null 2>&1 || { fail "docker fora do PATH"; echo "== resumo: $nfail falha(s), $nwarn aviso(s)"; exit 1; }
+
+# profile agent-studio ligado neste host? Mesma regra do `oute up`: OUTE_AGENT_STUDIO=1 no ambiente ou no .env do
+# checkout (achado pelo link do `oute install`; sem readlink -f, que o macOS antigo não tem)
+studio_on() {
+  local v="${OUTE_AGENT_STUDIO:-}" src="$OUTE_BIN" dir
+  if [[ -z "$v" ]]; then
+    while [[ -L "$src" ]]; do dir="$(cd "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"; [[ "$src" == /* ]] || src="$dir/$src"; done
+    dir="$(cd "$(dirname "$src")/.." 2>/dev/null && pwd)" || return 1
+    v="$(sed -n 's/^[[:space:]]*OUTE_AGENT_STUDIO=//p' "$dir/.env" 2>/dev/null | sed "s/[[:space:]]*#.*//; s/^[\"']//; s/[\"']\$//" | tail -1)"
+  fi
+  [[ "$v" == 1 ]]
+}
 
 # --- 1. versão
 echo "-- versão"
@@ -45,6 +58,8 @@ if [[ "$run_ver" == "$EXPECTED" ]]; then ok "imagem rodando $run_ver"; else fail
 
 # --- 2. serviços
 echo "-- serviços"
+if studio_on; then SERVICES="$SERVICES $STUDIO_SERVICES"
+else echo "       profile agent-studio desligado neste host: $STUDIO_SERVICES não conferidos"; fi
 for s in $SERVICES; do
   st="$(docker inspect -f '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.RestartCount}}|{{.State.StartedAt}}|{{.Config.Image}}' "$s" 2>/dev/null)" \
     || { fail "$s: container não existe"; continue; }
