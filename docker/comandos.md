@@ -68,22 +68,22 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 
 ## CONTAINER — rodada paralela (oute-swarm)
   oute-swarm <repo> [--max N] [--label L]
-      abre a coordenadora: tria issues → ESPERA SEU OK → abre uma aba por issue →
+      abre o dispatcher: tria issues → ESPERA SEU OK → abre uma aba por issue →
       acompanha PRs/CI/pedidos → retrospectiva kaizen (lições numeradas; você escolhe:
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
       Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--force] [--repo R] [--kaizen]
-      (a coordenadora usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
+      (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]
-                                    repassa sua decisão à sessão (a coordenadora usa quando você decide).
+                                    repassa sua decisão à sessão (o dispatcher usa quando você decide).
                                     Só com a sessão parada (idle/done/blocked); confere o campo antes do Enter
                                     e recusa se não bater. --force: manda mesmo com a sessão ocupada (só você pede)
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm watch [--interval s] [--round ID]
-                                    (monitor da coordenadora) uma linha por mudança real: sessão, aba, PR, CI,
+                                    (monitor do dispatcher) uma linha por mudança real: sessão, aba, PR, CI,
                                     conflito, pedido pendente/rc≠0 no canal; retoma do último estado; sai no close --all.
                                     Grava no log da rodada; PR/issue de outro repo aparecem como <repo>#n
   oute-swarm list                   abas abertas por rodada + worktrees

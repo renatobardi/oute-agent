@@ -114,7 +114,7 @@ wid="$(mark "$WT/proj-7-foo" id)"
 e="$(last)"
 check "worker: opened com a rodada e a sessão"         jqe --arg id "$wid" '.name == "oute.task.opened" and .attrs["oute.task.id"] == $id
                                                          and .attrs["oute.swarm.round"] == "swarm-0101-0000" and .attrs["oute.swarm.session"] == "7-foo"' <<<"$e"
-check "worker: quem chamou = agente da coordenadora (meta)" jqe '.attrs["oute.agent"] == "codex" and .res["oute.agent"] == "codex"' <<<"$e"
+check "worker: quem chamou = agente do dispatcher (meta)" jqe '.attrs["oute.agent"] == "codex" and .res["oute.agent"] == "codex"' <<<"$e"
 WMARK="$ORIGIN,oute.task.id=$wid,oute.task.repo=proj,oute.task.slug=7-foo,oute.swarm.round=swarm-0101-0000,oute.swarm.session=7-foo"
 check "worker: marca com oute.task.* e oute.swarm.*"   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" ]
 check "worker: sugestão de prompt continua desligada"  [ "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false -a -f "$(gitdir "$WT/proj-7-foo")/oute-swarm-worker" ]
@@ -124,9 +124,9 @@ check "worker reaberto sem o ambiente: rodada vem da worktree" jqe --arg id "$wi
 check "worker reaberto: mesma marca"                   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" ]
 OUTE_SWARM_ID=swarm-0202-0000 OUTE_SWARM_MAX=3 OUTE_SWARM_REPO="$WS/proj" t swarm-0202-0000 claude
 cid="$(mark "$WT/proj-swarm-0202-0000" id)"
-check "coordenadora: rodada sem sessão; chamou = claude (rodada sem meta)" jqe '.name == "oute.task.opened" and .attrs["oute.swarm.round"] == "swarm-0202-0000"
+check "dispatcher: rodada sem sessão; chamou = claude (rodada sem meta)" jqe '.name == "oute.task.opened" and .attrs["oute.swarm.round"] == "swarm-0202-0000"
                                                          and (.attrs | has("oute.swarm.session") | not) and .attrs["oute.agent"] == "claude"' <<<"$(last)"
-check "coordenadora: marca com a rodada"               [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$cid,oute.task.repo=proj,oute.task.slug=swarm-0202-0000,oute.swarm.round=swarm-0202-0000" ]
+check "dispatcher: marca com a rodada"               [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$cid,oute.task.repo=proj,oute.task.slug=swarm-0202-0000,oute.swarm.round=swarm-0202-0000" ]
 OUTE_SWARM_WORKER=1 t 8-sem-rodada claude
 check "worker de spawn fora de rodada: sessão avulsa"  jqe '.name == "oute.task.opened" and (.attrs | has("oute.swarm.round") or has("oute.swarm.session") | not) and .attrs["oute.agent"] == "claude"' <<<"$(last)"
 

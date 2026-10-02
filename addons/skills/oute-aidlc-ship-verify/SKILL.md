@@ -58,4 +58,4 @@ Uma mensagem por host verificado:
 4. **Evidência:** o `id` do pedido e o resumo do script.
 5. **Pendente:** host não verificado (passo 1), análise de telemetria (`oute-aidlc-ops-observe`).
 
-Numa rodada do swarm, o relatório vai para a coordenadora. O que ficar pendente vira issue com `aidlc:ops` ou `aidlc:ship`.
+Numa rodada do swarm, o relatório vai para o dispatcher. O que ficar pendente vira issue com `aidlc:ops` ou `aidlc:ship`.

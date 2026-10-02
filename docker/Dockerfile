@@ -142,7 +142,7 @@ COPY docker/oute-agents-install /usr/local/bin/
 COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md
 # uma sessão de agente = uma worktree + um branch (oute-task; wrapper interativo de claude/codex)
 COPY docker/oute-task /usr/local/bin/
-# sessões paralelas coordenadas (oute-swarm; prompts da coordenadora e das sessões)
+# sessões paralelas coordenadas (oute-swarm; prompts do dispatcher e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
 COPY docker/swarm.md docker/swarm-worker.md /usr/local/lib/oute/
 # guia de comandos: `oute help` no container (o mesmo arquivo que o `oute help` do host)

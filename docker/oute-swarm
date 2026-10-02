@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # oute-swarm — várias sessões de agente em paralelo, uma por issue, coordenadas por uma sessão do Claude.
 #
-#   oute-swarm <repo> [--max N] [--label L]         abre a coordenadora (worktree própria) com o prompt padrão
-#   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pela coordenadora) abre uma aba do herdr com
+#   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão
+#   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
 #              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --repo: outro repo
 #              [--repo <repo>] [--kaizen]           (padrão: o da rodada); --kaizen: sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
-#   oute-swarm list                                 abas abertas por esta coordenadora + worktrees de tarefa
+#   oute-swarm list                                 abas abertas por este dispatcher + worktrees de tarefa
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
-# Rodada de spawn/tell/close/watch: OUTE_SWARM_ID; sem ele, na worktree da coordenadora (sessao/swarm-<id>), a dela (com
+# Rodada de spawn/tell/close/watch: OUTE_SWARM_ID; sem ele, na worktree do dispatcher (sessao/swarm-<id>), a dele (com
 # aviso); fora dela, spawn grava em "avulso" e tell/close/watch usam a rodada mais recente.
 # Triagem, espera do ok do Bardi, acompanhamento e limpeza estão no prompt (/usr/local/lib/oute/swarm.md).
-# A coordenadora nunca faz merge sem pedido explícito; ações no host só pelo canal de aprovação.
+# O dispatcher nunca faz merge sem pedido explícito; ações no host só pelo canal de aprovação.
 set -euo pipefail
 LIB="${OUTE_LIB:-/usr/local/lib/oute}"
 STATE_ROOT="${HOME}/.oute/swarm"
@@ -29,7 +29,7 @@ slog() {
 }
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 
-# rodada da worktree de coordenadora em que o comando roda (#239): branch sessao/swarm-<id> ou pasta <repo>-swarm-<id>,
+# rodada da worktree de dispatcher em que o comando roda (#239): branch sessao/swarm-<id> ou pasta <repo>-swarm-<id>,
 # desde que exista ~/.oute/swarm/swarm-<id>/meta. Fora de uma, exit 1.
 coord_round() {
   local b top c cands=()
@@ -44,13 +44,13 @@ coord_round() {
 }
 
 # rodada do comando, a mesma para spawn, tell, close e watch: a do OUTE_SWARM_ID; sem a variável (ex.: a sessão da
-# coordenadora reiniciou), a da worktree de coordenadora, com aviso em stderr. Fora das duas, exit 1 e cada comando
+# dispatcher reiniciou), a da worktree de dispatcher, com aviso em stderr. Fora das duas, exit 1 e cada comando
 # decide (spawn: avulso; tell, close e watch: a mais recente).
 round_id() {
   local r
   if [[ -n "${OUTE_SWARM_ID:-}" ]]; then printf '%s' "$OUTE_SWARM_ID"; return 0; fi
   r="$(coord_round)" || return 1
-  echo "oute-swarm: OUTE_SWARM_ID ausente; assumindo a rodada $r (worktree da coordenadora)" >&2
+  echo "oute-swarm: OUTE_SWARM_ID ausente; assumindo a rodada $r (worktree do dispatcher)" >&2
   printf '%s' "$r"
 }
 
@@ -74,18 +74,18 @@ cmd_start() {
   done
   [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "--max inválido: $max"
   (( max <= 5 )) || die "--max acima de 5 não é permitido (quota e revisão humana)"
-  [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (a coordenadora abre abas nele)"
+  [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (o dispatcher abre abas nele)"
   command -v gh >/dev/null || die "gh não encontrado"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="swarm-$(date +%m%d-%H%M)"
   mkdir -p "$STATE_ROOT/$id"
-  # agent = o da coordenadora (oute.agent dos eventos da rodada)
+  # agent = o do dispatcher (oute.agent dos eventos da rodada)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n' "$main" "$max" "$label" "$(date -u +%FT%TZ)" > "$STATE_ROOT/$id/meta"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
                 -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" "$LIB/swarm.md")"
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label})"
-  echo "coordenadora $id · repo $name · max $max${label:+ · label $label}" >&2
+  echo "dispatcher $id · repo $name · max $max${label:+ · label $label}" >&2
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
     exec oute-task -r "$main" "$id" claude "$prompt"
 }
@@ -119,7 +119,7 @@ cmd_spawn() {
     [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "meta da rodada $round sem max válido ($STATE_ROOT/$round/meta); rode com OUTE_SWARM_ID=$round OUTE_SWARM_MAX=<n>"
   fi
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
-  else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"; fi
+  else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
   state="$STATE_ROOT/$round"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
@@ -165,7 +165,7 @@ tab_exists() {
 is_closed() { grep -qsxF -- "$2" "$1/closed"; }
 mark_closed() { is_closed "$1" "$2" || { printf '%s\n' "$2" >> "$1/closed"; slog "$1" "$(date -u +%FT%TZ) close $2"; }; }
 
-# rodada: a da coordenadora (round_id) ou, fora dela, a mais recente
+# rodada: a do dispatcher (round_id) ou, fora dela, a mais recente
 round_dir() {
   local d
   if d="$(round_id)"; then d="$STATE_ROOT/$d"
@@ -271,7 +271,7 @@ cmd_tell() {
        echo "aviso: sessão $label em '$st'; seguindo por --force" >&2 ;;
   esac
   # 2) digita, confere o campo e só então Enter. Não bateu: limpa (ctrl+c, só com a sessão pronta) e tenta uma vez
-  text="[coordenadora $(basename "$state"), repassando o Bardi] $msg"
+  text="[dispatcher $(basename "$state"), repassando o Bardi] $msg"
   # acima de 800 caracteres o Claude Code mostra "[Pasted text #n]" e o campo não dá para conferir
   (( ${#text} <= 800 )) || refuse "mensagem longa demais (${#text} caracteres com o prefixo; máx. 800); resuma"
   # sem campo na tela (diálogo/lista; o herdr dá idle no codex nesses casos) nada é digitado: teclas ali escolhem opções
@@ -335,7 +335,7 @@ cmd_close() {
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
 }
 
-# ---- watch: monitor da coordenadora (#45) ----
+# ---- watch: monitor do dispatcher (#45) ----
 # Cada passada monta um retrato normalizado da rodada (chave<TAB>valor) e compara com o anterior; só imprime linha
 # para mudança real. O retrato fica em $state/watch.state: a 1ª passada da rodada só grava a linha de base (silêncio)
 # e um watch reiniciado (monitor expirou) compara com o último retrato, sem perder o que mudou no intervalo.
@@ -350,7 +350,7 @@ W_OLDQ='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
 declare -A W_PREV=() W_CUR=() W_IID=()
 
-# evento: no stdout (monitor da coordenadora) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
+# evento: no stdout (monitor do dispatcher) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
 w_ev() {
   [[ -n "$2" ]] || return 0
   printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"
