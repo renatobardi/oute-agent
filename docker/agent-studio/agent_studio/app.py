@@ -1,6 +1,6 @@
 """API do agent-studio: recebe OTLP/HTTP JSON do collector e grava no DuckDB (ADR-08 §4 e §6), e serve a
-consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203) e os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
-#204).
+consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
+#204) e a tela (`web.py`, #206).
 
 - `Authorization: Bearer <token>` (item `agent-studio` do vault); sem token ou com token errado = 401.
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
@@ -9,10 +9,11 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203) e os alertas do pip
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, mesmo token; janela inválida = 400; leitura que falha = 500.
 - `GET /v1/alerts`: só leitura, mesmo token; `at` inválido = 400; leitura que falha = 500.
+- Leitura (`GET /v1/usage`, `GET /v1/alerts` e as páginas) aceita o `Bearer` ou o cookie do login (#206); a
+  ingestão, só o `Bearer`.
 """
 import contextlib
 import gzip
-import hmac
 import json
 import logging
 import time
@@ -23,7 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import config as config_mod, otlp, state, telemetry
+from . import auth as auth_mod, config as config_mod, otlp, state, telemetry, web
 
 log = logging.getLogger("agent_studio")
 detail = logging.getLogger("agent_studio_detail")
@@ -56,9 +57,7 @@ def _decompress(body, encoding):
 
 
 def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None):
-    if not token:
-        raise ValueError("token vazio")
-    expected = f"Bearer {token}".encode()
+    auth = auth_mod.Auth(token)
     tel = tel or telemetry.Noop()
     config = config or config_mod.Config()
 
@@ -74,8 +73,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     def authorized(request):
-        got = request.headers.get("authorization", "").encode()
-        return hmac.compare_digest(got, expected)
+        return auth.bearer(request)
 
     async def ingest(signal, request):
         resp = await _ingest(signal, request)
@@ -142,7 +140,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     @app.get("/v1/usage")
     async def v1_usage(request: Request):
         """Uso por host × agente × modelo, com janela e série diária (ADR-08 §9, contrato na seção #203)."""
-        if not authorized(request):
+        if not auth.reader(request):
             tel.warn("unauthorized", "recusado: token ausente ou errado (usage)")
             return JSONResponse({"message": "unauthorized"}, status_code=401)
         try:
@@ -165,7 +163,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     @app.get("/v1/alerts")
     async def v1_alerts(request: Request):
         """Alertas ativos e último dado de cada host (ADR-08 §8, contrato na seção #204)."""
-        if not authorized(request):
+        if not auth.reader(request):
             tel.warn("unauthorized", "recusado: token ausente ou errado (alerts)")
             return JSONResponse({"message": "unauthorized"}, status_code=401)
         try:
@@ -181,6 +179,9 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         return JSONResponse({"at": _iso(at_ns), "time": "hora do fato (UTC)", **result,
                              "config": {"errors": config.errors}})
+
+    # ------------------------------------------------ tela: login e conversas (#206)
+    web.mount(app, store, auth, config, tel, _window)
 
     return app
 

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Entrar · agent-studio{% endblock %}
+{% block nav %}{% endblock %}
+{% block main %}
+<form class="login" method="post" action="/login">
+  <h1>Entrar</h1>
+  {% if failed %}<p class="aviso erro" role="alert">Token errado.</p>{% endif %}
+  <label for="token">Token do agent-studio (item <code>agent-studio</code> do vault)</label>
+  <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+  <input type="hidden" name="next" value="{{ next }}">
+  <button type="submit">Entrar</button>
+</form>
+{% endblock %}

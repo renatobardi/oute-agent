@@ -1,0 +1,63 @@
+/* agent-studio: tela (#206). Um arquivo só, sem build; a CSP só aceita estilo daqui (nada de style inline). */
+:root {
+  color-scheme: light dark;
+  --fundo: #fbfbfa; --painel: #ffffff; --texto: #1c1d1f; --fraco: #63676d; --linha: #dfe1e4;
+  --link: #1257b8; --erro: #b3261e; --erro-fundo: #fdecea; --est: #8a5a00; --real: #17693a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #16171a; --painel: #1e2024; --texto: #e6e7e9; --fraco: #9aa0a8; --linha: #33363c;
+    --link: #7fb0ff; --erro: #ff8a80; --erro-fundo: #3a1f1d; --est: #e2b458; --real: #6fcf97;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fundo); color: var(--texto); font: 14px/1.45 system-ui, sans-serif; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, .hora, td.n { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.topo { display: flex; align-items: center; gap: 1.5rem; padding: .6rem 1.25rem; background: var(--painel);
+        border-bottom: 1px solid var(--linha); }
+.topo .marca { font-weight: 600; color: var(--texto); }
+.topo form { margin-left: auto; }
+main { padding: 1rem 1.25rem 3rem; }
+h1 { font-size: 1.3rem; margin: .5rem 0 1rem; }
+h2 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+h4 { margin: 1rem 0 .25rem; font-size: .85rem; color: var(--fraco); }
+button, select, input { font: inherit; color: inherit; background: var(--painel); border: 1px solid var(--linha);
+                        border-radius: 4px; padding: .3rem .6rem; }
+button { cursor: pointer; }
+.nota { color: var(--fraco); margin: .5rem 0; }
+.aviso { padding: .6rem .8rem; border: 1px solid var(--linha); border-radius: 4px; background: var(--painel); }
+.aviso.erro { border-color: var(--erro); background: var(--erro-fundo); color: var(--erro); }
+.filtro { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
+.filtro label { display: flex; flex-direction: column; gap: .2rem; color: var(--fraco); font-size: .85rem; }
+.login { max-width: 26rem; margin: 4rem auto; display: flex; flex-direction: column; gap: .75rem; }
+table { width: 100%; border-collapse: collapse; background: var(--painel); border: 1px solid var(--linha); }
+th, td { padding: .35rem .6rem; border-bottom: 1px solid var(--linha); text-align: left; vertical-align: top; }
+th { font-size: .8rem; color: var(--fraco); font-weight: 600; white-space: nowrap; }
+th.n, td.n { text-align: right; white-space: nowrap; }
+td.hora { white-space: nowrap; }
+tr.erro > td:first-child { box-shadow: inset 3px 0 var(--erro); }
+td.erro, tr.erro td:last-child { color: var(--erro); }
+.custo span { display: block; }
+.real { color: var(--real); }
+.est { color: var(--est); font-style: italic; }
+.semp, .orfao { color: var(--fraco); font-size: .8rem; }
+.orfao { margin-left: .5rem; border: 1px solid var(--linha); border-radius: 3px; padding: 0 .3rem; }
+.resumo { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; }
+.resumo dt, .span-detalhe dt { color: var(--fraco); }
+.resumo dd, .span-detalhe dd { margin: 0; }
+.resumo .custo span { display: inline; margin-right: .75rem; }
+/* árvore de spans: o nível vira recuo */
+.spans td.nome { white-space: nowrap; }
+.d1 { padding-left: 1.6rem; } .d2 { padding-left: 2.6rem; } .d3 { padding-left: 3.6rem; } .d4 { padding-left: 4.6rem; }
+.d5 { padding-left: 5.6rem; } .d6 { padding-left: 6.6rem; } .d7 { padding-left: 7.6rem; } .d8 { padding-left: 8.6rem; }
+.d9 { padding-left: 9.6rem; } .d10 { padding-left: 10.6rem; } .d11 { padding-left: 11.6rem; } .d12 { padding-left: 12.6rem; }
+.conteudo-linha td { padding: 0; border: 0; }
+.conteudo-linha td:not(:empty) { padding: .5rem 1rem 1rem 2rem; border-bottom: 1px solid var(--linha); background: var(--fundo); }
+.span-detalhe dl { display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; margin: 0; }
+pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
+.corpo details { margin-top: .25rem; }
+.corpo summary { color: var(--fraco); cursor: pointer; font-size: .8rem; }
+.mais td { text-align: center; }
+.htmx-request { opacity: .6; }
