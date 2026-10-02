@@ -4,6 +4,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.31] - 2026-10-02
+
 ### Added
 - **agent-studio: endpoint do tray, `GET /v1/tray`** (#205, #156, ADR-08 §10). **Precisa de release** (o agent-studio vai na imagem). Tudo o que o menu do tray no Mac (#158) mostra, numa chamada, para o polling de 15 s. Só leitura, com o token de sempre (`Bearer` ou o cookie do login; sem ele = 401; outro método = 405).
   - `bar`: nº de pedidos pendentes e nº de alertas (os contadores da barra).
@@ -16,6 +18,40 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
   - **SurrealDB fora:** a resposta segue 200 com o resto do menu, `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por palpite). Leitura do DuckDB que falha = 500.
   - **Tempo de resposta:** ~0,2 s estimado na produção de hoje (soma das peças medidas no oute-server); 0,43 s num banco de exemplo com mais volume, 0,49 s com dez vezes mais histórico. Detalhe e contrato inteiro no ADR-08, "Endpoint do tray".
   - Teste novo `tests/agent-studio-tray.test.sh` fixa o contrato da resposta. `tests/lib/otlp_json.py` ganhou `span`, `rl`, `event`, `canal_proposed`, `canal_decided` e `queue_metrics`, que saíram de dentro dos testes de uso, da tela e dos pedidos.
+- **Sessões do `oute-task` no bucket: eventos `oute.task.*` e a sessão marcada nas conversas** (#128, ADR-04 "Sessões"). **Precisa de release** (`oute-task`, `oute-emit`, `oute-swarm` e o shim vão na imagem).
+  - `oute-task` emite pelo `oute-emit` (verbo novo `oute-emit task`) `oute.task.opened` (worktree criada), `oute.task.reopened` e, no `clean --yes`, `oute.task.removed` com `oute.task.reason` = `merged`, `empty` ou `detached`. Atributos: `oute.task.id`, `oute.task.repo`, `oute.task.slug`, `oute.task.agent`, `oute.task.base` e, em sessão de rodada, `oute.swarm.round`/`oute.swarm.session`. Nunca levam corpo. Simulação do `clean` e `list` não emitem.
+  - **`oute.task.id`** = `<repo>-<slug>-<AAAAMMDDhhmmss>` (UTC), gravado em `<git-dir da worktree>/oute-task` e o mesmo da abertura à remoção. Worktree anterior a esta versão ganha id na primeira reabertura (`oute.task.legacy=true`); removida sem reabrir, o `removed` sai sem id.
+  - **Conversas marcadas:** antes do `exec` do agente, o `OTEL_RESOURCE_ATTRIBUTES` leva a origem que já estava + `oute.task.id`, `oute.task.repo`, `oute.task.slug` (+ `oute.swarm.*` em sessão de rodada). O shim refaz a marca quando `claude`/`codex` rodam de dentro de uma worktree com id (restore do herdr, `--resume`, `-c`, `-p`). **Codex conferido** (0.159.2): logs e traces saem com a marca no resource.
+  - **`oute.agent` = quem chamou:** marcador do agente (`CLAUDECODE=1`, `CODEX_THREAD_ID`), senão o agente da coordenadora (ambiente do swarm), senão `human` (terminal) ou `unknown`. O `oute-swarm spawn` passa `OUTE_SWARM_ROUND` ao worker.
+  - **O `oute-task` não muda:** mesma saída, mesmo `exec`, mesmos códigos, também com o coletor fora do ar (o evento vai ao spool) ou sem `oute-emit`. Só há uma linha nova, de aviso em stderr, quando o id não pôde ser gravado (a sessão abre sem id).
+  - Lacuna conhecida (#250): `oute-task` chamado por um agente Claude não emite, porque o shell do Claude Code não herda as `OTEL_*`; a marca nas conversas não é afetada.
+  - Teste novo `tests/oute-task.test.sh` (receptor OTLP falso + agente falso no PATH). `ev`/`n` foram para `tests/lib/otlp.sh` e `has_pty` para `tests/lib/check.sh` (eram cópias em `oute-emit.test.sh` e `oute-swarm.test.sh`).
+
+### Changed
+- **CHANGELOG em fragmentos: cada PR cria `changelog.d/<issue>-<slug>.md` e não edita mais o `CHANGELOG.md`** (#121, kaizen da `swarm-0927-1208`: 4 PRs na mesma linha do `[Unreleased]`, 5 rebases sem conflito de conteúdo). **Precisa de release** (`docker/swarm.md` vai na imagem); `scripts/`, skills e `AGENTS.md` entram com `git pull` + `oute down/up`.
+  - O fragmento traz a subseção (`### Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` ou `Security`) e a entrada, como sairiam no `CHANGELOG.md`. Formato em `changelog.d/README.md`.
+  - `scripts/release x.y.z` junta os fragmentos na seção da versão, agrupados por subseção (ordem do Keep a Changelog) e, dentro dela, por número da issue, e apaga os fragmentos no mesmo commit de release. **Transição:** o que ainda estiver escrito direto no `[Unreleased]` entra na mesma seção, antes dos fragmentos.
+  - `scripts/changelog` (novo, Python): `check` confere os fragmentos e o `[Unreleased]` e imprime a seção que a release montaria; `release` é o passo que o `scripts/release` chama. Fragmento inválido (subseção desconhecida ou vazia, texto fora de subseção, título `#`/`##`, entrada sem `- `, nome fora do padrão) faz a release parar antes de mudar `VERSION`, `CHANGELOG.md` ou criar a tag.
+  - `AGENTS.md` (Regras), `oute-aidlc-qa-pr-audit`, `docker/swarm.md` (gates do plano B) e `oute-aidlc-ship-release` (§3 e §5) passam a pedir e conferir o fragmento.
+  - Teste novo `tests/release-changelog.test.sh`: montagem num repo temporário, os ramos de erro, dois PRs com fragmentos diferentes sem conflito e os fragmentos do próprio repo (roda em todo PR).
+- **Histórico do roteador continua legível** (#218). O agent-studio segue somando no `/v1/usage` o custo gravado do `jev.decision` (histórico até 2026-09-30). A `oute-aidlc-ops-observe` deixa de consultar os agentes `router` e `unknown` (não acusa "sem telemetria") e perde a anomalia `agente-unknown`.
+- **`oute-aidlc-ship-verify`** (#218): o `verify-host.sh` não exige mais o `oute-jev-router` e passa a conferir `oute-agent-studio` e `oute-surrealdb` no host com o profile `agent-studio` ligado (`OUTE_AGENT_STUDIO=1` no ambiente ou no `.env` do checkout).
+- **Regra de plugin herdr** (#218, ADR-02 e `CONTEXT.md`): plugin herdr não chama API de LLM; quem fala com modelo é o agente da sessão. A única chamada fora das assinaturas é o Jev na TypeSafe, feita pelo seletor.
+- **README, `AGENTS.md`, `CONTEXT.md` e `oute-aidlc-qa-pr-audit` alinhados ao ADR-08** (#232). A telemetria passa a ser descrita como bucket + agent-studio, com o Langfuse em paralelo até ser desligado (#160).
+  - README: descrição, lista de ADRs até o 0008, serviços `agent-studio`, `surrealdb` e `volume-init` na tabela, `config/otel/agent-studio.yaml` e `config/agent-studio/` no layout, e a seção de observabilidade com o agent-studio.
+  - `AGENTS.md` e `oute-aidlc-qa-pr-audit`: o gate do collector valida também `config/otel/agent-studio.yaml`; ferramenta nova só entra se mandar consumo ao bucket + agent-studio (ADR-08 §11).
+- **Worker do swarm roda teste novo ou alterado também em ambiente limpo antes do PR** (#264). Regra nova nas regras da sessão (`swarm-worker.md`): o teste roda no ambiente da sessão e em `env -i` com `HOME` temporário e só o `PATH`; resultado diferente entre os dois é teste dependente do ambiente, e o que se corrige é o teste. Teste que executa script do host tira do ambiente as credenciais reais que o script usaria (`OCI_S3_*`, `GH_TOKEN`, `AGENT_STUDIO_*`…). **Precisa de release** (`swarm-worker.md` vai na imagem).
+
+### Removed
+- **jev-router, LiteLLM e OpenRouter fora do stack** (#218, ADR-02). **Precisa de release** (o `entrypoint.sh` e o `Dockerfile` vão na imagem: saem o export de `OPENROUTER_*`/`LITELLM_*` para os logins ssh e a env `OUTE_ROUTER_URL`).
+  - Saem o serviço `jev-router` do compose, `config/litellm/`, `scripts/router_sync.py`, os comandos `oute router-sync` e `oute schedule`, e `OUTE_LITELLM_IMAGE`/`OUTE_AB_*` do `.env.example`.
+  - O `oute up` não exige mais `OPENROUTER_API_KEY` no `agent.env`; a nota `openrouter` (pasta `oute-agent`) e a `openrouter-mgmt` (pasta `oute-admin`) do vault deixam de ser lidas. **Só revogue a key e tire as notas depois do deploy nos dois hosts**: o `oute up` da versão anterior morre sem a key.
+  - O `oute up` e o `oute down` tiram os restos do host, de forma idempotente (host sem eles não muda): a entrada diária do `router-sync` no crontab e o container `oute-jev-router`, que ficaria órfão e preso à rede `oute`.
+  - Collector: não marca mais `oute.agent=router` nem filtra os spans do LiteLLM no pipeline do Langfuse. A telemetria antiga fica como está no bucket e no Langfuse (nada é apagado).
+
+### Fixed
+- **Eventos operacionais descritos como "só ao bucket"** (#232). Com o pipeline `logs/studio` (#189) eles vão também ao agent-studio: texto corrigido no `oute help` (`docker/comandos.md`), no cabeçalho do `oute-emit`, no comentário do `Dockerfile`, no `AGENTS.md` e no `CONTEXT.md`. Nenhum comportamento muda. **Precisa de release** para o texto chegar aos hosts (o `oute-emit` e o `comandos.md` vão na imagem).
+- **`oute-swarm watch` avisa da falha de CI de um head já substituído** (#266). Quando um push troca o head do PR entre duas passadas, o `watch` passa a ler os checks do head anterior (até todos concluírem ou o PR fechar) e emite a falha uma vez só, também depois de reinício, com o head curto do run: `[ci] PR #262 · checks: fail (head 0169d46, já substituído por b47eaea)`. Check verde de head antigo não gera linha, nem o cancelado (o push novo cancela o run anterior). Antes, a falha sumia sem evento, e a coordenadora não tinha como avisar. **Precisa de release** (o `docker/oute-swarm` vai na imagem).
 
 ## [0.7.30] - 2026-10-02
 

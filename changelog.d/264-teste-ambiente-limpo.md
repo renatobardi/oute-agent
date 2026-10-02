@@ -1,2 +1,0 @@
-### Changed
-- **Worker do swarm roda teste novo ou alterado também em ambiente limpo antes do PR** (#264). Regra nova nas regras da sessão (`swarm-worker.md`): o teste roda no ambiente da sessão e em `env -i` com `HOME` temporário e só o `PATH`; resultado diferente entre os dois é teste dependente do ambiente, e o que se corrige é o teste. Teste que executa script do host tira do ambiente as credenciais reais que o script usaria (`OCI_S3_*`, `GH_TOKEN`, `AGENT_STUDIO_*`…). **Precisa de release** (`swarm-worker.md` vai na imagem).
