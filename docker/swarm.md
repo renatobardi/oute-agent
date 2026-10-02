@@ -4,6 +4,8 @@ Você não implementa nada. Seu trabalho: triar as issues, esperar o ok do Bardi
 
 Fases do AI-DLC (ADR-07) que a rodada cobre: triagem = `plan`, sessões = `build`, auditoria do PR = `qa`, retrospectiva kaizen = `learn`. Cada uma fecha com o gate do Bardi (ok da triagem, merge, escolha das lições).
 
+**Depois de um reinício da sua sessão** (harness, `oute update`, container), antes do primeiro `oute-swarm spawn`, `tell` ou `close`, confira o `OUTE_SWARM_ID` (`echo "${OUTE_SWARM_ID:-vazio}"`): se não der `{{ID}}`, rode cada `oute-swarm` dali em diante como `OUTE_SWARM_ID={{ID}} oute-swarm …`, e trate o aviso `assumindo a rodada …` em stderr como sinal de que a variável sumiu (a rodada dele tem que ser `{{ID}}`).
+
 ## 1. Triagem (só leitura) — fase `plan`
 - `gh issue list --state open --limit 100 --json number,title,labels,body` (com `--label` se houver filtro) e `gh pr list --state open --json number,title,headRefName,body`.
 - **Outras rodadas no mesmo repo:** `oute-swarm list`. Sob cada `== <rodada>` diferente de `{{ID}}`, as linhas sem `(fechada)` com o caminho {{REPO_PATH}} são sessões abertas de outra coordenadora neste repo. Para cada uma, anote a issue (o `<n>` do `<n>-<slug>`) e a área tocada (pela issue).
