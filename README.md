@@ -1,8 +1,8 @@
 # oute-agent
 
-Runtime em container para agentes de código — **herdr + Claude Code + Codex** — com os dois agentes por assinatura e o modelo da sessão escolhido pela fase (ADR-02), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
+Runtime em container para agentes de código — **herdr + Claude Code + Codex** — com os dois agentes por assinatura e o modelo da sessão escolhido pela fase (ADR-02), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + agent-studio, ADR-08; o Langfuse roda em paralelo até ser desligado, #160) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
 
-Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime-container.md`, `0002-roteamento-modelos.md`, `0003-storage-oci.md`, `0004-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
+Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime-container.md`, `0002-roteamento-modelos.md`, `0003-storage-oci.md`, `0004-observabilidade.md`, `0006-addons.md`, `0007-ai-dlc.md`, `0008-agent-studio.md` (o 0005, plugins herdr, está em estudo). Resumo com glossário: `CONTEXT.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
 
 ## Serviços (compose)
 
@@ -10,16 +10,20 @@ Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime
 |---|---|---|---|
 | `agent` | `ghcr.io/renatobardi/oute-agent:<VERSION>` | Ubuntu 24.04 + agentes/CLIs, sshd, herdr | `127.0.0.1:2222` (nunca `0.0.0.0`) |
 | `ai-memory` | `akitaonrails/ai-memory` | memória compartilhada entre agentes (MCP + hooks) | interna |
-| `otel-collector` | `otel/opentelemetry-collector-contrib` | telemetria → bucket OCI + Langfuse | interna |
+| `otel-collector` | `otel/opentelemetry-collector-contrib` | telemetria → bucket OCI + agent-studio (tudo, com conteúdo; fila em disco por destino) + Langfuse (só metadados, até a #160) | interna |
+| `agent-studio` | `ghcr.io/renatobardi/oute-agent:<VERSION>` (mesma imagem, outro comando) | **só no oute-server** (profile `agent-studio`): recebe OTLP/HTTP JSON do collector de cada host, grava a telemetria no DuckDB e o estado no SurrealDB; API só leitura e tela (ADR-08) | `127.0.0.1:8430` (nunca `0.0.0.0`); os outros hosts chegam por `agent-studio.oute.pro`, só na tailnet |
+| `surrealdb` | `surrealdb/surrealdb` (fixado por digest) | **só no oute-server** (mesmo profile): estado derivado do agent-studio (rodadas, sessões, pedidos, aprovações) | interna, sem porta publicada |
+| `volume-init` | `ghcr.io/renatobardi/oute-agent:<VERSION>` | one-shot: dono 10001 nos volumes | — |
 
 ## Layout
 
 ```
-docker/          Dockerfile, compose.yaml, entrypoint.sh, addons-link
+docker/          Dockerfile, compose.yaml, entrypoint.sh, addons-link; agent-studio/ (código do agent-studio, vai na imagem)
 addons/skills/   skills oute-* (ADR-06): montadas read-only em /opt/oute/addons e linkadas no boot; entram com git pull + oute down/up
-config/otel/     collector.yaml (bucket OCI), langfuse.yaml (só metadados), none.yaml
+config/otel/     collector.yaml (bucket OCI), agent-studio.yaml (tudo → agent-studio, ADR-08), langfuse.yaml (só metadados, até a #160), none.yaml (pipeline extra desligado)
+config/agent-studio/  config.toml (preços e alertas do agent-studio)
 config/ssh/      sshd_config
-tests/           addons-link.test.sh (bash puro; roda no CI de PR)
+tests/           *.test.sh (bash puro; rodam no CI de PR); lib/ = apoio compartilhado entre os testes
 scripts/         oute (CLI do host), oute-secrets.sh (Vaultwarden -> env), oci-bootstrap.sh, release
 secrets/         README com a convenção do vault (sem valores)
 ```
@@ -28,10 +32,10 @@ secrets/         README com a convenção do vault (sem valores)
 
 **Contas / serviços**
 - **Vaultwarden** (`vault.oute.pro`) — única fonte de segredos (ver `secrets/README.md`):
-  - pasta `oute-agent` (vira env do container): `oci-storage` (criado pelo `oci-bootstrap`), `langfuse` (opcional), `github`, `aws`, `gcp`…
+  - pasta `oute-agent` (vira env do container): `oci-storage` (criado pelo `oci-bootstrap`), `agent-studio` (token da ingestão e senha do SurrealDB, ADR-08), `langfuse` (opcional, até a #160), `github`, `aws`, `gcp`…
   - pasta `oute-admin` (**nunca** vai pro container): `oci-admin` (API key admin da OCI, só pro `oci-bootstrap`).
 - **OCI**: tenancy com API key admin (1x, pro `oci-bootstrap`).
-- **Langfuse Cloud** (opcional): projeto + API keys no item `langfuse`.
+- **Langfuse Cloud** (opcional, em paralelo ao agent-studio até a #160): projeto + API keys no item `langfuse`.
 - **GitHub**: chave SSH do host (repo privado).
 
 **No host**
@@ -104,14 +108,17 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 - Modelo da sessão pela fase do AI-DLC (tabela do ADR-02), com o Jev chamado direto na TypeSafe só quando a tarefa não tem label de fase: o seletor entra pela #219.
 - Plugin herdr não chama API de LLM: quem fala com modelo é o agente da sessão.
 
-## Observabilidade (ADR-04)
+## Observabilidade (ADR-04, ADR-08)
 
 `otel-collector` (sem porta publicada) recebe OTLP de Claude Code (métricas, eventos, traces) e Codex (eventos).
 - **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex; `pi` e `router` só em registro até 2026-09-30, #217 e #218). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
 - **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/host=<máquina>/instance=<instância>/year=…/hour=…/` (gzip, lotes de 5 min). Até a 0.7.4 não havia `host=/instance=` no caminho; esses objetos ficam onde estão.
-- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
+- **Tudo, com conteúdo** → **agent-studio** (ADR-08), se o vault tiver o item `agent-studio`: pipeline `config/otel/agent-studio.yaml`, lotes de segundos, OTLP/HTTP JSON com token. O serviço roda só no oute-server (`OUTE_AGENT_STUDIO=1` no `.env`), grava a telemetria no DuckDB e o estado derivado (rodadas, sessões, pedidos) no SurrealDB, e responde 2xx só depois do commit. O collector do oute-server fala com ele pela rede docker; o do Mac, por `https://agent-studio.oute.pro`, só na tailnet. API só leitura e tela no mesmo endereço. O bucket continua sendo o arquivo frio e o backup.
+- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`; **roda em paralelo ao agent-studio até ser desligado (#160)** e não é mais exigência para ferramenta nova: allowlist de atributos, sem span events. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
 - **Fila em disco do collector** (volume `oute-otel-queue`): o collector guarda o que ainda não chegou ao destino e retenta sem prazo. **Reserva de 4 GB por host**: 2 GB de disco por fila de 1 GB (o bbolt chega a ~1,7× o limite e não encolhe), duas filas (bucket e agent-studio). O `oute up` avisa, sem bloquear, quando o disco livre do Docker (no Mac, o da VM do Docker Desktop) não comporta a reserva descontado o que a fila já ocupa; o `oute status` mostra o disco livre e o tamanho da fila.
-- Conferir: Langfuse → Tracing; `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`.
+- **Eventos operacionais** (`oute-emit`: rodadas do swarm, pedidos do canal, sessões do `oute-task`): logs OTel ao bucket e ao agent-studio; nada ao Langfuse.
+- **Ferramenta nova** só entra no stack se mandar consumo ao **bucket + agent-studio**, com a origem e `oute.agent` (ADR-08 §11).
+- Conferir: `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`; a tela do agent-studio (`agent-studio.oute.pro`, na tailnet); enquanto durar o paralelo, Langfuse → Tracing.
 
 ## Storage comum (ADR-03)
 

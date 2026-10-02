@@ -111,7 +111,7 @@ git diff "$BASE_SHA...$HEAD_SHA" | LC_ALL=C.UTF-8 grep -nP '[\x{200B}-\x{200F}\x
 - canal de aprovação (`oute-propose`, `oute-inbox`, `~/outbox`, `~/inbox`): qualquer caminho que faça algo rodar no host sem o `oute approve`;
 - `.github/workflows/` e `scripts/release`: CI, tag, publicação de imagem (passo 5);
 - segredos: `agent_env`, `/run/secrets`, `BW_*`, tokens, `.env`, chaves; qualquer leitura, log, `echo`, arquivo ou envio de rede de um valor secreto;
-- telemetria (`config/otel/`): nada pode apagar dados do bucket `oute-observability` nem mandar conteúdo ao Langfuse fora da allowlist de metadados;
+- telemetria (`config/otel/`): nada pode apagar dados do bucket `oute-observability` nem mandar conteúdo ao Langfuse fora da allowlist de metadados (ele roda em paralelo ao agent-studio até a #160); conteúdo completo só vai ao bucket e ao agent-studio (ADR-08);
 - `addons/`: skill é instrução que os agentes carregam; texto novo ali é prompt que vai rodar em yolo;
 - `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, `docs/adr/`: mudam regra de agente.
 
@@ -160,7 +160,7 @@ git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"
 - `bash -n` em todo script alterado;
 - `docker compose --project-directory . -f docker/compose.yaml config`, com as variáveis exigidas preenchidas por valores fictícios;
 - `tests/addons-link.test.sh`;
-- `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml`, se `config/otel/` mudou;
+- `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml --config=config/otel/agent-studio.yaml`, se `config/otel/` mudou;
 - modo `100755` nos executáveis: `bash scripts/exec-files` e `git ls-files -s` no head;
 - para `scripts/oute`: o caminho do Mac (bash 3.2, sem `mapfile`, `timeout`, `${var,,}`), por leitura ou com um bash 3.2, se houver.
 
@@ -214,7 +214,7 @@ Regras duras do oute-agent que costumam aparecer (confira no AGENTS.md da base; 
 - mudança visível com **fragmento** em `changelog.d/<issue>-<slug>.md` (subseção `### Added`/`Changed`/`Deprecated`/`Removed`/`Fixed`/`Security` + a entrada; `scripts/changelog check` sai 0) e **sem editar o `CHANGELOG.md`** (#121). PR aberto antes da #121 com a linha no `[Unreleased]`: vale como está (o `scripts/release` junta), no máximo NIT; mudança na imagem declara que **precisa de release** (e o PR não faz release nem tag);
 - config de agente só com edição estrutural (tomlkit, jq, bloco gerenciado), nunca `sed` em arquivo que outra ferramenta escreve;
 - porta de container nunca em `0.0.0.0`; nada de `BW_*` no container; segredo só pelo Vaultwarden, lido pelo host;
-- telemetria no bucket nunca apagada; ferramenta nova manda consumo ao bucket + Langfuse;
+- telemetria no bucket nunca apagada; ferramenta nova só entra se mandar consumo ao bucket + agent-studio, pelo collector, com a origem (`host.name` + `oute.instance`) e `oute.agent` (ADR-08 §11; o Langfuse, em paralelo até a #160, não é mais exigência);
 - workflows de CI só pelo Bardi; mudança de host do oute-server é do repo `lab`;
 - ai-memory não muda de comportamento sem decisão do Bardi;
 - addon com prefixo `oute-`; primitivo que cita addon traz plano B inline (ADR-06);
