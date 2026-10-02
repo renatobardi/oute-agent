@@ -9,7 +9,7 @@ import threading
 import duckdb
 
 from . import (alerts as alerts_mod, conversations as conv_mod, proposals as prop_mod, sessions as sess_mod,
-               usage as usage_mod)
+               tray as tray_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -175,6 +175,11 @@ class Store:
         """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
         with self.lock:
             return alerts_mod.evaluate(self.con, at_ns, cfg)
+
+    def tray(self, at_ns, prices, cfg):
+        """Leitura do `/v1/tray` (#205), sob a mesma trava: os blocos do DuckDB numa passada só."""
+        with self.lock:
+            return tray_mod.snapshot(self.con, at_ns, prices, cfg)
 
     # leituras da tela (#206), sob a mesma trava
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None):
