@@ -368,6 +368,8 @@ def get(app, path, query=""):
     asyncio.run(app(scope, receive, send))
     return msgs[0]["status"], b"".join(m.get("body", b"") for m in msgs[1:]).decode()
 class ReadOnly:
+    def alerts(self, *a):  # o topo de toda página (#208)
+        return {"alerts": []}
     def sessions(self, *a):
         return sessions.listing(con, *a)
     def session(self, *a):
