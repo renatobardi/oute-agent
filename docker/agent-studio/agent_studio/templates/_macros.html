@@ -101,13 +101,17 @@
 {% for m in models %}<span class="modelo">{{ m.model or "(sem modelo)" }}{% if models|length > 1 %} ×{{ m.calls|num }}{% endif %}</span>{% else %}—{% endfor %}
 {% endmacro %}
 
-{% macro session_head() %}
-<thead><tr>
-  <th>Início (UTC)</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
-  <th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
-  <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
-  <th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
-</tr></thead>
+{# a tabela das sessões e das conversas, com o cabeçalho; as linhas vêm de quem chama (`call`) #}
+{% macro session_table() %}
+<table class="sessoes">
+  <thead><tr>
+    <th>Início (UTC)</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
+    <th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
+    <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
+    <th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
+  </tr></thead>
+  {{ caller() }}
+</table>
 {% endmacro %}
 
 {% macro conversation_row(c) %}

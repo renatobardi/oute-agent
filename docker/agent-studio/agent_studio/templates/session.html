@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import cost, model_list, usage_data, session_head, conversation_row, log_table, state_warning %}
+{% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, log_table, state_warning %}
 {% set s = session %}
 {% set st = s.state %}
 {% set u = s.usage %}
@@ -36,12 +36,11 @@
 
 <h2>Conversas ({{ s.conversation_count|num }})</h2>
 {% if s.conversations %}
-<table class="sessoes">
-  {{ session_head() }}
+{% call session_table() %}
   <tbody>
   {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
-</table>
+{% endcall %}
 {% else %}
 <p class="aviso">Esta sessão não tem conversas.</p>
 {% endif %}

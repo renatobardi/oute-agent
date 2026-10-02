@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import filter, session_head, session_row, conversation_row, state_warning %}
+{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
 {% block title %}Sessões · agent-studio{% endblock %}
 {% block main %}
 <h1>Sessões</h1>
@@ -10,8 +10,7 @@
   {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
 {{ state_warning(state_read) }}
 {% if sessions %}
-<table class="sessoes">
-  {{ session_head() }}
+{% call session_table() %}
   {% for s in sessions %}
   <tbody>
   {{ session_row(s) }}
@@ -21,7 +20,7 @@
   {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
   {% endfor %}
-</table>
+{% endcall %}
 {% else %}
 <p class="aviso" id="vazio">Nenhuma sessão nessa janela.</p>
 {% endif %}
@@ -31,12 +30,11 @@
   <code>session.id</code>.
   {% if loose_total > loose|length %}Mostrando as {{ loose|length }} mais recentes de {{ loose_total }}.{% endif %}</p>
 {% if loose %}
-<table class="sessoes">
-  {{ session_head() }}
+{% call session_table() %}
   <tbody>
   {% for c in loose %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
-</table>
+{% endcall %}
 {% else %}
 <p class="aviso" id="vazio-sem-sessao">Nenhuma conversa sem sessão nessa janela.</p>
 {% endif %}
