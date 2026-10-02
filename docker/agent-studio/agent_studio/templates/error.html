@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · agent-studio{% endblock %}
+{% block main %}
+<h1>{{ code }}</h1>
+<p class="aviso erro" role="alert">{{ message }}</p>
+<p><a href="/conversas">Voltar às conversas</a></p>
+{% endblock %}

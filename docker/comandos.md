@@ -22,7 +22,7 @@ Dois lugares, dois conjuntos de comandos:
   oute install         cria o link no PATH (chamar `oute` de qualquer lugar)
   oute update          git pull --tags no repo + pull da imagem + down + up + version
   oute version         versão do repo, da imagem rodando e origem (host/instância)
-  oute approve         revisa pedidos dos agentes (s = executa, N = recusa, r = relê)
+  oute approve         revisa pedidos dos agentes (s = executa, N ou Enter = deixa pendente, r = recusa)
   oute approve --watch fica esperando pedidos novos
   oute watch [host]    = approve --watch; com host, abre a espera nele via ssh
   oute up | down | restart | status

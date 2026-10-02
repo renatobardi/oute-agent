@@ -1,0 +1,51 @@
+{# custo real e estimado sempre separados; o estimado vai marcado (#203) #}
+{% macro cost(c) %}
+{% if c.real_usd is not none %}<span class="real" title="custo real, informado pela fonte">{{ c.real_usd|usd }}</span>{% endif %}
+{% if c.estimated_usd is not none %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
+{% if c.unpriced_calls %}<span class="semp" title="chamadas sem custo real e sem preço na tabela: fora das somas">{{ c.unpriced_calls|num }} sem preço</span>{% endif %}
+{% if c.real_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
+{% endmacro %}
+
+{% macro log_rows(logs, id, next_offset) %}
+{% for l in logs %}
+<tr data-log="{{ l.time_unix_nano }}"{% if l.severity_number and l.severity_number >= 17 %} class="erro"{% endif %}>
+  <td class="hora">{{ l.time_unix_nano|ts }}</td>
+  <td>{{ l.severity_text or l.severity_number or "—" }}</td>
+  <td>{{ l.event_name or "—" }}</td>
+  <td class="corpo">
+    {% if l.body %}<pre>{{ l.body }}</pre>{% endif %}
+    {% if l.attributes %}<details><summary>atributos</summary><pre>{{ l.attributes }}</pre></details>{% endif %}
+  </td>
+</tr>
+{% endfor %}
+{% if next_offset is not none %}
+{% set more = "/conversa/logs?id=" ~ (id|urlencode) ~ "&offset=" ~ next_offset %}
+<tr class="mais"><td colspan="4"><a href="{{ more }}" hx-get="{{ more }}" hx-target="closest tr" hx-swap="outerHTML">mais logs</a></td></tr>
+{% endif %}
+{% endmacro %}
+
+{% macro log_table(logs, id, next_offset) %}
+<table class="logs">
+  <thead><tr><th>Hora (UTC)</th><th>Nível</th><th>Evento</th><th>Conteúdo</th></tr></thead>
+  <tbody>
+  {{ log_rows(logs, id, next_offset) }}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro span_detail(span) %}
+<div class="span-detalhe" data-span-detalhe="{{ span.span_id }}">
+  <dl>
+    <dt>trace</dt><dd>{{ span.trace_id }}</dd>
+    <dt>span</dt><dd>{{ span.span_id }}</dd>
+    <dt>pai</dt><dd>{{ span.parent_span_id or "—" }}</dd>
+    <dt>início (UTC)</dt><dd>{{ span.time_unix_nano|ts }}</dd>
+    <dt>duração</dt><dd>{{ span.duration_ns|dur }}</dd>
+    {% if span.scope_name %}<dt>escopo</dt><dd>{{ span.scope_name }}</dd>{% endif %}
+    {% if span.status_message %}<dt>mensagem do status</dt><dd>{{ span.status_message }}</dd>{% endif %}
+  </dl>
+  {% for title, value in (("Atributos", span.attributes), ("Eventos", span.events), ("Links", span.links), ("Resource", span.resource_attributes)) %}
+  {% if value %}<h4>{{ title }}</h4><pre>{{ value }}</pre>{% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
