@@ -340,6 +340,13 @@ cmd_close() {
 # para mudança real. O retrato fica em $state/watch.state: a 1ª passada da rodada só grava a linha de base (silêncio)
 # e um watch reiniciado (monitor expirou) compara com o último retrato, sem perder o que mudou no intervalo.
 # Falha de herdr/gh numa passada não vira evento: o estado anterior daquela fonte é mantido (e sai um aviso só).
+# CI de head substituído (#266): o `gh pr list` só traz os checks do head atual. Quando o head de um PR muda entre duas
+# passadas, o head anterior entra em observação (oldhead|<pr>|<sha>) e os checks dele são lidos pelo commit até todos
+# concluírem (ou o PR fechar). Check que falhou nele sai uma vez, com o head curto (oldci|<pr>|<sha7>|<check>, que fica
+# no retrato para não repetir); verde não gera linha, e cancelado também não (o push novo cancela o run anterior).
+W_OLDQ='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){
+  ... on Commit{statusCheckRollup{contexts(first:100){nodes{__typename
+    ... on CheckRun{name conclusion startedAt completedAt} ... on StatusContext{context state startedAt: createdAt}}}}}}}}'
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
 declare -A W_PREV=() W_CUR=() W_IID=()
 
@@ -358,7 +365,8 @@ w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
 
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
-  local gh_ok=1
+  local gh_ok=1 oid old cur k pend
+  local -A prst=() prrepo=()
   W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
   if tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs"; then
@@ -385,7 +393,7 @@ w_snapshot() {
     [[ -n "$repo" ]] || continue
     ns="$(awk -v m="$main" -v r="$repo" '($6 == "" ? m : $6) == r {split($1, a, "-"); print a[1]}' "$state/spawned" \
           | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
-    if res="$(cd "$repo" && gh pr list --state all --limit 100 --json number,headRefName,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
+    if res="$(cd "$repo" && gh pr list --state all --limit 100 --json number,headRefName,headRefOid,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
        && res="$(jq -r --arg since "$since" --argjson ns "$ns" --arg pf "$(w_pfx "$repo" "$main")" '
           def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
                  | if test("^(SUCCESS|NEUTRAL|SKIPPED)$") then "pass"
@@ -394,20 +402,33 @@ w_snapshot() {
           .[] | select((.createdAt // "") >= $since) | . as $p
           | ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) as $n
           | select(any($ns[]; . == $n))
-          | "pr\t\($pf)\($p.number)\t\($pf)\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)",
+          | "pr\t\($pf)\($p.number)\t\($pf)\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)\t\($p.headRefOid // "")",
             ([$p.statusCheckRollup[]? | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")),
                                            t: (.completedAt // .startedAt // ""), r: r}]
              | group_by(.name)[] | max_by(.t) | "ci\t\($pf)\($p.number)\t\(.name)\t\(.r)")' <<<"$res" 2>/dev/null)"; then
       all+="${res:+$res$'\n'}"
+      while IFS=$'\t' read -r kind num _; do [[ "$kind" != pr ]] || prrepo[$num]="$repo"; done <<<"$res"
     else
       gh_ok=0; break
     fi
   done < <(awk -v m="$main" '{print ($6 == "" ? m : $6)}' "$state/spawned" 2>/dev/null | sort -u)
   if (( gh_ok )); then
-    while IFS=$'\t' read -r kind num n st mg url; do
+    w_keep "oldhead|"; w_keep "oldci|"
+    while IFS=$'\t' read -r kind num n st mg url oid; do
       case "$kind" in
         pr)
-          W_CUR["pr|$num|$n"]="$st"; W_CUR["url|$num"]="$url"
+          W_CUR["pr|$num|$n"]="$st"; W_CUR["url|$num"]="$url"; prst[$num]="$st"
+          old="${W_PREV[head|$num]:-}"
+          if [[ -n "$oid" ]]; then
+            W_CUR["head|$num"]="$oid"
+            if [[ -n "$old" && "$old" != "$oid" ]]; then
+              W_CUR["oldhead|$num|$old"]=1
+              # falha já emitida enquanto esse head era o atual: marcada como vista, para não sair de novo
+              for k in "${!W_PREV[@]}"; do
+                if [[ "$k" == "ci|$num|"* && "${W_PREV[$k]}" == fail ]]; then W_CUR["oldci|$num|${old:0:7}|${k#"ci|$num|"}"]=seen; fi
+              done
+            fi
+          fi
           case "$mg" in
             CONFLICTING) W_CUR["merge|$num"]=conflict ;;
             MERGEABLE) W_CUR["merge|$num"]=ok ;;
@@ -416,8 +437,35 @@ w_snapshot() {
         ci) name="$n"; W_CUR["ci|$num|$name"]="$st" ;;
       esac
     done <<<"$all"
+    # heads substituídos em observação: uma leitura por passada, até todos os checks dele concluírem ou o PR fechar
+    for k in "${!W_CUR[@]}"; do
+      [[ "$k" == "oldhead|"* ]] || continue
+      num="${k#oldhead|}"; old="${num##*|}"; num="${num%|*}"; cur="${W_CUR[head|$num]:-}"
+      if [[ -z "${prrepo[$num]:-}" ]]; then unset "W_CUR[$k]"; continue; fi   # PR saiu da lista da rodada
+      if res="$(cd "${prrepo[$num]}" && gh api graphql -F owner='{owner}' -F name='{repo}' -f oid="$old" -f query="$W_OLDQ" 2>/dev/null)" \
+         && res="$(jq -r '
+            def r: (.conclusion // .state // "") | ascii_upcase
+                   | if test("^(FAILURE|ERROR|TIMED_OUT|ACTION_REQUIRED|STARTUP_FAILURE)$") then "fail"
+                     elif . == "" or test("^(PENDING|EXPECTED|QUEUED|IN_PROGRESS)$") then "pending"
+                     else "done" end;
+            if (.data.repository | type) != "object" then error("resposta sem repository") else . end
+            | [.data.repository.object.statusCheckRollup.contexts.nodes[]?
+               | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")), t: (.completedAt // .startedAt // ""), r: r}]
+            | group_by(.name)[] | max_by(.t) | "\(.r)\t\(.name)"' <<<"$res" 2>/dev/null)"; then
+        pend=0
+        while IFS=$'\t' read -r st name; do
+          case "$st" in
+            pending) pend=1 ;;
+            fail) [[ -n "${W_CUR[oldci|$num|${old:0:7}|$name]:-}" ]] || W_CUR["oldci|$num|${old:0:7}|$name"]="fail ${cur:0:7}" ;;
+          esac
+        done <<<"$res"
+        (( pend )) && [[ "${prst[$num]}" == OPEN ]] || unset "W_CUR[$k]"
+      else
+        W_CUR["falha|gh"]=1   # fica em observação e é lido de novo na próxima passada
+      fi
+    done
   else
-    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; W_CUR["falha|gh"]=1
+    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; W_CUR["falha|gh"]=1
   fi
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do
@@ -467,6 +515,9 @@ w_diff() {
       ci)
         [[ "$new" == pass || "$new" == fail ]] || continue
         w_ev ci "PR $(w_ref "$a") · $b: $new" ;;
+      oldci)
+        [[ -z "$old" && "$new" == "fail "* ]] || continue
+        w_ev ci "PR $(w_ref "$a") · ${b#*|}: fail (head ${b%%|*}, já substituído por ${new#fail })" ;;
       merge)
         case "$old>$new" in
           *">conflict") w_ev conflito "PR $(w_ref "$a") em conflito com a base (mergeable=CONFLICTING)" ;;
@@ -485,7 +536,7 @@ w_diff() {
         else w_ev aviso "$a respondendo de novo"; fi ;;
     esac
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
-             | awk -F'|' 'BEGIN { split("falha tab agent pr ci merge ask res", o, " "); for (i in o) p[o[i]] = i }
+             | awk -F'|' 'BEGIN { split("falha tab agent pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
 }
 
