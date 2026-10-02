@@ -59,6 +59,15 @@ Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aid
 - Linker de addons: `tests/addons-link.test.sh`.
 - Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml --config=config/otel/agent-studio.yaml` (os três pipelines juntos, como no host com Langfuse e agent-studio ligados).
 - Script do host: pensar no caminho do Mac (bash 3.2, sem `timeout`, Docker Desktop).
+- **SonarCloud é gate do PR** (#192): o check `SonarCloud Code Analysis` do head (`gh pr checks <n>`) faz parte do "CI verde", que só vale com ele concluído com sucesso; pendente não é verde. O que costuma derrubar a nota de segurança no código novo:
+  - credencial literal, inclusive em teste (gerar aleatória);
+  - dado vindo do cliente em log ou em resposta de erro;
+  - SQL ou comando montado com entrada (usar parâmetros);
+  - download sem checksum;
+  - dependência sem versão travada;
+  - `npm install` sem `--ignore-scripts`.
+- **Exceção do `http://` interno:** `http://` para nome de serviço do compose na rede `oute` (só docker interno, ex.: `http://agent-studio:8430`) não se corrige no código: o agente declara o achado no corpo do PR e a `oute-aidlc-qa-pr-audit` o trata como não bloqueante. Não vale para host externo.
+- Gate reprovado fora da exceção: o agente corrige. Dispensar o gate ou marcar achado no SonarCloud (falso positivo, aceito) é só do Bardi, registrado no PR.
 
 ## Agent skills
 
