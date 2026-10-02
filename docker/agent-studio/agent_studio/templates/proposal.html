@@ -22,14 +22,26 @@
   <dt>Duração</dt><dd>{{ "—" if p.duration_s is none else (p.duration_s * 1000)|ms }}</dd>
   <dt>Tamanho da saída</dt><dd>{{ "—" if p.output_bytes is none else (p.output_bytes|num) ~ " bytes" }}</dd>
   <dt>Aprovador</dt><dd>{{ p.approver or "—" }}</dd>
-  {% if p.sha256 %}<dt>sha256 do script executado</dt><dd><code>{{ p.sha256 }}</code></dd>{% endif %}
+  {% if p.sha256 %}<dt>sha256 do script executado</dt><dd><code>{{ p.sha256 }}</code>{% if p.shown_sha256 and p.sha256 == p.shown_sha256 %} (igual ao do script exibido){% endif %}</dd>{% endif %}
   {% endif %}
 </dl>
 <p class="nota">Esta tela só mostra. Aprovar ou recusar é no host, com o <code>oute approve</code>, e o que vale é o script
   que ele mostra lá. A saída do script no host não vem para o agent-studio.</p>
 
 <h2>Script</h2>
+{% if p.versions > 1 %}
+<p class="aviso erro" role="alert" data-versoes="{{ p.versions }}">Chegaram {{ p.versions|num }} versões diferentes deste pedido (eventos <code>oute.canal.proposed</code>
+  com o mesmo id e script ou cabeçalho diferentes). A página mostra a primeira pela hora do evento e não tem como dizer
+  qual é a verdadeira: confira o sha256 abaixo com o que o <code>oute approve</code> mostra no host.</p>
+{% endif %}
+{% if p.state == "decidido" and p.sha256 and p.shown_sha256 and p.sha256 != p.shown_sha256 %}
+<p class="aviso erro" role="alert" data-sha-diferente>O script exibido <strong>não é</strong> o que foi decidido no host: o sha256 do exibido é
+  <code>{{ p.shown_sha256 }}</code> e o do <code>oute approve</code> foi <code>{{ p.sha256 }}</code>. A página não tem como dizer
+  qual é o verdadeiro.</p>
+{% endif %}
 {% if p.script is not none %}
+<p class="nota" data-sha-exibido="{{ p.shown_sha256 }}">sha256 do script exibido, como o <code>oute approve</code> mostra: <code>{{ p.shown_sha256 }}</code>
+  (os 12 primeiros; inclui o cabeçalho do <code>oute-propose</code>: título, como, agente e hora).</p>
 <pre class="script" data-script>{{ p.script }}</pre>
 {% else %}
 <p class="aviso" data-sem-script>O script deste pedido não chegou ao agent-studio (falta o evento <code>oute.canal.proposed</code>).</p>
