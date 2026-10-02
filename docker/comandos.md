@@ -58,7 +58,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
   Cada sessão tem um id (oute.task.id, gravado na worktree). Abrir, reabrir e remover (clean --yes) viram
-  eventos oute.task.* no bucket, e as conversas do agente saem marcadas com a sessão (ADR-04).
+  eventos oute.task.* no bucket e no agent-studio, e as conversas do agente saem marcadas com a sessão (ADR-04).
   oute-agents-install [claude|codex]
                                     instala o agente no home (~/.local/bin), onde ele se atualiza sozinho (claude a
                                     partir da reserva; codex pelo install.sh da versão fixa, conferido por sha256);
@@ -97,9 +97,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Quem aprova é você, no host: oute watch. Nunca de dentro do herdr.
 
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
-  Rodadas do swarm, pedidos do canal e sessões do oute-task vão ao bucket como logs OTel
-  (oute.swarm.*, oute.canal.*, oute.task.*), com a origem do host; nada ao Langfuse. A saída do
-  script executado no host nunca vai.
+  Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
+  oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao
+  Langfuse. A saída do script executado no host nunca vai.
   O oute-swarm, o oute-propose, o oute-task e o oute approve chamam sozinhos; falha nunca muda o comando.
   oute-emit canal <id>              emite a fase atual do pedido (proposto ou decidido)
   oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada

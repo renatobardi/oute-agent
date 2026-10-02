@@ -135,7 +135,7 @@ COPY docker/addons-link /usr/local/lib/oute/addons-link
 COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 # canal de aprovação: o agente propõe, o humano aprova no host (`oute approve`)
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
-# eventos operacionais do swarm e do canal (ADR-04, #124): emissor único, python3 stdlib, só ao bucket
+# eventos operacionais do swarm e do canal (ADR-04, #124): emissor único, python3 stdlib, ao bucket e ao agent-studio (ADR-08)
 COPY docker/oute-emit /usr/local/bin/
 # agentes no home pelo instalador oficial de cada um (#195)
 COPY docker/oute-agents-install /usr/local/bin/

@@ -3,10 +3,10 @@
 Instruções para agentes (Claude Code, Codex) trabalhando **neste repositório**. As regras gerais (worktree por sessão, canal de aprovação, escopo de memória, issues) vêm das notas globais do container; aqui só o que é específico do oute-agent. Contexto e decisões: `CONTEXT.md`.
 
 ## O que é
-Runtime em container para agentes de código (herdr + Claude Code, o principal, + Codex, a reserva; os dois por assinatura, com o modelo da sessão escolhido pela fase, ADR-02), memória compartilhada (ai-memory), storage no OCI e observabilidade (bucket OCI + agent-studio, ADR-08; o Langfuse roda em paralelo até ser desligado). Roda no `oute-server` (Oracle Cloud, arm64) e no Mac (Apple Silicon).
+Runtime em container para agentes de código (herdr + Claude Code, o principal, + Codex, a reserva; os dois por assinatura, com o modelo da sessão escolhido pela fase, ADR-02), memória compartilhada (ai-memory), storage no OCI e observabilidade (bucket OCI + agent-studio, ADR-08; o Langfuse roda em paralelo até ser desligado, #160). Roda no `oute-server` (Oracle Cloud, arm64) e no Mac (Apple Silicon).
 
 ## Mapa do repo
-- `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-emit` (eventos operacionais ao bucket, ADR-04), `oute-agents-install` (claude/codex no home, com auto-update, #195; entrada conferida por sha256, #199), `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `comandos.md` (guia do `oute help`) + `oute-container`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`). `docker/agent-studio/`: o agent-studio (ADR-08; Python, vai na imagem, serviço próprio no compose, só no oute-server).
+- `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container (`oute-propose`, `oute-inbox`, `oute-emit` (eventos operacionais ao bucket e ao agent-studio, ADR-04 e ADR-08), `oute-agents-install` (claude/codex no home, com auto-update, #195; entrada conferida por sha256, #199), `oute-task`, `oute-swarm` + `swarm.md`/`swarm-worker.md`, `comandos.md` (guia do `oute help`) + `oute-container`, `agent-wrap.sh`, `agent-notes.md`, `codex_config.py`). `docker/agent-studio/`: o agent-studio (ADR-08; Python, vai na imagem, serviço próprio no compose, só no oute-server).
 - `addons/<tipo>/`: addons (ADR-06). Hoje só `addons/skills/oute-*` (skill de fluxo: `oute-aidlc-<fase>-<id>`, ADR-07) (`SKILL.md` com `name` = pasta). Montado read-only em `/opt/oute/addons`; o `docker/addons-link` (chamado pelo entrypoint) cria os links em `~/.claude/skills` e `~/.agents/skills`. Skill entra com `git pull` + `oute down/up`, sem release.
 - `tests/`: testes em bash puro (`tests/*.test.sh`), rodados pelo workflow `pr` em todo PR. `tests/lib/`: apoio compartilhado entre os testes:
   - geral: `check.sh` (contagem dos casos: `check`/`ok`/`bad`/`jqe`/`die`/`has_pty`, casos vindos de Python, resumo e código de saída) e `pycheck.py` (o `check` dos trechos em Python);
@@ -14,7 +14,7 @@ Runtime em container para agentes de código (herdr + Claude Code, o principal, 
   - collector: `otelcol.sh` (binário fixado do `otelcol-contrib`) e `fakes3.py` (S3 falso);
   - agent-studio: `agent-studio.sh` (venv, sobe e derruba o app, `post`/`code`/`hdr`/`data`/`enc`/`usd`, preços de exemplo, bloco de um serviço do compose) + `agent-studio-run.py` (app com falha injetada), `surreal.sh` (SurrealDB fixado), `html-data.py` (HTML → JSON dos `data-*`) e `studio_asgi.py` (chama o app pelo ASGI; store e SurrealDB de mentira).
 - `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
-- `config/otel/`: pipelines do collector. `config/agent-studio/`: preços e alertas do agent-studio.
+- `config/otel/`: pipelines do collector (`collector.yaml` = bucket; `agent-studio.yaml` = agent-studio; `langfuse.yaml` = Langfuse, até a #160; `none.yaml` = pipeline extra desligado). `config/agent-studio/`: preços e alertas do agent-studio.
 - `.github/ISSUE_TEMPLATE/aidlc.md`: template de issue (AI-DLC).
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.
 
@@ -29,7 +29,7 @@ Runtime em container para agentes de código (herdr + Claude Code, o principal, 
 - **Workflows de CI (`.github/workflows/`) só pelo Bardi.** O `GH_TOKEN` dos agentes não tem o escopo `workflow`, de propósito: agente nenhum cria ou altera CI (o GitHub recusa o push e, na API, responde 404). O agente deixa o arquivo pronto e publica no PR um link para o editor web já preenchido (`https://github.com/<dono>/<repo>/new/<branch>?filename=<caminho>&value=<conteúdo url-encoded>`); o Bardi commita pela interface web. O resto do PR segue normal, com o workflow no `## Falta` até entrar. Não peça o escopo `workflow` para contornar, e o canal de aprovação também não serve (o host não tem credencial do GitHub). Workflow disparado só em `pull_request` é validado por um PR descartável (commit vazio, fechado sem merge).
 - **Canal de aprovação e restart do `agent`:** script proposto pode rodar `oute down`/`up`/`restart` (#210, com o `scripts/oute` do host atualizado: o resultado fica no host e é entregue quando o container volta). A sessão que propôs morre junto com o container: o `oute-inbox --wait` dela não volta; quem continua lê o resultado depois (`oute-inbox <id>`). Um pedido assim por vez, e por último na fila.
 - **Nunca** publicar porta de container em `0.0.0.0`. Segredos só pelo Vaultwarden, lidos pelo host. Nada de BW_* no container.
-- Telemetria no bucket `oute-observability` **nunca é apagada**. Ferramenta nova só entra se mandar consumo ao bucket + agent-studio (ADR-08).
+- Telemetria no bucket `oute-observability` **nunca é apagada**. Ferramenta nova só entra se mandar consumo ao bucket + agent-studio (ADR-08 §11); o Langfuse roda em paralelo até a #160 e não é exigência para ferramenta nova.
 - Comportamento do **ai-memory** não muda sem decisão explícita do Bardi. Servidor e cliente sempre na mesma versão.
 - Mudanças no host oute-server (usuários, sudoers, nginx, firewall, systemd) são do repo `renatobardi/lab`, não daqui.
 
@@ -47,7 +47,7 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 | `build` | `oute-task`, worker do swarm, `oute-aidlc-build-implement`, `oute-aidlc-build-tdd`, `oute-aidlc-build-conflicts` |
 | `qa` | `oute-aidlc-qa-pr-audit` (chama `oute-aidlc-qa-security-audit`), `tests/`, CI `pr` |
 | `ship` | `oute-aidlc-ship-release` (checklist antes da release), `scripts/release` + deploy nos hosts (Bardi), `oute-aidlc-ship-verify` (pós-deploy pelo canal de aprovação) |
-| `ops` | telemetria ADR-04 (bucket + Langfuse; agent-studio pelo ADR-08, #157), canal de aprovação, `oute-aidlc-ops-observe`, `oute-aidlc-ops-diagnose` |
+| `ops` | telemetria ADR-04 e ADR-08 (bucket + agent-studio; Langfuse em paralelo até a #160; a `ops-observe` passa a ler do agent-studio na #157), canal de aprovação, `oute-aidlc-ops-observe`, `oute-aidlc-ops-diagnose` |
 | `learn` | `oute-swarm` §4.1 (kaizen, por rodada), `oute-aidlc-learn-insights` (fecha o ciclo: insights entre rodadas e fontes → lições e melhorias), `oute-aidlc-learn-feedback` |
 | `iter` | `oute-aidlc-iter-roadmap` (abre o próximo ciclo: foco, issues e limpeza do backlog), issues de fim de sessão |
 | `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory, `oute-aidlc-ctx-router`, `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
@@ -57,7 +57,7 @@ Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aid
 ## Validar antes do PR
 - `bash -n` em todo script alterado; `docker compose --project-directory . -f docker/compose.yaml config` com as envs necessárias.
 - Linker de addons: `tests/addons-link.test.sh`.
-- Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml`.
+- Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml --config=config/otel/agent-studio.yaml` (os três pipelines juntos, como no host com Langfuse e agent-studio ligados).
 - Script do host: pensar no caminho do Mac (bash 3.2, sem `timeout`, Docker Desktop).
 
 ## Agent skills
