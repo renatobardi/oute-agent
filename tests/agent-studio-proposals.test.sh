@@ -42,24 +42,13 @@ P1=20260930-120000-reiniciar-nginx; P2=20260930-110000-listar-backups; P3=202609
 P4=20260930-130000-so-decidido; P5='p <b>5</b>&x=é'
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import json, sys
-from otlp_json import kv
+from otlp_json import canal_decided as decided, canal_proposed as proposed, kv, queue_metrics
 tmp, NOW = sys.argv[1], int(sys.argv[2])
 P1, P2, P3, P4, P5 = ("20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "20260930-100000-apagar-tudo",
                       "20260930-130000-so-decidido", "p <b>5</b>&x=é")
-def ev(t, name, eid, attrs, body=None):
-    r = {"timeUnixNano": str(t * 10**9), "severityNumber": 9, "eventName": name,
-         "attributes": kv({"event.name": name, "oute.event.id": eid, **attrs})}
-    if body is not None: r["body"] = {"stringValue": body}
-    return r
 def rl(host, agent, recs):
     return {"resource": {"attributes": kv({"host.name": host, "oute.instance": "oute-agent", "service.name": "oute",
                                            "oute.agent": agent})}, "scopeLogs": [{"logRecords": recs}]}
-def proposed(t, pid, eid, title, how, script):
-    return ev(t, "oute.canal.proposed", eid, {"oute.canal.id": pid, "oute.canal.title": title, "oute.canal.as": how,
-                                              "oute.canal.size": len(script.encode())}, script)
-def decided(t, pid, eid, decision, body=None, **attrs):
-    return ev(t, "oute.canal.decided", eid, {"oute.canal.id": pid, "oute.canal.decision": decision,
-                                             "oute.canal.approver": "bardi@oute-server", **attrs}, body)
 s1 = ('set -euo pipefail\necho "reiniciando <b>nginx</b> & cia"\n'
       "# </pre><script>alert('pedido')</script>\nsudo systemctl reload nginx\n")
 open(f"{tmp}/p1.sh", "w").write(s1)
@@ -80,17 +69,8 @@ forged = {"resourceLogs": [
                                proposed(NOW - 90, P5, "ev-p5-forjado", "Pedido de id estranho", "user", "echo FORJADO-ANTES\n"),
                                proposed(NOW - 7200, P3, "ev-p3-de-novo", "Apagar tudo", "root", "rm -rf /srv/x\n")])]}
 json.dump(forged, open(f"{tmp}/forged.json", "w"))
-CAP = 1000
-def queue(t, size):
-    point = lambda x, off: {"timeUnixNano": str(t * 10**9 + off), "asInt": str(x),
-                            "attributes": kv({"exporter": "otlp_http/studio_logs"})}
-    return {"resourceMetrics": [{
-        "resource": {"attributes": kv({"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "otelcol-contrib"})},
-        "scopeMetrics": [{"metrics": [
-            {"name": "otelcol_exporter_queue_size", "gauge": {"dataPoints": [point(size, 0)]}},
-            {"name": "otelcol_exporter_queue_capacity", "gauge": {"dataPoints": [point(CAP, -12640)]}}]}]}]}
-json.dump(queue(NOW - 120, 800), open(f"{tmp}/metrics-high.json", "w"))
-json.dump(queue(NOW - 20, 100), open(f"{tmp}/metrics-low.json", "w"))
+json.dump(queue_metrics("oute-server", NOW - 120, 800), open(f"{tmp}/metrics-high.json", "w"))
+json.dump(queue_metrics("oute-server", NOW - 20, 100), open(f"{tmp}/metrics-low.json", "w"))
 PY
 
 # a config do repo (limites e hosts sempre ligados de verdade), nunca a do ambiente

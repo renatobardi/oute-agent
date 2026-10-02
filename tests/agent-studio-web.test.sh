@@ -24,7 +24,7 @@ PKG="$ROOT/docker/agent-studio/agent_studio"
 #   conv-c (janeiro de 2025): fora da janela. Um span sem session.id: fora de toda conversa.
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
-from otlp_json import kv, rs
+from otlp_json import kv, rl, rs
 tmp = sys.argv[1]
 D1 = 1759000000
 def span(trace, sid, parent, name, start, dur, attrs, err=False):
@@ -72,7 +72,6 @@ def log(t, sev, body, attrs, name=None):
     r = {"timeUnixNano": str(int(t * 1e9)), "severityNumber": sev, "body": {"stringValue": body}, "attributes": kv(attrs)}
     if name: r["eventName"] = name
     return r
-def rl(res, recs): return {"resource": {"attributes": kv(res)}, "scopeLogs": [{"logRecords": recs}]}
 logs = {"resourceLogs": [
   rl(claude, [
     log(D1 + 8, 17, "falhou <b>feio</b>", A, "claude_code.api_error"),

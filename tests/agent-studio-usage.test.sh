@@ -18,17 +18,9 @@ usage() { curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/usage
 # D1 = 2025-09-27T19:06:40Z, D2 = D1 + 1 dia. Tudo chega agora: a janela de 2025 só acha os fatos pela hora do fato.
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
-from otlp_json import kv, rs
+from otlp_json import kv, rs, span
 tmp = sys.argv[1]
 D1, D2 = 1759000000, 1759000000 + 86400
-n = 0
-def span(name, start, dur, attrs, err=False):
-    global n; n += 1
-    s = {"traceId": f"{n:032x}", "spanId": f"{n:016x}", "name": name,
-         "startTimeUnixNano": str(int(start * 1e9)), "endTimeUnixNano": str(int((start + dur) * 1e9)),
-         "attributes": kv(attrs)}
-    if err: s["status"] = {"code": 2, "message": "falhou"}
-    return s
 claude = {"host.name": "oute-server", "service.name": "claude-code", "oute.agent": "claude"}
 codex = {"host.name": "oute-mac", "service.name": "codex_exec", "oute.agent": "codex"}
 router = {"host.name": "oute-server", "service.name": "jev-router", "oute.agent": "router"}
