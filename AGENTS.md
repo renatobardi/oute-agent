@@ -21,7 +21,7 @@ Runtime em container para agentes de código (herdr + Claude Code, o principal, 
 ## Regras
 - **Entrega por PR.** Release (`scripts/release x.y.z` + tag) e deploy nos hosts são do Bardi.
 - **Precisa de release:** mudança na imagem (Dockerfile, entrypoint, arquivos copiados). **Não precisa:** `scripts/oute`, `config/`, `docker/compose.yaml`, que entram com `git pull` (+ `oute down/up`).
-- Toda mudança visível entra no `CHANGELOG.md`, em `[Unreleased]`.
+- Toda mudança visível entra no changelog por **fragmento** (#121): o PR cria `changelog.d/<issue>-<slug>.md` com a subseção (`### Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` ou `Security`) e a entrada, e **não edita o `CHANGELOG.md`**. Formato em `changelog.d/README.md`; conferir com `scripts/changelog check`. O `scripts/release` junta os fragmentos na seção da versão e os apaga no commit de release. Linha que já estava no `[Unreleased]` (PR aberto antes da #121) fica onde está e entra na mesma seção.
 - `scripts/oute` roda também no **bash 3.2 do macOS**: nada de `mapfile`, `timeout`, `${var,,}`; array vazio com `set -u` só como `${a[@]+"${a[@]}"}`.
 - Configs dos agentes (`~/.codex/config.toml`, `~/.claude/settings.json`, notas) só com edição **estrutural** (tomlkit, jq, bloco gerenciado). Nunca `sed` em arquivo que outra ferramenta também escreve.
 - Scripts executáveis com modo `100755` (o CI recusa sem).

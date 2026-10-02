@@ -7,7 +7,7 @@ description: Checklist de release do oute-agent antes do Bardi rodar scripts/rel
 
 Fase: `ship` (AI-DLC, ADR-07) · Outcome: release conferida, com versão proposta e o comando pronto · Gate: o Bardi roda `scripts/release`, faz o push da tag e o deploy.
 
-Você **confere e propõe**; a release é do Bardi. Nada aqui roda `scripts/release`, cria tag, faz push na `main` nem edita `VERSION` (quem muda `VERSION` e fecha o `[Unreleased]` é o `scripts/release`). Correção que o checklist achar vira PR à parte, pelo fluxo normal.
+Você **confere e propõe**; a release é do Bardi. Nada aqui roda `scripts/release`, cria tag, faz push na `main` nem edita `VERSION` (quem muda `VERSION`, monta a seção da versão no `CHANGELOG.md` e apaga os fragmentos de `changelog.d/` é o `scripts/release`). Correção que o checklist achar vira PR à parte, pelo fluxo normal.
 
 Trabalhe numa worktree própria, na `main` atualizada (`git fetch --tags origin`, `git switch --detach origin/main`). Os passos são em ordem; cada um termina num item do relatório (passo 7).
 
@@ -33,14 +33,20 @@ Feito quando: cada arquivo do diff está num dos dois grupos e a resposta é **s
 
 Resposta **não**: o deploy é `git pull` + `oute down/up` nos hosts, sem versão nova. Pule para o passo 7 (sem os passos 4 a 6) e recomende isso.
 
-## 3. CHANGELOG `[Unreleased]`
+## 3. CHANGELOG: fragmentos de `changelog.d/`
 
-Leia a seção `[Unreleased]` do `CHANGELOG.md` da `main` e cruze com os commits do passo 1:
+As entradas da release vêm dos fragmentos `changelog.d/<issue>-<slug>.md` da `main` (#121), mais o que ainda estiver escrito direto no `[Unreleased]` do `CHANGELOG.md` (PR aberto antes da #121). O `scripts/release` junta tudo na seção da versão, por subseção, e apaga os fragmentos. Veja o que ele montaria:
+
+```bash
+scripts/changelog check
+```
+
+Saída diferente de 0 (fragmento inválido: o arquivo e a linha vêm na mensagem) é achado que **bloqueia** a release: o `scripts/release` para no mesmo ponto. Com saída 0, cruze a seção impressa com os commits do passo 1:
 
 - **Cobertura:** todo commit com mudança visível (tudo que não é só teste, CI ou texto interno) tem uma entrada. Mapeie pelo número do PR/issue no assunto do commit (`(#n)`). Commit sem entrada é achado.
 - **Coerência:** entrada que diz "precisa de release" tem arquivo de imagem no diff, e vice-versa; entrada que diz "sem release" não cita arquivo de imagem.
-- **Forma:** Keep a Changelog, subseções `### Added`, `### Changed`, `### Fixed` (e `Removed`/`Security` se houver), cada entrada com o número da issue.
-- **Nada fora do lugar:** nenhuma entrada do período caiu dentro de uma seção já lançada (`## [x.y.z]`).
+- **Forma:** cada entrada na subseção certa (`### Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`; o `check` já recusa as outras) e com o número da issue.
+- **Nada fora do lugar:** nenhuma entrada do período caiu dentro de uma seção já lançada (`## [x.y.z]`): `git diff "$LAST"..origin/main -- CHANGELOG.md` só mexe no `[Unreleased]`, ou sai vazio.
 
 Feito quando: cada commit do passo 1 está marcado como "com entrada", "sem entrada (achado)" ou "sem mudança visível".
 
@@ -55,11 +61,12 @@ Feito quando: há uma versão proposta e a tag dela está livre.
 O script recusa sem estas; confira antes, na `main`:
 
 - scripts executáveis: `bash scripts/exec-files | while read -r f; do [[ "$(git ls-files -s -- "$f" | cut -d' ' -f1)" == 100755 ]] || echo "$f"; done` sem saída;
-- `grep -q '^## \[Unreleased\]' CHANGELOG.md`.
+- `grep -q '^## \[Unreleased\]' CHANGELOG.md`;
+- `scripts/changelog check` sai 0 (passo 3).
 
 À parte (o script não confere): CI `pr` verde no PR de cada commit do passo 1 (`gh pr checks <n>`).
 
-Feito quando: as duas pré-condições e o CI dos PRs estão ok ou o que falhou está no relatório.
+Feito quando: as três pré-condições e o CI dos PRs estão ok ou o que falhou está no relatório.
 
 ## 6. Versões fixas de claude e codex
 
@@ -81,7 +88,7 @@ Uma mensagem, nesta ordem:
 
 1. **Precisa de release:** sim/não, com os arquivos que decidem.
 2. **Versão:** `LAST` → proposta (e o motivo, se não for patch).
-3. **CHANGELOG:** ok, ou a lista de achados (commit sem entrada, entrada incoerente, fora do lugar), com a correção sugerida. Achado bloqueia a release até virar PR mergeado: diga isso.
+3. **CHANGELOG:** ok, ou a lista de achados (fragmento inválido, commit sem entrada, entrada incoerente, fora do lugar), com a correção sugerida. Achado bloqueia a release até virar PR mergeado: diga isso.
 4. **Pré-condições:** ok ou o que falhou.
 5. **Versões de claude/codex:** as dos `ARG`s, `ok` ou o `DIFERENTE` (bloqueio), e as mais recentes, se estiverem à frente.
 6. **Comandos do Bardi** (no checkout da `main`, no Mac ou no oute-server):

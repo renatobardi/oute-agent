@@ -205,14 +205,14 @@ Pergunta: o PR segue as regras documentadas do repo? Separado do eixo Spec: um P
 **Fontes**, sempre da base: `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, `docs/adr/`, `docs/agents/`, `CONTRIBUTING.md` e equivalentes. Cada achado cita **arquivo + a regra** (texto curto) e o trecho do diff.
 
 **Violação dura × julgamento:**
-- **violação dura**: a regra está escrita e a violação é verificável (grep, modo do arquivo, seção do CHANGELOG). É BLOCKING, salvo NIT evidente (ex.: typo em comentário).
+- **violação dura**: a regra está escrita e a violação é verificável (grep, modo do arquivo, fragmento do changelog). É BLOCKING, salvo NIT evidente (ex.: typo em comentário).
 - **julgamento**: a regra pede interpretação, ou o achado vem só do bom senso. Marque `(julgamento)`, nunca acima de SHOULD-FIX.
 - Pule o que ferramenta do repo já garante e que você viu passar no passo 6.
 
 Regras duras do oute-agent que costumam aparecer (confira no AGENTS.md da base; ele manda):
 - `scripts/oute` compatível com bash 3.2 do macOS (sem `mapfile`, `timeout`, `${var,,}`; array vazio com `set -u` só como `${a[@]+"${a[@]}"}`);
 - script executável com modo `100755`;
-- mudança visível no `CHANGELOG.md` em `[Unreleased]`; mudança na imagem declara que **precisa de release** (e o PR não faz release nem tag);
+- mudança visível com **fragmento** em `changelog.d/<issue>-<slug>.md` (subseção `### Added`/`Changed`/`Deprecated`/`Removed`/`Fixed`/`Security` + a entrada; `scripts/changelog check` sai 0) e **sem editar o `CHANGELOG.md`** (#121). PR aberto antes da #121 com a linha no `[Unreleased]`: vale como está (o `scripts/release` junta), no máximo NIT; mudança na imagem declara que **precisa de release** (e o PR não faz release nem tag);
 - config de agente só com edição estrutural (tomlkit, jq, bloco gerenciado), nunca `sed` em arquivo que outra ferramenta escreve;
 - porta de container nunca em `0.0.0.0`; nada de `BW_*` no container; segredo só pelo Vaultwarden, lido pelo host;
 - telemetria no bucket nunca apagada; ferramenta nova manda consumo ao bucket + Langfuse;
@@ -253,7 +253,7 @@ Percorra todas as frentes e dê, para cada uma, `ok`, `achado` (com severidade) 
 - **Compatibilidade:** Mac (bash 3.2, Docker Desktop, BSD `sed`/`date`) e oute-server (arm64), configs e volumes já existentes, caminho de upgrade (`oute pull`, `oute down/up`) e se precisa de release;
 - **Escopo:** coerente com o eixo Spec (além do pedido) e com "uma sessão = uma issue"; nada de outra área de trabalho misturado;
 - **Testes:** existe teste para o comportamento mudado quando o repo tem teste para aquela área; o teste falha na base e passa no head (passo 6);
-- **Docs e CHANGELOG:** CHANGELOG em `[Unreleased]` só com a linha deste PR, README/`comandos.md`/AGENTS/CONTEXT atualizados quando o comportamento visível mudou, "precisa de release" declarado quando é o caso;
+- **Docs e CHANGELOG:** um fragmento em `changelog.d/` só com a entrada deste PR, na subseção certa e com o número da issue, sem tocar o `CHANGELOG.md` nem o fragmento de outro PR, README/`comandos.md`/AGENTS/CONTEXT atualizados quando o comportamento visível mudou, "precisa de release" declarado quando é o caso;
 - **Atribuição:** código ou texto de terceiros com origem, commit e licença registrados; nada copiado de fonte sem licença que permita; trailers de coautoria quando o repo pede.
 
 ## 10. Severidade e gate de dúvida
@@ -403,7 +403,7 @@ Se `baseRefName` do PR for outra, e a política não justificar (PR empilhado so
 
 ### 2. Ajustes mínimos
 
-Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `Closes` por `Refs` e completar o `## Falta`, a linha que falta no `CHANGELOG.md`, o modo `100755` de um script, um typo que quebra um gate, o conflito com a base. Se a correção sugerida não é mínima, pare aqui e devolva ao autor.
+Ajuste mínimo é a **correção sugerida** do relatório, sem ampliar: trocar `Closes` por `Refs` e completar o `## Falta`, o fragmento que falta em `changelog.d/`, o modo `100755` de um script, um typo que quebra um gate, o conflito com a base. Se a correção sugerida não é mínima, pare aqui e devolva ao autor.
 
 - **Corpo do PR** (`Closes` × `Refs`, `## Falta`; fora do swarm, veja o último item): `gh pr edit <N> --body-file <arquivo>`, mudando só o necessário. Não é commit.
 - **Arquivos** (fora do swarm; branch de sessão ativa, veja o último item): um commit por ajuste, no topo do branch do autor, com mensagem convencional que diz o ajuste e por quê (ex.: `fix: modo 100755 em tests/x.test.sh (oute-aidlc-qa-pr-audit)`) e os trailers de coautoria que o repo pede.
