@@ -12,6 +12,8 @@
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
+# Rodada de spawn/tell/close/watch: OUTE_SWARM_ID; sem ele, na worktree da coordenadora (sessao/swarm-<id>), a dela (com
+# aviso); fora dela, spawn grava em "avulso" e tell/close/watch usam a rodada mais recente.
 # Triagem, espera do ok do Bardi, acompanhamento e limpeza estão no prompt (/usr/local/lib/oute/swarm.md).
 # A coordenadora nunca faz merge sem pedido explícito; ações no host só pelo canal de aprovação.
 set -euo pipefail
@@ -26,6 +28,31 @@ slog() {
   if command -v oute-emit >/dev/null 2>&1; then oute-emit swarm "$(basename "$1")" "$2" >/dev/null 2>&1 || true; fi
 }
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
+
+# rodada da worktree de coordenadora em que o comando roda (#239): branch sessao/swarm-<id> ou pasta <repo>-swarm-<id>,
+# desde que exista ~/.oute/swarm/swarm-<id>/meta. Fora de uma, exit 1.
+coord_round() {
+  local b top c cands=()
+  b="$(git -C "$PWD" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  top="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ "$b" =~ ^sessao/(swarm-[A-Za-z0-9-]+)$ ]] && cands+=("${BASH_REMATCH[1]}")
+  [[ "${top##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4})$ ]] && cands+=("${BASH_REMATCH[1]}")
+  for c in ${cands[@]+"${cands[@]}"}; do
+    if [[ -f "$STATE_ROOT/$c/meta" ]]; then printf '%s' "$c"; return 0; fi
+  done
+  return 1
+}
+
+# rodada do comando, a mesma para spawn, tell, close e watch: a do OUTE_SWARM_ID; sem a variável (ex.: a sessão da
+# coordenadora reiniciou), a da worktree de coordenadora, com aviso em stderr. Fora das duas, exit 1 e cada comando
+# decide (spawn: avulso; tell, close e watch: a mais recente).
+round_id() {
+  local r
+  if [[ -n "${OUTE_SWARM_ID:-}" ]]; then printf '%s' "$OUTE_SWARM_ID"; return 0; fi
+  r="$(coord_round)" || return 1
+  echo "oute-swarm: OUTE_SWARM_ID ausente; assumindo a rodada $r (worktree da coordenadora)" >&2
+  printf '%s' "$r"
+}
 
 resolve_repo() {
   local r="$1"
@@ -64,7 +91,7 @@ cmd_start() {
 }
 
 cmd_spawn() {
-  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out cmd pfile count
+  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out cmd pfile count round max rrepo
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -84,20 +111,27 @@ cmd_spawn() {
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
   n="${slug%%-*}"
+  # rodada assumida pela worktree (sem OUTE_SWARM_ID): o max e o repo vêm do meta dela, não do ambiente
+  round="$(round_id || true)"; max="${OUTE_SWARM_MAX:-}"; rrepo="${OUTE_SWARM_REPO:-}"
+  if [[ -z "$round" ]]; then round=avulso
+  elif [[ -z "${OUTE_SWARM_ID:-}" ]]; then
+    max="$(sed -n 's/^max=//p' "$STATE_ROOT/$round/meta" | head -1)"; rrepo="$(sed -n 's/^repo=//p' "$STATE_ROOT/$round/meta" | head -1)"
+    [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "meta da rodada $round sem max válido ($STATE_ROOT/$round/meta); rode com OUTE_SWARM_ID=$round OUTE_SWARM_MAX=<n>"
+  fi
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
-  else main="${OUTE_SWARM_REPO:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"; fi
+  else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree da coordenadora)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
-  state="$STATE_ROOT/${OUTE_SWARM_ID:-avulso}"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
+  state="$STATE_ROOT/$round"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
   # o limite conta as abas abertas agora (spawned menos closed); sessão kaizen (7º campo) não conta
   count="$(awk -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1} $7 != "kaizen" && !($1 in c)' "$state/spawned" | wc -l)"
-  if (( ! force && ! kaizen )) && [[ -n "${OUTE_SWARM_MAX:-}" ]] && (( count >= OUTE_SWARM_MAX )); then
-    die "limite da rodada atingido ($count/$OUTE_SWARM_MAX abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
+  if (( ! force && ! kaizen )) && [[ -n "$max" ]] && (( count >= max )); then
+    die "limite da rodada atingido ($count/$max abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
   fi
   pfile="$state/$slug.prompt"
   {
     printf '%s\n\n' "$instr"
-    sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|${OUTE_SWARM_ID:-avulso}|g" "$LIB/swarm-worker.md"
+    sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
   } > "$pfile"
   out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "#$n ${slug#*-}" --no-focus 2>&1)" \
     || die "herdr tab create falhou: $out"
@@ -128,10 +162,10 @@ tab_exists() {
 is_closed() { grep -qsxF -- "$2" "$1/closed"; }
 mark_closed() { is_closed "$1" "$2" || { printf '%s\n' "$2" >> "$1/closed"; slog "$1" "$(date -u +%FT%TZ) close $2"; }; }
 
-# rodada: a da coordenadora (OUTE_SWARM_ID) ou, fora dela, a mais recente
+# rodada: a da coordenadora (round_id) ou, fora dela, a mais recente
 round_dir() {
   local d
-  if [[ -n "${OUTE_SWARM_ID:-}" ]]; then d="$STATE_ROOT/$OUTE_SWARM_ID"
+  if d="$(round_id)"; then d="$STATE_ROOT/$d"
   else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; d="${d%/}"; fi
   [[ -n "$d" && -f "$d/spawned" ]] || die "nenhuma aba registrada (${d:-$STATE_ROOT})"
   printf '%s' "$d"
@@ -462,7 +496,7 @@ cmd_watch() {
     esac
   done
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 10 )) || die "--interval inválido: $interval (mínimo 10 s)"
-  round="${round:-${OUTE_SWARM_ID:-}}"
+  [[ -n "$round" ]] || round="$(round_id || true)"
   if [[ -n "$round" ]]; then W_STATE="$STATE_ROOT/$round"
   else W_STATE="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; W_STATE="${W_STATE%/}"; fi
   [[ -n "$W_STATE" && -f "$W_STATE/meta" ]] || die "rodada não encontrada: ${W_STATE:-$STATE_ROOT}"
@@ -508,7 +542,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;

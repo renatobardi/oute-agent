@@ -234,6 +234,84 @@ check "close: marca a sessão fechada"                    grep -qx '7-bar' "$STA
 sw list
 check "list: sessão fechada marcada"                     grep -q "$LAB kaizen (fechada)" <<<"$OUT"
 
+# ---------------------------------------------------------------- #239: coordenadora que reiniciou sem OUTE_SWARM_ID
+# swc <dir> <args>: roda o oute-swarm em <dir> sem OUTE_SWARM_ID/REPO/MAX no ambiente (WATCHING=1: o sleep falso vira
+# o gancho do watch). coord <dir> <branch>: pasta git com o HEAD em <branch>.
+swc() {
+  local d="$1" g=(); shift; command -v timeout >/dev/null && g=(timeout 30)
+  OUT="$(cd "$d" && env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" \
+         STATE="$STATE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 ${WATCHING:+FAKE_WATCH=1} \
+         OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" \
+         ${g[@]+"${g[@]}"} "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+}
+coord() { gitrepo "$1" && git -C "$1" symbolic-ref HEAD "refs/heads/$2"; }
+ASSUME='OUTE_SWARM_ID ausente; assumindo a rodada swarm-test (worktree da coordenadora)'
+
+# 7b. spawn na worktree sessao/swarm-<id>: assume a rodada, com o max e o repo do meta, e avisa em stderr
+CASE=assume; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
+swc "$WT" spawn 8-bar "instrução"
+check "assume: código 0"                                 [ "$RC" -eq 0 ]
+check "assume: aviso em stderr com a rodada"             grep -qF "$ASSUME" <<<"$ERR"
+check "assume: spawned da rodada, com o repo do meta"    [ "$(awk '$1=="8-bar" {print $6}' "$STATE/spawned")" == "$REPO" ]
+check "assume: log da rodada"                            grep -q ' spawn 8-bar claude$' "$STATE/log"
+check "assume: nada em avulso"                           [ ! -e "$H/.oute/swarm/avulso" ]
+check "assume: prompt da sessão cita a rodada"           grep -q 'swarm-test' "$STATE/8-bar.prompt"
+sed -i.bak 's/^max=.*/max=2/' "$STATE/meta"
+swc "$WT" spawn 9-baz "instrução"
+check "assume: max do meta recusa a 3ª aba"              [ "$RC" -ne 0 ]
+check "assume: mensagem com o max do meta"               grep -q 'limite da rodada atingido (2/2 abertas)' <<<"$ERR"
+check "assume: recusada não entra no spawned"            [ -z "$(awk '$1=="9-baz"' "$STATE/spawned")" ]
+sed -i.bak '/^repo=/d' "$STATE/meta"
+swc "$WT" spawn 9-rep "instrução" --kaizen
+check "meta sem repo: vale o repo da worktree"           [ "$RC" -eq 0 -a "$(awk '$1=="9-rep" {print $6}' "$STATE/spawned")" == "$WT" ]
+before="$(cat "$STATE/spawned")"
+sed -i.bak '/^max=/d' "$STATE/meta"
+swc "$WT" spawn 9-baz "instrução"
+check "meta sem max: falha"                              [ "$RC" -ne 0 ]
+check "meta sem max: mensagem clara"                     grep -q 'meta da rodada swarm-test sem max válido' <<<"$ERR"
+check "meta sem max: nada registrado nem aberto"         [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 2 ]
+
+# 7c. pasta <repo>-swarm-<id> (branch qualquer) também vale; o OUTE_SWARM_ID, quando existe, ganha da worktree
+CASE=pasta; round "$CASE"; ID=swarm-0101-0000; WT="$TMP/$CASE/repo-$ID"; coord "$WT" main
+mkdir -p "$H/.oute/swarm/$ID"; printf 'repo=%s\nmax=3\nlabel=\nstarted=2026-01-01T00:00:00Z\n' "$REPO" > "$H/.oute/swarm/$ID/meta"
+swc "$WT" spawn 8-bar "instrução"
+check "pasta: assume a rodada da pasta"                  [ "$RC" -eq 0 ] && grep -qF "assumindo a rodada $ID" <<<"$ERR"
+check "pasta: spawned da rodada, com o repo do meta"     [ "$(awk '$1=="8-bar" {print $6}' "$H/.oute/swarm/$ID/spawned")" == "$REPO" ]
+OUT="$(cd "$WT" && env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+       OUTE_SWARM_ID=swarm-test "$SWARM" spawn 9-baz "instrução" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+check "variável ganha: grava na rodada do OUTE_SWARM_ID" [ "$RC" -eq 0 ] && grep -q '^9-baz ' "$STATE/spawned"
+check "variável ganha: sem aviso"                        [ -z "$ERR" ]
+
+# 7d. fora de worktree de coordenadora (ou com branch swarm sem meta): avulso, como antes, sem aviso
+CASE=avulso; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-sem-meta
+swc "$REPO" spawn 8-bar "instrução"
+check "avulso: código 0, sem aviso"                      [ "$RC" -eq 0 -a -z "$ERR" ]
+check "avulso: grava em avulso (spawned e log)"          grep -q '^8-bar ' "$H/.oute/swarm/avulso/spawned" && grep -q ' spawn 8-bar claude$' "$H/.oute/swarm/avulso/log"
+check "avulso: a rodada não recebe nada"                 [ "$(wc -l < "$STATE/spawned")" -eq 1 ]
+swc "$WT" spawn 9-baz "instrução"
+check "branch swarm sem meta: avulso, sem aviso"         [ "$RC" -eq 0 -a -z "$ERR" ] && grep -q '^9-baz ' "$H/.oute/swarm/avulso/spawned"
+
+# 7e. spawn, tell, close e watch sem a variável, na worktree da coordenadora: a mesma rodada, mesmo com outra mais recente
+CASE=mesma; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
+swc "$WT" spawn 8-bar "instrução"
+NEW="$H/.oute/swarm/swarm-nova"; mkdir -p "$NEW"; cp "$STATE/meta" "$NEW/meta"
+printf '7-foo w1:p9 claude 2026-01-01T00:00:01Z w1:t9\n' > "$NEW/spawned"; touch -t 203001010000 "$NEW"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
+echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
+echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
+swc "$WT" tell 8-bar "pode seguir"
+check "mesma: tell acha a sessão na rodada da worktree"  [ "$RC" -eq 0 ] && grep -q " tell 8-bar ok"$'\t'"pode seguir\$" "$STATE/log"
+check "mesma: tell avisa a rodada assumida"              grep -qF "$ASSUME" <<<"$ERR"
+swc "$WT" close 8-bar --yes
+check "mesma: close na rodada da worktree"               [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-test" ] && grep -qx '8-bar' "$STATE/closed"
+WATCHING=1 swc "$WT" watch
+check "mesma: watch na rodada da worktree"               [ "$RC" -eq 0 ] && grep -q 'oute-swarm watch: rodada swarm-test ' <<<"$ERR"
+check "mesma: a rodada mais recente fica intacta"        [ ! -e "$NEW/log" -a ! -e "$NEW/closed" -a ! -e "$NEW/fechada" ]
+swc "$REPO" close 7-foo
+check "fora da worktree: close segue na mais recente"    [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-nova" -a -z "$ERR" ]
+STATE="$NEW" WATCHING=1 swc "$WT" watch --round swarm-nova
+check "watch --round: ganha da worktree, sem aviso"      [ "$RC" -eq 0 ] && grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR" && ! grep -q 'assumindo' <<<"$ERR"
+
 # ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
 # cada linha do log da rodada também chega ao receptor como log OTLP (oute-emit), com a origem e o oute.agent
 . "$ROOT/tests/lib/otlp.sh"
