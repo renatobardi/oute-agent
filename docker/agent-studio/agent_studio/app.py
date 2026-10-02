@@ -1,6 +1,6 @@
 """API do agent-studio: recebe OTLP/HTTP JSON do collector e grava no DuckDB (ADR-08 §4 e §6), e serve a
 consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
-#204) e a tela (`web.py`, #206).
+#204) e a tela (`web.py`, #206 e #207).
 
 - `Authorization: Bearer <token>` (item `agent-studio` do vault); sem token ou com token errado = 401.
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
@@ -180,8 +180,8 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         return JSONResponse({"at": _iso(at_ns), "time": "hora do fato (UTC)", **result,
                              "config": {"errors": config.errors}})
 
-    # ------------------------------------------------ tela: login e conversas (#206)
-    web.mount(app, store, auth, config, tel, _window)
+    # ------------------------------------------------ tela: login e conversas (#206), sessões (#207)
+    web.mount(app, store, auth, config, tel, _window, surreal)
 
     return app
 

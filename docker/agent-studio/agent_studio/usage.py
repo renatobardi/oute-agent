@@ -1,8 +1,8 @@
 """Agregação de uso (ADR-08 §9, #203): custo real e estimado, tokens, erros, p95 e série diária, com qualquer
-agrupamento de `day`/`host`/`agent`/`model`/`conversation`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
+agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dias em UTC. As regras de escopo e de custo estão no `cost.py`.
 
-`aggregate` é a peça reusável (alertas #204, tray #205, tela #206); `usage` monta a resposta do `/v1/usage`.
+`aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
 from datetime import datetime, timezone
 
@@ -10,10 +10,11 @@ from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_S
                    estimate_cost_usd)
 
 DAY_NS = 86_400_000_000_000
-KEYS = ("day", "host", "agent", "model", "conversation")
-# conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206)
+KEYS = ("day", "host", "agent", "model", "conversation", "session")
+# conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
+# session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"day": f"CAST(time_unix_nano // {DAY_NS} AS BIGINT)", "host": "host_name", "agent": "oute_agent",
-         "model": "model", "conversation": "session_id"}
+         "model": "model", "conversation": "session_id", "session": "oute_task_id"}
 # logs não têm modelo: agrupados por modelo, caem no modelo nulo
 _LOG_COLS = {**_COLS, "model": "CAST(NULL AS VARCHAR)"}
 _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"

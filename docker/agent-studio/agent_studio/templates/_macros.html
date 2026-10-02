@@ -49,3 +49,108 @@
   {% endfor %}
 </div>
 {% endmacro %}
+
+{# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
+{% macro filter(action, windows, hours, range, hosts, host, agents, agent) %}
+<form class="filtro" method="get" action="{{ action }}" hx-get="{{ action }}" hx-trigger="change" hx-target="#conteudo"
+      hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true">
+  {% if range.from %}
+  <label>De <input name="from" value="{{ range.from }}"></label>
+  <label>Até <input name="to" value="{{ range.to }}"></label>
+  {% else %}
+  <label>Janela
+    <select name="hours">
+      {% for value, label in windows %}<option value="{{ value }}"{% if value == hours %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      {% if hours not in windows|map("first") %}<option value="{{ hours }}" selected>{{ hours }} h</option>{% endif %}
+    </select>
+  </label>
+  {% endif %}
+  <label>Host
+    <select name="host">
+      <option value="">todos</option>
+      {% for h in hosts %}<option value="{{ h }}"{% if h == host %} selected{% endif %}>{{ h }}</option>{% endfor %}
+      {% if host and host not in hosts %}<option value="{{ host }}" selected>{{ host }}</option>{% endif %}
+    </select>
+  </label>
+  <label>Agente
+    <select name="agent">
+      <option value="">todos</option>
+      {% for a in agents %}<option value="{{ a }}"{% if a == agent %} selected{% endif %}>{{ a }}</option>{% endfor %}
+      {% if agent and agent not in agents %}<option value="{{ agent }}" selected>{{ agent }}</option>{% endif %}
+    </select>
+  </label>
+  <button type="submit">Aplicar</button>
+</form>
+{% endmacro %}
+
+{# ---- sessões (#207): as mesmas colunas para a linha da sessão e para a linha de cada conversa ---- #}
+{% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
+
+{% macro usage_cells(u) %}
+<td class="n">{{ u.calls|num }}</td>
+<td class="n">{{ u.tokens.input|num }}</td>
+<td class="n">{{ u.tokens.output|num }}</td>
+<td class="n">{{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</td>
+<td class="n custo">{{ cost(u.cost) }}</td>
+<td class="n">{{ u.latency_p95_ms|ms }}</td>
+<td class="n{% if u.errors.total %} erro{% endif %}">{{ u.errors.total|num }}</td>
+{% endmacro %}
+
+{# modelos das chamadas ao modelo; com mais de um, quantas chamadas cada #}
+{% macro model_list(models) %}
+{% for m in models %}<span class="modelo">{{ m.model or "(sem modelo)" }}{% if models|length > 1 %} ×{{ m.calls|num }}{% endif %}</span>{% else %}—{% endfor %}
+{% endmacro %}
+
+{% macro session_head() %}
+<thead><tr>
+  <th>Início (UTC)</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
+  <th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
+  <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
+  <th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
+</tr></thead>
+{% endmacro %}
+
+{% macro conversation_row(c) %}
+<tr data-conversa="{{ c.id }}" data-da-sessao="{{ c.session or '' }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}"
+    data-models="{{ c.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-start-ns="{{ c.start_ns }}"
+    data-duration-ns="{{ c.duration_ns }}" {{ usage_data(c.usage) }}>
+  <td class="hora">{{ c.start_ns|ts }}</td>
+  <td{% if c.session %} class="da-sessao"{% endif %}><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a></td>
+  <td>{{ c.host or "—" }}</td>
+  <td>{{ c.agent or "—" }}</td>
+  <td>{{ model_list(c.models) }}</td>
+  <td class="n">{{ c.duration_ns|dur }}</td>
+  {{ usage_cells(c.usage) }}
+</tr>
+{% endmacro %}
+
+{# repo, estado, rodada e issue da sessão: o que o SurrealDB souber dela #}
+{% macro session_tags(s) %}
+{% set st = s.state %}
+{% if st and (st.repo or st.slug) %}<span class="sub">{{ st.repo or "—" }} · {{ st.slug or "—" }}</span>{% endif %}
+{% if st and st.state %}<span class="etiqueta">{{ st.state }}</span>{% endif %}
+{% if s.swarm_round %}<span class="etiqueta">rodada {{ s.swarm_round }}{% if s.round and s.round.label %} ({{ s.round.label }}){% endif %}</span>
+{% else %}<span class="etiqueta">avulsa</span>{% endif %}
+{% if st and st.issue is not none %}<span class="etiqueta">issue #{{ st.issue }}</span>{% endif %}
+{% endmacro %}
+
+{% macro session_row(s) %}
+<tr class="sessao" data-sessao="{{ s.id }}" data-host="{{ s.host or '' }}" data-agents="{{ s.agents|join(',') }}"
+    data-models="{{ s.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-round="{{ s.swarm_round or '' }}"
+    data-state="{{ s.state.state or '' if s.state else '' }}" data-conversations="{{ s.conversation_count }}"
+    data-start-ns="{{ '' if s.start_ns is none else s.start_ns }}" data-duration-ns="{{ '' if s.duration_ns is none else s.duration_ns }}"
+    {{ usage_data(s.usage) }}>
+  <td class="hora">{{ s.start_ns|ts }}</td>
+  <td><a href="/sessao?id={{ s.id|urlencode }}">{{ s.id }}</a> {{ session_tags(s) }}</td>
+  <td>{{ s.host or "—" }}</td>
+  <td>{{ s.agents|join(", ") or (s.state.agent if s.state and s.state.agent else "—") }}</td>
+  <td>{{ model_list(s.models) }}</td>
+  <td class="n">{{ s.duration_ns|dur }}</td>
+  {{ usage_cells(s.usage) }}
+</tr>
+{% endmacro %}
+
+{% macro state_warning(state_read) %}
+{% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das sessões (SurrealDB) não pôde ser lido:
+  repositório, estado e rodada podem faltar. A causa está no log do agent-studio.</p>{% endif %}
+{% endmacro %}

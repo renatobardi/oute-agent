@@ -1,4 +1,5 @@
-"""Tela do agent-studio (ADR-08 §9, #206): login por token que vira cookie, lista de conversas e detalhe.
+"""Tela do agent-studio (ADR-08 §9): login por token que vira cookie, lista de conversas e detalhe (#206) e
+as sessões do `oute-task` com as conversas de cada uma (#207).
 
 HTML gerado no servidor (Jinja2, sempre com autoescape) + htmx servido daqui mesmo (`/static`): sem SPA, sem build
 de front-end e sem CDN. Só leitura.
@@ -7,6 +8,8 @@ de front-end e sem CDN. Só leitura.
 - `POST /login` com o token errado = 401; certo = cookie (`auth.py`) e volta para onde ia. `POST /logout` apaga.
 - O conteúdo das conversas (prompts, saídas de tool) é dado não confiável: autoescape em tudo e uma CSP que só
   aceita script e estilo deste servidor.
+- Sessões: os fatos vêm do DuckDB e o estado da sessão (repo, estado, rodada) do SurrealDB. SurrealDB fora não
+  derruba a página: ela sai só com o DuckDB e um aviso.
 """
 import logging
 import os
@@ -19,7 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import conversations as conv_mod
+from . import conversations as conv_mod, sessions as sess_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -62,6 +65,15 @@ def _dur(ns):
     return f"{h} h {m:02d} min" if h else f"{m} min {s:02d} s"
 
 
+def _ms(ms):
+    return _dur(None if ms is None else int(ms * 1e6))
+
+
+def _when(iso):
+    # datetime do SurrealDB (`2026-09-29T07:43:00.5Z`) -> `2026-09-29 07:43:00`
+    return iso[:19].replace("T", " ") if isinstance(iso, str) and iso else "—"
+
+
 def _num(n):
     return "—" if n is None else _br(f"{n:,}")
 
@@ -73,7 +85,7 @@ def _usd(v):
 def _env():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
-    env.filters.update(ts=_ts, dur=_dur, num=_num, usd=_usd)
+    env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd)
     return env
 
 
@@ -86,8 +98,9 @@ def safe_next(target):
     return target
 
 
-def mount(app, store, auth, config, tel, window):
-    """Liga as rotas da tela no app. `window(query_params)` é a regra de janela do `/v1/usage` (ValueError = 400)."""
+def mount(app, store, auth, config, tel, window, surreal=None):
+    """Liga as rotas da tela no app. `window(query_params)` é a regra de janela do `/v1/usage` (ValueError = 400).
+    `surreal` = cliente do SurrealDB para o estado das sessões (`None` = sem ele: a tela mostra só o DuckDB)."""
     env = _env()
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
 
@@ -218,3 +231,53 @@ def mount(app, store, auth, config, tel, window):
         if data is None:
             return error(404, "Span não encontrado.")
         return page("span_detail.html" if is_htmx(request) else "span.html", span=data)
+
+    # ------------------------------------------------ sessões (#207)
+    async def with_state(sessions):
+        """Estado do SurrealDB nas sessões: `True` = lido; `False` = a leitura falhou (a página segue só com o
+        DuckDB, com aviso; a causa só no stderr); `None` = este processo não tem SurrealDB."""
+        if surreal is None:
+            return None
+        try:
+            await run_in_threadpool(sess_mod.with_state, surreal, sessions)
+            return True
+        except Exception as e:  # noqa: BLE001 — o estado só enfeita: sem ele, a página sai com o DuckDB
+            tel.warn("web-state-failed", "tela: estado das sessões (SurrealDB) falhou, segui sem ele: %s",
+                     type(e).__name__, level=logging.ERROR)
+            detail_log.exception("tela: estado das sessões falhou")
+            return False
+
+    @app.get("/sessoes")
+    async def sessions(request: Request):
+        if (denied := gate(request)) is not None:
+            return denied
+        q = request.query_params
+        try:
+            from_ns, to_ns = window(q)
+        except ValueError as e:
+            return error(400, str(e))
+        host, agent = q.get("host", ""), q.get("agent", "")
+        data, failed = await read("lista de sessões", store.sessions, from_ns, to_ns, config.prices, host, agent)
+        if failed:
+            return failed
+        state = await with_state(data["sessions"])
+        return page("sessions.html", **data, state_read=state, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent,
+                    windows=WINDOWS, hours=q.get("hours", "" if "from" in q else "24"),
+                    range={"from": q.get("from", ""), "to": q.get("to", "")}, limit=conv_mod.LIST_LIMIT)
+
+    @app.get("/sessao")
+    async def session(request: Request):
+        if (denied := gate(request)) is not None:
+            return denied
+        task_id = request.query_params.get("id", "")
+        if not task_id:
+            return error(400, "Falta o id da sessão.")
+        data, failed = await read("sessão", store.session, task_id, config.prices)
+        if failed:
+            return failed
+        # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
+        data = data or {"session": sess_mod.blank(task_id), "events": [], "events_truncated": False}
+        state = await with_state([data["session"]])
+        if data["session"]["start_ns"] is None and not data["session"]["state"]:
+            return error(404, "Sessão não encontrada.")
+        return page("session.html", **data, id=task_id, state_read=state, event_limit=sess_mod.EVENT_LIMIT)
