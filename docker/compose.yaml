@@ -63,8 +63,6 @@ services:
     depends_on:
       volume-init:
         condition: service_completed_successfully
-      jev-router:
-        condition: service_started
       ai-memory:
         condition: service_started
       otel-collector:
@@ -76,29 +74,6 @@ services:
     init: true
     tty: true
     stdin_open: true
-
-  jev-router:
-    # fixado por digest (= litellm 1.103.0, build de 2026-09-20, o que já rodava). Upgrade é deliberado: troca aqui + router-sync + teste.
-    image: ${OUTE_LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest@sha256:114aca7726c311915c8ea5120fcc44d32a0648c3ae3aec41a1014f0e846b16d1}
-    container_name: oute-jev-router
-    logging: *logging
-    restart: unless-stopped
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-oute-local}
-      # A/B Jev × openrouter/auto (#15): off | split | auto ; share = fração das conversas no braço auto
-      OUTE_AB_MODE: ${OUTE_AB_MODE:-off}
-      OUTE_AB_AUTO_SHARE: ${OUTE_AB_AUTO_SHARE:-0.5}
-      # callback "otel" (config.yaml gerado): spans com modelo servido, tokens, custo e metadata do Jev
-      OTEL_EXPORTER: otlp_grpc
-      OTEL_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: jev-router
-    volumes:
-      - ./config/litellm/config.yaml:/app/config.yaml:ro
-      - ./config/litellm/router.yaml:/app/router.yaml:ro
-      - ./config/litellm/jev_hook.py:/app/jev_hook.py:ro
-    networks: [oute]
 
   ai-memory:
     # mesma versão do cliente embutido na imagem do agent (Dockerfile ARG AI_MEMORY_VERSION)

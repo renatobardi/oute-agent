@@ -1,5 +1,5 @@
 # OTel Collector do oute-agent (issue #13, ADR-04) — porta de entrada única de telemetria.
-# Fontes (rede docker "oute", sem porta publicada): Claude Code, Codex, jev-router (LiteLLM).
+# Fontes (rede docker "oute", sem porta publicada): Claude Code e Codex.
 # Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt.
 # Destino 2 (opcional, langfuse.yaml): Langfuse Cloud — só traces, só metadados (allowlist).
 # Sem perda no bucket (#161, #152): fila em disco por exporter, lote formado na fila (não em memória),
@@ -32,8 +32,8 @@ processors:
       - {key: host.name, value: "${env:OUTE_HOST}", action: upsert}
       - {key: oute.instance, value: "${env:OUTE_INSTANCE}", action: upsert}
       - {key: deployment.environment, value: "${env:OUTE_HOST}", action: upsert}
-  # oute.agent = qual agente gerou a telemetria (claude | codex | router); nos spans do jev-router o hook
-  # já grava o cliente real (pi, …) em span.attributes["oute.agent"], que tem precedência
+  # oute.agent = qual agente gerou a telemetria (claude | codex). O valor do span, quando a fonte o grava, tem
+  # precedência sobre o do resource
   transform/agent:
     error_mode: ignore
     trace_statements:
@@ -41,7 +41,6 @@ processors:
         statements: &agent_by_service
           - set(resource.attributes["oute.agent"], "claude") where resource.attributes["service.name"] == "claude-code"
           - set(resource.attributes["oute.agent"], "codex") where IsMatch(resource.attributes["service.name"], "(?i)^codex")
-          - set(resource.attributes["oute.agent"], "router") where resource.attributes["service.name"] == "jev-router"
       - context: span
         statements:
           - set(span.attributes["oute.agent"], resource.attributes["oute.agent"]) where span.attributes["oute.agent"] == nil

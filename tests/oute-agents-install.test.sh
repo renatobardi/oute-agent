@@ -76,7 +76,7 @@ fresh() { H="$TMP/$1"; mkdir -p "$H"; return 0; }
 # roda o instalador com os shims e a reserva no PATH (como no container) e os pins da imagem; guarda saída em $OUT e
 # código em $RC. PINS="" simula imagem sem os pins do codex.
 run() {
-  OUT="$(HOME="$H" OPENROUTER_API_KEY=segredo-teste GH_TOKEN=segredo-teste \
+  OUT="$(HOME="$H" AI_MEMORY_AUTH_TOKEN=segredo-teste GH_TOKEN=segredo-teste \
     OUTE_SHIMS_DIR="$SHIMS" OUTE_AGENTS_FALLBACK="$FALLBACK" \
     OUTE_CODEX_VERSION="${PIN_V-$CODEX_V}" OUTE_CODEX_INSTALLER_SHA256="${PIN_SUM-$CODEX_SUM}" \
     PATH="$SHIMS:$FALLBACK:$STUB:$SYS" "$INSTALL" "$@" 2>&1)"; RC=$?

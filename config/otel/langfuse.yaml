@@ -5,9 +5,7 @@ processors:
   filter/no_events:
     error_mode: ignore
     traces:
-      # spans internos do LiteLLM = ruído no painel (continuam no bucket)
       span:
-        - 'IsMatch(name, "^(auth|router|self|proxy_pre_call|raw_gen_ai_request|batch_write_to_db|redis|postgres)$")'
         # Codex: allowlist de spans (1 exec gerava ~7 traces + milhares de fs.*/append_items/thread/*).
         # Fica só o esqueleto útil: sessão -> turno -> amostragem -> tool/hook. Resto segue no bucket.
         - >-
@@ -33,7 +31,7 @@ processors:
           - set(span.attributes["gen_ai.usage.cache_read_input_tokens"], span.attributes["codex.turn.token_usage.cached_input_tokens"]) where span.attributes["codex.turn.token_usage.cached_input_tokens"] != nil
           - set(span.attributes["gen_ai.request.model"], span.attributes["model"]) where span.name == "session_task.turn" and span.attributes["model"] != nil
           - set(span.attributes["langfuse.observation.type"], "generation") where span.name == "session_task.turn"
-          # agente (claude | codex | router | …) -> metadata do trace, filtrável no Langfuse
+          # agente (claude | codex) -> metadata do trace, filtrável no Langfuse
           - set(span.attributes["langfuse.trace.metadata.agent"], span.attributes["oute.agent"]) where span.attributes["oute.agent"] != nil
           # origem: máquina = Environment nativo do Langfuse (seletor no topo); máquina/instância também em metadata
           - set(span.attributes["langfuse.environment"], resource.attributes["host.name"]) where resource.attributes["host.name"] != nil
@@ -45,7 +43,7 @@ processors:
         statements:
           - >-
             keep_matching_keys(span.attributes,
-            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(environment|trace\\.name|trace\\.tags|trace\\.metadata\\.(agent|host|instance)|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|metadata\\.oute_router.*|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
+            "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(environment|trace\\.name|trace\\.tags|trace\\.metadata\\.(agent|host|instance)|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")
       # eventos que sobraram (Codex): mesma lógica de allowlist — prompt/resposta nunca saem
       - context: spanevent
         statements:

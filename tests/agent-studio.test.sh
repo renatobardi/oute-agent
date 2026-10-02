@@ -239,7 +239,7 @@ check "Dockerfile: copia o pacote e instala por hash"  bash -c 'grep -q "COPY do
 
 # ---------------------------------------------------------------- 8. `oute up`: item do vault -> profile
 # só as funções do agent-studio (o script inteiro roda o case no fim)
-FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^router_sync()/p' "$ROOT/scripts/oute" | sed '$d')"
+FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$ROOT/scripts/oute" | sed '$d')"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 envf="$TMP/env"; : > "$envf"
 T1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"; S1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"

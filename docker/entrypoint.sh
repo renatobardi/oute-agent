@@ -229,7 +229,7 @@ case "$MODE" in
     setup_ssh
     # env pros logins ssh
     # declare -px cita os valores (espaços, vírgulas, '=' não quebram o source)
-    declare -px | grep -E '^declare -x (OPENROUTER|GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|LITELLM|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' \
+    declare -px | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' \
       > "$HOME/.oute_env"
     # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
     for rc in "$HOME/.profile" "$HOME/.bashrc"; do
