@@ -124,6 +124,7 @@ check "AGENT_STUDIO_TOKEN vazio: não cria o banco"     test ! -e "$TMP/x.duckdb
 
 # ---------------------------------------------------------------- 6b. spans e métricas (#186)
 # spans do Claude Code (claude_code.llm_request), do Codex (session_task.turn) e o jev.decision do jev-router
+# (histórico até 2026-09-30, #218: o jev-router saiu do stack; a ingestão continua lendo o registro antigo)
 cat > "$TMP/traces.json" <<'EOF'
 {"resourceSpans":[
  {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-server"}},{"key":"oute.instance","value":{"stringValue":"oute-agent"}},

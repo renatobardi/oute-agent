@@ -2,7 +2,8 @@
 # mudança entra com `git pull` + `oute down/up`, sem release. Preços (#203) e alertas (#204).
 
 # Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (hoje, o
-# Codex). Claude Code e jev.decision (OpenRouter) mandam o custo real e não dependem desta tabela.
+# Codex). O Claude Code manda o custo real e não depende desta tabela (nem o `jev.decision` do roteador, só em
+# registro histórico, até 2026-09-30).
 #   input          = entrada não cacheada        output         = saída
 #   cache_read     = entrada lida do cache       cache_creation = escrita no cache
 # `input` e `output` são obrigatórios; cache ausente = preço de `input` (estima para cima, nunca de graça).

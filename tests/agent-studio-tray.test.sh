@@ -44,6 +44,7 @@ DAY = NOW // 86400 * 86400
 P1, P2, P5 = "20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "p <b>5</b>&x=é"
 claude = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "claude-code", "oute.agent": "claude"}
 codex = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "codex_exec", "oute.agent": "codex"}
+# histórico até 2026-09-30 (#218): registro do jev-router, que saiu do stack; o custo gravado continua contando
 router = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "jev-router", "oute.agent": "router"}
 cl = lambda **a: {"model": "claude-sonnet-5", **a}
 cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,

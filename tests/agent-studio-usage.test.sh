@@ -23,6 +23,8 @@ tmp = sys.argv[1]
 D1, D2 = 1759000000, 1759000000 + 86400
 claude = {"host.name": "oute-server", "service.name": "claude-code", "oute.agent": "claude"}
 codex = {"host.name": "oute-mac", "service.name": "codex_exec", "oute.agent": "codex"}
+# histórico até 2026-09-30 (#218): o jev-router saiu do stack; o que ele gravou (jev.decision, spans do LiteLLM com
+# oute.agent=router) segue no DuckDB e o /v1/usage tem que continuar somando o custo passado
 router = {"host.name": "oute-server", "service.name": "jev-router", "oute.agent": "router"}
 cl = lambda **a: {"model": "claude-sonnet-5", **a}
 cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,
@@ -112,6 +114,7 @@ check "Codex: tokens de entrada, saída e cache"        jqe '.tokens == {input: 
 check "Codex: preço achado sem prefixo e sem caixa"    jqe "$(usd .cost.estimated_usd) == 10000 and .errors.spans == 1" <<<"$(row oute-mac codex OpenAI/GPT-5-Codex)"
 U="$(row oute-mac codex gpt-9-sem-preco)"
 check "sem preço: estimado null, nunca 0"              jqe '.cost.estimated_usd == null and .cost.unpriced_calls == 1 and .tokens.input == 500' <<<"$U"
+# histórico até 2026-09-30 (#218): custo passado do jev.decision continua no /v1/usage
 check "jev.decision conta para o cliente (pi)"         jqe ".calls == 1 and $(usd .cost.real_usd) == 400 and .tokens.input == 50" <<<"$(row oute-server pi openai/gpt-oss-20b)"
 RT="$(row oute-server router openai/gpt-oss-20b)"
 check "router: só o jev.decision sem cliente soma"     jqe ".calls == 1 and $(usd .cost.real_usd) == 600 and .tokens.input == 60" <<<"$RT"
