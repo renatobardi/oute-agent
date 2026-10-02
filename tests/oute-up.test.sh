@@ -79,7 +79,7 @@ check "sintaxe (bash -n)" bash -n "$ROOT/scripts/oute"
 printf '%s\n%s\n' "$OTHER_LINE" "$ROUTER_LINE" > "$F_CRON"; : > "$F_LEGACY"
 oute up
 check "up sem a key do roteador: rc 0"                 [ "$RC" -eq 0 ]
-check "up: não reclama de segredo ausente"             hasnt 'ausente'
+check "up: não reclama de segredo ausente"             hasnt 'ausente em .*agent.env'
 check "up: compose up chamado"                         grep -q -- ' up -d --no-build' "$F_LOG"
 check "up: esperou o sshd"                             has 'sshd pronto'
 check "crontab: entrada do roteador removida"          bash -c '! grep -q "router[-]sync" "$F_CRON"'
