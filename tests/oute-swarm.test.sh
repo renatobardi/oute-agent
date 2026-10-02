@@ -35,11 +35,17 @@ case "$1 ${2:-}" in
   *) echo "herdr falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
-# gh: `pr list` devolve $FAKE/prs-<nome da pasta do repo>.json (o watch roda o gh dentro do repo)
+# gh: `pr list` devolve $FAKE/prs-<nome da pasta do repo>.json (o watch roda o gh dentro do repo). `api graphql`
+# (checks de um commit, #266) devolve $FAKE/checks-<sha>.json, falha se existir $FAKE/checks-<sha>.fail e anota
+# cada leitura em $FAKE/gh.log (<pasta do repo> <sha>)
 cat > "$BIN/gh" <<'SH'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
   "pr list") cat "$FAKE/prs-$(basename "$PWD").json" 2>/dev/null || echo '[]' ;;
+  "api graphql") oid=""; for a in "$@"; do [[ "$a" != oid=* ]] || oid="${a#oid=}"; done
+                 echo "$(basename "$PWD") $oid" >> "$FAKE/gh.log"
+                 [[ ! -e "$FAKE/checks-$oid.fail" ]] || { echo "gh falso: falha pedida" >&2; exit 1; }
+                 cat "$FAKE/checks-$oid.json" 2>/dev/null || echo '{"data":{"repository":{"object":null}}}' ;;
   *) echo "gh falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
@@ -309,6 +315,172 @@ swc "$REPO" close 7-foo
 check "fora da worktree: close segue na mais recente"    [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-nova" -a -z "$ERR" ]
 STATE="$NEW" WATCHING=1 swc "$WT" watch --round swarm-nova
 check "watch --round: ganha da worktree, sem aviso"      [ "$RC" -eq 0 ] && grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR" && ! grep -q 'assumindo' <<<"$ERR"
+
+# ---------------------------------------------------------------- #266: falha de CI em head já substituído
+# fake-pr <sha do head> [<estado>] [<checks do head, JSON>]: PR #12 da issue #7 no repo da rodada (usável nos ganchos)
+cat > "$BIN/fake-pr" <<'SH'
+#!/usr/bin/env bash
+jq -n --arg h "$1" --arg s "${2:-OPEN}" --argjson c "${3:-[]}" '[{number: 12, headRefName: "feat/7-foo", headRefOid: $h,
+  state: $s, mergeable: "MERGEABLE", createdAt: "2026-06-01T00:00:00Z", url: "https://github.com/x/y/pull/12",
+  statusCheckRollup: $c}]' > "$FAKE/prs-repo.json"
+SH
+# fake-checks <sha> <nome>=<conclusão>...: checks do commit (conclusão vazia = ainda rodando; "ctx:" na frente do nome
+# = status de commit, não check run)
+cat > "$BIN/fake-checks" <<'SH'
+#!/usr/bin/env bash
+sha="$1"; shift
+for a in "$@"; do
+  n="${a%=*}" c="${a##*=}"
+  if [[ "$n" == ctx:* ]]; then jq -n --arg n "${n#ctx:}" --arg c "$c" '{__typename: "StatusContext", context: $n, state: $c, startedAt: "2026-06-01T00:01:00Z"}'
+  else jq -n --arg n "$n" --arg c "$c" '{__typename: "CheckRun", name: $n, conclusion: (if $c == "" then null else $c end),
+         startedAt: "2026-06-01T00:01:00Z", completedAt: (if $c == "" then null else "2026-06-01T00:05:00Z" end)}'; fi
+done | jq -s '{data: {repository: {object: {statusCheckRollup: {contexts: {nodes: .}}}}}}' > "$FAKE/checks-$sha.json"
+SH
+chmod +x "$BIN/fake-pr" "$BIN/fake-checks"
+A=aaaaaaa1111111111111111111111111111111aa; B=bbbbbbb2222222222222222222222222222222bb
+RUN='[{"name":"checks","status":"IN_PROGRESS","conclusion":"","startedAt":"2026-06-01T00:01:00Z","completedAt":"0001-01-01T00:00:00Z"}]'
+OLDFAIL="[ci] PR #12 · checks: fail (head aaaaaaa, já substituído por bbbbbbb)"
+ci_events() { log_events | grep -F '[ci]' || true; }
+reads() { grep -cxF "repo $1" "$FAKE/gh.log" 2>/dev/null || true; }
+
+# 7f. o caso da #262: o check falha no head A e um push troca o head por B antes da passada seguinte
+CASE=substituido; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks=FAILURE "SonarCloud Code Analysis=SUCCESS" ctx:CodeRabbit=SUCCESS
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "substituído: código 0"                            [ "$RC" -eq 0 ]
+check "substituído: falha do head antigo, com o head"    logged "$OLDFAIL"
+check "substituído: verde do head antigo sem linha"      [ "$(ci_events)" == "$OLDFAIL" ]
+check "substituído: uma vez só entre passadas"           [ "$(count "$OLDFAIL")" -eq 1 ]
+check "substituído: head concluído é lido uma vez só"    [ "$(reads "$A")" -eq 1 ]
+check "substituído: log = stdout"                        [ "$(log_events)" == "$(out_events)" ]
+watch
+check "substituído: não repete depois do reinício"       [ "$(count "$OLDFAIL")" -eq 1 -a "$(reads "$A")" -eq 1 ]
+
+# 7g. falha já emitida enquanto o head era o atual não sai de novo quando ele é substituído
+CASE=jaemitida; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $A OPEN '[{"name":"checks","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]'
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks=FAILURE lint=FAILURE
+SH
+watch
+check "já emitida: a falha do head atual saiu"           logged "[ci] PR #12 · checks: fail"
+check "já emitida: sem segunda linha para o mesmo check" [ "$(count "$OLDFAIL")" -eq 0 ]
+check "já emitida: outro check do mesmo head sai"        logged "[ci] PR #12 · lint: fail (head aaaaaaa, já substituído por bbbbbbb)"
+
+# 7h. head antigo com check ainda rodando fica em observação; cancelado (o push novo cancela o run) não é falha
+CASE=rodando; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks= lint=CANCELLED
+cp "\$STATE/log" "\$FAKE/log.p2" 2>/dev/null || : > "\$FAKE/log.p2"
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+cp "\$STATE/log" "\$FAKE/log.p2"
+fake-checks $A checks=FAILURE lint=CANCELLED
+SH
+echo : > "$FAKE/on-sleep-3"
+watch
+check "rodando: nada enquanto o check roda, nem pelo cancelado" [ -z "$(grep -F '[ci]' "$FAKE/log.p2")" ]
+check "rodando: a falha sai quando o check conclui"      [ "$(ci_events)" == "$OLDFAIL" ]
+check "rodando: observação termina com o head concluído" [ "$(reads "$A")" -eq 2 ]
+
+# 7i. leitura dos checks do head antigo falha: aviso, o head segue em observação e a falha sai na passada seguinte
+CASE=ghfalha; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks=FAILURE
+: > "\$FAKE/checks-$A.fail"
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+cp "\$STATE/log" "\$FAKE/log.p2"
+rm -f "\$FAKE/checks-$A.fail"
+SH
+watch
+check "gh falha: aviso na passada da falha, sem [ci]"    grep -qF '[aviso] gh falhou nesta passada' "$FAKE/log.p2" && ! grep -qF '[ci]' "$FAKE/log.p2"
+check "gh falha: a falha sai quando o gh volta"          [ "$(ci_events)" == "$OLDFAIL" ]
+check "gh falha: aviso de volta"                         logged "[aviso] gh respondendo de novo"
+
+# 7j. resposta sem o repositório (não é JSON dos checks): mesmo tratamento da falha do gh
+CASE=ghlixo; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+echo '{"errors":[{"message":"x"}]}' > "\$FAKE/checks-$A.json"
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+fake-checks $A checks=FAILURE
+SH
+watch
+check "gh lixo: aviso e nova leitura"                    logged "[aviso] gh falhou nesta passada; mantendo o último estado conhecido" && [ "$(reads "$A")" -eq 2 ]
+check "gh lixo: a falha sai na passada seguinte"         [ "$(ci_events)" == "$OLDFAIL" ]
+
+# 7k. PR fechado ou mergeado: o head antigo é lido uma vez (a falha concluída sai) e sai da observação mesmo com check rodando
+CASE=mergeado; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B MERGED
+fake-checks $A checks=FAILURE lint=
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "mergeado: falha concluída do head antigo sai"     logged "$OLDFAIL"
+check "mergeado: sem nova leitura depois do merge"       [ "$(reads "$A")" -eq 1 ]
+
+# 7l. `gh pr list` falha na passada seguinte à troca de head: a observação é mantida e a falha sai uma vez só
+CASE=listafalha; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks=
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+cp "\$FAKE/prs-repo.json" "\$FAKE/prs.ok"; echo 'não é json' > "\$FAKE/prs-repo.json"
+fake-checks $A checks=FAILURE
+SH
+cat > "$FAKE/on-sleep-3" <<SH
+cp "\$FAKE/prs.ok" "\$FAKE/prs-repo.json"
+SH
+echo : > "$FAKE/on-sleep-4"
+watch
+check "lista falha: observação mantida, falha uma vez"   [ "$(ci_events)" == "$OLDFAIL" ]
+
+# 7l2. PR some da lista da rodada com o head antigo em observação: a observação termina
+CASE=sumiu; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'
+fake-checks $A checks=
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+echo '[]' > "\$FAKE/prs-repo.json"
+SH
+echo : > "$FAKE/on-sleep-3"
+watch
+check "PR sumiu: código 0, sem [ci] e sem nova leitura"  [ "$RC" -eq 0 -a -z "$(ci_events)" -a "$(reads "$A")" -eq 1 ]
+
+# 7m. PR de outro repo: a leitura roda no repo do PR e a linha leva o repo
+CASE=oldmulti; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
+printf '7-bar w1:p2 claude 2026-01-01T00:00:02Z w1:t2 %s kaizen\n' "$LAB" >> "$STATE/spawned"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#7 bar=working"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN "$RUN"; mv "$FAKE/prs-repo.json" "$FAKE/prs-lab.json"
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $B OPEN '$RUN'; mv "\$FAKE/prs-repo.json" "\$FAKE/prs-lab.json"
+fake-checks $A checks=FAILURE
+SH
+watch
+check "outro repo: falha do head antigo com o repo"      logged "[ci] PR lab#12 · checks: fail (head aaaaaaa, já substituído por bbbbbbb)"
+check "outro repo: leitura feita no repo do PR"          [ "$(grep -cxF "lab $A" "$FAKE/gh.log")" -eq 1 ]
 
 # ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
 # cada linha do log da rodada também chega ao receptor como log OTLP (oute-emit), com a origem e o oute.agent
