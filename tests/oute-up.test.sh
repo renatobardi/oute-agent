@@ -64,9 +64,11 @@ echo "ssh-ed25519 AAAA teste" > "$TMP/home/.ssh/id_ed25519.pub"
 ROUTER_LINE="0 4 * * * cd /repo && ./scripts/oute router""-sync >> /home/x/.oute/router""-sync.log 2>&1"
 OTHER_LINE="15 3 * * * /usr/local/bin/backup"
 
-# oute <cmd>: roda o scripts/oute de verdade com os falsos; guarda saída em $OUT e código em $RC
+# oute <cmd>: roda o scripts/oute de verdade com os falsos; guarda saída em $OUT e código em $RC. Sem OCI_S3_* no
+# ambiente: com eles (e rclone no host) o `up` montaria o bucket de verdade dentro de $TMP
 oute() {
   OUT="$(env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
+    -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/id_ed25519.pub" \
     "$ROOT/scripts/oute" "$@" 2>&1)"; RC=$?
@@ -79,7 +81,7 @@ check "sintaxe (bash -n)" bash -n "$ROOT/scripts/oute"
 printf '%s\n%s\n' "$OTHER_LINE" "$ROUTER_LINE" > "$F_CRON"; : > "$F_LEGACY"
 oute up
 check "up sem a key do roteador: rc 0"                 [ "$RC" -eq 0 ]
-check "up: não reclama de segredo ausente"             hasnt 'ausente em .*agent.env'
+check "up: não pede a key do roteador"                 hasnt "$OLD_KEY"
 check "up: compose up chamado"                         grep -q -- ' up -d --no-build' "$F_LOG"
 check "up: esperou o sshd"                             has 'sshd pronto'
 check "crontab: entrada do roteador removida"          bash -c '! grep -q "router[-]sync" "$F_CRON"'
