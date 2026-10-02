@@ -9,6 +9,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ### Fixed
 - **Guia do `oute help`: teclas do `oute approve` como no prompt** (#231). O `docker/comandos.md` dizia `N = recusa, r = relê`; o prompt do `scripts/oute` é `[s]im / [N]ão agora / [r]ecusar`: `s` executa, `N` (padrão, também Enter) deixa o pedido pendente e `r` recusa (não existe "relê"). Quem seguia o guia apertava `N` achando que recusava, ou `r` achando que relia. Só o guia muda; teclas e comportamento do `oute approve` ficam como estão. README, `agent-notes.md`, `swarm.md` e skills conferidos: já batiam com o prompt. Teste novo `tests/comandos-approve.test.sh` compara a linha do guia com o prompt e os ramos do `scripts/oute`. **Precisa de release** (`comandos.md` vai na imagem; no host, o `oute help` lê do repo e muda com `git pull`).
+- **`tests/agent-studio.test.sh` passa dentro do container** (#227). O `AGENT_STUDIO_TOKEN` do `agent.env` vazava para o teste: o app subia com o token de verdade e o `post` mandava o token do teste, 401 onde se esperava 200 (55 ok, 109 falhas; no CI, sem a variável, passava). O teste agora faz `unset AGENT_STUDIO_TOKEN` no começo, como o `agent-studio-usage` e o `agent-studio-alerts`; os casos de token vazio e do `oute up` já montam o próprio ambiente e não mudam. Só teste. Sem release.
 
 ## [0.7.29] - 2026-09-30
 
