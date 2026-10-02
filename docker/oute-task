@@ -10,15 +10,123 @@
 #
 # Worktree: /workspace/.worktrees/<repo>-<slug>   Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR)
 # Base: origin/<branch padrão> atualizado. Slug: [a-z0-9-].
+#
+# Sessão no bucket (ADR-04, "Sessões (#128)"): abrir, reabrir e remover (clean --yes) emitem oute.task.opened/reopened/
+# removed pelo oute-emit, e a conversa do agente sai marcada com a sessão no OTEL_RESOURCE_ATTRIBUTES. Nada disso muda
+# saída, exec ou código de saída, nem com o coletor fora ou sem oute-emit.
+#   oute-task --mark [dir]   (o shim usa) imprime o OTEL_RESOURCE_ATTRIBUTES com a marca da sessão da worktree; sem id, nada
 set -euo pipefail
 WT_ROOT="${OUTE_WORKTREES:-/workspace/.worktrees}"
+WS_ROOT="${OUTE_WORKSPACE:-/workspace}"   # a variável só existe para os testes
 die() { printf 'oute-task: %s\n' "$*" >&2; exit 1; }
 slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
 # git de rede sem prompt: helper do gh (GH_TOKEN) e nunca pedir usuário/senha no terminal
 gitnet() { GIT_TERMINAL_PROMPT=0 git -c credential.https://github.com.helper= -c 'credential.https://github.com.helper=!gh auth git-credential' "$@"; }
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 default_branch() { git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true; }
-all_repos() { local d; for d in /workspace/*/; do [[ -d "$d/.git" ]] && echo "${d%/}"; done; }
+all_repos() { local d; for d in "$WS_ROOT"/*/; do [[ -d "$d/.git" ]] && echo "${d%/}"; done; }
+
+# ---------------------------------------------------------------- sessão no bucket (ADR-04, #128)
+# Marca da sessão: <git-dir da worktree>/oute-task, uma chave por linha (id, repo, slug e, em sessão de rodada, round e
+# session). Fica ao lado da marca oute-swarm-worker e some junto com a worktree.
+attr() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }   # valor que cabe no OTEL_RESOURCE_ATTRIBUTES (sem vírgula, sem =)
+mark_path() { local gd; gd="$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null)" && printf '%s/oute-task' "$gd"; }
+mark_get() { [[ -f "$1" ]] || return 0; sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' || true; }
+mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm>
+  local f="$1"; shift
+  { printf 'id=%s\nrepo=%s\nslug=%s\n' "$1" "$2" "$3"
+    [[ -z "$4" ]] || printf 'round=%s\n' "$4"
+    [[ -z "$5" ]] || printf 'session=%s\n' "$5"; } 2>/dev/null > "$f"
+}
+# OTEL_RESOURCE_ATTRIBUTES de agora sem oute.task.*/oute.swarm.* (fica a origem) + os pares dados (par sem valor não
+# entra): chave que já existia não se repete, vale a nova
+otel_attrs() {
+  local out="" part k parts=()
+  IFS=, read -r -a parts <<<"${OTEL_RESOURCE_ATTRIBUTES:-}" || true
+  for part in ${parts[@]+"${parts[@]}"}; do
+    k="${part%%=*}"; k="${k//[[:space:]]/}"
+    case "$k" in ""|oute.task.*|oute.swarm.*) continue ;; esac
+    out+="${out:+,}$part"
+  done
+  for part in "$@"; do [[ "$part" == *= ]] || out+="${out:+,}$part"; done
+  printf '%s' "$out"
+}
+# marca nas conversas: <id> <repo> <slug> <rodada> <sessão do swarm>. Sem id não marca (e tira a de outra sessão, se
+# veio no ambiente de quem chamou)
+mark_env() {
+  local v
+  if [[ -n "$1" ]]; then
+    v="$(otel_attrs "oute.task.id=$1" "oute.task.repo=$2" "oute.task.slug=$3" "oute.swarm.round=$4" "oute.swarm.session=$5")"
+  else v="$(otel_attrs)"; fi
+  [[ -z "$v" && -z "${OTEL_RESOURCE_ATTRIBUTES+x}" ]] || export OTEL_RESOURCE_ATTRIBUTES="$v"
+}
+# oute.agent dos eventos = quem chamou, em $WHO: o marcador que o harness põe no shell dele; ambiente do swarm = o
+# agente da coordenadora (meta da rodada; sem ele, claude); `human` só com terminal e nenhum marcador; na dúvida,
+# unknown. Sem $(…): o -t 1 olha o stdout
+WHO=unknown
+who_called() {
+  local r a=""
+  if [[ "${CLAUDECODE:-}" == 1 ]]; then WHO=claude
+  elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then WHO=codex
+  elif [[ -n "${OUTE_SWARM_ID:-}${OUTE_SWARM_ROUND:-}${OUTE_SWARM_WORKER:-}" ]]; then
+    r="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}"
+    if [[ "$r" =~ ^[A-Za-z0-9._-]+$ && -f "$HOME/.oute/swarm/$r/meta" ]]; then
+      a="$(sed -n 's/^agent=//p' "$HOME/.oute/swarm/$r/meta" 2>/dev/null | head -n1 | tr -cd 'a-z0-9_-' || true)"
+    fi
+    WHO="${a:-claude}"
+  elif [[ -t 0 && -t 1 ]]; then WHO=human
+  else WHO=unknown; fi
+}
+# evento da sessão: <opened|reopened|removed> chave=valor… Best-effort, como no oute-swarm e no oute-propose: sem
+# oute-emit ou com o coletor fora, nada muda aqui. O resource do evento leva só a origem: a marca que esteja no
+# ambiente de quem chamou é de outra sessão
+emit() {
+  local ev="$1"; shift
+  command -v oute-emit >/dev/null 2>&1 || return 0
+  OTEL_RESOURCE_ATTRIBUTES="$(otel_attrs)" oute-emit task "$ev" "$WHO" "$@" </dev/null >/dev/null 2>&1 || true
+}
+# sessão de uma worktree que o clean vai remover, lida antes (a marca vai embora junto), em T_*. Sem marca (worktree
+# anterior à #128), repo e slug saem do caminho e o removed sai sem id
+task_of() {   # <repo principal> <worktree>
+  local f n; n="$(basename "$1")"
+  T_ID=""; T_ROUND=""; T_SESS=""; T_REPO="$(attr "$n")"; T_SLUG="${2##*/}"; T_SLUG="$(attr "${T_SLUG#"$n"-}")"
+  f="$(mark_path "$2")" || return 0
+  T_ID="$(mark_get "$f" id)"; [[ -n "$T_ID" ]] || return 0
+  T_ROUND="$(mark_get "$f" round)"; T_SESS="$(mark_get "$f" session)"
+}
+removed() {   # <base> <merged|empty|detached>, depois do task_of
+  emit removed "id=$T_ID" "repo=$T_REPO" "slug=$T_SLUG" "base=$1" "reason=$2" "round=$T_ROUND" "session=$T_SESS" || true
+}
+# abertura: id estável na marca da worktree, evento e marca nas conversas. Chamada com `|| true`: nada daqui
+# interrompe a abertura. Rodada: a do ambiente (coordenadora ou spawn; o worker leva o slug como sessão) ou, sem ele
+# (restore, reabertura na mão), a que a marca guardou
+session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
+  local ev="$1" wt="$2" rname slug="$4" agent="$5" base="$6" mf="" id="" mid round eround mround="" sess msess="" legacy=""
+  rname="$(attr "$3")"
+  if mf="$(mark_path "$wt")"; then id="$(mark_get "$mf" id)"; mround="$(mark_get "$mf" round)"; msess="$(mark_get "$mf" session)"; fi
+  mid="$id"; round="$mround"; sess="$msess"
+  eround="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}"
+  if [[ "$eround" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    round="$eround"; sess=""
+    [[ -z "${OUTE_SWARM_WORKER:-}" ]] || sess="$slug"
+  fi
+  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" ]]; then
+    # worktree sem id na reabertura = anterior à #128: ganha um agora, com legacy
+    if [[ -z "$id" ]]; then id="$rname-$slug-$(date -u +%Y%m%d%H%M%S)"; [[ "$ev" == opened ]] || legacy=true; fi
+    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess"; then
+      [[ -n "$mid" ]] || { echo "aviso: não consegui gravar o id da sessão em ${mf:-$wt}; a sessão segue sem id" >&2; id=""; legacy=""; }
+    fi
+  fi
+  emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy"
+  mark_env "$id" "$rname" "$slug" "$round" "$sess"
+}
+cmd_mark() {
+  local f id
+  f="$(mark_path "${1:-$PWD}")" || return 0
+  id="$(mark_get "$f" id)"; [[ -n "$id" ]] || return 0
+  otel_attrs "oute.task.id=$id" "oute.task.repo=$(mark_get "$f" repo)" "oute.task.slug=$(mark_get "$f" slug)" \
+    "oute.swarm.round=$(mark_get "$f" round)" "oute.swarm.session=$(mark_get "$f" session)"
+}
 
 cmd_list() {
   local r; for r in $(all_repos); do
@@ -40,7 +148,8 @@ sync_main() {
 
 cmd_clean() {
   local yes=0; [[ "${1:-}" == --yes ]] && yes=1
-  local r wt br ahead why todo=0
+  local r wt br ahead why reason todo=0
+  who_called || true
   for r in $(all_repos); do
     local base; base="$(default_branch "$r")"; base="${base:-main}"
     gitnet -C "$r" fetch -q origin --prune 2>/dev/null || true
@@ -52,18 +161,20 @@ cmd_clean() {
         else ahead="$(git -C "$wt" rev-list --count "origin/$base..HEAD" 2>/dev/null || echo '?')"
              echo "mantém  $wt (detached com $ahead commit(s) fora de origin/$base)"; continue; fi
         todo=1
-        if (( yes )); then git -C "$r" worktree remove "$wt" && echo "removida $wt ($why)"
+        if (( yes )); then task_of "$r" "$wt" || true; git -C "$r" worktree remove "$wt" && echo "removida $wt ($why)" && removed "$base" detached
         else echo "remover $wt ($why)"; fi
         continue
       fi
       ahead="$(git -C "$r" rev-list --count "origin/$base..$br" 2>/dev/null || echo 1)"
-      why=""
-      if [[ "$ahead" == 0 ]]; then why="sem commits além de origin/$base"
-      elif command -v gh >/dev/null && [[ "$(cd "$r" && gh pr list --head "$br" --state merged --json number --jq length 2>/dev/null || echo 0)" != 0 ]]; then why="PR mergeado"
+      why=""; reason=""
+      if [[ "$ahead" == 0 ]]; then why="sem commits além de origin/$base"; reason=empty
+      elif command -v gh >/dev/null && [[ "$(cd "$r" && gh pr list --head "$br" --state merged --json number --jq length 2>/dev/null || echo 0)" != 0 ]]; then why="PR mergeado"; reason=merged
       fi
       if [[ -z "$why" ]]; then echo "mantém  $wt ($br: $ahead commit(s) sem PR mergeado)"; continue; fi
       todo=1
-      if (( yes )); then git -C "$r" worktree remove "$wt" && git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"
+      # o evento sai com a worktree removida, mesmo que o branch não apague
+      if (( yes )); then task_of "$r" "$wt" || true
+        git -C "$r" worktree remove "$wt" && { removed "$base" "$reason"; git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"; }
       else echo "remover $wt ($why)"; fi
     done < <(git -C "$r" worktree list --porcelain | awk -v root="$WT_ROOT" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2} /^detached$/{if (index(w, root"/")==1) print w, "-"}')
     sync_main "$r" "$base" "$yes" || todo=1
@@ -74,7 +185,8 @@ cmd_clean() {
 cmd_open() {
   local repo="$1" slug="$2"; shift 2
   local agent="${1:-claude}"; [[ $# -gt 0 ]] && shift
-  local main name base wt br
+  local main name base="" wt br ev=reopened
+  who_called || true
   # antes de criar a worktree: agente fora do stack não deixa sessão vazia para trás
   case "$agent" in
     claude|codex|shell) ;;
@@ -94,8 +206,11 @@ cmd_open() {
     if git -C "$main" show-ref -q --verify "refs/heads/$br"; then git -C "$main" worktree add -q "$wt" "$br"
     else git -C "$main" worktree add -q -b "$br" "$wt" "origin/$base"; fi
     echo "worktree $wt · branch $br (de origin/$base)" >&2
+    ev=opened
   fi
   cd "$wt"
+  [[ -n "$base" ]] || { base="$(default_branch "$main")"; base="${base:-main}"; }
+  session "$ev" "$wt" "$name" "$slug" "$agent" "$base" || true   # sessão no bucket (ADR-04, #128)
   case "$agent" in
     claude|codex)
       # sessão aberta pelo `oute-swarm spawn`: sem sugestão de prompt no campo do Claude Code (um Enter na hora errada a submeteria)
@@ -113,7 +228,8 @@ case "${1:-}" in
   ""|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
+  --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
   -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
-      r="$2"; [[ -d "$r" ]] || r="/workspace/$r"; shift 2; cmd_open "$r" "$@" ;;
+      r="$2"; [[ -d "$r" ]] || r="$WS_ROOT/$r"; shift 2; cmd_open "$r" "$@" ;;
   *) cmd_open "$PWD" "$@" ;;
 esac

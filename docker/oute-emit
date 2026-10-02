@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""oute-emit — eventos operacionais (ADR-04, adendo #124): um log OTel por fato de rodada ou pedido, só ao bucket.
+"""oute-emit — eventos operacionais (ADR-04, adendo #124): um log OTel por fato de rodada, pedido ou sessão, só ao bucket.
 
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
+  oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
+                                     sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
   oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
 
-Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"). OTLP/HTTP JSON em
+Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"); a sessão do oute-task é a exceção: o
+oute-task passa os campos, porque no removed a worktree (e a marca dela) já não existe. OTLP/HTTP JSON em
 ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs; origem do OTEL_RESOURCE_ATTRIBUTES, service.name=oute.
 Best-effort: teto de ~2 s por chamada, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com
 OUTE_EMIT_DEBUG=1 (o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida:
@@ -534,6 +537,44 @@ def cmd_swarm(rnd, line):
     return [swarm_event(rnd, line, max(1, log.count(line)))]
 
 
+# ---------------------------------------------------------------- sessões do oute-task (#128)
+TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.slug", "agent": "oute.task.agent",
+             "base": "oute.task.base", "reason": "oute.task.reason", "legacy": "oute.task.legacy",
+             "round": "oute.swarm.round", "session": "oute.swarm.session"}
+TASK_REASONS = ("merged", "empty", "detached")
+
+
+def cmd_task(kind, caller, pairs):
+    """oute.task.opened/reopened/removed: os campos vêm do oute-task (chave=valor; valor vazio = campo ausente).
+    Nunca leva corpo. Hora do fato = agora; id do evento = tipo + sessão (o id dela; sem id, repo e slug) + hora +
+    motivo: o mesmo fato repetido no mesmo segundo é um evento só"""
+    if kind not in ("opened", "reopened", "removed"):
+        raise Skip(f"evento de sessão desconhecido: {kind}")
+    f = {}
+    for p in pairs:
+        k, sep, v = p.partition("=")
+        if not sep or k not in TASK_KEYS:
+            raise Skip(f"campo de sessão inválido: {p}")
+        if v:
+            f[k] = v
+    if not f.get("repo") or not f.get("slug"):
+        raise Skip("sessão sem repo ou slug")
+    if kind == "removed":
+        if f.get("reason") not in TASK_REASONS:
+            raise Skip(f"motivo de remoção inválido: {f.get('reason')}")
+    else:
+        f.pop("reason", None)
+    if "legacy" in f:
+        if f["legacy"] != "true":
+            raise Skip(f"legacy inválido: {f['legacy']}")
+        f["legacy"] = True
+    if not re.fullmatch(r"[a-z0-9_-]{1,32}", caller):
+        caller = "unknown"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [event(f"oute.task.{kind}", caller, ts, {TASK_KEYS[k]: v for k, v in f.items()},
+                  scope=f"task/{f.get('id') or f['repo'] + '-' + f['slug']}", key=f.get("reason", ""))]
+
+
 # ---------------------------------------------------------------- reconciliação (#167)
 def cmd_reconcile(deadline, drained):
     """na subida: decided de todo .out sem marca em decided/ e com a decisão a partir do corte (o anterior é do
@@ -687,7 +728,7 @@ def main(argv):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
     valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1}
-    if valid.get(verb) != len(argv):
+    if (len(argv) < 3) if verb == "task" else (valid.get(verb) != len(argv)):
         debug(f"uso inválido: {' '.join(argv)}")
         return
     drained = drain(deadline)  # toda chamada: primeiro o que ficou para trás
@@ -699,6 +740,8 @@ def main(argv):
         cmd_reconcile(deadline, drained)
     elif verb == "swarm":
         send(cmd_swarm(argv[1], argv[2]), deadline, drained)
+    elif verb == "task":
+        send(cmd_task(argv[1], argv[2], argv[3:]), deadline, drained)
     elif verb == "backfill":
         cmd_backfill()
 

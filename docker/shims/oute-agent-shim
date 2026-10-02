@@ -76,6 +76,15 @@ resume_in_worktree() {
   swarm_env "$real"
 }
 resume_in_worktree "$@"
+# Worktree de tarefa com id (marca do oute-task no git-dir): a conversa sai com a sessão no OTEL_RESOURCE_ATTRIBUTES
+# (ADR-04, #128), também quando o agente não veio do oute-task: restore do herdr, -c/--resume, -p. Sem id, não marca.
+task_env() {
+  local v
+  command -v oute-task >/dev/null 2>&1 || return 0
+  v="$(oute-task --mark "$PWD" 2>/dev/null)" || return 0
+  [[ -z "$v" ]] || export OTEL_RESOURCE_ATTRIBUTES="$v"
+}
+task_env
 
 [[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
 [[ -t 0 && -t 1 ]] || pass "$@"
