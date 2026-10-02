@@ -16,6 +16,7 @@ A tela não decide qual é o verdadeiro; ela dá o que permite conferir: o sha25
 """
 import hashlib
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from .conversations import _dicts
 from .state import iso
@@ -33,10 +34,11 @@ _FIELDS = ("record::id(id) AS id, title, as, agent, host, instance, size, state,
 # antes do primeiro `oute.canal.*` a tabela não existe, e ler tabela que não existe é erro no SurrealDB: sem ela,
 # lista vazia. Os valores vão sempre em variáveis.
 _IF_TABLE = "IF (INFO FOR DB).tables.pedido THEN ({}) ELSE [] END;"
-_LIST = " ".join(_IF_TABLE.format(q) for q in (
-    f'SELECT {_FIELDS} FROM pedido WHERE state = "pendente" ORDER BY proposed_at DESC LIMIT $pending',
-    f'SELECT {_FIELDS} FROM pedido WHERE state = "decidido" ORDER BY decided_at DESC LIMIT $recent',
-    'SELECT count() AS n FROM pedido WHERE state = "pendente" GROUP ALL'))
+_PENDING = f'SELECT {_FIELDS} FROM pedido WHERE state = "pendente" ORDER BY proposed_at DESC LIMIT $pending'
+_RECENT = f'SELECT {_FIELDS} FROM pedido WHERE state = "decidido" ORDER BY decided_at DESC LIMIT $recent'
+_COUNT = 'SELECT count() AS n FROM pedido WHERE state = "pendente" GROUP ALL'
+_LIST = " ".join(_IF_TABLE.format(q) for q in (_PENDING, _RECENT, _COUNT))
+_PENDING_ONLY = " ".join(_IF_TABLE.format(q) for q in (_PENDING, _COUNT))
 # pelo id do registro: sem varrer a tabela (e tabela que ainda não existe = nenhum registro)
 _ONE = f'SELECT {_FIELDS} FROM [type::record("pedido", $id)];'
 
@@ -64,9 +66,34 @@ def listing(surreal, pending_limit=PENDING_LIMIT, recent_limit=RECENT_LIMIT):
     """Pedidos pendentes (do mais novo para o mais antigo; `pending_total` diz quantos há) e os últimos decididos.
     Erro do SurrealDB levanta (SurrealError): sem o estado não há lista."""
     found = surreal.query(_LIST, {"pending": pending_limit, "recent": recent_limit})
-    count = found[2]["result"] or [{}]
     return {"pending": found[0]["result"] or [], "recent": found[1]["result"] or [],
-            "pending_total": count[0].get("n", 0)}
+            "pending_total": _total(found[2])}
+
+
+def pending(surreal, limit=PENDING_LIMIT):
+    """Só os pendentes (os `limit` mais novos) e quantos há ao todo: o que o tray mostra (#205). As mesmas consultas
+    da lista. Erro do SurrealDB levanta (SurrealError)."""
+    found = surreal.query(_PENDING_ONLY, {"pending": limit})
+    return {"pending": found[0]["result"] or [], "pending_total": _total(found[1])}
+
+
+def _total(statement):
+    return (statement["result"] or [{}])[0].get("n", 0)
+
+
+def page_path(proposal_id):
+    """Caminho da página "ver script" do pedido (`web.py`), estável pelo id: o link da lista e o que o tray abre."""
+    return "/pedido?id=" + quote(str(proposal_id), safe="/")
+
+
+def age_seconds(when, at_ns):
+    """Datetime do SurrealDB (`2026-09-29T07:43:00.5Z`) -> segundos inteiros até `at_ns` (nunca negativo); `None`
+    se não é uma hora."""
+    try:
+        then = datetime.strptime(when[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return max(0, at_ns // 1_000_000_000 - int(then.timestamp()))
 
 
 def state(surreal, proposal_id):
