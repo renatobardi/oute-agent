@@ -1,6 +1,6 @@
 # oute-agent
 
-Runtime em container para agentes de código — **herdr + Claude Code + Codex** — com roteamento de modelo em 2 etapas (Jev escolhe o perfil, OpenRouter escolhe o modelo), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
+Runtime em container para agentes de código — **herdr + Claude Code + Codex** — com os dois agentes por assinatura e o modelo da sessão escolhido pela fase (ADR-02), memória compartilhada (ai-memory), storage comum no OCI, observabilidade completa (bucket OCI + Langfuse) e segredos só no Vaultwarden. Roda em ARM: VPC Oracle Cloud (`oute-server`) e MacBook (Apple Silicon).
 
 Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime-container.md`, `0002-roteamento-modelos.md`, `0003-storage-oci.md`, `0004-observabilidade.md`. Backlog: issues deste repo. Histórico: `CHANGELOG.md`.
 
@@ -9,7 +9,6 @@ Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime
 | serviço | imagem | papel | rede |
 |---|---|---|---|
 | `agent` | `ghcr.io/renatobardi/oute-agent:<VERSION>` | Ubuntu 24.04 + agentes/CLIs, sshd, herdr | `127.0.0.1:2222` (nunca `0.0.0.0`) |
-| `jev-router` | `berriai/litellm` + `jev_hook.py` | proxy OpenAI-compatible; Jev → perfil → preset do OpenRouter | interna |
 | `ai-memory` | `akitaonrails/ai-memory` | memória compartilhada entre agentes (MCP + hooks) | interna |
 | `otel-collector` | `otel/opentelemetry-collector-contrib` | telemetria → bucket OCI + Langfuse | interna |
 
@@ -18,12 +17,10 @@ Decisões de arquitetura (ADRs) ficam em [`docs/adr/`](docs/adr/): `0001-runtime
 ```
 docker/          Dockerfile, compose.yaml, entrypoint.sh, addons-link
 addons/skills/   skills oute-* (ADR-06): montadas read-only em /opt/oute/addons e linkadas no boot; entram com git pull + oute down/up
-config/litellm/  policy.yaml (FONTE do router), jev_hook.py
-                 router.yaml, config.yaml, candidates.json, catalog.json  <- GERADOS por `oute router-sync` (fora do git)
 config/otel/     collector.yaml (bucket OCI), langfuse.yaml (só metadados), none.yaml
 config/ssh/      sshd_config
 tests/           addons-link.test.sh (bash puro; roda no CI de PR)
-scripts/         oute (CLI do host), oute-secrets.sh (Vaultwarden -> env), router_sync.py, oci-bootstrap.sh, release
+scripts/         oute (CLI do host), oute-secrets.sh (Vaultwarden -> env), oci-bootstrap.sh, release
 secrets/         README com a convenção do vault (sem valores)
 ```
 
@@ -31,9 +28,8 @@ secrets/         README com a convenção do vault (sem valores)
 
 **Contas / serviços**
 - **Vaultwarden** (`vault.oute.pro`) — única fonte de segredos (ver `secrets/README.md`):
-  - pasta `oute-agent` (vira env do container): `openrouter`, `oci-storage` (criado pelo `oci-bootstrap`), `langfuse` (opcional), `github`, `aws`, `gcp`…
+  - pasta `oute-agent` (vira env do container): `oci-storage` (criado pelo `oci-bootstrap`), `langfuse` (opcional), `github`, `aws`, `gcp`…
   - pasta `oute-admin` (**nunca** vai pro container): `oci-admin` (API key admin da OCI, só pro `oci-bootstrap`).
-- **OpenRouter**: guardrail "oute-agent guardrail - core" na key (allowlist de provedores, ZDR, sem treino, orçamento). `config/litellm/policy.yaml` **espelha** o guardrail.
 - **OCI**: tenancy com API key admin (1x, pro `oci-bootstrap`).
 - **Langfuse Cloud** (opcional): projeto + API keys no item `langfuse`.
 - **GitHub**: chave SSH do host (repo privado).
@@ -51,7 +47,7 @@ secrets/         README com a convenção do vault (sem valores)
 - `~/.oute/bw_client.env` (API key do Vaultwarden) e uma chave pública em `OUTE_SSH_AUTHORIZED_KEYS` (default `~/.ssh/id_ed25519.pub`).
 - Se `172.19.0.0/16` já estiver em uso por outra rede docker: `OUTE_NET_SUBNET=172.29.0.0/16`, `OUTE_NET_GATEWAY=172.29.0.1`, `OUTE_AGENT_IP=172.29.0.5` no `.env` (o IP fixo só importa no oute-server).
 - Bucket: rclone **do rclone.org** + FUSE-T; o do Homebrew não faz `mount` no macOS.
-- Diferenças × oute-server: sem FUSE instalado o bucket não é montado (fica o volume local); `ssh oute-server` de dentro do container não se aplica (o gateway é a VM do Docker, não o servidor); crontab do router-sync depende do Mac estar ligado às 04:00.
+- Diferenças × oute-server: sem FUSE instalado o bucket não é montado (fica o volume local); `ssh oute-server` de dentro do container não se aplica (o gateway é a VM do Docker, não o servidor).
 
 ## Deploy novo
 
@@ -67,7 +63,7 @@ OUTE_OCI_BUDGET_EMAIL=voce@x ./scripts/oute oci-bootstrap
 ./scripts/oute install                                # 1x por host: link no PATH -> depois é só `oute`
 ```
 
-`oute up`, em ordem: carrega `~/.oute/agent.env` (o vault só é lido, com a master password, se o arquivo não existe ou com `--refresh-secrets`) → monta `oci:oute-shared` → `router-sync` (catálogo do OpenRouter conforme guardrail; se falhar, usa o anterior; publica presets) → cron diário do router-sync → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
+`oute up`, em ordem: carrega `~/.oute/agent.env` (o vault só é lido, com a master password, se o arquivo não existe ou com `--refresh-secrets`) → monta `oci:oute-shared` → tira os restos do roteador de modelos que saiu na #218 (entrada diária no crontab do host e container antigo; host sem eles não muda) → garante a imagem (local ou `pull` do ghcr; nunca builda escondido) → `docker compose up` → espera o sshd → limpa imagem antiga solta.
 
 ### Release e deploy
 
@@ -93,7 +89,6 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
-| `oute router-sync [--dry-run]` / `schedule` | regenera perfis/presets / agenda diário 04:00 |
 | `oute oci-bootstrap` | provisiona storage OCI (idempotente, `DRY_RUN=1`) |
 | `oute storage [ls\|lsl\|about] [path]` | lista o bucket direto no OCI (`OUTE_BUCKET=oute-observability` p/ telemetria) |
 | `oute sync-shared` | (re)monta o bucket |
@@ -103,24 +98,20 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 
 `claude` e `codex` ficam no home (`~/.local/bin`, volume `oute-home`), instalados na subida pelo `oute-agents-install` sem `curl | sh` (#199): o claude a partir da reserva da imagem (`claude install`), o codex pelo `install.sh` da release fixa, conferido por sha256, e se atualizam sozinhos sem release: o Claude Code em segundo plano, o Codex com `codex update` quando avisa. O Pi saiu do stack (#217): `pi`, `oute-task` e `oute-swarm spawn` pedidos com o Pi só respondem com erro; o `~/.pi` antigo fica no volume, sem ser tocado. A imagem traz só uma cópia de reserva em `/opt/oute/agents`, fora do PATH, com versão fixa no `Dockerfile` (#200), usada pelo shim enquanto o agente não está no home (primeira subida, sem rede).
 
-## Roteamento de modelos (ADR-02)
+## Agentes e modelos (ADR-02)
 
-- `claude` e `codex`: assinatura própria (login 1x, persiste no volume `oute-home`). Fora do OpenRouter.
-- Cliente OpenAI-compatible → `http://jev-router:4000/v1` (nenhum no stack desde a saída do Pi, #217; o router sai na #218):
-  - `model: jev-router` → **Jev** (Decisions API) escolhe o perfil (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) → preset **`@preset/oute-<perfil>`** no OpenRouter escolhe o modelo (até 3 + `provider.sort`, com fallback, ZDR).
-  - `model: <perfil>` → pula o Jev.
-- Editar perfis/provedores: `config/litellm/policy.yaml` → `oute router-sync --dry-run` → `oute router-sync`.
-- Log: `docker logs oute-jev-router 2>&1 | grep 'jev-router\]'` → `chosen=… via=jev|cheapest` e `served … model=<real> provider=… cost=…`.
+- `claude` (principal) e `codex` (reserva): assinatura própria (login 1x, persiste no volume `oute-home`). Nenhum proxy de modelo no stack: o roteador de modelos saiu na #218 (ADR-02, Histórico).
+- Modelo da sessão pela fase do AI-DLC (tabela do ADR-02), com o Jev chamado direto na TypeSafe só quando a tarefa não tem label de fase: o seletor entra pela #219.
+- Plugin herdr não chama API de LLM: quem fala com modelo é o agente da sessão.
 
 ## Observabilidade (ADR-04)
 
-`otel-collector` (sem porta publicada) recebe OTLP de Claude Code (métricas, eventos, traces), Codex (eventos) e jev-router.
-- **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex | router; `pi` só em registro anterior à #217). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
+`otel-collector` (sem porta publicada) recebe OTLP de Claude Code (métricas, eventos, traces) e Codex (eventos).
+- **Origem = máquina + instância** em todo registro: `host.name` (`OUTE_HOST`; sem ele, o hostname da máquina) e `oute.instance` (`OUTE_INSTANCE`, default `oute-agent`), além de `oute.agent` (claude | codex; `pi` e `router` só em registro até 2026-09-30, #217 e #218). A instância só precisa ser única dentro da máquina (#22). `oute version` mostra a origem.
 - **Tudo, com conteúdo** → bucket OCI `oute-observability/otel/{traces,metrics,logs}/host=<máquina>/instance=<instância>/year=…/hour=…/` (gzip, lotes de 5 min). Até a 0.7.4 não havia `host=/instance=` no caminho; esses objetos ficam onde estão.
-- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events, sem spans internos do LiteLLM. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
-- Span **`jev.decision`** (trace `jev:<perfil>`): perfil e via do Jev, modelos candidatos, sinais, tokens e — via `GET /api/v1/generation` do OpenRouter, em background — **modelo servido, provedor, custo (US$) e latência**.
+- **Só metadados** → Langfuse Cloud (EU), se o vault tiver `langfuse`: allowlist de atributos, sem span events. Prompt/resposta nunca saem. **Environment** do Langfuse = máquina (seletor no topo); `metadata.host`, `metadata.instance` e `metadata.agent` no trace.
 - **Fila em disco do collector** (volume `oute-otel-queue`): o collector guarda o que ainda não chegou ao destino e retenta sem prazo. **Reserva de 4 GB por host**: 2 GB de disco por fila de 1 GB (o bbolt chega a ~1,7× o limite e não encolhe), duas filas (bucket e agent-studio). O `oute up` avisa, sem bloquear, quando o disco livre do Docker (no Mac, o da VM do Docker Desktop) não comporta a reserva descontado o que a fila já ocupa; o `oute status` mostra o disco livre e o tamanho da fila.
-- Conferir: Langfuse → Tracing (`name = jev.decision`); `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`.
+- Conferir: Langfuse → Tracing; `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`.
 
 ## Storage comum (ADR-03)
 
@@ -152,8 +143,7 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 
 - Nenhuma porta de container em `0.0.0.0` (Docker ignora ufw): sshd do container em `127.0.0.1:2222` (`OUTE_SSH_BIND`).
 - Usuário do container com **uid/gid próprios (10001)**, que não existem no host (lab#181): arquivo criado pelo container não vira arquivo do `ubuntu`. Do host, o container só grava no mount do bucket; o resto é volume docker ou bind read-only.
-- Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado em `~/.oute/agent.env`, 0600, que é também o cache do host). Sem sessão do Vaultwarden em disco: o vault só é aberto com a master password digitada (`oute secrets refresh`, `up --refresh-secrets`, `router-sync --check-guardrail`, `oci-bootstrap`) e trancado (`bw lock`) em seguida (#21). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
-- OpenRouter: guardrail com ZDR e sem treino; presets reforçam `zdr` + `data_collection: deny`.
+- Segredos só no Vaultwarden, lidos **só pelo host**: o container dos agentes não tem sessão, API key nem estado do `bw` — recebe apenas os valores da pasta `oute-agent` em `/run/secrets/agent_env` (gerado em `~/.oute/agent.env`, 0600, que é também o cache do host). Sem sessão do Vaultwarden em disco: o vault só é aberto com a master password digitada (`oute secrets refresh`, `up --refresh-secrets`, `oci-bootstrap`) e trancado (`bw lock`) em seguida (#21). Pastas de outros projetos e `oute-admin` ficam fora do alcance dos agentes. Usuário de serviço OCI só com S3 nos 2 buckets.
 
 ## Build, versionamento e retenção
 

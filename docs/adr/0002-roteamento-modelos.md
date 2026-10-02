@@ -1,9 +1,9 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento Jev + OpenRouter de 2026-09-23 a 2026-09-30 (ver **Histórico**)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**)
 
 ## Decisão
-O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **Pi, jev-router, LiteLLM e OpenRouter saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
+O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
 
 ### Ordem de precedência
 1. **`--model` / `--agent` explícitos** vencem tudo. `--agent codex` força o Codex.
@@ -36,10 +36,13 @@ A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
 O `claude-fable-5-1` (um nível acima do Opus, 2,5× o preço dele na API) não entra em nenhuma linha. As fases do Opus são conversa com gate humano, onde o ganho do Fable (tarefa longa e autônoma) pesa pouco, e o consumo maior aproximaria o gatilho de cota. Uso só por `--model claude-fable-5-1`. Reavaliar com o consumo de cota das fases do Opus medido no agent-studio.
 
 ### Jev direto na TypeSafe
-- O Jev (`jev-1.13.0`) é chamado **direto na API da TypeSafe** (`POST https://api.typesafe.ai/v1/systemone`, primitivo `choice` → opção + confiança). Sem OpenRouter. US$ 0,042/M tokens de entrada, saída grátis.
+- O Jev (`jev-1.13.0`) é chamado **direto na API da TypeSafe** (`POST https://api.typesafe.ai/v1/systemone`, primitivo `choice` → opção + confiança), sem intermediário. US$ 0,042/M tokens de entrada, saída grátis.
 - Só o texto da tarefa vai ao Jev. Nenhum token de assinatura passa por proxy.
 - Chave da TypeSafe no vault (pasta `oute-agent`) → `agent_env`.
 - Skill da TypeSafe (`typesafe-ai/skills`): nada de `claude plugin install`/`npx skills add` (nada do marketplace). Fork revisado e pinado em `addons/skills/`, ou só referência no build.
+
+### Plugin herdr não chama LLM (#218, gate de `spec` do Bardi, 2026-10-02)
+Plugin herdr **não chama API de LLM**; quem fala com modelo é o agente da sessão (Claude/Codex, por assinatura). A única chamada fora das assinaturas é o Jev na TypeSafe, feita pelo seletor (acima). Substitui a regra anterior, que só permitia chamada a LLM pelo roteador de modelos (Histórico).
 
 ### Telemetria (ADR-04, ADR-08)
 Cada escolha gera um evento com: fase, origem da escolha (`manual`/`label`/`jev`), confiança do Jev, agente, modelo, esforço e motivo da reserva (`indisponivel`/`cota`). Vai ao bucket e ao agent-studio.
@@ -48,12 +51,12 @@ Cada escolha gera um evento com: fase, origem da escolha (`manual`/`label`/`jev`
 - **Revisão cruzada** (auditoria de um PR pelo outro provedor): descartada.
 - Mudar o comportamento do ai-memory: ele usa provedor próprio (`AI_MEMORY_LLM_PROVIDER`) e não depende do router.
 
-Implementação: #219 (seletor), com #217 (Pi), #218 (router) e #55 (cota).
+Implementação: #219 (seletor), com #217 (Pi, feito), #218 (router, feito) e #55 (cota).
 
 ## Histórico
 
 ### Roteamento Jev + OpenRouter (2026-09-23 a 2026-09-30)
-Vigorou para clientes OpenAI-compatible (na prática, só o Pi); Claude Code e Codex sempre ficaram fora, por assinatura. Sai com o Pi (#217, #218).
+Vigorou para clientes OpenAI-compatible (na prática, só o Pi); Claude Code e Codex sempre ficaram fora, por assinatura. Saiu com o Pi (#217, #218): o serviço `jev-router` (LiteLLM + hook do Jev), `config/litellm/`, o `oute router-sync` e a key do OpenRouter não existem mais no repo.
 
 - **Duas etapas por request:** o **Jev** (`typesafe/jev-1.13`, Decisions API do OpenRouter `/api/alpha/decisions`) escolhia o **perfil** pela tarefa (falha → perfil mais barato); o **OpenRouter** escolhia o **modelo** dentro do perfil (`models` ≤ 3 + `provider.sort = {by, partition: "none"}`, com fallback entre endpoints). Cada padrão do perfil contribuía com 1 modelo, para o fallback ser entre famílias diferentes.
 - **Perfis** (`reasoning`, `coder`, `coder-fast`, `long-context`, `cheap`, `vision`) publicados como presets `@preset/oute-<perfil>` (ZDR, `data_collection: deny`). Presets por papel (reviewer/architect) foram descartados em 2026-09-26 (#14): papel e perfil são eixos ortogonais; persona fica em prompt versionado.
