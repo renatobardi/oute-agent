@@ -139,7 +139,10 @@ cmd_spawn() {
   pane="$(printf '%s' "$out" | grep -oE 'w[0-9]+:p[A-Za-z0-9]+' | head -1 || true)"
   tab="$(printf '%s' "$out" | grep -oE 'w[0-9]+:t[A-Za-z0-9]+' | head -1 || true)"
   [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
-  printf -v cmd 'OUTE_SWARM_WORKER=1 oute-task -r %q %q %q "$(cat %q)"' "$main" "$slug" "$agent" "$pfile"
+  # OUTE_SWARM_ROUND: a rodada na sessão do worker (oute.swarm.round dos eventos oute.task.* e das conversas, #128);
+  # spawn fora de rodada abre sessão avulsa
+  printf -v cmd 'OUTE_SWARM_WORKER=1 %soute-task -r %q %q %q "$(cat %q)"' \
+    "$([[ "$round" == avulso ]] || printf 'OUTE_SWARM_ROUND=%q ' "$round")" "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
   # slug pane agente início aba repo tipo (linhas antigas param na aba: repo = o da rodada)
   printf '%s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \

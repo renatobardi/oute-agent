@@ -147,7 +147,7 @@ CASE=spawn; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
 MAX=1 sw spawn 7-bar "instrução kaizen" --repo "$LAB" --kaizen
 check "spawn --repo: código 0"                           [ "$RC" -eq 0 ]
 check "spawn --repo: aba aberta no repo indicado"        grep -q -- "tab create --workspace w1 --cwd $LAB " "$FAKE/herdr.log"
-check "spawn --repo: oute-task na worktree do repo"      grep -q -- "pane run w1:p2 OUTE_SWARM_WORKER=1 oute-task -r $LAB 7-bar claude" "$FAKE/herdr.log"
+check "spawn --repo: oute-task na worktree do repo, com a rodada (#128)" grep -q -- "pane run w1:p2 OUTE_SWARM_WORKER=1 OUTE_SWARM_ROUND=swarm-test oute-task -r $LAB 7-bar claude" "$FAKE/herdr.log"
 check "spawn --repo: spawned grava repo e kaizen"        [ "$(awk '$1=="7-bar" {print $2, $6, $7}' "$STATE/spawned")" == "w1:p2 $LAB kaizen" ]
 check "kaizen: fora do --max (1 normal já aberta)"       grep -q 'kaizen' <<<"$OUT"
 MAX=1 sw spawn 8-baz "instrução normal"
@@ -284,6 +284,7 @@ CASE=avulso; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-sem-met
 swc "$REPO" spawn 8-bar "instrução"
 check "avulso: código 0, sem aviso"                      [ "$RC" -eq 0 -a -z "$ERR" ]
 check "avulso: grava em avulso (spawned e log)"          grep -q '^8-bar ' "$H/.oute/swarm/avulso/spawned" && grep -q ' spawn 8-bar claude$' "$H/.oute/swarm/avulso/log"
+check "avulso: sessão avulsa, sem OUTE_SWARM_ROUND (#128)" grep -q -- "pane run w1:p[0-9]* OUTE_SWARM_WORKER=1 oute-task -r .* 8-bar claude" "$FAKE/herdr.log"
 check "avulso: a rodada não recebe nada"                 [ "$(wc -l < "$STATE/spawned")" -eq 1 ]
 swc "$WT" spawn 9-baz "instrução"
 check "branch swarm sem meta: avulso, sem aviso"         [ "$RC" -eq 0 -a -z "$ERR" ] && grep -q '^9-baz ' "$H/.oute/swarm/avulso/spawned"
@@ -315,8 +316,6 @@ check "watch --round: ganha da worktree, sem aviso"      [ "$RC" -eq 0 ] && grep
 trap 'rcv_stop; rm -rf "$TMP"' EXIT
 ln -sf "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 export OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent"
-ev() { events "$RCV_DIR" | jq -c "select($1)"; }
-n() { ev "$1" | grep -c . || true; }
 
 # 8. abertura, spawn, tell (ok e recusado), close, rodada fechada e watch
 CASE=eventos-op; round "$CASE"; rcv_start "$TMP/$CASE/rcv"

@@ -1,6 +1,7 @@
 # Funções dos testes de eventos operacionais (#124), para `source`: receptor OTLP falso e leitura do que chegou.
 # rcv_start <dir>: sobe o receptor e exporta OTEL_EXPORTER_OTLP_ENDPOINT; rcv_stop: derruba.
 # events <dir>: um objeto JSON por registro recebido: {name, time, body, attrs{}, res{}}.
+# ev <jq-select>: registros recebidos pelo receptor atual que casam o filtro; n <jq-select>: quantos.
 OTLP_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rcv_start() {
   RCV_DIR="$1"; mkdir -p "$RCV_DIR"; rm -f "$RCV_DIR/port"
@@ -15,5 +16,7 @@ events() {
          | .scopeLogs[].logRecords[] | {name: .eventName, time: .timeUnixNano, body: (.body.stringValue // null),
            attrs: (.attributes | map({(.key): (.value | to_entries[0].value)}) | add), res: $res}' "${f[@]}"
 }
+ev() { events "$RCV_DIR" | jq -c "select($1)"; }
+n() { ev "$1" | grep -c . || true; }
 # closed_port: porta local sem ninguém escutando (receptor fora do ar)
 closed_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }

@@ -61,6 +61,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task list                    worktrees de tarefa abertas
   oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
+  Cada sessão tem um id (oute.task.id, gravado na worktree). Abrir, reabrir e remover (clean --yes) viram
+  eventos oute.task.* no bucket, e as conversas do agente saem marcadas com a sessão (ADR-04).
   oute-agents-install [claude|codex]
                                     instala o agente no home (~/.local/bin), onde ele se atualiza sozinho (claude a
                                     partir da reserva; codex pelo install.sh da versão fixa, conferido por sha256);
@@ -99,11 +101,14 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Quem aprova é você, no host: oute watch. Nunca de dentro do herdr.
 
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
-  Rodadas do swarm e pedidos do canal vão ao bucket como logs OTel (oute.swarm.*, oute.canal.*),
-  com a origem do host; nada ao Langfuse. A saída do script executado no host nunca vai.
-  O oute-swarm, o oute-propose e o oute approve chamam sozinhos; falha nunca muda o comando.
+  Rodadas do swarm, pedidos do canal e sessões do oute-task vão ao bucket como logs OTel
+  (oute.swarm.*, oute.canal.*, oute.task.*), com a origem do host; nada ao Langfuse. A saída do
+  script executado no host nunca vai.
+  O oute-swarm, o oute-propose, o oute-task e o oute approve chamam sozinhos; falha nunca muda o comando.
   oute-emit canal <id>              emite a fase atual do pedido (proposto ou decidido)
   oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada
+  oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
+                                    (o oute-task usa) emite o evento da sessão, sem corpo
   oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
                                     (~/.oute/emit/since) com a hora original; resumo no stderr;
                                     rodar de novo não emite nada (retoma se falhou no meio)

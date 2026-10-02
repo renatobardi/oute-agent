@@ -18,9 +18,6 @@ ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 export PATH="$BIN:$PATH" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
 unset CLAUDECODE CODEX_THREAD_ID PI_CODING_AGENT OUTE_PROPOSE_AGENT OUTE_INBOX OUTE_OUTBOX
 
-# ev <jq-select>: registros recebidos que casam o filtro; n <jq-select>: quantos
-ev() { events "$RCV_DIR" | jq -c "select($1)"; }
-n() { ev "$1" | grep -c . || true; }
 posts() { ls "$RCV_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; }
 # propose <home> <título> [args]: roda o oute-propose com o script de $SCRIPT; stdout em $OUT, código em $RC
 propose() { local h="$1"; shift; OUT="$(HOME="$h" "$ROOT/docker/oute-propose" "$@" <<<"$SCRIPT" 2>/dev/null)"; RC=$?; }
@@ -75,7 +72,7 @@ OUT="$(HOME="$H" oute-emit canal ../../etc/passwd 2>&1; oute-emit nada 2>&1; out
 check "uso inválido: rc 0, nada na tela"               [ "$RC" -eq 0 -a -z "$OUT" ]
 
 # ---------------------------------------------------------------- 3. oute approve → oute.canal.decided (docker falso)
-if ! command -v script >/dev/null || ! script -qec true /dev/null </dev/null >/dev/null 2>&1; then
+if ! has_pty; then
   echo "skip approve: sem script(1) do util-linux (o read do approve lê do /dev/tty)"
 else
 CH="$TMP/ctr"; OH="$TMP/ohome"; mkdir -p "$CH/outbox" "$CH/inbox" "$OH"

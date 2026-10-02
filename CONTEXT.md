@@ -39,6 +39,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **origem da escolha:** de onde veio o modelo da sessão: `manual`, `label` ou `jev`.
 - **pedido:** script que um agente propõe pelo canal de aprovação, com id `<data>-<hora>-<slug>`. Termina **executado** (com rc), **recusado** ou fica **pendente**. Evite "proposta", "job".
 - **sessão:** uma worktree + um branch abertos pelo `oute-task`, de rodada (worker ou coordenadora) ou avulsa. Começa quando a worktree é criada e termina quando o `oute-task clean` a remove; id `oute.task.id`. Contém uma ou mais conversas. Evite "sessão" para a conversa do agente.
+- **marca da sessão:** o arquivo `oute-task` no git-dir da worktree (id, repo, slug e rodada) e, por extensão, as chaves `oute.task.*`/`oute.swarm.*` que o `oute-task` e o shim põem no `OTEL_RESOURCE_ATTRIBUTES` das conversas (ADR-04, #128).
 - **conversa:** uma sessão do agente no sentido do harness (`session.id` do Claude/Codex). Termina no fim do processo, no `/clear` ou no restore do herdr.
 - **sessão avulsa:** sessão fora de uma rodada. Evite "worker" (só a sessão de rodada).
 - **evento operacional:** fato de um primitivo (rodada, pedido) registrado como log OTel no bucket, com origem e `oute.agent`. Não é consumo de modelo. Evite "telemetria do swarm" como sinônimo de consumo.
