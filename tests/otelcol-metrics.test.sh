@@ -14,20 +14,16 @@ CPID=""; S3PID=""; RCV_PID=""
 cleanup() { for p in $CPID $S3PID; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; rcv_stop; rm -rf "$TMP"; }
 trap cleanup EXIT
 . "$ROOT/tests/lib/check.sh"
-for c in python3 jq curl tar; do command -v "$c" >/dev/null || die "precisa de $c"; done
 
-. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, V
+. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, otelcol_env, otelcol_s3_start, otelcol_start, jqp…
 otelcol_bin
 
 # ---------------------------------------------------------------- 1. config de produção
-export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT=http://127.0.0.1:9 \
-  LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
-  AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+otelcol_env
 CFG="$ROOT/config/otel/collector.yaml"
 check "validate collector.yaml + langfuse.yaml"         "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/langfuse.yaml"
 check "validate collector.yaml + none.yaml"             "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/none.yaml"
-P="$("$OTELCOL" print-config --mode=unredacted --format=json --config="$CFG" 2>/dev/null)"
-jqp() { jq -e "$@" >/dev/null <<<"$P"; }
+P="$(otelcol_print --config="$CFG")"
 check "telemetry.metrics: level basic"                  jqp '.service.telemetry.metrics.level | ascii_downcase == "basic"'
 check "telemetry.metrics: um reader, OTLP http/protobuf" jqp '.service.telemetry.metrics.readers
   | length == 1 and (.[0].periodic.exporter.otlp.protocol == "http/protobuf")'
@@ -40,25 +36,12 @@ check "metrics/archive recebe do otlp e vai ao bucket"  jqp '.service.pipelines[
   | (.receivers | index("otlp") != null) and .exporters == ["awss3/metrics"]'
 
 # ---------------------------------------------------------------- collector de teste: mesmo config, portas locais
-S3D="$TMP/s3"; mkdir -p "$S3D"; echo down > "$S3D/mode"
-python3 "$ROOT/tests/lib/fakes3.py" "$S3D" & S3PID=$!
-for _ in $(seq 1 50); do [[ -s "$S3D/port" ]] && break; sleep 0.1; done
-[[ -s "$S3D/port" ]] || die "S3 falso não subiu"
-export OCI_S3_ENDPOINT="http://127.0.0.1:$(cat "$S3D/port")"
+S3D="$TMP/s3"; otelcol_s3_start "$S3D" down
 rcv_start "$TMP/rcv"; [[ -s "$TMP/rcv/port" ]] || die "receptor OTLP falso não subiu"
-HTTP="$(closed_port)"; GRPC="$(closed_port)"; HC="$(closed_port)"
+otelcol_ports
 # só o que muda no teste: portas em 127.0.0.1, diretório da fila, flush_timeout de 5 s (produção: 5 min) e os readers
 # a cada 1 s (produção: 60 s): o do próprio receiver (como em produção, na porta de teste) e o do receptor falso
-cat > "$TMP/test.yaml" <<EOF
-extensions:
-  health_check: {endpoint: 127.0.0.1:$HC}
-  file_storage/queue: {directory: $TMP/queue}
-receivers:
-  otlp: {protocols: {grpc: {endpoint: 127.0.0.1:$GRPC}, http: {endpoint: 127.0.0.1:$HTTP}}}
-exporters:
-  awss3/traces: {sending_queue: {batch: {flush_timeout: 5s}}}
-  awss3/metrics: {sending_queue: {batch: {flush_timeout: 5s}}}
-  awss3/logs: {sending_queue: {batch: {flush_timeout: 5s}}}
+{ otelcol_test_yaml s3; cat <<EOF; } > "$TMP/test.yaml"
 service:
   telemetry:
     metrics:
@@ -74,14 +57,10 @@ exporters:
   awss3/metrics: {retry_on_failure: {enabled: false}}
   awss3/logs: {retry_on_failure: {enabled: false}}
 EOF
-start() {
-  "$OTELCOL" --config="$CFG" --config="$TMP/test.yaml" "$@" >>"$TMP/collector.log" 2>&1 & CPID=$!
-  local i; for i in $(seq 1 100); do curl -fs -o /dev/null "127.0.0.1:$HC" && return 0; sleep 0.1; done
-  echo "# collector não subiu"; tail -20 "$TMP/collector.log"; return 1
-}
+start() { otelcol_start --config="$CFG" --config="$TMP/test.yaml" "$@"; }
 stop() {
   kill -TERM "$CPID"; for _ in $(seq 1 300); do kill -0 "$CPID" 2>/dev/null || break; sleep 0.1; done
-  kill -9 "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null; CPID=""
+  otelcol_kill
 }
 refused() { [[ -s "$S3D/refused" ]] && wc -l <"$S3D/refused" | tr -d ' ' || echo 0; }
 # pontos que chegaram ao receptor falso: um JSON por ponto {name, value, attrs}
@@ -97,14 +76,14 @@ for _ in $(seq 1 40); do [[ "$(refused)" -ge 3 ]] && break; sleep 0.5; done
 check "S3 fora: o collector tentou e levou 503"         [ "$(refused)" -ge 3 ]
 sleep 3   # mais uns ciclos do reader depois da falha
 PTS="$(pts)"
-has() { jq -se "$@" >/dev/null <<<"$PTS"; }
+pts_has() { jq -se "$@" >/dev/null <<<"$PTS"; }
 for x in $EXP; do
   IFS=: read -r s q u <<<"$x"; e="awss3/$s"
-  check "receptor: otelcol_exporter_queue_capacity de $e = $((q / 1048576)) MB" has --arg e "$e" --argjson q "$q" \
+  check "receptor: otelcol_exporter_queue_capacity de $e = $((q / 1048576)) MB" pts_has --arg e "$e" --argjson q "$q" \
     'map(select(.name == "otelcol_exporter_queue_capacity" and .attrs.exporter == $e)) | length > 0 and all(.value == $q)'
-  check "receptor: otelcol_exporter_queue_size de $e > 0 com o S3 fora" has --arg e "$e" \
+  check "receptor: otelcol_exporter_queue_size de $e > 0 com o S3 fora" pts_has --arg e "$e" \
     'any(.[]; .name == "otelcol_exporter_queue_size" and .attrs.exporter == $e and .value > 0)'
-  check "receptor: otelcol_receiver_refused_$u do otlp"    has --arg n "otelcol_receiver_refused_$u" \
+  check "receptor: otelcol_receiver_refused_$u do otlp"    pts_has --arg n "otelcol_receiver_refused_$u" \
     'any(.[]; .name == $n and .attrs.receiver == "otlp")'
 done
 # parada com o S3 fora: o envio em curso é abandonado (send_failed_* sobe; o lote continua no disco, #137) e o
@@ -113,7 +92,7 @@ stop
 PTS="$(pts)"
 for x in $EXP; do
   IFS=: read -r s _ u <<<"$x"
-  check "receptor: otelcol_exporter_send_failed_$u de awss3/$s > 0 (parada com o S3 fora)" has --arg e "awss3/$s" \
+  check "receptor: otelcol_exporter_send_failed_$u de awss3/$s > 0 (parada com o S3 fora)" pts_has --arg e "awss3/$s" \
     --arg n "otelcol_exporter_send_failed_$u" 'any(.[]; .name == $n and .attrs.exporter == $e and .value > 0)'
 done
 
@@ -124,8 +103,8 @@ rm -f "$TMP"/rcv/*.json
 start --config="$TMP/retry.yaml" || die "collector (restart)"
 FAILED='[.[] | select((.name | startswith("otelcol_exporter_send_failed_")) and .value > 0) | .attrs.exporter] | unique
   == ["awss3/logs", "awss3/metrics", "awss3/traces"]'
-for _ in $(seq 1 60); do PTS="$(pts)"; has "$FAILED" && break; sleep 0.5; done
-check "S3 fora, sem retry: send_failed_* > 0 nos três exporters com o collector no ar" has "$FAILED"
+for _ in $(seq 1 60); do PTS="$(pts)"; pts_has "$FAILED" && break; sleep 0.5; done
+check "S3 fora, sem retry: send_failed_* > 0 nos três exporters com o collector no ar" pts_has "$FAILED"
 echo ok > "$S3D/mode"
 # os contadores do receiver só nascem quando o sinal chega: manda os três de novo
 python3 "$ROOT/tests/lib/otlp-send.py" "$HTTP" m2 50 "$TMP/accepted2.txt" >/dev/null
@@ -160,5 +139,5 @@ for x in $EXP; do
 done
 stop
 
-[[ "$fail" -eq 0 ]] || { echo "# log do collector:"; tail -30 "$TMP/collector.log"; }
+otelcol_log
 check_end

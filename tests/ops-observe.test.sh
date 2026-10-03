@@ -15,9 +15,6 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 CHECK_OUT=+1   # o bad mostra a saída inteira
-has() { grep -q -- "$1" <<<"$OUT"; }
-hasnt() { ! has "$1"; }
-line() { grep -qxF -- "$1" <<<"$OUT"; }   # linha inteira, sem regex
 
 [[ -f "$SCRIPT" ]] || die "script ausente: $SCRIPT"
 check "sintaxe (bash -n)"                              bash -n "$SCRIPT"
@@ -97,20 +94,20 @@ check "studio: cabeçalho com a URL, a janela e a base" has "^## agent-studio ($
 check "studio: nada do Langfuse na saída"              bash -c '! grep -qi langfuse <<<"$0"' "$OUT"
 check "studio: lê /v1/usage da janela e da base e /v1/alerts" test "$(grep -c '/v1/usage?from=.*&to=' "$ARGV") $(grep -c '/v1/alerts$' "$ARGV") $(wc -l < "$ARGV")" = "2 1 3"
 check "studio: credencial fora do argv e da saída"     bash -c '! grep -qF -- "$2" "$1" && ! grep -qF -- "$2" <<<"$0" && ! grep -qi "bearer" "$1"' "$OUT" "$ARGV" "$READ"
-check "tabela: colunas (real e estimado separados)"    line "host	agente	chamadas	spans	erros_span	erros_log	custo_real_usd	custo_estimado_usd	sem_preço	tokens	p95_ms	base_custo_usd/dia"
-check "tabela: Claude com custo real, estimado, p95 e base/dia" line "oute-server	claude	3	4	0	0	1.2	3	0	1000370	3900	0.1"
+check "tabela: colunas (real e estimado separados)"    has_line "host	agente	chamadas	spans	erros_span	erros_log	custo_real_usd	custo_estimado_usd	sem_preço	tokens	p95_ms	base_custo_usd/dia"
+check "tabela: Claude com custo real, estimado, p95 e base/dia" has_line "oute-server	claude	3	4	0	0	1.2	3	0	1000370	3900	0.1"
 check "tabela: Codex com erros de span e de log, sem custo real" has "^oute-mac	codex	10	10	6	2	-	0.018	2	9800	1000	0$"
-check "anomalia erro-alto (6 de 10 spans)"             line "ANOMALIA	erro-alto	oute-mac/codex	6 de 10 spans com erro"
-check "anomalia custo-alto (real + estimado × base)"   line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + estimado) = US\$ 4.2/dia; base US\$ 0.1/dia"
-check "anomalia sem-telemetria (só na base)"           line "ANOMALIA	sem-telemetria	oute-velho/codex	1 chamadas e 1 spans na base e nada na janela"
-check "anomalia sem-preço, com o modelo"               line "ANOMALIA	sem-preço	oute-mac/codex	2 chamadas de gpt-9-sem-preco sem custo real e sem preço (config/agent-studio/config.toml)"
+check "anomalia erro-alto (6 de 10 spans)"             has_line "ANOMALIA	erro-alto	oute-mac/codex	6 de 10 spans com erro"
+check "anomalia custo-alto (real + estimado × base)"   has_line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + estimado) = US\$ 4.2/dia; base US\$ 0.1/dia"
+check "anomalia sem-telemetria (só na base)"           has_line "ANOMALIA	sem-telemetria	oute-velho/codex	1 chamadas e 1 spans na base e nada na janela"
+check "anomalia sem-preço, com o modelo"               has_line "ANOMALIA	sem-preço	oute-mac/codex	2 chamadas de gpt-9-sem-preco sem custo real e sem preço (config/agent-studio/config.toml)"
 check "router só na base: não é sem-telemetria"        hasnt "ANOMALIA	sem-telemetria	oute-server/router"
 check "Codex sem base: não é custo-alto"               hasnt "ANOMALIA	custo-alto	oute-mac"
 check "só as quatro anomalias"                         test "$(grep -c '^ANOMALIA' <<<"$OUT")" = 4
 check "custo por modelo: do mais caro ao mais barato"  test "$(sed -n '/^### custo por modelo/,/^###/p' <<<"$OUT" | sed -n '3,5p')" = "oute-server	claude-sonnet-5	3	1.2	3	0
 oute-mac	gpt-5-codex	8	-	0.018	0
 oute-mac	gpt-9-sem-preco	2	-	-	2"
-check "alertas: os dois ativos contados"               line "alertas_ativos	2"
+check "alertas: os dois ativos contados"               has_line "alertas_ativos	2"
 check "alerta da fila do Mac, com o exporter"          has "^ALERTA	queue	oute-mac	oute-agent	0.9	ratio	0.5	.*Z	otlp_http/studio_logs$"
 check "alerta de host sem dado (oute-server, 1 h)"     has "^ALERTA	host_no_data	oute-server	-	3[0-9]*	seconds	1800	.*Z	-$"
 check "último dado por host"                           bash -c 'grep -q "^oute-mac	false	.*Z	[0-9]*$" <<<"$0" && grep -q "^oute-server	true	.*Z	3[0-9]*$" <<<"$0"' "$OUT"
@@ -155,7 +152,7 @@ run bucket --content-hours 0
 check "bucket: só a seção do bucket, sem chamada ao agent-studio" bash -c '[ "$1" -eq 0 ] && ! grep -q "agent-studio" <<<"$0" && [ ! -s "$2" ]' "$OUT" "$RC" "$ARGV"
 run F_RCLONE_FAIL=1 all --content-hours 0
 check "all com o bucket ilegível: ERRO, código 1"      erro "listagem de traces falhou: ERROR : falha de teste"
-check "all com o bucket ilegível: o studio sai inteiro" line "alertas_ativos	2"
+check "all com o bucket ilegível: o studio sai inteiro" has_line "alertas_ativos	2"
 run AGENT_STUDIO_READ_TOKEN= all --content-hours 0
 check "all com o studio ilegível: ERRO, código 1"      erro "AGENT_STUDIO_READ_TOKEN ausente"
 check "all com o studio ilegível: o bucket sai inteiro" has "^traces	h1	i1	"

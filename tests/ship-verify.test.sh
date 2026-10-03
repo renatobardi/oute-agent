@@ -9,8 +9,6 @@ SCRIPT="$ROOT/addons/skills/oute-aidlc-ship-verify/scripts/verify-host.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=+1   # o bad mostra a saída inteira
-has() { grep -q -- "$1" <<<"$OUT"; }
-hasnt() { ! has "$1"; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/oute" <<'SH'

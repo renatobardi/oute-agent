@@ -17,7 +17,6 @@ cleanup() { [[ -s "$TMP/daemons" ]] && kill $(cat "$TMP/daemons") 2>/dev/null; r
 trap cleanup EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=30   # o bad mostra o fim da saída
-has() { grep -q -- "$1" <<<"$OUT"; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/docker" <<'SH'
