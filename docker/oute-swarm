@@ -91,7 +91,7 @@ cmd_start() {
 }
 
 cmd_spawn() {
-  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out cmd pfile count round max rrepo
+  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -133,12 +133,22 @@ cmd_spawn() {
     printf '%s\n\n' "$instr"
     sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
   } > "$pfile"
-  out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "#$n ${slug#*-}" --no-focus 2>&1)" \
+  label="#$n ${slug#*-}"
+  # só o stdout é o JSON; o stderr do herdr vai direto para o stderr do spawn
+  out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "$label" --no-focus)" \
     || die "herdr tab create falhou: $out"
-  # o id do pane tem o formato w<N>:p<id>; o do tab é w<N>:t<id>
-  pane="$(printf '%s' "$out" | grep -oE 'w[0-9]+:p[A-Za-z0-9]+' | head -1 || true)"
-  tab="$(printf '%s' "$out" | grep -oE 'w[0-9]+:t[A-Za-z0-9]+' | head -1 || true)"
-  [[ -n "$pane" ]] || die "não achei o pane da aba nova na saída do herdr: $out"
+  # ids lidos do JSON (o id do workspace não é sempre w<dígitos>: o herdr também gera wA, #276)
+  pane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$out" 2>/dev/null || true)"
+  tab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$out" 2>/dev/null || true)"
+  if [[ -z "$pane" ]]; then
+    # sem o pane o agente não abre e a linha não entra no spawned: fecha a aba para não ficar órfã
+    # (pelo id da saída; sem ele, pelo label)
+    [[ -n "$tab" ]] || tab="$(tab_by_label "$label" || true)"
+    if [[ -n "$tab" ]] && herdr tab close "$tab" >/dev/null 2>&1; then
+      die "não achei o pane da aba nova na saída do herdr (aba $tab fechada): $out"
+    fi
+    die "não achei o pane da aba nova na saída do herdr e não consegui fechar a aba \"$label\" (feche à mão): $out"
+  fi
   # OUTE_SWARM_ROUND: a rodada na sessão do worker (oute.swarm.round dos eventos oute.task.* e das conversas, #128);
   # spawn fora de rodada abre sessão avulsa
   printf -v cmd 'OUTE_SWARM_WORKER=1 %soute-task -r %q %q %q "$(cat %q)"' \
