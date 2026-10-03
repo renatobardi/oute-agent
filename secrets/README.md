@@ -33,6 +33,22 @@ Pasta **`oute-services`** (#256; nunca vai ao `agent`):
 
 Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
 
+### Rotação da senha root do SurrealDB (oute-server)
+
+A senha só vale na criação do volume do SurrealDB, então trocar o campo no vault não basta: o volume é recriado e o estado, remontado do DuckDB (ADR-08 §7). Rodada de 2026-10-03 (#256, #427). Tudo no oute-server, sem escrever a senha em comando, arquivo, issue ou log.
+
+0. Antes de começar, rode `oute studio rebuild-state` e guarde a linha `depois:` da saída (rodadas, workers, sessoes, pedidos, conversas). É a referência do passo 5.
+1. Senha nova em `AGENT_STUDIO_SURREAL_PASS`, no item `agent-studio` da pasta `oute-services` do vault.
+2. `oute up --refresh-secrets` (grava o `services.env`; pede a master password).
+3. Libere o volume `oute-agent_oute-surrealdb`:
+   - `docker stop oute-agent-studio`;
+   - `docker rm -f oute-surrealdb oute-volume-init`: o one-off `oute-volume-init`, mesmo parado, também segura o volume, e sem remover os dois o `docker volume rm` falha (sem apagar nada);
+   - `docker volume rm oute-agent_oute-surrealdb`.
+4. `oute up`. Com o `oute-surrealdb` saudável (`docker ps`), rode `oute studio rebuild-state`. Enquanto o agent-studio está parado, o collector guarda a ingestão na fila em disco.
+5. Confira a linha `antes:` (deve ser zerada: volume novo) e compare a `depois:` com a do passo 0: rodadas e o resto não podem ser menores; a diferença a mais é o que entrou no intervalo (em 2026-10-03: 35/130/118/55/158 antes, 35/132/120/58/160 depois). Confira também o studio sem alertas e as telas respondendo.
+
+Se o `rebuild-state` falhar, rodar de novo termina (o que já entrou fica). Não apague a telemetria do bucket `oute-observability` em nenhum passo.
+
 Pasta **`oute-admin`** (separada, NUNCA exportada pro container; só o `oute oci-bootstrap` lê):
 
 | item      | tipo | campos |
