@@ -385,6 +385,15 @@ for i, (what, kw, code) in enumerate((("500", {"md_mode": "500", "or_mode": "500
     check(f"as duas fontes com {what}: nenhuma troca, as duas falhas na telemetria, sem levantar",
           out == {"changes": 0, "failures": {"models.dev": code, "openrouter": code}} and t.runs == [(0, out["failures"])])
 serve(ALL, ALL, OR_IDS)
+def explode(url):
+    raise RuntimeError("segredo-da-fonte")
+t = Rec()
+out = P.check(st, cfg, t, now_ns=T5 + 2 * DAY + 5 * HOUR, urls=URLS, fetcher=explode, select_path=sel_path)
+check("erro inesperado ao ler uma fonte: vira a falha `interno` das duas, sem levantar e sem a causa no aviso",
+      out == {"changes": 0, "failures": {"models.dev": "interno", "openrouter": "interno"}} and all("segredo-da-fonte" not in w[1] for w in t.warns))
+check("histórico: a mesma (modelo, hora) não entra duas vezes e a linha antiga não é reescrita",
+      st.transact(lambda con: (P._insert(con, "gpt-5-codex", C.ModelPrice(7, 7, 7, 7), "fontes", T1), P._insert(con, "m-teste", C.ModelPrice(7, 7, 7, 7), "fontes", T1))) == (False, True)
+      and cfg.prices.lookup("gpt-5-codex").input == 1.5 and st.read(lambda con: con.execute("SELECT input FROM price_history WHERE model = 'gpt-5-codex' AND start_unix_nano = ?", [T1]).fetchone()[0]) == 1.5)
 class C_:
     def __init__(self): self.adds = []
     def add(self, n, attrs=None): self.adds.append((n, attrs))

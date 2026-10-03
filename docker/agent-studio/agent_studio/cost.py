@@ -137,10 +137,6 @@ class PriceTable:
             vigente = price
         return vigente
 
-    def history(self, model):
-        """`[(início em ns, ModelPrice)]` do modelo, do mais antigo ao mais novo; vazio sem entrada."""
-        return list(self._history(model) or ())
-
     def boundaries(self):
         """Horas (ns) em que algum modelo troca de preço, em ordem: o início de toda linha menos a primeira de cada
         modelo. Entre duas horas seguidas nenhum preço muda, então o estimado se agrupa por faixa."""
