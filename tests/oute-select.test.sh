@@ -73,6 +73,20 @@ check "kaizen: motivo diz a exceção"                    jqe '.reason == "label
 labels 21 docs aidlc:build
 sel --issue 21
 check "docs: Haiku, mesmo com aidlc:build"              is build label claude "$HAIKU" ""
+labels 26 kaizen aidlc:build
+sel --issue 26
+check "kaizen + aidlc:build: Sonnet, vale a fase"        is build label claude "$SONNET" ""
+check "kaizen + aidlc:build: motivo diz a fase"          jqe '.reason == "label aidlc:build da issue #26"' <<<"$OUT"
+for p in qa design plan ship iter; do
+  labels 27 kaizen "aidlc:$p"; sel --issue 27
+  check "kaizen + aidlc:$p: Sonnet, vale a fase"         is "$p" label claude "$SONNET" ""
+done
+labels 28 kaizen aidlc:spec
+sel --issue 28
+check "kaizen + aidlc:spec: Haiku, vale a exceção"       is spec label claude "$HAIKU" ""
+labels 29 kaizen aidlc:build aidlc:spec
+sel --issue 29
+check "kaizen + build e spec: a fase de código vale"     bash -c 'jq -e ".phase == \"build\" and .model == \"$1\"" <<<"$2" >/dev/null' _ "$SONNET" "$OUT"
 labels 22 kaizen
 sel --issue 22
 check "kaizen sem fase: Haiku, fase vazia, sem aviso"   bash -c '[ -z "$1" ] && jq -e ".phase == \"\" and .origin == \"label\" and .model == \"$2\"" <<<"$3" >/dev/null' _ "$ERR" "$HAIKU" "$OUT"
@@ -87,6 +101,9 @@ check "spike + kaizen: motivo diz o spike"             jqe '.reason == "label sp
 labels 25 aidlc:build spike
 sel --issue 25
 check "spike em build: Sonnet"                         is build label claude "$SONNET" ""
+labels 31 spike kaizen aidlc:build
+sel --issue 31
+check "spike + kaizen + build: motivo diz o spike"     jqe '.reason == "label spike da issue #31"' <<<"$OUT"
 
 # ---------------------------------------------------------------- 3. sem label: Sonnet, com aviso, sem bloquear
 labels 30 bug agentes

@@ -39,8 +39,10 @@ claude = "claude-sonnet-5-5"
 codex = "gpt-6.1-sol"
 effort = "high"
 
+# `kaizen` não vale com label de fase que mexe em código (#409): vale a fase.
 [[exception]]
 label = "kaizen"
+unless_phases = ["build", "qa", "design", "plan", "ship", "iter"]
 claude = "claude-haiku-4-5-20251001"
 codex = "gpt-6-luna"
 effort = "medium"

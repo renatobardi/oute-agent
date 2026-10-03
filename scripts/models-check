@@ -8,8 +8,8 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
     $OUTE_MODELS_CLAUDE_BIN aponta outro arquivo).
   - Codex: `slug` e esforço em ${CODEX_HOME:-~/.codex}/models_cache.json (`supported_reasoning_levels`). Cache
     ausente, ilegível ou com mais de 7 dias = `desconhecido`, com aviso (o Codex o renova ao abrir).
-  - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, e toda exceção usa um label que
-    existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
+  - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, toda fase de `unless_phases` de uma
+    exceção é do ADR-07 (#409), e toda exceção usa um label que existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
 
 Uma linha por conferência, no stdout: `ok <o quê> (<onde>)`, `FALTA <o quê> (<onde>)` ou `desconhecido …`.
 Avisos em stderr. Código de saída: 0 tudo ok; 1 algum FALTA; 3 nenhum FALTA, mas algo `desconhecido` (não foi
@@ -72,6 +72,8 @@ def load_table(path):
     for i, ex in enumerate(exceptions, 1):
         if not isinstance(ex.get("label"), str) or not ex["label"]:
             die(f"[[exception]] {i} sem label ({path})")
+        if not isinstance(ex.get("unless_phases", []), list) or not all(isinstance(p, str) for p in ex.get("unless_phases", [])):
+            die(f"[[exception]] {i} com unless_phases inválido ({path})")
     return rows, lines, exceptions
 
 
@@ -171,6 +173,9 @@ def check_structure(lines, exceptions):
     for p in dict.fromkeys(keys):
         if p not in PHASES:
             report("FALTA", f"fase {p}", "ADR-07")
+    for ex in exceptions:   # #409: fase citada na ressalva da exceção tem que ser do ADR-07
+        for p in ex.get("unless_phases", []):
+            report("ok" if p in PHASES else "FALTA", f"fase {p} em unless_phases de {ex['label']}", "tabela")
     if exceptions:
         labels = repo_labels()
         for ex in exceptions:

@@ -65,6 +65,7 @@ effort = "medium"
 
 [[exception]]
 label = "kaizen"
+unless_phases = ["build", "qa"]
 claude = "claude-haiku-4-5-20251001"
 codex = "gpt-6-luna"
 effort = "medium"
@@ -113,6 +114,8 @@ check "codex: uma linha ok por esforço"                 has_line "ok gpt-6-luna
 check "estrutura: as 12 fases e ctx têm linha"          [ "$(grep -c '^ok linha da fase [a-z]* (tabela)$' <<<"$OUT")" -eq 13 ]
 check "estrutura: a faixa ctx"                          has_line "ok linha da fase ctx (tabela)"
 check "estrutura: label de exceção existe"              has_line "ok label kaizen (repo)"
+check "estrutura: unless_phases do kaizen com fase do ADR-07"  has_line "ok fase build em unless_phases de kaizen (tabela)"
+check "estrutura: unless_phases confere cada fase"      has_line "ok fase qa em unless_phases de kaizen (tabela)"
 check "estrutura: o gh lista os labels uma vez"         [ "$(grep -c '^label list' "$FAKE/gh.log")" -eq 1 ]
 # sem --table vale a tabela do repo: a mesma saída de quando ela é apontada, seja qual for o conteúdo dela
 mc; REPO_OUT="$OUT"; REPO_RC="$RC"
@@ -236,6 +239,10 @@ table -e '/^phases = \["ops"/d'; mc --table "$TMP/table.toml"
 check "[[line]] sem phases: código 2"                   bash -c '[ "$1" -eq 2 ] && grep -qF "[[line]] 3 sem phases" <<<"$2"' _ "$RC" "$ERR"
 table -e '/^label = "docs"/d'; mc --table "$TMP/table.toml"
 check "[[exception]] sem label: código 2"               bash -c '[ "$1" -eq 2 ] && grep -qF "[[exception]] 2 sem label" <<<"$2"' _ "$RC" "$ERR"
+table -e 's/^unless_phases = .*/unless_phases = ["build", "zz"]/'; mc --table "$TMP/table.toml"
+check "unless_phases com fase fora do ADR-07: FALTA, código 1"  bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA fase zz em unless_phases de kaizen (tabela)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^unless_phases = .*/unless_phases = "build"/'; mc --table "$TMP/table.toml"
+check "unless_phases que não é lista: código 2"         bash -c '[ "$1" -eq 2 ] && grep -qF "[[exception]] 1 com unless_phases inválido" <<<"$2"' _ "$RC" "$ERR"
 mc --tabela x
 check "opção desconhecida: código 2, com o uso"         bash -c '[ "$1" -eq 2 ] && grep -qF "uso: models-check" <<<"$2"' _ "$RC" "$ERR"
 mc --table
