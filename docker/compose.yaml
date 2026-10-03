@@ -62,6 +62,8 @@ services:
       # addons (ADR-06): skills do checkout, read-only (agente em yolo não reescreve as próprias skills);
       # skill nova entra com git pull + oute down/up, sem release. O entrypoint linka em ~/.claude e ~/.agents.
       - ./addons:/opt/oute/addons:ro
+      # tabela de fase do seletor de modelo (ADR-02, #219), read-only: muda com git pull + oute down/up, sem release
+      - ./config/select:/opt/oute/select:ro
     depends_on:
       volume-init:
         condition: service_completed_successfully

@@ -37,11 +37,15 @@ cat > "$BIN/gh" <<'SH'
 case "$1 ${2:-}" in
   "pr list") br=""; while [[ $# -gt 0 ]]; do [[ "$1" != --head ]] || br="$2"; shift; done
              if grep -qxF "$br" "$FAKE/merged" 2>/dev/null; then echo 1; else echo 0; fi ;;
+  "issue view") exec bash "$TESTLIB/fake-gh-issue.sh" "$@" ;;   # labels da issue, para o seletor (#219)
   *) echo "gh falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
 chmod +x "$BIN"/*
 cp "$BIN/claude" "$BIN/codex" "$BIN/gh" "$NOEMIT/"; cp "$BIN/claude" "$NOTASK/"
+# seletor de modelo (#219): o oute-select de verdade, com a tabela do repo, nas seções todas (o resultado não pode
+# depender de haver um oute-select no PATH de quem roda o teste)
+ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"; ln -s "$ROOT/docker/oute-select" "$NOEMIT/oute-select"
 # herdr: `workspace get <id>` responde o label da linha "<id> <label>" de $FAKE/spaces; id desconhecido sai com erro
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -59,7 +63,9 @@ ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
       OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC \
       HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
+       TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" \
        GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 
 # checkout principal em $WS/proj, com remote bare local e origin/HEAD em main
@@ -67,8 +73,14 @@ git init -q --bare -b main "$TMP/remote.git"
 git init -q -b main "$TMP/seed" && git -C "$TMP/seed" commit -q --allow-empty -m base \
   && git -C "$TMP/seed" push -q "$TMP/remote.git" main && git clone -q "$TMP/remote.git" "$WS/proj" || die "não montei o repo de teste"
 
-# t <args…>: oute-task no checkout principal, sem terminal; stdout em $OUT, stderr em $ERR, código em $RC
-t() { OUT="$(cd "$WS/proj" && "$TASK" "$@" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"; }
+# t <args…>: oute-task no checkout principal, sem terminal; stdout em $OUT, stderr em $ERR, código em $RC.
+# Os avisos do seletor (#219: slug sem issue abre no padrão, com aviso) saem do $ERR e ficam em $SELW: as seções 1 a 9
+# conferem o resto do stderr, e a seção 10 confere os avisos.
+t() {
+  OUT="$(cd "$WS/proj" && "$TASK" "$@" 2>"$TMP/err" </dev/null)"; RC=$?
+  ERR="$(grep -v '^oute-select: aviso: ' "$TMP/err")"; SELW="$(grep '^oute-select: aviso: ' "$TMP/err")"
+}
+MS="--model claude-sonnet-5-5"   # o que o seletor põe na frente dos argumentos do claude, no padrão
 # shim <agente> <dir> <args…>: o shim do agente em <dir>, sem terminal
 shim() { local a="$1" d="$2"; shift 2; OUT="$(cd "$d" && PATH="$SHIMS:$PATH" "$SHIMS/$a" "$@" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"; }
 gitdir() { git -C "$1" rev-parse --path-format=absolute --git-dir; }
@@ -85,7 +97,7 @@ rcv_start "$TMP/r1"
 FAKE_RC=7 t s1 claude "faça x"
 check "abrir: exec do agente (saída e código dele)"    [ "$RC" -eq 7 -a "$OUT" == "agente falso claude" ]
 check "abrir: stderr só com a linha da worktree"       [ "$ERR" == "worktree $SP/proj-s1 · branch sessao/s1 (de origin/main)" ]
-check "abrir: agente na worktree, com o prompt"        [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(cat "$FAKE/claude.args")" == "faça x" ]
+check "abrir: agente na worktree, com o prompt"        [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(cat "$FAKE/claude.args")" == "${MS/ /$'\n'}"$'\n'"faça x" ]
 id="$(mark "$SP/proj-s1" id)"
 check "abrir: id <repo>-<slug>-<AAAAMMDDhhmmss> no git-dir da worktree" grep -qE '^proj-s1-[0-9]{14}$' <<<"$id"
 e="$(task_ev '.name == "oute.task.opened"')"
@@ -179,7 +191,7 @@ else
   gd="$(gitdir "$SP/proj-nogravo")"; rm -f "$gd/oute-task"; chmod a-w "$gd"
   FAKE_RC=5 OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=de-outra" t nogravo claude "segue"
   chmod u+w "$gd"
-  check "falha ao gravar o id: a sessão abre igual (exec e código)" [ "$RC" -eq 5 -a "$OUT" == "agente falso claude" -a "$(cat "$FAKE/claude.args")" == "segue" ]
+  check "falha ao gravar o id: a sessão abre igual (exec e código)" [ "$RC" -eq 5 -a "$OUT" == "agente falso claude" -a "$(cat "$FAKE/claude.args")" == "${MS/ /$'\n'}"$'\n'"segue" ]
   check "falha ao gravar o id: só uma linha a mais no stderr" [ "$(grep -c . <<<"$ERR")" -eq 2 ]
   check "falha ao gravar o id: reabre a worktree"      grep -q "^reabrindo $SP/proj-nogravo " <<<"$ERR"
   check "falha ao gravar o id: a linha a mais é o aviso" grep -q '^aviso: não consegui gravar o id da sessão' <<<"$ERR"
@@ -305,7 +317,7 @@ ciclo() {
   printf '%s' "${r//$s/SLUG}"
 }
 up="$(ciclo ciclo-up)"
-check "coletor no ar: o ciclo abre, reabre e remove"   grep -q "^\[3|agente falso claude|worktree $SP/proj-SLUG · branch sessao/SLUG (de origin/main)|p\]\[0|agente falso codex|reabrindo .*removida $SP/proj-SLUG (sem commits além de origin/main)" <<<"$(tr '\n' ' ' <<<"$up")"
+check "coletor no ar: o ciclo abre, reabre e remove"   grep -q "^\[3|agente falso claude|worktree $SP/proj-SLUG · branch sessao/SLUG (de origin/main)|$MS p\]\[0|agente falso codex|reabrindo .*removida $SP/proj-SLUG (sem commits além de origin/main)" <<<"$(tr '\n' ' ' <<<"$up")"
 check "coletor no ar: opened, reopened e removed do ciclo" [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-up"' | jq -r .name | tr '\n' ' ')" == "oute.task.opened oute.task.reopened oute.task.removed " ]
 live="$OTEL_EXPORTER_OTLP_ENDPOINT"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
@@ -409,5 +421,167 @@ for a in "--space x --all" "--all --space x" "--space" "--foo"; do
   check "clean $a: recusa, sem remover nada"           [ "$RC" -ne 0 -a -z "$OUT" -a -d "$SP/proj-fica1" ]
   check "clean $a: diz o erro"                         grep -q "^oute-task: " <<<"$ERR"
 done
+
+# ---------------------------------------------------------------- 10. seletor de modelo (#219, ADR-02)
+# o oute-task abre com o modelo do oute-select (tabela do repo, gh falso da tests/lib), guarda a escolha na marca da
+# sessão e a manda no oute.task.opened; o shim a repõe quando a conversa é retomada
+rcv_stop; rcv_start "$TMP/r3"
+labels() { local n="$1"; shift; printf '%s\n' "$@" > "$FAKE/labels-$n"; }   # <n> <label…> da issue
+args() { tr '\n' ' ' < "$FAKE/$1.args" | sed 's/ $//'; }                   # argumentos que o agente recebeu, numa linha
+# sel_ev <fase> <origem> <agente> <modelo> <esforço>: a escolha no último evento de sessão (vazio = atributo ausente)
+sel_ev() {
+  jqe --arg p "$1" --arg o "$2" --arg a "$3" --arg m "$4" --arg e "$5" '
+    def is($k; $v): if $v == "" then (.attrs | has($k) | not) else .attrs[$k] == $v end;
+    is("oute.task.phase"; $p) and is("oute.task.origin"; $o) and is("oute.task.agent"; $a)
+    and is("oute.task.model"; $m) and is("oute.task.effort"; $e)' <<<"$(last)"
+}
+smark() { echo "$(mark "$1" agent)|$(mark "$1" model)|$(mark "$1" effort)"; }   # agente|modelo|esforço da marca
+labels 40 aidlc:build agentes; labels 41 aidlc:spec; labels 42 aidlc:spec kaizen; labels 43 bug; labels 44 aidlc:ops
+
+# 10a. label de fase
+FAKE_RC=4 t 40-build claude "faça a 40"
+check "fase: claude --model <id da fase> e o prompt"   [ "$RC" -eq 4 -a "$(args claude)" == "--model claude-sonnet-5-5 faça a 40" ]
+check "fase: sem aviso"                                [ -z "$SELW" ]
+check "fase: opened com fase, origem label, agente e modelo, sem esforço" bash -c '[ "$1" == oute.task.opened ]' _ "$(jq -r .name <<<"$(last)")"
+check "fase: atributos da escolha"                     sel_ev build label claude claude-sonnet-5-5 ""
+check "fase: opened continua com o oute.task.id"       jqe --arg id "$(mark "$SP/proj-40-build" id)" '.attrs["oute.task.id"] == $id' <<<"$(last)"
+check "fase: marca guarda agente e modelo"             [ "$(smark "$SP/proj-40-build")" == "claude|claude-sonnet-5-5|" ]
+check "fase: a marca das conversas não muda"           [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$(mark "$SP/proj-40-build" id),oute.task.repo=proj,oute.task.slug=40-build" ]
+t 41-spec
+check "fase spec, sem agente posicional: Opus"         [ "$(args claude)" == "--model claude-opus-5-5" ]
+check "fase spec: origem label (o padrão claude não é escolha)" sel_ev spec label claude claude-opus-5-5 ""
+t 44-ops claude
+check "fase ops: Haiku"                                [ "$(args claude)" == "--model claude-haiku-4-5-20251001" ]
+
+# 10b. exceção por label
+t 42-licao claude "lição"
+check "kaizen: Haiku, mesmo com aidlc:spec"            [ "$(args claude)" == "--model claude-haiku-4-5-20251001 lição" ]
+check "kaizen: evento com a fase da issue e origem label" sel_ev spec label claude claude-haiku-4-5-20251001 ""
+
+# 10c. sem label e gh fora do ar: Sonnet, com aviso, e a sessão abre
+FAKE_RC=6 t 43-semlabel claude "p"
+check "sem label: abre no Sonnet, com o código do agente" [ "$RC" -eq 6 -a "$(args claude)" == "--model claude-sonnet-5-5 p" ]
+check "sem label: aviso"                               [ "$SELW" == "oute-select: aviso: issue #43 sem label aidlc:<fase>; abrindo no padrão (claude-sonnet-5-5)" ]
+check "sem label: origem padrao, sem fase"             sel_ev "" padrao claude claude-sonnet-5-5 ""
+touch "$FAKE/gh.down"
+FAKE_RC=8 t 41-fora claude "p"
+check "gh fora: abre no Sonnet, com o código do agente" [ "$RC" -eq 8 -a "$(args claude)" == "--model claude-sonnet-5-5 p" -a -d "$SP/proj-41-fora" ]
+check "gh fora: aviso"                                 [ "$SELW" == "oute-select: aviso: o gh não respondeu para a issue #41; abrindo no padrão (claude-sonnet-5-5)" ]
+check "gh fora: origem padrao"                         sel_ev "" padrao claude claude-sonnet-5-5 ""
+rm "$FAKE/gh.down"
+
+# 10d. escolha explícita: --agent, --model, codex posicional, --model nos argumentos do agente
+t 40-cx codex "p"
+check "codex posicional: -m <id> -c model_reasoning_effort=<e>" [ "$(args codex)" == "-m gpt-6.1-sol -c model_reasoning_effort=high p" ]
+check "codex posicional: origem manual, com esforço"   sel_ev build manual codex gpt-6.1-sol high
+check "codex posicional: marca com agente, modelo e esforço" [ "$(smark "$SP/proj-40-cx")" == "codex|gpt-6.1-sol|high" ]
+t --agent codex 41-flag
+check "--agent codex: Codex da linha da fase"          [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6-astra -c model_reasoning_effort=high" ]
+check "--agent codex: origem manual"                   sel_ev spec manual codex gpt-6-astra high
+t --model claude-fable-5-1 42-modelo claude "p"
+check "--model: vence a exceção e a fase"              [ "$(args claude)" == "--model claude-fable-5-1 p" ]
+check "--model: origem manual"                         sel_ev spec manual claude claude-fable-5-1 ""
+t --model gpt-6-luna -r "$WS/proj" 40-luna
+check "--model do Codex sem agente: abre o codex"      [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6-luna -c model_reasoning_effort=high" ]
+t --agent claude 41-explicito claude
+check "--agent claude: manual, com o modelo da fase"   sel_ev spec manual claude claude-opus-5-5 ""
+t 40-args claude --model 'claude-opus-5-5[1m]' "p"
+check "--model nos argumentos do agente: não duplica"  [ "$(args claude)" == "--model claude-opus-5-5[1m] p" ]
+check "--model nos argumentos: origem manual, com o id" sel_ev build manual claude 'claude-opus-5-5[1m]' ""
+check "--model nos argumentos: a marca guarda o id com [1m]" [ "$(smark "$SP/proj-40-args")" == "claude|claude-opus-5-5[1m]|" ]
+t 40-args2 codex -m gpt-6-astra "p"
+check "-m nos argumentos do codex: não duplica nem põe esforço" [ "$(args codex)" == "-m gpt-6-astra p" ]
+t --phase plan swarm-0909-0000 claude "prompt"
+check "--phase plan (dispatcher): Sonnet, sem ler a issue" [ "$(args claude)" == "--model claude-sonnet-5-5 prompt" -a -z "$SELW" ]
+check "--phase plan: fase plan, origem padrao"         sel_ev plan padrao claude claude-sonnet-5-5 ""
+
+# 10e. escolha já resolvida pelo oute-swarm spawn (OUTE_SELECT_FILE): vale ela, sem outra leitura da issue
+echo '{"phase":"arch","origin":"label","agent":"codex","model":"gpt-6-astra","effort":"high","reason":"x"}' > "$TMP/sel.json"
+rm -f "$FAKE/gh-issue.log"
+OUTE_SELECT_FILE="$TMP/sel.json" t 43-arquivo claude "p"
+check "OUTE_SELECT_FILE: abre o agente e o modelo do arquivo" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6-astra -c model_reasoning_effort=high p" ]
+check "OUTE_SELECT_FILE: evento com a escolha do arquivo" sel_ev arch label codex gpt-6-astra high
+check "OUTE_SELECT_FILE: o gh não é chamado"           [ ! -e "$FAKE/gh-issue.log" ]
+OUTE_SELECT_FILE="$TMP/nao-existe.json" t 40-semarq claude "p"
+check "OUTE_SELECT_FILE que não existe: o oute-task resolve" [ "$(args claude)" == "--model claude-sonnet-5-5 p" ]
+echo 'lixo' > "$TMP/sel.json"
+OUTE_SELECT_FILE="$TMP/sel.json" FAKE_RC=9 t 40-lixo claude "p"
+check "OUTE_SELECT_FILE inválido: abre sem modelo, com o código do agente" [ "$RC" -eq 9 -a "$(args claude)" == "p" ]
+check "OUTE_SELECT_FILE inválido: aviso"               grep -qxF "aviso: o seletor de modelo não respondeu; a sessão abre com o modelo padrão do agente" <<<"$ERR"
+check "OUTE_SELECT_FILE inválido: evento sem a escolha" sel_ev "" "" claude "" ""
+
+# 10f. seletor falhando ou sem tabela: aviso, e a sessão abre com o modelo padrão do agente
+BAD="$TMP/bin-bad"; mkdir -p "$BAD"; printf '#!/usr/bin/env bash\necho "estourou" >&2; exit 1\n' > "$BAD/oute-select"; chmod +x "$BAD/oute-select"
+OUT="$(cd "$WS/proj" && PATH="$BAD:$PATH" FAKE_RC=3 "$TASK" 40-quebrado claude "p" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "oute-select falhando: abre sem modelo, com o código do agente" [ "$RC" -eq 3 -a "$(args claude)" == "p" -a -d "$SP/proj-40-quebrado" ]
+check "oute-select falhando: aviso"                    grep -qxF "aviso: o seletor de modelo não respondeu; a sessão abre com o modelo padrão do agente" <<<"$ERR"
+OUTE_SELECT_TABLE="$TMP/sem-tabela.toml" FAKE_RC=2 t 40-semtabela claude "p"
+check "sem tabela: abre sem modelo, com o código do agente" [ "$RC" -eq 2 -a "$(args claude)" == "p" ]
+check "sem tabela: aviso do seletor"                   grep -qF 'tabela de fase ausente ou inválida' <<<"$SELW"
+check "sem tabela: evento com a origem, sem modelo"    sel_ev "" padrao claude "" ""
+OUT="$(cd "$WS/proj" && PATH="$NOTASK:$SHIMS:/usr/bin:/bin" "$TASK" 40-semsel claude "p" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "sem oute-select no PATH: abre como antes, sem aviso" [ "$RC" -eq 0 -a "$(args claude)" == "p" -a "$ERR" == "worktree $SP/proj-40-semsel · branch sessao/40-semsel (de origin/main)" ]
+
+# 10g. argumento inválido: erro antes de criar a worktree
+t --model 'x y' 40-invalido claude
+check "--model inválido: código != 0, sem worktree"    [ "$RC" -ne 0 -a ! -e "$SP/proj-40-invalido" ]
+check "--model inválido: diz o motivo"                 grep -qF 'oute-select: modelo inválido: x y' <<<"$ERR"
+t --agent pi 40-pi
+check "--agent pi: recusado, sem worktree"             [ "$RC" -ne 0 -a ! -e "$SP/proj-40-pi" -a "$ERR" == "oute-task: Pi saiu do stack (#217), use claude ou codex" ]
+t --agent gemini 40-gem
+check "--agent inválido: recusado"                     [ "$RC" -ne 0 -a ! -e "$SP/proj-40-gem" ]
+t --agent codex 40-conflito claude
+check "--agent e agente posicional diferentes: recusado" [ "$RC" -ne 0 -a ! -e "$SP/proj-40-conflito" -a "$ERR" == "oute-task: --agent codex e o agente claude não andam juntos" ]
+t --model claude-opus-5-5 40-conflito claude --model claude-sonnet-5-5
+check "--model e o dos argumentos diferentes: recusado" [ "$RC" -ne 0 -a ! -e "$SP/proj-40-conflito" ]
+t --model
+check "--model sem valor: recusado"                    [ "$RC" -ne 0 -a "$ERR" == "oute-task: --model sem valor" ]
+t --nada x
+check "opção desconhecida: recusada, com o uso"        bash -c '[ "$1" -ne 0 ] && grep -q "^oute-task: opção desconhecida: --nada" <<<"$2"' _ "$RC" "$ERR"
+
+# 10h. reabertura: resolve de novo e atualiza a marca; o shell não mexe nela
+labels 40 aidlc:spec
+t 40-build claude
+check "reabrir com o label trocado: modelo novo"       [ "$(args claude)" == "--model claude-opus-5-5" ]
+check "reabrir: reopened com a escolha nova, mesmo id" sel_ev spec label claude claude-opus-5-5 ""
+check "reabrir: a marca acompanha"                     [ "$(smark "$SP/proj-40-build")" == "claude|claude-opus-5-5|" ]
+labels 40 aidlc:build
+idb="$(mark "$SP/proj-40-cx" id)"
+t 40-cx shell </dev/null >/dev/null 2>&1
+check "shell: a marca fica como estava"                [ "$(smark "$SP/proj-40-cx")" == "codex|gpt-6.1-sol|high" -a "$(mark "$SP/proj-40-cx" id)" == "$idb" ]
+check "shell: evento sem a escolha"                    sel_ev "" "" shell "" ""
+
+# 10i. restore do herdr: o shim reabre com o modelo da marca
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-41-spec" > "$HOME/.claude/projects/p/conv-41.jsonl"
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-40-cx" > "$HOME/.codex/sessions/2026/rollout-2026-conv-40cx.jsonl"
+shim claude "$WS/proj" --resume conv-41
+check "restore: claude --resume reabre com o modelo da marca" [ "$RC" -eq 0 -a "$(args claude)" == "--resume conv-41 --model claude-opus-5-5" -a "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-41-spec" && pwd -P)" ]
+shim codex "$WS/proj" resume conv-40cx
+check "restore: codex resume com modelo e esforço"     [ "$RC" -eq 0 -a "$(args codex)" == "resume conv-40cx -m gpt-6.1-sol -c model_reasoning_effort=high" ]
+shim claude "$SP/proj-41-spec" -c
+check "claude -c na worktree: o modelo da marca"       [ "$(args claude)" == "-c --model claude-opus-5-5" ]
+shim claude "$SP/proj-41-spec" --resume conv-41 --model claude-haiku-4-5-20251001
+check "restore com --model na linha: não mexe"         [ "$(args claude)" == "--resume conv-41 --model claude-haiku-4-5-20251001" ]
+shim codex "$SP/proj-40-cx" resume conv-40cx -m gpt-6-luna
+check "codex resume com -m na linha: não mexe"         [ "$(args codex)" == "resume conv-40cx -m gpt-6-luna" ]
+shim claude "$SP/proj-40-cx" --resume outra
+check "marca de outro agente: claude abre sem modelo"  [ "$(args claude)" == "--resume outra" ]
+shim claude "$SP/proj-41-spec" -p "oi"
+check "sem retomar conversa (-p): sem modelo"          [ "$(args claude)" == "-p oi" ]
+shim claude "$SP/proj-40-lixo" --resume y
+check "worktree com marca sem modelo: sem modelo"      [ "$(args claude)" == "--resume y" ]
+OUT="$(cd "$SP/proj-41-spec" && PATH="$SHIMS:$NOTASK:/usr/bin:/bin" "$SHIMS/claude" --resume conv-41 2>&1 </dev/null)"; RC=$?
+check "shim sem oute-task no PATH: retoma sem modelo"  [ "$RC" -eq 0 -a "$(args claude)" == "--resume conv-41" ]
+check "--model-args: os argumentos da marca, um por linha" [ "$("$TASK" --model-args codex "$SP/proj-40-cx")" == "$(printf -- '-m\ngpt-6.1-sol\n-c\nmodel_reasoning_effort=high')" ]
+check "--model-args: outro agente, fora de worktree e sem agente: nada" [ -z "$("$TASK" --model-args claude "$SP/proj-40-cx"; "$TASK" --model-args claude "$TMP"; "$TASK" --model-args)" ]
+
+# 10j. oute-emit task: a escolha só entra no opened/reopened, e a origem é conferida
+before="$(total)"
+oute-emit task opened human repo=a slug=b origin=chute model=m
+check "oute-emit task: origem inválida não emite"      [ "$(total)" -eq "$before" ]
+oute-emit task removed human repo=a slug=b reason=merged phase=build origin=label model=m effort=high
+check "oute-emit task: removed sem a escolha"          jqe '.name == "oute.task.removed" and (.attrs | has("oute.task.phase") or has("oute.task.origin") or has("oute.task.model") or has("oute.task.effort") | not)' <<<"$(last)"
+check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
+rcv_stop
 
 check_end

@@ -24,7 +24,8 @@ trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as sessões na janela de 2025.
 #   S1 (sessão de rodada, claude, oute-server): 3 conversas. s1-0 começou 2 dias antes (os números são da sessão
 #      inteira); s1-a com custo real e estimado; s1-b com outro modelo, um span e um log com erro. Evento
-#      `oute.task.opened` e um evento de exemplo do seletor (#219, nome ainda sem contrato) com o `oute.task.id`.
+#      `oute.task.opened` com a escolha do seletor (#219: fase, origem, modelo) e um evento de exemplo, de nome
+#      qualquer, com o `oute.task.id`.
 #   S2 (avulsa, codex, oute-mac): aberta e removida; uma conversa só com custo estimado.
 #   S3 (id com HTML, sem evento `oute.task.*`: sem registro `sessao`): uma conversa com modelo sem preço.
 #   S4: só o evento `oute.task.opened` (sessão aberta, sem conversa ainda).
@@ -91,7 +92,9 @@ def ev(t, name, eid, attrs): return log(t, name, {"event.name": name, "oute.even
 oute = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": "human"}
 oute_mac = {**oute, "host.name": "oute-mac"}
 task1 = {"oute.task.id": S1, "oute.task.repo": "oute-agent", "oute.task.slug": "207-tela", "oute.task.agent": "claude",
-         "oute.swarm.round": RND, "oute.swarm.session": "207-tela"}
+         "oute.swarm.round": RND, "oute.swarm.session": "207-tela",
+         # escolha do seletor no opened (ADR-02, #219; catálogo do ADR-04)
+         "oute.task.phase": "build", "oute.task.origin": "label", "oute.task.model": "claude-sonnet-5-5"}
 task2 = {"oute.task.id": S2, "oute.task.repo": "lab", "oute.task.slug": "ajuste", "oute.task.agent": "codex"}
 logs = {"resourceLogs": [
   rl(oute, [
@@ -100,7 +103,7 @@ logs = {"resourceLogs": [
     ev(D1 - 3 * 86400 + 5, "oute.swarm.session.spawned", "ev-w1", {"oute.swarm.round": RND, "oute.swarm.session": "207-tela",
                                                                    "oute.swarm.issue": 207, "oute.swarm.session.agent": "claude"}),
     ev(D1 - 3 * 86400 + 10, "oute.task.opened", "ev-t1", task1),
-    # exemplo do evento do seletor (ADR-02, #219): nome e atributos ainda sem contrato; o que importa é a identidade
+    # evento de nome qualquer com o oute.task.id: entra na página da sessão pela identidade, sem mudança na tela
     ev(D1 - 3 * 86400 + 11, "oute.exemplo.seletor", "ev-sel1", {"oute.task.id": S1, "fase": "build", "origem": "label",
                                                                  "modelo": "claude-sonnet-5", "nota": "<script>alert('ev')</script>"}),
     ev(D1 + 600, "oute.task.opened", "ev-t4", {"oute.task.id": S4, "oute.task.repo": "oute-agent", "oute.task.slug": "vazia",
@@ -222,7 +225,8 @@ check "sessão: host, agente, modelos e p95"            jqe '.text | test("Host 
 check "sessão: as 3 conversas, com link"               bash -c 'test "$(jq -c "[.[] | select(.conversa) | .conversa]" <<<"$1")" = "[\"s1-0\",\"s1-a\",\"s1-b\"]" && grep -qF "<a href=\"/conversa?id=s1-b\">s1-b</a>" "$2"' _ "$D" "$TMP/s1.html"
 G="$(jq -c '[.[] | select(.log)]' <<<"$D")"
 check "sessão: eventos dela, pela hora do fato (os logs das conversas não entram)" jqe 'map(.text | capture("(?<e>oute\\.[a-z.]+)").e) == ["oute.task.opened", "oute.exemplo.seletor"]' <<<"$G"
-check "sessão: evento do seletor aparece com os atributos" jqe '.[1].text | test("\"fase\": \"build\"") and test("\"origem\": \"label\"") and test("\"modelo\": \"claude-sonnet-5\"")' <<<"$G"
+check "sessão: a escolha do seletor aparece no oute.task.opened (#219)" jqe '.[0].text | test("\"oute.task.phase\": \"build\"") and test("\"oute.task.origin\": \"label\"") and test("\"oute.task.model\": \"claude-sonnet-5-5\"")' <<<"$G"
+check "sessão: evento com o oute.task.id aparece com os atributos" jqe '.[1].text | test("\"fase\": \"build\"") and test("\"origem\": \"label\"") and test("\"modelo\": \"claude-sonnet-5\"")' <<<"$G"
 check "sessão: conteúdo do evento escapado"            bash -c '! grep -q "<script>alert" "$1" && grep -q "&lt;script&gt;alert" "$1"' _ "$TMP/s1.html"
 S2H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"

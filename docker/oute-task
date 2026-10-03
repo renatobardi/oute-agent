@@ -3,6 +3,7 @@
 #
 #   oute-task <slug> [claude|codex|shell] [args…]      cria/reabre a worktree da tarefa e abre o agente nela
 #   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
+#   oute-task --agent claude|codex --model <id> <slug>   escolha explícita do agente e/ou do modelo (antes do slug)
 #   oute-task list                                       worktrees de tarefa abertas (todos os spaces)
 #   oute-task clean [--yes] [--space <nome> | --all]     remove as já mergeadas/vazias (ou detached contidas na base)
 #                                                        e sem mudança local, só do space atual (--space: de outro;
@@ -13,11 +14,15 @@
 # herdr: _sem-space). Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR). Slug: [a-z0-9-].
 # Base: origin/<branch padrão> atualizado. Formato antigo (/workspace/.worktrees/<repo>-<slug>, antes da #277): reabre
 # e aparece no list, sem migração; só o clean --all o considera.
+# Modelo (ADR-02, #219): o oute-select escolhe pela issue do slug (<n>-…): --agent/--model (ou `codex` posicional, ou
+# --model/-m nos args do agente) > label kaizen/docs > label aidlc:<fase> > Sonnet. Abre com `claude --model <id>` ou
+# `codex -m <id> -c model_reasoning_effort=<e>`; a escolha fica na marca da sessão e vale no restore. Nunca bloqueia.
 #
 # Sessão no bucket (ADR-04, "Sessões (#128)"): abrir, reabrir e remover (clean --yes) emitem oute.task.opened/reopened/
 # removed pelo oute-emit, e a conversa do agente sai marcada com a sessão no OTEL_RESOURCE_ATTRIBUTES. Nada disso muda
 # saída, exec ou código de saída, nem com o coletor fora ou sem oute-emit.
 #   oute-task --mark [dir]   (o shim usa) imprime o OTEL_RESOURCE_ATTRIBUTES com a marca da sessão da worktree; sem id, nada
+#   oute-task --model-args <agente> [dir]   (o shim usa) argumentos de modelo da marca, um por linha, se o agente é o dela
 set -euo pipefail
 WT_ROOT="${OUTE_WORKTREES:-/workspace/.worktrees}"
 WS_ROOT="${OUTE_WORKSPACE:-/workspace}"   # a variável só existe para os testes
@@ -48,16 +53,22 @@ current_space() {
 }
 
 # ---------------------------------------------------------------- sessão no bucket (ADR-04, #128)
-# Marca da sessão: <git-dir da worktree>/oute-task, uma chave por linha (id, repo, slug e, em sessão de rodada, round e
-# session). Fica ao lado da marca oute-swarm-worker e some junto com a worktree.
+# Marca da sessão: <git-dir da worktree>/oute-task, uma chave por linha (id, repo, slug; em sessão de rodada, round e
+# session; com o seletor, agent, model e effort, #219). Fica ao lado da marca oute-swarm-worker e some junto com a
+# worktree.
 attr() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'; }   # valor que cabe no OTEL_RESOURCE_ATTRIBUTES (sem vírgula, sem =)
 mark_path() { local gd; gd="$(git -C "$1" rev-parse --path-format=absolute --git-dir 2>/dev/null)" && printf '%s/oute-task' "$gd"; }
 mark_get() { [[ -f "$1" ]] || return 0; sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' || true; }
-mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm>
+# id de modelo na marca: como o mark_get, mais o sufixo [1m]
+mark_model() { [[ -f "$1" ]] || return 0; sed -n 's/^model=//p' "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._[]-' || true; }
+mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço>
   local f="$1"; shift
   { printf 'id=%s\nrepo=%s\nslug=%s\n' "$1" "$2" "$3"
     [[ -z "$4" ]] || printf 'round=%s\n' "$4"
-    [[ -z "$5" ]] || printf 'session=%s\n' "$5"; } 2>/dev/null > "$f"
+    [[ -z "$5" ]] || printf 'session=%s\n' "$5"
+    [[ -z "$6" ]] || printf 'agent=%s\n' "$6"
+    [[ -z "$7" ]] || printf 'model=%s\n' "$7"
+    [[ -z "$8" ]] || printf 'effort=%s\n' "$8"; } 2>/dev/null > "$f"
 }
 # OTEL_RESOURCE_ATTRIBUTES de agora sem oute.task.*/oute.swarm.* (fica a origem) + os pares dados (par sem valor não
 # entra): chave que já existia não se repete, vale a nova
@@ -121,24 +132,31 @@ removed() {   # <base> <merged|empty|detached>, depois do task_of
 # abertura: id estável na marca da worktree, evento e marca nas conversas. Chamada com `|| true`: nada daqui
 # interrompe a abertura. Rodada: a do ambiente (dispatcher ou spawn; o worker leva o slug como sessão) ou, sem ele
 # (restore, reabertura na mão), a que a marca guardou
+# Escolha do seletor (S_*, do select_model): vai no evento e, para claude/codex, na marca; o `shell` não mexe nela
 session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
   local ev="$1" wt="$2" rname slug="$4" agent="$5" base="$6" mf="" id="" mid round eround mround="" sess msess="" legacy=""
+  local ma="" mm="" me="" wa wm we
   rname="$(attr "$3")"
-  if mf="$(mark_path "$wt")"; then id="$(mark_get "$mf" id)"; mround="$(mark_get "$mf" round)"; msess="$(mark_get "$mf" session)"; fi
+  if mf="$(mark_path "$wt")"; then
+    id="$(mark_get "$mf" id)"; mround="$(mark_get "$mf" round)"; msess="$(mark_get "$mf" session)"
+    ma="$(mark_get "$mf" agent)"; mm="$(mark_model "$mf")"; me="$(mark_get "$mf" effort)"
+  fi
+  if [[ "$agent" == shell ]]; then wa="$ma"; wm="$mm"; we="$me"; else wa="$agent"; wm="$S_MODEL"; we="$S_EFFORT"; fi
   mid="$id"; round="$mround"; sess="$msess"
   eround="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}"
   if [[ "$eround" =~ ^[A-Za-z0-9._-]+$ ]]; then
     round="$eround"; sess=""
     [[ -z "${OUTE_SWARM_WORKER:-}" ]] || sess="$slug"
   fi
-  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" ]]; then
+  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" || "$wa" != "$ma" || "$wm" != "$mm" || "$we" != "$me" ]]; then
     # worktree sem id na reabertura = anterior à #128: ganha um agora, com legacy
     if [[ -z "$id" ]]; then id="$rname-$slug-$(date -u +%Y%m%d%H%M%S)"; [[ "$ev" == opened ]] || legacy=true; fi
-    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess"; then
+    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess" "$wa" "$wm" "$we"; then
       [[ -n "$mid" ]] || { echo "aviso: não consegui gravar o id da sessão em ${mf:-$wt}; a sessão segue sem id" >&2; id=""; legacy=""; }
     fi
   fi
-  emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy"
+  emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy" \
+    "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT"
   mark_env "$id" "$rname" "$slug" "$round" "$sess"
 }
 cmd_mark() {
@@ -147,6 +165,60 @@ cmd_mark() {
   id="$(mark_get "$f" id)"; [[ -n "$id" ]] || return 0
   otel_attrs "oute.task.id=$id" "oute.task.repo=$(mark_get "$f" repo)" "oute.task.slug=$(mark_get "$f" slug)" \
     "oute.swarm.round=$(mark_get "$f" round)" "oute.swarm.session=$(mark_get "$f" session)"
+}
+
+# ---------------------------------------------------------------- modelo da sessão (ADR-02, #219)
+S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; MARGS=()
+# argumentos de modelo do agente, em MARGS: <agente> <modelo> <esforço>; sem modelo, nenhum
+model_args() {
+  MARGS=()
+  [[ -n "$2" ]] || return 0
+  case "$1" in
+    claude) MARGS=(--model "$2") ;;
+    codex) MARGS=(-m "$2"); [[ -z "$3" ]] || MARGS+=(-c "model_reasoning_effort=$3") ;;
+  esac
+}
+# --model/-m que já vem nos argumentos do agente (`oute-task x claude --model <id> …`): escolha explícita, e o
+# oute-task não põe outro. <agente> <args…>; imprime o id
+args_model() {
+  local a="$1" prev="" x; shift
+  for x in "$@"; do
+    case "$prev" in --model) printf '%s' "$x"; return ;; -m) [[ "$a" != codex ]] || { printf '%s' "$x"; return; } ;; esac
+    case "$x" in --model=*) printf '%s' "${x#--model=}"; return ;; esac
+    prev="$x"
+  done
+}
+# escolha da sessão, em S_*: <repo principal> <slug> <agente explícito ou vazio> <modelo explícito ou vazio> <fase fixa>.
+# O `oute-swarm spawn` já resolveu e entrega o JSON em OUTE_SELECT_FILE; senão, o oute-select. Nunca interrompe a
+# abertura: sem oute-select, nada muda; com ele falhando ou devolvendo algo inválido, aviso e o modelo padrão do
+# agente. Só argumento inválido (código 2 do oute-select, que já disse o motivo) sai com erro.
+select_model() {
+  local js="" rc=0 args=() a m e p o
+  S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""
+  if [[ -n "${OUTE_SELECT_FILE:-}" && -r "$OUTE_SELECT_FILE" ]]; then js="$(cat "$OUTE_SELECT_FILE" 2>/dev/null || true)"
+  elif command -v oute-select >/dev/null 2>&1; then
+    [[ -z "$3" ]] || args+=(--agent "$3")
+    [[ -z "$4" ]] || args+=(--model "$4")
+    if [[ -n "$5" ]]; then args+=(--phase "$5"); else args+=(--task "$2"); fi
+    js="$(oute-select --json --repo "$1" ${args[@]+"${args[@]}"} </dev/null)" || rc=$?
+    (( rc != 2 )) || exit 1
+  else return 0; fi
+  IFS='|' read -r a m e p o < <(jq -r '[.agent, .model, .effort, .phase, .origin] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || true
+  if (( rc != 0 )) || [[ ! "${a:-}" =~ ^(claude|codex)$ ]]; then
+    echo "aviso: o seletor de modelo não respondeu; a sessão abre com o modelo padrão do agente" >&2; return 0
+  fi
+  S_AGENT="$a"
+  [[ ! "$m" =~ ^[A-Za-z0-9._-]+(\[1m\])?$ ]] || S_MODEL="$m"
+  [[ ! "$e" =~ ^[a-z]+$ ]] || S_EFFORT="$e"
+  [[ ! "$p" =~ ^[a-z]+$ ]] || S_PHASE="$p"
+  [[ ! "$o" =~ ^(manual|label|padrao)$ ]] || S_ORIGIN="$o"
+}
+cmd_model_args() {   # <agente> [dir]
+  local f
+  f="$(mark_path "${2:-$PWD}")" || return 0
+  [[ -n "${1:-}" && "$(mark_get "$f" agent)" == "$1" ]] || return 0
+  model_args "$1" "$(mark_model "$f")" "$(mark_get "$f" effort)"
+  [[ ${#MARGS[@]} -eq 0 ]] || printf '%s\n' "${MARGS[@]}"
 }
 
 cmd_list() {
@@ -225,8 +297,8 @@ cmd_clean() {
 
 cmd_open() {
   local repo="$1" slug="$2"; shift 2
-  local agent="${1:-claude}"; [[ $# -gt 0 ]] && shift
-  local main name base="" wt br sp ev=reopened
+  local agent="${1:-${O_AGENT:-claude}}" pos="${1:-}"; [[ $# -gt 0 ]] && shift
+  local main name base="" wt br sp ev=reopened xagent="$O_AGENT" xmodel="$O_MODEL" amodel=""
   who_called || true
   # antes de criar a worktree: agente fora do stack não deixa sessão vazia para trás
   case "$agent" in
@@ -234,8 +306,19 @@ cmd_open() {
     pi) die "Pi saiu do stack (#217), use claude ou codex" ;;
     *) die "agente desconhecido: $agent (claude|codex|shell)" ;;
   esac
+  [[ -z "$O_AGENT" || -z "$pos" || "$pos" == "$O_AGENT" ]] || die "--agent $O_AGENT e o agente $pos não andam juntos"
   main="$(main_root "$repo")" || die "$repo não é um repositório git"
   name="$(basename "$main")"; slug="$(slugify "$slug")"; [[ -n "$slug" ]] || die "slug vazio"
+  # modelo da sessão (#219), também antes da worktree: --model inválido sai aqui. Escolha explícita = --agent,
+  # --model, `codex` posicional e o --model/-m dos argumentos do agente; o `claude` posicional (o do shim) não conta
+  if [[ "$agent" != shell ]]; then
+    [[ "$pos" != codex ]] || xagent=codex
+    amodel="$(args_model "$agent" "$@")"
+    [[ -z "$O_MODEL" || -z "$amodel" || "$amodel" == "$O_MODEL" ]] || die "--model $O_MODEL e o modelo $amodel dos argumentos do agente não andam juntos"
+    select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE"
+    agent="${S_AGENT:-$agent}"
+    [[ -n "$amodel" ]] || model_args "$agent" "$S_MODEL" "$S_EFFORT"
+  fi
   sp="$(current_space)"; wt="$WT_ROOT/$sp/$name-$slug"; br="sessao/$slug"
   # formato antigo (antes da #277): a worktree que já existe direto em $WT_ROOT continua sendo a da tarefa
   [[ -d "$wt" || ! -d "$WT_ROOT/$name-$slug" ]] || wt="$WT_ROOT/$name-$slug"
@@ -263,17 +346,32 @@ cmd_open() {
         export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-false}"
         touch "$(git rev-parse --path-format=absolute --git-dir)/oute-swarm-worker" 2>/dev/null || true
       fi
-      OUTE_NO_WORKTREE=1 exec "$agent" "$@" ;;   # passa pelo shim, que deixa seguir
+      OUTE_NO_WORKTREE=1 exec "$agent" ${MARGS[@]+"${MARGS[@]}"} "$@" ;;   # passa pelo shim, que deixa seguir
     shell) exec bash -i ;;
   esac
 }
 
+O_AGENT=""; O_MODEL=""; O_PHASE=""
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
-  -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
-      r="$2"; [[ -d "$r" ]] || r="$WS_ROOT/$r"; shift 2; cmd_open "$r" "$@" ;;
-  *) cmd_open "$PWD" "$@" ;;
+  --model-args) cmd_model_args "${2:-}" "${3:-}" 2>/dev/null || true ;;
+  *) r="$PWD"
+     # opções da abertura, antes do slug; --phase (fase fixa, sem ler a issue) é o que o oute-swarm usa no dispatcher
+     while [[ "${1:-}" == -* ]]; do
+       case "$1" in
+         -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
+             r="$2"; [[ -d "$r" ]] || r="$WS_ROOT/$r" ;;
+         --agent) O_AGENT="${2:-}"; [[ "$O_AGENT" != pi ]] || die "Pi saiu do stack (#217), use claude ou codex"
+                  [[ "$O_AGENT" == claude || "$O_AGENT" == codex ]] || die "--agent inválido: ${O_AGENT:-(vazio)} (claude|codex)" ;;
+         --model) O_MODEL="${2:-}"; [[ -n "$O_MODEL" ]] || die "--model sem valor" ;;
+         --phase) O_PHASE="${2:-}"; [[ -n "$O_PHASE" ]] || die "--phase sem valor" ;;
+         *) die "opção desconhecida: $1 (uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] <slug> [agente] [args…])" ;;
+       esac
+       shift 2
+     done
+     [[ $# -ge 1 ]] || die "uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] <slug> [agente] [args…]"
+     cmd_open "$r" "$@" ;;
 esac

@@ -51,14 +51,15 @@ case "$1 ${2:-}" in
                  echo "$(basename "$PWD") $oid" >> "$FAKE/gh.log"
                  [[ ! -e "$FAKE/checks-$oid.fail" ]] || { echo "gh falso: falha pedida" >&2; exit 1; }
                  cat "$FAKE/checks-$oid.json" 2>/dev/null || echo '{"data":{"repository":{"object":null}}}' ;;
+  "issue view") exec bash "$TESTLIB/fake-gh-issue.sh" "$@" ;;   # labels da issue, para o seletor (#219)
   *) echo "gh falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
 SH
 cat > "$BIN/oute-task" <<'SH'
 #!/usr/bin/env bash
 [[ "${1:-}" == list ]] && echo "(worktrees falsas)"
-# o último argumento (prompt da rodada, na abertura) fica em $FAKE/oute-task.last
-[[ -z "${FAKE:-}" ]] || printf '%s' "${@: -1}" > "$FAKE/oute-task.last"
+# o último argumento (prompt da rodada, na abertura) fica em $FAKE/oute-task.last; os anteriores, em oute-task.args
+[[ -z "${FAKE:-}" ]] || { printf '%s' "${@: -1}" > "$FAKE/oute-task.last"; printf '%s\n' "${@:1:$#-1}" > "$FAKE/oute-task.args"; }
 exit 0
 SH
 # sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
@@ -78,12 +79,20 @@ i=0; for a in "$@"; do
 done | jq -s '{result: {tabs: .}}' > "$FAKE/tabs.json"
 SH
 chmod +x "$BIN"/*
+# seletor de modelo (#219): o oute-select de verdade, com a tabela do repo, em todas as seções (o resultado não pode
+# depender de haver um oute-select no PATH de quem roda o teste). Issue sem $FAKE/labels-<n> = o gh não acha a issue:
+# a sessão abre no padrão (Sonnet), com aviso em stderr
+ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
+export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
+unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 
 # round(<caso>): HOME, rodada swarm-test (repo da rodada = pasta git "repo", início no passado) e $FAKE limpos;
 # issue #7 aberta na aba "#7 foo" (linha do spawned no formato antigo, sem repo). Globais: H, STATE, FAKE, REPO.
+# As issues #1 a #20 têm o label aidlc:build (o seletor abre no Sonnet, sem aviso); a seção 11 troca os labels.
 round() {
   H="$TMP/$1/home"; STATE="$H/.oute/swarm/swarm-test"; FAKE="$TMP/$1/fake"; REPO="$TMP/$1/repo"
   mkdir -p "$STATE" "$FAKE" "$TMP/$1/inbox" "$TMP/$1/outbox"
+  local i; for i in $(seq 1 20); do echo aidlc:build > "$FAKE/labels-$i"; done
   gitrepo "$REPO"
   printf 'repo=%s\nmax=3\nlabel=\nstarted=2026-01-01T00:00:00Z\n' "$REPO" > "$STATE/meta"
   printf '7-foo w1:p1 claude 2026-01-01T00:00:01Z w1:t1\n' > "$STATE/spawned"
@@ -160,7 +169,7 @@ CASE=spawn; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
 MAX=1 sw spawn 7-bar "instrução kaizen" --repo "$LAB" --kaizen
 check "spawn --repo: código 0"                           [ "$RC" -eq 0 ]
 check "spawn --repo: aba aberta no repo indicado"        grep -q -- "tab create --workspace w1 --cwd $LAB " "$FAKE/herdr.log"
-check "spawn --repo: oute-task na worktree do repo, com a rodada (#128)" grep -q -- "pane run w1:p2 OUTE_SWARM_WORKER=1 OUTE_SWARM_ROUND=swarm-test oute-task -r $LAB 7-bar claude" "$FAKE/herdr.log"
+check "spawn --repo: oute-task na worktree do repo, com a rodada (#128)" grep -q -- "pane run w1:p2 OUTE_SWARM_WORKER=1 OUTE_SWARM_ROUND=swarm-test OUTE_SELECT_FILE=$STATE/7-bar.select oute-task -r $LAB 7-bar claude" "$FAKE/herdr.log"
 check "spawn --repo: spawned grava repo e kaizen"        [ "$(awk '$1=="7-bar" {print $2, $6, $7}' "$STATE/spawned")" == "w1:p2 $LAB kaizen" ]
 check "kaizen: fora do --max (1 normal já aberta)"       grep -q 'kaizen' <<<"$OUT"
 MAX=1 sw spawn 8-baz "instrução normal"
@@ -374,7 +383,7 @@ swc "$REPO" spawn 8-bar "instrução"
 check "avulso: código 0, sem aviso"                      [ "$RC" -eq 0 -a -z "$ERR" ]
 check "avulso: grava em avulso (spawned)"                grep -q '^8-bar ' "$H/.oute/swarm/avulso/spawned"
 check "avulso: grava em avulso (log)"                    grep -q ' spawn 8-bar claude$' "$H/.oute/swarm/avulso/log"
-check "avulso: sessão avulsa, sem OUTE_SWARM_ROUND (#128)" grep -q -- "pane run w1:p[0-9]* OUTE_SWARM_WORKER=1 oute-task -r .* 8-bar claude" "$FAKE/herdr.log"
+check "avulso: sessão avulsa, sem OUTE_SWARM_ROUND (#128)" grep -q -- "pane run w1:p[0-9]* OUTE_SWARM_WORKER=1 OUTE_SELECT_FILE=[^ ]*/avulso/8-bar.select oute-task -r .* 8-bar claude" "$FAKE/herdr.log"
 check "avulso: a rodada não recebe nada"                 [ "$(wc -l < "$STATE/spawned")" -eq 1 ]
 swc "$WT" spawn 9-baz "instrução"
 check "branch swarm sem meta: código 0, sem aviso"       [ "$RC" -eq 0 -a -z "$ERR" ]
@@ -635,7 +644,7 @@ CASE=fora; round "$CASE"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
 t0=$(date +%s)
 sw spawn 9-baz "instrução"
-check "fora do ar: spawn com código 0 e a mesma saída"   [ "$RC" -eq 0 -a "$OUT" == "aberta: #9 → pane w1:p2 · worktree repo-9-baz · agente claude" ]
+check "fora do ar: spawn com código 0 e a mesma saída"   [ "$RC" -eq 0 -a "$OUT" == "aberta: #9 → pane w1:p2 · worktree repo-9-baz · agente claude · modelo claude-sonnet-5-5 (fase build, label)" ]
 check "fora do ar: sem erro na tela"                     [ -z "$ERR" ]
 check "fora do ar: rápido"                               [ $(( $(date +%s) - t0 )) -le 3 ]
 check "fora do ar: log continua sendo gravado"           grep -q ' spawn 9-baz claude$' "$STATE/log"
@@ -661,7 +670,7 @@ nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
 check "--agent: código 0 e rodada nova"                  [ "$RC" -eq 0 -a -n "$nr" ]
 check "--agent: meta com workers=codex e agent=claude"   [ "$(grep -cxE 'workers=codex|agent=claude' "$M")" -eq 2 ]
 check "--agent: prompt com o agente da rodada"           grep -qF 'Agente das sessões: `codex` (escolhido pelo Bardi na abertura, `--agent codex`).' "$FAKE/oute-task.last"
-check "--agent: prompt manda não passar --agent"         grep -qF -- '- **Agente:** não passe `--agent` no `spawn`' "$FAKE/oute-task.last"
+check "--agent: prompt manda não passar --agent nem --model" grep -qF -- '- **Agente e modelo:** não passe `--agent` nem `--model` no `spawn`' "$FAKE/oute-task.last"
 check "--agent: triagem com o agente de cada sessão"     grep -qF 'área tocada, agente da sessão,' "$FAKE/oute-task.last"
 check "--agent: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 check "--agent: aviso com o agente"                      grep -qxF "dispatcher $nr · repo repo · max 2 · agente codex" <<<"$ERR"
@@ -699,7 +708,7 @@ sw spawn 8-def "instrução"
 check "padrão do meta: código 0"                         [ "$RC" -eq 0 ]
 check "padrão do meta: spawned com codex"                [ "$(sp_agent swarm-test 8-def)" == codex ]
 check "padrão do meta: oute-task com codex"              ran 8-def codex
-check "padrão do meta: saída e log com codex"            [ "${OUT##* · }" == "agente codex" -a "$(grep -c ' spawn 8-def codex$' "$STATE/log")" -eq 1 ]
+check "padrão do meta: saída e log com codex"            [ "${OUT##* · agente }" == "codex · modelo gpt-6.1-sol (fase build, manual)" -a "$(grep -c ' spawn 8-def codex$' "$STATE/log")" -eq 1 ]
 sw spawn 9-ovr "instrução" --agent claude
 check "--agent sobrepõe: claude no spawned e no oute-task" [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-ovr)" == claude ]
 check "--agent sobrepõe: oute-task com claude"           ran 9-ovr claude
@@ -725,5 +734,99 @@ check "meta inválido: mensagem com a origem"             grep -qF 'Pi saiu do s
 check "meta inválido: nada registrado nem aberto"        [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs" ]
 sw spawn 13-y "instrução" --kaizen --agent claude
 check "meta inválido + --agent: abre com o explícito"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 13-y)" == claude ]
+
+# ---------------------------------------------------------------- #219: seletor de modelo (ADR-02)
+# sel <slug> <campo>: campo do <slug>.select da rodada (a escolha que o spawn resolveu e entrega ao oute-task).
+# cmd <slug>: a linha que o spawn mandou rodar no pane
+sel() { jq -r --arg k "$2" '.[$k]' "$STATE/$1.select" 2>/dev/null; }
+cmd() { grep -- " oute-task -r [^ ]* $1 " "$FAKE/herdr.log" | tail -1; }
+labels() { local n="$1"; shift; printf '%s\n' "$@" > "$FAKE/labels-$n"; }
+
+# 11. spawn: fase da issue, exceção, sem label, gh fora
+CASE=seletor; round "$CASE"
+labels 8 aidlc:spec agentes; labels 9 aidlc:spec kaizen; labels 10 bug; labels 12 aidlc:ops
+sw spawn 8-arq "instrução"
+check "fase: código 0, sem aviso"                        [ "$RC" -eq 0 -a -z "$ERR" ]
+check "fase: escolha em <slug>.select (Opus, origem label)" [ "$(sel 8-arq phase) $(sel 8-arq origin) $(sel 8-arq agent) $(sel 8-arq model)" == "spec label claude claude-opus-5-5" ]
+check "fase: o oute-task recebe a escolha e o agente"    grep -qF -- "OUTE_SWARM_ROUND=swarm-test OUTE_SELECT_FILE=$STATE/8-arq.select oute-task -r $REPO 8-arq claude " <<<"$(cmd 8-arq)"
+check "fase: saída com agente, modelo, fase e origem"    [ "$OUT" == "aberta: #8 → pane w1:p2 · worktree repo-8-arq · agente claude · modelo claude-opus-5-5 (fase spec, label)" ]
+check "fase: a issue é lida no repo da sessão"           grep -qxF "repo 8" "$FAKE/gh-issue.log"
+sw spawn 9-licao "instrução" --kaizen
+check "kaizen: Haiku pela exceção do label"              [ "$RC" -eq 0 -a "$(sel 9-licao model) $(sel 9-licao origin)" == "claude-haiku-4-5-20251001 label" ]
+sw spawn 10-semlabel "instrução"
+check "sem label: abre no Sonnet, código 0"              [ "$RC" -eq 0 -a "$(sel 10-semlabel model) $(sel 10-semlabel origin) $(sp_agent swarm-test 10-semlabel)" == "claude-sonnet-5-5 padrao claude" ]
+check "sem label: aviso"                                 [ "$ERR" == "oute-select: aviso: issue #10 sem label aidlc:<fase>; abrindo no padrão (claude-sonnet-5-5)" ]
+touch "$FAKE/gh.down"
+MAX=5 sw spawn 12-fora "instrução"
+check "gh fora: abre no Sonnet, código 0"                [ "$RC" -eq 0 -a "$(sel 12-fora model) $(sel 12-fora origin)" == "claude-sonnet-5-5 padrao" ]
+check "gh fora: aviso, e a aba abre"                     bash -c 'grep -qF "o gh não respondeu para a issue #12" <<<"$1" && grep -q "^12-fora " "$2"' _ "$ERR" "$STATE/spawned"
+rm "$FAKE/gh.down"
+
+# 11b. escolha explícita: --model, --agent e os dois; o agente gravado é o que de fato abre
+CASE=seletor-manual; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+labels 8 aidlc:spec
+MAX=5 sw spawn 8-mod "instrução" --model claude-fable-5-1
+check "--model: vence a fase, origem manual"             [ "$RC" -eq 0 -a "$(sel 8-mod model) $(sel 8-mod origin) $(sel 8-mod phase)" == "claude-fable-5-1 manual spec" ]
+MAX=5 sw spawn 9-cx "instrução" --agent codex
+check "--agent codex: Codex da linha da fase"            [ "$(sel 9-cx agent) $(sel 9-cx model) $(sel 9-cx effort) $(sel 9-cx origin)" == "codex gpt-6.1-sol high manual" ]
+MAX=5 sw spawn 10-astra "instrução" --model gpt-6-astra
+check "--model do Codex sem --agent: código 0"           [ "$RC" -eq 0 ]
+check "--model do Codex: spawned com o agente que abriu" [ "$(sp_agent swarm-test 10-astra)" == codex ]
+check "--model do Codex: oute-task com codex"            ran 10-astra codex
+check "--model do Codex: log com codex"                  grep -q ' spawn 10-astra codex$' "$STATE/log"
+check "--model do Codex: session.spawned com o agente que abriu" [ "$(n '.name == "oute.swarm.session.spawned" and .attrs["oute.swarm.session"] == "10-astra" and .attrs["oute.swarm.session.agent"] == "codex"')" -eq 1 ]
+before="$(cat "$STATE/spawned")"; tabs="$(grep -c 'tab create' "$FAKE/herdr.log")"
+MAX=5 sw spawn 11-ruim "instrução" --model 'x y'
+check "--model inválido: código != 0, com o motivo"      bash -c '[ "$1" -ne 0 ] && grep -qF "oute-select: modelo inválido: x y" <<<"$2" && grep -qF "seletor recusou a sessão 11-ruim" <<<"$2"' _ "$RC" "$ERR"
+check "--model inválido: nada registrado nem aberto"     [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs" ]
+rcv_stop
+
+# 11c. rodada com --agent (workers=codex): escolha explícita da rodada; o modelo é o do Codex da fase
+CASE=seletor-rodada; round "$CASE"; echo workers=codex >> "$STATE/meta"
+labels 8 aidlc:spec; labels 9 aidlc:ops
+sw spawn 8-rod "instrução"
+check "rodada codex: Codex da linha da fase, origem manual" [ "$RC" -eq 0 -a "$(sel 8-rod agent) $(sel 8-rod model) $(sel 8-rod effort) $(sel 8-rod origin) $(sel 8-rod phase)" == "codex gpt-6-astra high manual spec" ]
+check "rodada codex: spawned e oute-task com codex"      bash -c '[ "$1" == codex ] && grep -qF -- "oute-task -r $2 8-rod codex " "$3"' _ "$(sp_agent swarm-test 8-rod)" "$REPO" "$FAKE/herdr.log"
+sw spawn 9-ovr "instrução" --agent claude
+check "spawn --agent claude sobrepõe a rodada: Haiku da fase ops" [ "$(sel 9-ovr agent) $(sel 9-ovr model) $(sel 9-ovr origin)" == "claude claude-haiku-4-5-20251001 manual" ]
+
+# 11d. seletor falhando ou ausente: o spawn abre como antes (o agente pedido, sem escolha), com aviso
+CASE=seletor-falha; round "$CASE"
+BAD="$TMP/$CASE/bad"; mkdir -p "$BAD"; printf '#!/usr/bin/env bash\necho estourou >&2; exit 1\n' > "$BAD/oute-select"; chmod +x "$BAD/oute-select"
+swb() {   # sw com outro PATH na frente ($1)
+  local p="$1"; shift
+  OUT="$(env PATH="$p:$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+         OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX=5 "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+}
+swb "$BAD" spawn 8-cai "instrução" --agent codex
+check "seletor falhando: abre o agente pedido, código 0" [ "$RC" -eq 0 -a "$(sp_agent swarm-test 8-cai)" == codex -a ! -e "$STATE/8-cai.select" ]
+check "seletor falhando: aviso"                          grep -qxF "oute-swarm: aviso: o seletor de modelo não respondeu; 8-cai abre com o modelo padrão do agente" <<<"$ERR"
+check "seletor falhando: oute-task sem OUTE_SELECT_FILE" grep -qF -- "OUTE_SWARM_ROUND=swarm-test oute-task -r $REPO 8-cai codex " <<<"$(cmd 8-cai)"
+check "seletor falhando: saída como antes"               [ "$OUT" == "aberta: #8 → pane w1:p2 · worktree repo-8-cai · agente codex" ]
+OUTE_SELECT_TABLE="$TMP/sem-tabela.toml" MAX=5 sw spawn 9-semtab "instrução"
+check "sem tabela: abre claude sem modelo, com aviso"    bash -c '[ "$1" -eq 0 ] && [ "$2" == "aberta: #9 → pane w1:p3 · worktree repo-9-semtab · agente claude" ] && grep -qF "tabela de fase ausente ou inválida" <<<"$3"' _ "$RC" "$OUT" "$ERR"
+# PATH sem oute-select nenhum: só os falsos do teste (menos ele) e o sistema
+NOSEL="$TMP/$CASE/nosel"; mkdir -p "$NOSEL"; for f in "$BIN"/*; do [[ "$(basename "$f")" == oute-select ]] || ln -s "$f" "$NOSEL/"; done
+nosel() {
+  OUT="$(env PATH="$NOSEL:/usr/bin:/bin" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+         OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX=5 "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+}
+nosel spawn 10-nosel "instrução"
+check "sem oute-select: abre claude como antes, sem aviso" [ "$RC" -eq 0 -a -z "$ERR" -a "$OUT" == "aberta: #10 → pane w1:p4 · worktree repo-10-nosel · agente claude" ]
+before="$(cat "$STATE/spawned")"
+nosel spawn 11-nosel "instrução" --model claude-opus-5-5
+check "sem oute-select + --model: recusa, nada registrado" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--model precisa do oute-select" <<<"$2" && [ "$3" == "$4" ]' _ "$RC" "$ERR" "$(cat "$STATE/spawned")" "$before"
+
+# 11e. dispatcher: fase plan fixa, e a triagem com fase e modelo de cada issue
+CASE=seletor-abre; round "$CASE"
+opn --max 2
+check "dispatcher: oute-task com --phase plan"           [ "$RC" -eq 0 -a "$(head -n2 "$FAKE/oute-task.args" | tr '\n' ' ')" == "--phase plan " ]
+check "dispatcher: abre no claude"                       [ "$(sed -n '5,6p' "$FAKE/oute-task.args" | tr '\n' ' ')" == "$(nova) claude " ]
+check "triagem: oute-select por issue, no repo da rodada" grep -qF "\`oute-select --json --repo $REPO --issue <n>\`" "$FAKE/oute-task.last"
+check "triagem: tabela com fase e modelo"                grep -qF 'agente da sessão, fase, modelo (com a origem' "$FAKE/oute-task.last"
+check "triagem: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
+CASE=seletor-abre-cx; round "$CASE"
+opn --max 2 --agent codex
+check "triagem de rodada com --agent: oute-select com o agente" grep -qF "\`oute-select --json --repo $REPO --issue <n> --agent codex\`" "$FAKE/oute-task.last"
 
 check_end

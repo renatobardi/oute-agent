@@ -106,7 +106,7 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 ## Agentes e modelos (ADR-02)
 
 - `claude` (principal) e `codex` (reserva): assinatura própria (login 1x, persiste no volume `oute-home`). Nenhum proxy de modelo no stack: o roteador de modelos saiu na #218 (ADR-02, Histórico).
-- Modelo da sessão pela fase do AI-DLC (tabela do ADR-02), com o Jev chamado direto na TypeSafe só quando a tarefa não tem label de fase: o seletor entra pela #219.
+- Modelo da sessão pela fase do AI-DLC (ADR-02): o `oute-task` e o `oute-swarm spawn` leem o label `aidlc:<fase>` da issue e abrem com o modelo da tabela `config/select/models.toml` (`--agent`/`--model` > `kaizen`/`docs` > fase > Sonnet); `oute-select --json` mostra a escolha sem abrir sessão. Sem label ou com o `gh` fora do ar, abre no Sonnet com aviso. O Jev (tarefa sem label) e a reserva no Codex entram nas fatias seguintes (#257, #258).
 - Plugin herdr não chama API de LLM: quem fala com modelo é o agente da sessão.
 
 ## Observabilidade (ADR-04, ADR-08)

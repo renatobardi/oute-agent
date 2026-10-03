@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""oute-select — seletor de modelo por sessão (ADR-02, #219): diz com que agente e modelo uma sessão abre, sem abrir.
+
+  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>]
+              [--agent claude|codex] [--model <id>]
+
+  --issue <n>      issue da sessão; --task <n>-<slug> tira o número do slug (slug sem número = sessão sem issue)
+  --repo <dir>     checkout em que o `gh` lê a issue (padrão: o diretório atual)
+  --phase <fase>   fase fixa, sem ler a issue (o dispatcher do swarm abre em `plan`)
+  --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase
+  --json           {"phase","origin","agent","model","effort","reason"}; sem ele, uma linha para ler
+
+Precedência: --agent/--model > exceção por label (`kaizen`, `docs`) > label `aidlc:<fase>` > padrão (Sonnet).
+Origem: `manual`, `label` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
+Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/select/ do checkout, só leitura).
+
+Nunca bloqueia a abertura: `gh` fora do ar, issue sem label ou tabela ausente dão o padrão, com aviso em stderr e
+código 0 (sem tabela, `model` sai vazio e o agente abre com o modelo dele). Código 2 só para argumento inválido.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+
+TABLE = os.environ.get("OUTE_SELECT_TABLE", "/opt/oute/select/models.toml")
+AGENTS = ("claude", "codex")
+MODEL_RE = re.compile(r"[A-Za-z0-9._-]+(\[1m\])?")
+PHASE_RE = re.compile(r"[a-z]+")
+USAGE = "uso: oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] " \
+        "[--agent claude|codex] [--model <id>]"
+
+
+def die(msg):
+    print(f"oute-select: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def warn(msg):
+    print(f"oute-select: aviso: {msg}", file=sys.stderr)
+
+
+def line_ok(d):
+    return isinstance(d, dict) and all(isinstance(d.get(k), str) and MODEL_RE.fullmatch(d[k])
+                                       for k in ("claude", "codex", "effort"))
+
+
+def load_table():
+    """(padrão, {fase: linha}, [(label, linha)]); tabela ausente ou inválida = (None, {}, []), com aviso"""
+    try:
+        with open(TABLE, "rb") as f:
+            t = tomllib.load(f)
+        default, phases, exceptions = t["default"], {}, []
+        if not line_ok(default):
+            raise ValueError("[default] sem claude, codex ou effort")
+        for ln in t.get("line", []):
+            if not line_ok(ln) or not isinstance(ln.get("phases"), list):
+                raise ValueError("[[line]] sem phases, claude, codex ou effort")
+            for p in ln["phases"]:
+                if not isinstance(p, str) or not PHASE_RE.fullmatch(p):
+                    raise ValueError(f"fase inválida: {p!r}")
+                phases[p] = ln
+        for ex in t.get("exception", []):
+            if not line_ok(ex) or not isinstance(ex.get("label"), str) or not ex["label"]:
+                raise ValueError("[[exception]] sem label, claude, codex ou effort")
+            exceptions.append((ex["label"], ex))
+        return default, phases, exceptions
+    except (OSError, KeyError, ValueError, TypeError) as e:   # tomllib.TOMLDecodeError é ValueError
+        warn(f"tabela de fase ausente ou inválida ({TABLE}: {e}); a sessão abre com o modelo padrão do agente")
+        return None, {}, []
+
+
+def issue_labels(repo, issue):
+    """labels da issue pelo `gh`; None se o gh não respondeu (fora do ar, sem auth, issue inexistente, sem gh)"""
+    try:
+        timeout = float(os.environ.get("OUTE_SELECT_GH_TIMEOUT", "10"))
+    except ValueError:
+        timeout = 10.0
+    try:
+        r = subprocess.run(["gh", "issue", "view", str(issue), "--json", "labels"], cwd=repo or None,
+                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            return None
+        return [x["name"] for x in json.loads(r.stdout)["labels"]]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+
+
+def by_issue(repo, issue, phases, exceptions):
+    """(linha ou None, fase, origem, motivo, aviso) pela issue: exceção por label, depois a fase"""
+    if issue is None:
+        return None, "", "padrao", "sessão sem issue", "sessão sem issue"
+    labels = issue_labels(repo, issue)
+    if labels is None:
+        why = f"o gh não respondeu para a issue #{issue}"
+        return None, "", "padrao", why, why
+    found = [x[len("aidlc:"):] for x in labels if x.startswith("aidlc:")]
+    known = [p for p in found if p in phases]
+    phase = known[0] if known else ""
+    for label, ln in exceptions:
+        if label in labels:
+            return ln, phase, "label", f"label {label} da issue #{issue}", None
+    if known:
+        extra = f"issue #{issue} com mais de um label de fase ({', '.join(found)}); vale {phase}" if len(found) > 1 else None
+        return phases[phase], phase, "label", f"label aidlc:{phase} da issue #{issue}", extra
+    if found:
+        why = f"issue #{issue} com fase fora da tabela (aidlc:{found[0]})"
+    else:
+        why = f"issue #{issue} sem label aidlc:<fase>"
+    return None, "", "padrao", why, why
+
+
+def guess_agent(model, default, phases, exceptions):
+    """agente de um --model dado sem --agent: a coluna da tabela em que o id aparece; fora dela, pelo prefixo"""
+    lines = [default] if default else []
+    lines += list(phases.values()) + [ln for _, ln in exceptions]
+    if any(ln["codex"] == model for ln in lines):
+        return "codex"
+    if any(ln["claude"] == model for ln in lines):
+        return "claude"
+    return "codex" if model.startswith(("gpt-", "codex")) else "claude"
+
+
+def main(argv):
+    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": ""}
+    it = iter(argv)
+    for a in it:
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        if a == "--json":
+            opt["json"] = True
+            continue
+        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--model"):
+            die(f"opção desconhecida: {a}\n{USAGE}")
+        v = next(it, None)
+        if v is None:
+            die(f"{a} sem valor\n{USAGE}")
+        if a == "--task":
+            m = re.match(r"([0-9]+)-", v)
+            opt["issue"] = int(m.group(1)) if m else None
+        elif a == "--issue":
+            if not re.fullmatch(r"[0-9]+", v):
+                die(f"--issue inválido: {v}")
+            opt["issue"] = int(v)
+        else:
+            opt[a[2:]] = v
+    agent, model = opt["agent"], opt["model"]
+    if agent == "pi":
+        die("Pi saiu do stack (#217), use claude ou codex")
+    if agent and agent not in AGENTS:
+        die(f"agente inválido: {agent}; use claude ou codex")
+    if model and not MODEL_RE.fullmatch(model):
+        die(f"modelo inválido: {model}")
+
+    default, phases, exceptions = load_table()
+    warning = None
+    if opt["phase"]:
+        phase = opt["phase"]
+        if phase in phases:
+            ln, origin, reason = phases[phase], "padrao", f"fase {phase} fixa"
+        else:
+            ln, origin, reason = None, "padrao", f"fase fixa fora da tabela ({phase})"
+            phase, warning = "", reason
+    else:
+        ln, phase, origin, reason, warning = by_issue(opt["repo"], opt["issue"], phases, exceptions)
+    if ln is None:
+        ln = default
+    if agent or model:
+        origin = "manual"
+        reason = " ".join(x for x in (agent and f"--agent {agent}", model and f"--model {model}") if x) + f" ({reason})"
+    if not agent:
+        agent = guess_agent(model, default, phases, exceptions) if model else "claude"
+    # o aviso só interessa quando o padrão escolheu o modelo; sem tabela, o aviso dela já saiu
+    if warning and not model and default:
+        warn(f"{warning}; abrindo no padrão ({ln[agent]})" if ln is default else warning)
+    if not model and ln:
+        model = ln[agent]
+    effort = ln["effort"] if ln and agent == "codex" else ""
+    out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason}
+    if opt["json"]:
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        print(f"fase {phase or '-'} · origem {origin} · agente {agent} · modelo {model or '-'}"
+              f"{' · esforço ' + effort if effort else ''} · motivo: {reason}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
