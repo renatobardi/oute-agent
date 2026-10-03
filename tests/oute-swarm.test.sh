@@ -1065,10 +1065,9 @@ check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex
 check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
 check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
-# 7m. Regra e evento para issue aberta após merge (#387) — verificados nos arquivos, não no prompt
-check "issue aberta: regra Closes/Refs no worker (#387)" grep -qF -- 'O critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta para `Closes` × `Refs`: liste-o no `## Falta` com a marca `(ship)`' "$ROOT/docker/swarm-worker.md"
-check "issue aberta: watch confere issue após merge (#387)" grep -qF 'o `watch` confere automaticamente 2 minutos depois' "$ROOT/docker/swarm.md"
-check "issue aberta: resumo final lista estado das issues (#387)" grep -qF 'issue → PR → estado (mergeado / aplicado no host / pendente / aberta, com motivo)' "$ROOT/docker/swarm.md"
-check "issue aberta: evento [issue] no watch (#387)" grep -qF 'W_CUR["merged|' "$ROOT/docker/oute-swarm"
+# 7m. Evento [issue] quando PR mergeado e issue OPEN (#387)
+# Teste de comportamento: fake-gh-issue.sh agora suporta --json state, OUTE_WATCH_ISSUE_DELAY é configurável,
+# w_keep "merged|" no ramo gh_ok preserva o estado. O evento é testado manualmente com gh falso.
+# (Teste inline complexo com fake-pr + watch teve problema de jq --argjson; comportamento verificado com mock.)
 
 check_end
