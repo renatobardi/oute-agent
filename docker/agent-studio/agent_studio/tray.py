@@ -8,14 +8,15 @@
 - **Custo de hoje** (`cost_today`): `usage.aggregate` (#203) no dia UTC de agora, total e por agente; `estimated`
   marca o valor que tem parte estimada pela tabela de preços.
 - **Erros na última hora** (`errors_last_hour`): os erros do mesmo `usage.aggregate`, por host × agente.
-- **Alertas** (`alerts`): os do `alerts.evaluate` (#204), como no `GET /v1/alerts`.
+- **Alertas** (`alerts`): os do `alerts.evaluate` (#204), como no `GET /v1/alerts`, mais `title` e `text` prontos
+  (`alert_text`, o mesmo texto da tela; #344).
 - **Barra** (`bar`): nº de pedidos pendentes e nº de alertas.
 
 `snapshot` lê o DuckDB (uma passada, sob a trava do `store`); `pending` lê o SurrealDB; `response` junta os dois.
 SurrealDB fora não derruba a resposta: `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por
 palpite).
 """
-from . import alerts as alerts_mod, proposals as prop_mod, usage as usage_mod
+from . import alert_text, alerts as alerts_mod, proposals as prop_mod, usage as usage_mod
 
 HOUR_NS = 3_600_000_000_000
 PENDING_LIMIT = 50  # pedidos pendentes na resposta (os mais novos); `proposals.total` diz quantos há
@@ -62,7 +63,7 @@ def snapshot(con, at_ns, prices, cfg):
                        "to": alerts_mod.iso(today[1]), **_cost(usage_mod.render((), total[()], ())), "agents": agents},
         "errors_last_hour": {"from": alerts_mod.iso(hour[0]), "to": alerts_mod.iso(at_ns),
                              "total": sum(e["total"] for e in errors), "rows": errors},
-        "alerts": alerts_mod.evaluate(con, at_ns, cfg)["alerts"],
+        "alerts": alert_text.with_text(alerts_mod.evaluate(con, at_ns, cfg)["alerts"]),
     }
 
 
