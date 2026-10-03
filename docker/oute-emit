@@ -13,6 +13,9 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
                                      oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
                                      /v1/metrics) e, para agente sem leitura, o evento oute.quota.unknown com o motivo
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
+  oute-emit backfill --from <ISO> [--to <ISO>] [--dry-run]
+                                     os mesmos leitores sobre a janela [from, to) pela hora do fato (#261), sem olhar o
+                                     corte nem o backfill.done; --dry-run só conta por tipo, sem enviar
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
   oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
 
@@ -854,19 +857,10 @@ def round_lines(rnd):
     return lines, untimed
 
 
-def cmd_backfill():
-    os.makedirs(EMIT, exist_ok=True)
-    done = os.path.join(EMIT, "backfill.done")
-    if os.path.exists(done):
-        print("oute-emit backfill: já feito neste host (~/.oute/emit/backfill.done); nada a emitir", file=sys.stderr)
-        return []
-    since_f = os.path.join(EMIT, "since")
-    since = (read_text(since_f) or "").strip()
-    if not TS_RE.match(since):  # sem corte (entrypoint antigo): o corte é agora
-        since = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        with open(since_f, "w") as f:
-            f.write(since + "\n")
-    cut = ns(since)
+def backfill_collect(keep, need_time=False):
+    """os eventos dos mesmos leitores do ao vivo (log das rodadas, outbox/, outbox/done/, outbox/rejected/, inbox/*.out)
+    cuja hora do fato passa em keep(ns). need_time: o pedido sem `criado:` não tem hora do fato (o leitor usaria a de
+    agora) e fica de fora. -> (eventos, linhas não reconhecidas, close sem hora, rodadas)"""
     events, skipped, untimed = [], 0, 0
     rounds = sorted(d for d in os.listdir(SWARM) if ROUND_RE.match(d)) if os.path.isdir(SWARM) else []
     for rnd in rounds:
@@ -883,7 +877,7 @@ def cmd_backfill():
                 debug(f"{rnd}: {e}")
                 skipped += 1
                 continue
-            if int(ev[1]["timeUnixNano"]) < cut:
+            if keep(int(ev[1]["timeUnixNano"])):
                 events.append(ev)
     pids = set()
     for d in ("", "done", "rejected"):
@@ -895,13 +889,20 @@ def cmd_backfill():
         outs = {f[:-4] for f in os.listdir(INBOX) if f.endswith(".out")}
     except OSError:
         outs = set()
+
+    def proposed(p):
+        src = proposed_file(p)
+        if need_time and not header(src).get("criado"):
+            raise Skip(f"{p}: pedido sem hora do fato (criado)")
+        return canal_proposed(p, src)
+
     for pid in sorted(pids | outs):
         if not ID_RE.match(pid):
             skipped += 1
             continue
         todo = []
         if pid in pids:
-            todo.append(lambda p=pid: canal_proposed(p, proposed_file(p)))
+            todo.append(lambda p=pid: proposed(p))
         if pid in outs:
             todo.append(lambda p=pid: canal_decided(p, os.path.join(INBOX, p + ".out")))
         for mk in todo:
@@ -911,10 +912,27 @@ def cmd_backfill():
                 debug(f"{pid}: {e}")
                 skipped += 1
                 continue
-            if int(ev[1]["timeUnixNano"]) < cut:
+            if keep(int(ev[1]["timeUnixNano"])):
                 events.append(ev)
     for _, rec in events:
         rec["attributes"].append({"key": "oute.backfill", "value": {"boolValue": True}})
+    return events, skipped, untimed, len(rounds)
+
+
+def cmd_backfill():
+    os.makedirs(EMIT, exist_ok=True)
+    done = os.path.join(EMIT, "backfill.done")
+    if os.path.exists(done):
+        print("oute-emit backfill: já feito neste host (~/.oute/emit/backfill.done); nada a emitir", file=sys.stderr)
+        return []
+    since_f = os.path.join(EMIT, "since")
+    since = (read_text(since_f) or "").strip()
+    if not TS_RE.match(since):  # sem corte (entrypoint antigo): o corte é agora
+        since = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with open(since_f, "w") as f:
+            f.write(since + "\n")
+    cut = ns(since)
+    events, skipped, untimed, nrounds = backfill_collect(lambda t: t < cut)
     stamp(events)
     # retomada: a ordem é determinística; backfill.sent guarda quantos já foram aceitos (sem duplicar)
     sent_f = os.path.join(EMIT, "backfill.sent")
@@ -929,7 +947,7 @@ def cmd_backfill():
             f.write(f"{sent}\n")
     ep = endpoint() or "(sem endpoint no ambiente e no ~/.oute_env)"
     summary = (f"oute-emit backfill: corte {since}; {sent} de {len(events)} evento(s) emitido(s) "
-               f"({len(rounds)} rodada(s)); pulados: {skipped} linha(s) não reconhecida(s), "
+               f"({nrounds} rodada(s)); pulados: {skipped} linha(s) não reconhecida(s), "
                f"{untimed} close(s) sem hora")
     if failed or (events and not endpoint()):
         print(f"{summary}\noute-emit backfill: falhou ao mandar a {ep}; rode de novo (retoma de onde parou)",
@@ -941,6 +959,94 @@ def cmd_backfill():
     return []
 
 
+# ---------------------------------------------------------------- backfill de uma janela (#261)
+WINDOW_USAGE = "uso: oute-emit backfill [--from <ISO> [--to <ISO>] [--dry-run]]  (ISO = 2026-09-30T00:00:00Z)"
+
+
+def parse_window(args):
+    """--from <ISO> [--to <ISO>] [--dry-run] -> (from, to ou None, dry). ValueError com o motivo se não vale"""
+    opts, dry, i = {}, False, 0
+    while i < len(args):
+        a = args[i]
+        k, eq, v = a.partition("=")
+        if a == "--dry-run":
+            dry = True
+        elif k in ("--from", "--to"):
+            if not eq:
+                i += 1
+                v = args[i] if i < len(args) else ""
+            if k in opts:
+                raise ValueError(f"{k} repetido")
+            opts[k] = v
+        else:
+            raise ValueError(f"argumento desconhecido: {a}")
+        i += 1
+    if "--from" not in opts:
+        raise ValueError("falta --from")
+    for k, v in opts.items():
+        try:
+            ns(v)
+        except (Skip, ValueError):
+            raise ValueError(f"{k} fora do formato ISO UTC (2026-09-30T00:00:00Z): {v}") from None
+    frm, to = opts["--from"], opts.get("--to")
+    if to is not None and ns(to) <= ns(frm):
+        raise ValueError(f"--to ({to}) não é depois de --from ({frm})")
+    return frm, to, dry
+
+
+def window_state(frm, to):
+    """arquivo da retomada desta janela: um oute.event.id por linha, os já aceitos. Cada janela tem o seu"""
+    name = re.sub(r"[^0-9A-Za-z]", "", frm) + "_" + (re.sub(r"[^0-9A-Za-z]", "", to) if to else "aberta")
+    return os.path.join(EMIT, "backfill.janela", name)
+
+
+def event_key(rec):
+    return next((a["value"]["stringValue"] for a in rec["attributes"] if a["key"] == "oute.event.id"), "")
+
+
+def cmd_backfill_window(frm, to, dry):
+    """os mesmos leitores sobre [from, to) pela hora do fato; ignora o corte (since) e o backfill.done. Reenvia tudo
+    da janela, inclusive o que já chegou (a ingestão deduplica pelo id, ADR-08 §1); a retomada é por janela: os ids já
+    aceitos ficam em backfill.janela/, e uma nova execução da mesma janela manda só o resto. Resumo em stderr"""
+    lo = ns(frm)
+    hi = ns(to) if to else None
+    events, skipped, untimed, nrounds = backfill_collect(lambda t: t >= lo and (hi is None or t < hi), need_time=True)
+    state = window_state(frm, to)
+    already = {ln for ln in (read_text(state) or "").split("\n") if ln}
+    todo = [e for e in events if event_key(e[1]) not in already]
+    stats = {}
+    for _, rec in events:
+        st = stats.setdefault(rec["eventName"], {"cand": 0, "sent": 0, "skip": 0})
+        st["cand"] += 1
+        st["skip"] += event_key(rec) in already
+    failed = False
+    if not dry and todo:
+        if not endpoint():
+            failed = True
+        else:
+            stamp(todo)
+            os.makedirs(os.path.dirname(state), exist_ok=True)
+            for i in range(0, len(todo), BACKFILL_CHUNK):
+                chunk = todo[i:i + BACKFILL_CHUNK]
+                if not post(chunk, BACKFILL_TIMEOUT):
+                    failed = True
+                    break
+                with open(state, "a") as f:
+                    f.write("".join(event_key(r) + "\n" for _, r in chunk))
+                for _, r in chunk:
+                    stats[r["eventName"]]["sent"] += 1
+    out = [f"oute-emit backfill: janela [{frm}, {to or 'sem fim'}){' (dry-run: nada enviado)' if dry else ''}; "
+           f"{len(events)} candidato(s) em {nrounds} rodada(s) e nos pedidos"]
+    for name in sorted(stats):
+        st = stats[name]
+        out.append(f"  {name}: candidatos {st['cand']}, enviados {st['sent']}, pulados {st['skip']} (já enviados nesta janela)")
+    out.append(f"  não lidos: {skipped} linha(s) não reconhecida(s) ou pedido sem hora, {untimed} close(s) sem hora")
+    if failed:
+        out.append(f"oute-emit backfill: falhou ao mandar a {endpoint() or '(sem endpoint no ambiente e no ~/.oute_env)'}; "
+                   "rode de novo com a mesma janela (retoma de onde parou)")
+    print("\n".join(out), file=sys.stderr)
+
+
 def main(argv):
     deadline = time.monotonic() + TIMEOUT
     verb = argv[0] if argv else ""
@@ -948,7 +1054,16 @@ def main(argv):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
     valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2}
-    if verb == "regression":
+    window = None
+    if verb == "backfill" and len(argv) > 1:
+        try:
+            window = parse_window(argv[1:])
+        except ValueError as e:  # o backfill é manual: o erro de uso sai sempre, o rc segue 0
+            print(f"oute-emit backfill: {e}\n{WINDOW_USAGE}", file=sys.stderr)
+            return
+    if verb == "backfill":
+        bad = False
+    elif verb == "regression":
         bad = len(argv) < 2
     elif verb == "task":
         bad = len(argv) < 3
@@ -985,7 +1100,7 @@ def main(argv):
             post_json(metrics_endpoint(), {"resourceMetrics": rms}, deadline - time.monotonic())
         send(events, deadline, drained)
     elif verb == "backfill":
-        cmd_backfill()
+        cmd_backfill_window(*window) if window else cmd_backfill()
 
 
 if __name__ == "__main__":
