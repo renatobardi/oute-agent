@@ -140,3 +140,7 @@ quota_max_pct = 90
 quota_metric = "oute.quota.used_pct"
 quota_reset_metric = "oute.quota.reset_in_seconds"
 quota_reset_grace_minutes = 20
+# Rodada parada (#364): rodada do swarm aberta (oute.swarm.round.opened, sem round.closed) sem nenhum evento oute.swarm.*
+# há mais de round_stalled_minutes, com sessão aberta ou só na triagem (sem sessão). Sem evento há mais de lookback_hours
+# vira "rodada antiga sem fechamento" por mais lookback_hours, e depois some.
+round_stalled_minutes = 30

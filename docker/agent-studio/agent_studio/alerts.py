@@ -16,6 +16,11 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
   ponto) dá a hora do reset, e ponto cujo reset já passou **não alerta** (ponto velho). Sem esse par, não alerta.
   Exceção: a janela de **5h** com reset em menos de `quota_reset_grace_minutes` (20), abaixo de 100% e com a 7d do
   mesmo agente abaixo do corte, não alerta; a 7d nunca tem exceção.
+- **Rodada parada** (`round_stalled`, #364): rodada do swarm aberta (`oute.swarm.round.opened`, sem `round.closed`) sem
+  nenhum evento `oute.swarm.*` há mais de `round_stalled_minutes`, por host e rodada: com sessão aberta
+  (`session.spawned` sem `session.closed`; `evidence.kind = "sessions"`) ou sem nenhuma (triagem sem resposta;
+  `kind = "triage"`). Passadas `lookback_hours` sem evento a rodada deixa de ser "parada" e vira, por mais
+  `lookback_hours`, `round_old` ("rodada antiga sem fechamento"); depois some. Falha deste cálculo não derruba os outros.
 
 **Host parado** = sem nenhum registro há mais de `no_data_minutes`. Host parado não liga fila, recusa, spool nem cota
 (o último valor dele é velho): o Mac fechado não alerta; o host sempre ligado parado alerta só "host sem dado".
@@ -27,13 +32,15 @@ de log. Tudo pela hora do fato; "desde quando" volta no máximo `lookback_hours`
 O tray reusa também `last_data`, `stopped` e `hosts` para as máquinas (pela hora de chegada).
 """
 import json
+import logging
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 
 MIN_NS = 60 * 1_000_000_000
 
 QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA = "queue", "destination_refusing", "host_no_data", "spool", "quota"
-TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA)
+ROUND_STALLED, ROUND_OLD = "round_stalled", "round_old"
+TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD)
 # alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
 PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
                "price_fixed_differs")
@@ -66,6 +73,7 @@ class AlertConfig:
     quota_metric: str = "oute.quota.used_pct"
     quota_reset_metric: str = "oute.quota.reset_in_seconds"
     quota_reset_grace_minutes: float = 20
+    round_stalled_minutes: float = 30
 
     @classmethod
     def parse(cls, raw):
@@ -371,6 +379,51 @@ def _quota(con, lo, at, cfg):
     return out
 
 
+SWARM_PREFIX = "oute.swarm."
+SWARM_SESSION = "oute.swarm.session"
+
+
+def _rounds(con, at, cfg):
+    """Rodadas abertas e sem evento há mais de `round_stalled_minutes` (hora do fato, até `at`). Sem sessão aberta =
+    triagem parada. Sem evento há mais de `lookback_hours` = `round_old`, só até o dobro disso."""
+    day = int(cfg.lookback_hours * 60 * MIN_NS)
+    rows = _rows(con, """
+        SELECT host_name AS host, oute_instance AS instance, oute_swarm_round AS round, max(time_unix_nano) AS last_t,
+               max(time_unix_nano) FILTER (WHERE event_name = 'oute.swarm.round.opened') AS opened_t,
+               max(time_unix_nano) FILTER (WHERE event_name = 'oute.swarm.round.closed') AS closed_t
+        FROM logs
+        WHERE starts_with(event_name, ?) AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ?
+        GROUP BY host_name, oute_instance, oute_swarm_round
+        HAVING last_t >= ? AND opened_t IS NOT NULL AND closed_t IS NULL""", [SWARM_PREFIX, at, max(0, at - 2 * day)])
+    if not rows:
+        return []
+    marks = ", ".join("?" * len(rows))
+    life = _series(_rows(con, f"""
+        SELECT host_name AS host, oute_swarm_round AS round,
+               json_extract_string(attributes, '$."{SWARM_SESSION}"') AS slug, event_name, time_unix_nano AS t
+        FROM logs
+        WHERE event_name IN ('oute.swarm.session.spawned', 'oute.swarm.session.closed') AND time_unix_nano <= ?
+          AND oute_swarm_round IN ({marks})
+        ORDER BY t""", [at, *[r["round"] for r in rows]]), ("host", "round"))
+    out = []
+    for r in rows:
+        idle = at - r["last_t"]
+        if idle <= int(cfg.round_stalled_minutes * MIN_NS):
+            continue
+        state = {}
+        for e in life.get((r["host"], r["round"]), []):
+            if e["slug"]:
+                state[e["slug"]] = e["event_name"].endswith(".spawned")
+        slugs = sorted(k for k, v in state.items() if v)
+        kind = ROUND_OLD if idle > day else ROUND_STALLED
+        out.append(_alert(kind, r["host"], r["instance"], idle // 1_000_000_000, "seconds",
+                          cfg.round_stalled_minutes * 60, r["last_t"], {
+                              "round": r["round"], "sessions": slugs,
+                              "kind": "old" if kind == ROUND_OLD else ("sessions" if slugs else "triage"),
+                              "last_event": iso(r["last_t"]), "opened_at": iso(r["opened_t"])}))
+    return out
+
+
 def enabled(cfg):
     return {t: (cfg.quota_enabled if t == QUOTA else True) for t in ALL_TYPES}
 
@@ -383,10 +436,15 @@ def evaluate(con, at_ns, cfg):
         + _spool(con, lo, at_ns, cfg)
     if cfg.quota_enabled:
         alerts += _quota(con, lo, at_ns, cfg)
+    try:
+        alerts += _rounds(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — o cálculo da rodada parada não derruba os outros alertas (#364)
+        logging.getLogger(__name__).exception("alerta de rodada parada falhou; os outros seguem")
     from . import price_alerts  # aqui e não no topo: o `price_alerts` importa este módulo
     alerts += price_alerts.evaluate(con, at_ns)
     idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
     alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]
     alerts.sort(key=lambda a: (ALL_TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
-                               str(a["evidence"].get("exporter") or a["evidence"].get("attribute") or "")))
+                               str(a["evidence"].get("exporter") or a["evidence"].get("attribute")
+                                   or a["evidence"].get("round") or "")))
     return {"alerts": alerts, "hosts": hosts(last, at_ns, cfg), "checks": enabled(cfg)}
