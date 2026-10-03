@@ -37,7 +37,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **reserva:** abrir a sessão no Codex, na linha da mesma fase, porque o Claude está indisponível (`claude auth status` ≠ 0 ou ausente) ou com cota ≥ 90% (#355). Evite "fallback" para isso.
 - **tabela de fase:** mapa fase → modelo Claude e modelo/esforço do Codex (ADR-02), em `config/select/models.toml`. Só fases são chave; o resto é exceção por label.
 - **seletor:** o `oute-select`, que dá fase, origem da escolha, agente, modelo e esforço de uma sessão sem abri-la. Evite "roteador".
-- **exceção por label:** label de tipo (`kaizen`, `docs`) que escolhe o modelo antes da fase.
+- **exceção por label:** label de tipo (`spike`, `kaizen`, `docs`) que escolhe o modelo antes da fase, em ordem de precedência. `spike` → Sonnet (investigação com análise).
 - **origem da escolha:** de onde veio o modelo da sessão: `manual`, `label`, `jev` (o Jev classificou a fase com confiança ≥ 0,6) ou `padrao` (nada decidiu, abriu no Sonnet).
 - **pedido:** script que um agente propõe pelo canal de aprovação, com id `<data>-<hora>-<slug>`. Termina **executado** (com rc), **recusado** ou fica **pendente**. Evite "proposta", "job".
 - **sessão:** uma worktree + um branch abertos pelo `oute-task`, de rodada (worker ou dispatcher) ou avulsa. Começa quando a worktree é criada e termina quando o `oute-task clean` a remove; id `oute.task.id`. Contém uma ou mais conversas. Evite "sessão" para a conversa do agente.
