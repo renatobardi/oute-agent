@@ -1,0 +1,2 @@
+### Changed
+- **`AGENTS.md`: `http://` interno literal em arquivo novo e o alcance da exceção** (#295). A lista do que derruba a nota de segurança do SonarCloud ganha o `http://` literal em arquivo novo (inclusive em teste, mesmo para nome de serviço do compose), com a forma de evitar: comparar com a linha do `docker/compose.yaml` ou montar o endereço de partes. A "Exceção do `http://` interno" passa a dizer o alcance (a linha que já existe em `docker/compose.yaml` e `config/`) e que, se o gate reprovar mesmo assim, o agente corrige. Só docs, sem release.
