@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Testes do scripts/models-check (#220, ADR-02): a tabela do seletor conferida contra fontes de exemplo, um "binário"
-# do claude, um models_cache.json do Codex e um `gh label list` falso. Bash puro + python3/jq, sem rede e sem
+# Testes do scripts/models-check (#220, ADR-02): uma tabela de exemplo do próprio teste conferida contra fontes de
+# exemplo, um "binário" do claude, um models_cache.json do Codex e um `gh label list` falso. A tabela do repo só entra
+# para provar que é ela que o script lê sem --table, sem afirmar nada do conteúdo dela (#304): mudar a
+# config/select/models.toml não quebra este teste. Bash puro + python3/jq, sem rede e sem
 # nenhuma chamada a modelo: o claude e o codex do PATH do teste só registram se alguém os executar.
 # Só comportamento externo: as linhas do stdout, o aviso no stderr e o código de saída.
 # Uso: tests/models-check.test.sh   (sai != 0 se algo falhar)
@@ -25,16 +27,56 @@ claude_bin() {   # <arquivo> <id…>
   chmod +x "$f"
 }
 # cache do Codex: <dias de idade> <slug:esforço,esforço…>…
+# A idade leva 1 hora de folga: o fetched_at tem a fração de segundo fixa (os 9 dígitos que o Codex grava), e com
+# "-N dias" exatos a idade dava N-1 dias quando o models-check rodava numa fração menor que ela (#304).
 codex_cache() {
   local days="$1"; shift
-  printf '%s\n' "$@" | jq -Rn --arg at "$(date -u -d "-$days days" +%Y-%m-%dT%H:%M:%S.123456789Z)" '
+  printf '%s\n' "$@" | jq -Rn --arg at "$(date -u -d "-$days days -1 hour" +%Y-%m-%dT%H:%M:%S.123456789Z)" '
     {fetched_at: $at, client_version: "0.0.0", models: [inputs | split(":") |
       {slug: .[0], visibility: "list", supported_reasoning_levels: [.[1] | split(",")[] | {effort: .}]}]}' \
     > "$TMP/codex/models_cache.json"
 }
 good_cache() { codex_cache "${1:-1}" gpt-6.1-sol:low,medium,high gpt-6-astra:low,high gpt-6-luna:low,medium gpt-6-sol:low; }
-# tabela de exemplo: a do repo, com as trocas dadas (sed)
-table() { sed "$@" "$TABLE" > "$TMP/table.toml"; }
+# tabela de exemplo do teste (não a do repo): um [default], três [[line]] e duas [[exception]]
+EX="$TMP/exemplo.toml"
+cat > "$EX" <<'TOML'
+[default]
+claude = "claude-sonnet-5-5"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+[[line]]
+phases = ["strat", "intent", "arch", "spec"]
+claude = "claude-opus-5-5"
+codex = "gpt-6-astra"
+effort = "high"
+
+[[line]]
+phases = ["build", "qa", "design", "plan", "ship", "iter"]
+claude = "claude-sonnet-5-5"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+[[line]]
+phases = ["ops", "ctx", "learn"]
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"
+
+[[exception]]
+label = "kaizen"
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"
+
+[[exception]]
+label = "docs"
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"
+TOML
+# a tabela de exemplo com as trocas dadas (sed)
+table() { sed "$@" "$EX" > "$TMP/table.toml"; }
 
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
@@ -55,15 +97,16 @@ export OUTE_AGENTS_FALLBACK="$EMPTY"
 
 # mc <args…>: models-check com as fontes de exemplo; stdout em $OUT, stderr em $ERR, código em $RC
 mc() { OUT="$("$MC" "$@" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(<"$TMP/err")"; }
+ex() { mc --table "$EX"; }                  # com a tabela de exemplo, sem trocas
 has() { grep -qxF -- "$1" <<<"$OUT"; }      # linha inteira no stdout
 hasnt() { ! grep -qF -- "$1" <<<"$OUT"; }
 count() { grep -c "^$1 " <<<"$OUT" || true; }
 
-# ---------------------------------------------------------------- 1. a tabela do repo, com fontes que têm tudo
-mc
-check "tabela do repo: código 0"                        [ "$RC" -eq 0 ]
-check "tabela do repo: sem aviso"                       [ -z "$ERR" ]
-check "tabela do repo: nenhum FALTA nem desconhecido"   bash -c '! grep -qE "^(FALTA|desconhecido) " <<<"$1"' _ "$OUT"
+# ---------------------------------------------------------------- 1. a tabela de exemplo, com fontes que têm tudo
+ex
+check "tabela de exemplo: código 0"                     [ "$RC" -eq 0 ]
+check "tabela de exemplo: sem aviso"                    [ -z "$ERR" ]
+check "tabela de exemplo: nenhum FALTA nem desconhecido" bash -c '! grep -qE "^(FALTA|desconhecido) " <<<"$1"' _ "$OUT"
 check "claude: uma linha ok por id"                     has "ok $OPUS (claude)"
 check "claude: o Haiku com data"                        has "ok $HAIKU (claude)"
 check "claude: id repetido na tabela sai uma vez"       [ "$(grep -cxF "ok $HAIKU (claude)" <<<"$OUT")" -eq 1 ]
@@ -73,8 +116,10 @@ check "estrutura: as 12 fases e ctx têm linha"          [ "$(grep -c '^ok linha
 check "estrutura: a faixa ctx"                          has "ok linha da fase ctx (tabela)"
 check "estrutura: label de exceção existe"              has "ok label kaizen (repo)"
 check "estrutura: o gh lista os labels uma vez"         [ "$(grep -c '^label list' "$FAKE/gh.log")" -eq 1 ]
+# sem --table vale a tabela do repo: a mesma saída de quando ela é apontada, seja qual for o conteúdo dela
+mc; REPO_OUT="$OUT"; REPO_RC="$RC"
 mc --table "$TABLE"
-check "--table: a mesma tabela, código 0"               [ "$RC" -eq 0 ]
+check "sem --table: lê a tabela do repo"                bash -c '[ -n "$1" ] && [ "$1" = "$2" ] && [ "$3" -eq "$4" ]' _ "$OUT" "$REPO_OUT" "$RC" "$REPO_RC"
 
 # ---------------------------------------------------------------- 2. id inexistente
 table -e 's/claude-opus-5-5/claude-opus-9-9/' -e 's/gpt-6-astra/gpt-9-nada/'
@@ -117,36 +162,36 @@ mc --table "$TMP/table.toml"
 check "exceção com label que não existe: código 1"      [ "$RC" -eq 1 ]
 check "exceção com label que não existe: FALTA"         has "FALTA label nao-existe (repo)"
 check "exceção com label que existe: ok"                has "ok label kaizen (repo)"
-touch "$FAKE/gh.down"; mc
+touch "$FAKE/gh.down"; ex
 check "gh fora do ar: labels desconhecidos, código 3"   bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido label kaizen (repo)" <<<"$2"' _ "$RC" "$OUT"
 check "gh fora do ar: aviso"                            grep -qF 'aviso: o gh não listou os labels do repo' <<<"$ERR"
 check "gh fora do ar: o resto segue conferido"          has "ok $OPUS (claude)"
 rm "$FAKE/gh.down"
-cp "$BIN/gh" "$TMP/gh.bak"; printf '#!/usr/bin/env bash\necho "isto não é JSON"\n' > "$BIN/gh"; mc
+cp "$BIN/gh" "$TMP/gh.bak"; printf '#!/usr/bin/env bash\necho "isto não é JSON"\n' > "$BIN/gh"; ex
 check "gh com resposta que não é JSON: desconhecido"    bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido label docs (repo)" <<<"$2"' _ "$RC" "$OUT"
 cp "$TMP/gh.bak" "$BIN/gh"
 
 # ---------------------------------------------------------------- 5. cache do Codex ausente, velho ou ilegível
-rm "$TMP/codex/models_cache.json"; mc
+rm "$TMP/codex/models_cache.json"; ex
 check "cache ausente: código 3"                         [ "$RC" -eq 3 ]
 check "cache ausente: id desconhecido, não ok"          has "desconhecido gpt-6-astra (codex)"
 check "cache ausente: esforço desconhecido"             has "desconhecido gpt-6-luna esforço medium (codex)"
 check "cache ausente: nenhum ok do Codex"               hasnt "ok gpt-"
 check "cache ausente: aviso com o caminho"              grep -qF "aviso: cache de modelos do Codex ausente ou ilegível ($TMP/codex/models_cache.json" <<<"$ERR"
 check "cache ausente: o Claude segue conferido"         has "ok $OPUS (claude)"
-good_cache 8; mc
+good_cache 8; ex
 check "cache com 8 dias: desconhecido, código 3"        bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido gpt-6.1-sol (codex)" <<<"$2"' _ "$RC" "$OUT"
 check "cache com 8 dias: aviso com a idade"             grep -qF 'aviso: cache de modelos do Codex com 8 dias, mais de 7' <<<"$ERR"
-good_cache 6; mc
+good_cache 6; ex
 check "cache com 6 dias: vale, código 0"                [ "$RC" -eq 0 ]
 good_cache 1; jq 'del(.fetched_at)' "$TMP/codex/models_cache.json" > "$TMP/c.json"; cp "$TMP/c.json" "$TMP/codex/models_cache.json"
-mc
+ex
 check "cache sem fetched_at: vale a data do arquivo"    [ "$RC" -eq 0 ]
-touch -d '-9 days' "$TMP/codex/models_cache.json"; mc
+touch -d '-9 days' "$TMP/codex/models_cache.json"; ex
 check "cache sem fetched_at e arquivo velho: desconhecido" bash -c '[ "$1" -eq 3 ] && grep -qF "com 9 dias" <<<"$2"' _ "$RC" "$ERR"
-echo 'isto não é JSON' > "$TMP/codex/models_cache.json"; mc
+echo 'isto não é JSON' > "$TMP/codex/models_cache.json"; ex
 check "cache que não é JSON: desconhecido, com aviso"   bash -c '[ "$1" -eq 3 ] && grep -qF "ausente ou ilegível" <<<"$2"' _ "$RC" "$ERR"
-echo '{"fetched_at": "2026", "models": "nada"}' > "$TMP/codex/models_cache.json"; touch "$TMP/codex/models_cache.json"; mc
+echo '{"fetched_at": "2026", "models": "nada"}' > "$TMP/codex/models_cache.json"; touch "$TMP/codex/models_cache.json"; ex
 check "cache com models fora do formato: desconhecido"  bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido gpt-6-luna (codex)" <<<"$2"' _ "$RC" "$OUT"
 table -e 's/claude-opus-5-5/claude-opus-9-9/'
 mc --table "$TMP/table.toml"
@@ -154,11 +199,11 @@ check "FALTA e desconhecido juntos: código 1"           bash -c '[ "$1" -eq 1 ]
 good_cache
 
 # ---------------------------------------------------------------- 6. binário do Claude
-OUTE_MODELS_CLAUDE_BIN="$TMP/nao-existe" mc
+OUTE_MODELS_CLAUDE_BIN="$TMP/nao-existe" ex
 check "binário apontado não existe: desconhecido, código 3" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido $3 (claude)" <<<"$2"' _ "$RC" "$OUT" "$OPUS"
 check "binário apontado não existe: aviso"              grep -qF 'aviso: Claude não conferido' <<<"$ERR"
 check "binário apontado não existe: o Codex segue conferido" has "ok gpt-6-astra (codex)"
-: > "$TMP/claude-vazio"; OUTE_MODELS_CLAUDE_BIN="$TMP/claude-vazio" mc
+: > "$TMP/claude-vazio"; OUTE_MODELS_CLAUDE_BIN="$TMP/claude-vazio" ex
 check "binário vazio: desconhecido, com aviso"          bash -c '[ "$1" -eq 3 ] && grep -qF "Claude não conferido" <<<"$2"' _ "$RC" "$ERR"
 # sem OUTE_MODELS_CLAUDE_BIN: o claude do PATH, pulando o shim (link para oute-agent-shim), senão a reserva
 printf '#!/usr/bin/env bash\necho "shim $*" >> "%s/called"; exit 1\n' "$FAKE" > "$SHIMS/oute-agent-shim"
@@ -166,17 +211,17 @@ chmod +x "$SHIMS/oute-agent-shim"; ln -s oute-agent-shim "$SHIMS/claude"
 mkdir -p "$TMP/home/bin" "$TMP/versions"; claude_bin "$TMP/versions/9.9.9" "$OPUS" "$SONNET"
 ln -s "$TMP/versions/9.9.9" "$TMP/home/bin/claude"
 unset OUTE_MODELS_CLAUDE_BIN; SAVED_PATH="$PATH"
-PATH="$SHIMS:$TMP/home/bin:$SAVED_PATH" mc
+PATH="$SHIMS:$TMP/home/bin:$SAVED_PATH" ex
 check "claude do PATH: pula o shim e lê o binário real" bash -c '[ "$1" -eq 1 ] && grep -qxF "ok $3 (claude)" <<<"$2" && grep -qxF "FALTA $4 (claude)" <<<"$2"' _ "$RC" "$OUT" "$OPUS" "$HAIKU"
 claude_bin "$RES/claude" "$OPUS" "$SONNET" "$HAIKU"
 # PATH sem claude nenhum: só o shim, o gh falso (bash + jq) e o que o models-check precisa para rodar
 for c in env bash python3 jq; do ln -s "$(command -v "$c")" "$EMPTY/$c"; done
-PATH="$SHIMS:$BIN:$EMPTY" OUTE_AGENTS_FALLBACK="$RES" mc
+PATH="$SHIMS:$BIN:$EMPTY" OUTE_AGENTS_FALLBACK="$RES" ex
 check "sem claude no PATH: lê a reserva da imagem"      bash -c '[ "$1" -eq 0 ] && grep -qxF "ok $3 (claude)" <<<"$2"' _ "$RC" "$OUT" "$HAIKU"
-PATH="$SHIMS:$BIN:$EMPTY" mc
+PATH="$SHIMS:$BIN:$EMPTY" ex
 check "sem claude nem reserva: desconhecido, código 3"  bash -c '[ "$1" -eq 3 ] && grep -qF "binário do claude não encontrado" <<<"$2"' _ "$RC" "$ERR"
 export OUTE_MODELS_CLAUDE_BIN="$TMP/claude-real"
-PATH="$EMPTY" mc
+PATH="$EMPTY" ex
 check "sem gh no PATH: labels desconhecidos, código 3"  bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido label kaizen (repo)" <<<"$2"' _ "$RC" "$OUT"
 
 # ---------------------------------------------------------------- 7. tabela ilegível e argumento inválido: código 2
