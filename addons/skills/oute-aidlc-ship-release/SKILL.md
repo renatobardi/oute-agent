@@ -68,7 +68,7 @@ O script recusa sem estas; confira antes, na `main`:
 
 Feito quando: as três pré-condições e o CI dos PRs estão ok ou o que falhou está no relatório.
 
-## 6. Versões fixas de claude e codex e tabela do seletor
+## 6. Versões fixas de claude e codex, tabela do seletor e preços
 
 A reserva de claude/codex na imagem tem versão fixa e sha256 em `ARG`s do `docker/Dockerfile` (#200, #199, adendo do ADR-01). O build recusa sha256 errado, e versão que o npm ainda não serve derruba o CI `image` e deixa a tag sem imagem (foi o que aconteceu na `v0.7.26`). Confira na `main`:
 
@@ -92,7 +92,19 @@ Não chama modelo: lê o binário do `claude`, o `~/.codex/models_cache.json` e 
 - **3, linha `desconhecido`** (cache do Codex ausente ou com mais de 7 dias, binário do `claude` não encontrado, `gh` sem resposta): não foi conferido, e não vale como ok. O aviso em stderr diz a causa; o cache o Codex renova ao abrir. Sem conseguir conferir, vai ao relatório como pendência, para o Bardi decidir.
 - **0:** tudo `ok`.
 
-Feito quando: `scripts/agent-pins` saiu 0, ou o que deu `DIFERENTE` está no relatório como bloqueio; e `scripts/models-check` saiu 0, ou cada `FALTA` (bloqueio) e cada `desconhecido` (pendência) está no relatório.
+**Alerta de preço aberto** (#340, ADR-08 adendo "Preços"): o agent-studio confere os preços dos modelos todo dia, e um preço errado só aparece no custo estimado depois. Leia os alertas ativos, só `GET`, com a credencial de leitura pelo stdin do `curl` (nunca no argv) e só os tipos e os modelos, sem abrir a tela:
+
+```bash
+tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; tok="${tok//\"/\\\"}"
+curl -sS --max-time 30 -K - "$AGENT_STUDIO_URL/v1/alerts" <<<"header = \"Authorization: Bearer $tok\"" \
+  | jq -r '.alerts[] | select(.type | IN("price_sources_diverge","price_model_unpriced","price_fixed_differs")) | "\(.type)\t\(.evidence.model // "-")"'
+```
+
+- Linha `price_sources_diverge` (fontes divergem), `price_model_unpriced` (modelo em uso sem preço) ou `price_fixed_differs` (preço fixo difere da fonte): **aviso** no relatório, com o modelo; **não bloqueia** a release. Quem decide é o Bardi, olhando a página `/precos` do studio.
+- Sem linha: nenhum alerta de preço aberto. `price_changed` (informativo) e `price_source_down` não entram aqui.
+- Curl que falha, `AGENT_STUDIO_URL` ou `AGENT_STUDIO_READ_TOKEN` ausente, HTTP diferente de 200: **não conferido**, e não vale como ok. Vai ao relatório como pendência com o motivo (sem o corpo da resposta).
+
+Feito quando: `scripts/agent-pins` saiu 0, ou o que deu `DIFERENTE` está no relatório como bloqueio; `scripts/models-check` saiu 0, ou cada `FALTA` (bloqueio) e cada `desconhecido` (pendência) está no relatório; e cada alerta de preço aberto está no relatório como aviso, ou o relatório diz "preços: não conferido" com o motivo.
 
 ## 7. Relatório para o Bardi
 

@@ -1,6 +1,6 @@
 """Tela do agent-studio (ADR-08 §9): login por token que vira cookie, lista de conversas e detalhe (#206), as
 sessões do `oute-task` com as conversas de cada uma (#207), os pedidos do canal de aprovação e os alertas do
-pipeline no topo das páginas (#208).
+pipeline no topo das páginas (#208) e a página de preços (#340).
 
 HTML gerado no servidor (Jinja2, sempre com autoescape) + htmx servido daqui mesmo (`/static`): sem SPA, sem build
 de front-end e sem CDN. Só leitura.
@@ -14,7 +14,10 @@ de front-end e sem CDN. Só leitura.
 - Pedidos: o estado vem do SurrealDB e o script do DuckDB (`proposals.py`). O script é dado não confiável, sempre
   escapado. Nenhuma ação: aprovar e recusar continuam no `oute approve` (ADR-01); aqui não há botão nem rota
   para isso.
-- Alertas: os do `alerts.evaluate` (#204), calculados a cada página; aqui só o texto de cada um.
+- Alertas: os do `alerts.evaluate` (#204), calculados a cada página; aqui só o texto de cada um. O de preço leva
+  à `/precos`.
+- Preços (#340): `/precos` mostra o `prices.view` (o mesmo do `GET /v1/prices`): vigente e histórico por modelo. Nenhuma
+  ação: trocar preço é da conferência diária e do `fixed` do `config.toml`; aqui não há botão nem rota para isso.
 """
 import logging
 import os
@@ -28,7 +31,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import alert_text, conversations as conv_mod, proposals as prop_mod, sessions as sess_mod
+from . import alert_text, conversations as conv_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -69,6 +72,10 @@ def _usd(v):
     return "—" if v is None else f"US$ {_br(f'{v:,.4f}')}"
 
 
+def _usdm(v):
+    return "—" if v is None else _br(f"{v:g}")
+
+
 def _ago(iso):
     """Datetime do SurrealDB -> idade até agora (`3 min 05 s`)."""
     age = prop_mod.age_seconds(iso, time.time_ns())
@@ -78,8 +85,8 @@ def _ago(iso):
 def _env():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
-    env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd, ago=_ago,
-                       alert_title=alert_text.title, alert_value=alert_text.text, proposal_path=prop_mod.page_path)
+    env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd, usdm=_usdm, ago=_ago,
+                       alert_title=alert_text.title, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     return env
 
 
@@ -336,3 +343,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if ev is None and record is None:
             return error(request, 404, "Pedido não encontrado.")
         return page(request, "proposal.html", p=prop_mod.merged(proposal_id, ev, record), state_read=state_read)
+
+    # ------------------------------------------------ preços (#340): só leitura
+    @app.get("/precos")
+    async def prices(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        at_ns = time.time_ns()
+        data, failed = await read(request, "preços", store.read, lambda con: prices_mod.view(con, config.fixed, at_ns))
+        if failed:
+            return failed
+        return page(request, "prices.html", **data)
