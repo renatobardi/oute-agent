@@ -171,7 +171,9 @@ studio_stop
 
 # ---------------------------------------------------------------- compose: o agent sabe onde ler
 AGENT="$(compose_service agent)"
-check "compose: agent com AGENT_STUDIO_URL (rede docker por padrão; o oute up troca no Mac)" grep -qx '      AGENT_STUDIO_URL: ${AGENT_STUDIO_URL:-http://agent-studio:8430}' <<<"$AGENT"
+URL_LINE="$(grep '^      AGENT_STUDIO_URL: ' <<<"$AGENT")"
+check "compose: agent com AGENT_STUDIO_URL vindo do oute up (rede docker no oute-server, vhost no Mac)" grep -q '^      AGENT_STUDIO_URL: ${AGENT_STUDIO_URL:-[^}]*agent-studio:8430}$' <<<"$URL_LINE"
+check "compose: o mesmo endereço que o collector recebe" test "$URL_LINE" = "$(compose_service otel-collector | grep '^      AGENT_STUDIO_URL: ')"
 check "compose: a credencial de leitura segue só no agent_env" bash -c '! grep -v "^ *#" <<<"$0" | grep -q "AGENT_STUDIO_READ_TOKEN"' "$AGENT"
 
 check_end
