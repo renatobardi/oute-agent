@@ -96,6 +96,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute oci-bootstrap` | provisiona storage OCI (idempotente, `DRY_RUN=1`) |
 | `oute storage [ls\|lsl\|about] [path]` | lista o bucket direto no OCI (`OUTE_BUCKET=oute-observability` p/ telemetria) |
 | `oute sync-shared` | (re)monta o bucket |
+| `oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]` | **só no oute-server**: reenvia o bucket de telemetria à ingestão do agent-studio (remonta o DuckDB e, junto, o SurrealDB); ver **Observabilidade** |
 | `oute lock` / `version` | tranca o vault e apaga a sessão em cache das versões antigas / versão repo × imagem |
 
 Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.
@@ -117,6 +118,7 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 - **Fila em disco do collector** (volume `oute-otel-queue`): o collector guarda o que ainda não chegou ao destino e retenta sem prazo. **Reserva de 4 GB por host**: 2 GB de disco por fila de 1 GB (o bbolt chega a ~1,7× o limite e não encolhe), duas filas (bucket e agent-studio). O `oute up` avisa, sem bloquear, quando o disco livre do Docker (no Mac, o da VM do Docker Desktop) não comporta a reserva descontado o que a fila já ocupa; o `oute status` mostra o disco livre e o tamanho da fila.
 - **Eventos operacionais** (`oute-emit`: rodadas do swarm, pedidos do canal, sessões do `oute-task`): logs OTel ao bucket e ao agent-studio.
 - **Ferramenta nova** só entra no stack se mandar consumo ao **bucket + agent-studio**, com a origem e `oute.agent` (ADR-08 §11).
+- **Remontar o agent-studio a partir do bucket** (#159, ADR-08 §7), no oute-server: `oute studio replay --from 2026-10-01 --to 2026-10-02` (UTC, pela partição do bucket, com 1 h de folga de cada lado; `--signal`, `--host`, `--legacy` para objetos sem `host=`). Reenvia os objetos pela ingestão do serviço no ar, com dedupe: rodar de novo não duplica, e o SurrealDB volta junto. Resumo por sinal (objetos lidos, gravados × repetidos, falharam); objeto ilegível é listado e pulado, com código ≠ 0. **Objetos com mais de 90 dias estão em Archive (ADR-03): restaure-os antes**, com a credencial de admin do OCI (`oci os object restore --bucket-name oute-observability --name <objeto>`, ~1 h) e rode o replay de novo.
 - Conferir: `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`; a tela do agent-studio (`agent-studio.oute.pro`, na tailnet).
 
 ## Storage comum (ADR-03)

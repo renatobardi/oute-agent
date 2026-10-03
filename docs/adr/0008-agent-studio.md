@@ -67,7 +67,8 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 
 ### 7. Bucket = arquivo frio e backup (#142)
 - **O bucket fica como está:** recebe tudo direto do collector (lote de 5 min), independente do agent-studio; lifecycle do ADR-03 mantido (Infrequent aos 30 d, Archive aos 90 d); **nunca apagado**.
-- **O bucket é o backup.** Sem dump do SurrealDB nem do DuckDB e sem job de backup: o DuckDB é remontado do bucket (script rodado quando precisar) e o SurrealDB, do DuckDB.
+- **O bucket é o backup.** Sem dump do SurrealDB nem do DuckDB e sem job de backup: o DuckDB é remontado do bucket (`oute studio replay`, rodado quando precisar; "Replay do bucket (#159)") e o SurrealDB, do DuckDB.
+- **Objeto com mais de 90 dias está em Archive e precisa de restore antes do replay.** O `oute studio replay` não restaura (nem lê o bucket em escrita): o objeto que o rclone não consegue ler é listado, pulado, e o comando termina com código ≠ 0. Restaure os objetos da faixa com a credencial de admin do OCI (console ou `oci os object restore --bucket-name oute-observability --name <objeto>`; ficam legíveis depois de ~1 h) e rode o replay de novo: o que já entrou volta como repetido.
 - **Toda mudança de estado vira evento** no pipeline. Nada existe só no SurrealDB.
 
 ### 8. Alertas do pipeline (#136, #150)
@@ -267,6 +268,19 @@ Adendo do Bardi, aprovado no grilling de 2026-10-03 (o merge deste PR é o gate 
 - **Telemetria própria** (§ "Telemetria própria"): `agent_studio.prices.checks` (conferências, por `result`: `ok`, `parcial` quando uma fonte falhou, `falha`), `agent_studio.prices.changes` (preços trocados) e `agent_studio.prices.failures` (por `source` e `reason`; `rotina` = falha interna). Aviso (com o teto por tipo) quando uma fonte falha.
 - **Fora desta fatia:** página "Preços" e item do checklist de release (#340).
 - **Código:** `price_sources.py` (busca, leitura, mapeamento), `prices.py` (tabelas, semente, decisão, rotina, visão), `price_alerts.py`, `PriceTable` em `cost.py`. Teste: `tests/agent-studio-prices.test.sh` (fontes falsas com TLS em `tests/lib/fake-price-sources.py`).
+
+### Replay do bucket (#159)
+Fatia 1 da remontagem (§7): bucket → ingestão. A fatia 2 (SurrealDB a partir do DuckDB, sem bucket) é issue própria.
+- **Pela ingestão do serviço no ar:** o replay faz `POST /v1/logs|traces|metrics` no próprio agent-studio, o mesmo caminho do collector (dedupe da ingestão, um escritor só no DuckDB, 2xx só depois do commit). Nada lê o bucket pelo DuckDB. Comandado do **host**, porque só o serviço tem a credencial de ingestão (§6, #256).
+- **`oute studio replay --from <ISO> --to <ISO> [--signal logs|traces|metrics] [--host <máquina>] [--legacy]`** (`scripts/oute`, bash 3.2): só no host com `OUTE_AGENT_STUDIO=1` (fora dele, erro claro). Lista `oute-observability/otel/<sinal>/` com o rclone do `oute storage` (só `lsf` e `copyto`: leitura) e passa cada objeto, por `docker exec -i oute-agent-studio … python -m agent_studio.replay <sinal>`, ao `agent_studio/replay.py`, que usa a credencial de ingestão do **ambiente do container**: ela nunca vai a argv nem a log (nem a do bucket: o rclone a recebe por variável de ambiente).
+- **Faixa = partição do bucket** (hora de chegada ao collector, UTC), não a hora do fato. A partição `hour=H` cobre `[H, H+1 h)`; entra se cruza `[from − 1 h, to + 1 h)` (1 h de folga de cada lado). `--from`/`--to` em ISO 8601 UTC (`2026-10-01` ou `2026-10-01T12:00:00Z`). Objetos sem `host=` (anteriores à 0.7.5, ADR-04) só entram com `--legacy`; `--host` filtra por `host=`. Objeto sem partição de hora no caminho é ignorado, com aviso.
+- **`agent_studio/replay.py`:** lê o `otlp_json.gz` do stdin (JSON puro também) e faz o POST com gzip. Lote acima de 64 MB (o teto da ingestão, `MAX_BODY`) é **partido por `resource*`** (um resource que sozinho passa do teto, por `scope*`). **503 = espera** (`Retry-After`, senão 5 s) **e repete**, até 60 tentativas; **400** (ou outro 4xx) conta, segue com as outras partes e o comando sai ≠ 0. Saída de uma linha, `written=<n> duplicate=<n> failed=<n>`; o stderr nunca leva texto do objeto nem da resposta.
+- **Contagem:** a ingestão passou a devolver, no 2xx, `X-Agent-Studio-Written` e `X-Agent-Studio-Duplicate` (o collector ignora). O resumo por sinal: objetos lidos, registros gravados × repetidos, objetos que falharam.
+- **Idempotente:** rodar de novo não cria linha (a chave de dedupe é a do registro). Reenviar o bucket **já remonta o SurrealDB**: o estado derivado sai de todas as linhas do lote, inclusive das repetidas (§3); com o DuckDB intacto e o SurrealDB vazio, o replay das mesmas partições devolve pedidos, rodadas e sessões.
+- **Falhas:** objeto que o rclone não lê (Archive) = listado, pulado, rc ≠ 0 no fim; objeto que não é OTLP JSON ou que a ingestão recusa = conta em "falharam", rc ≠ 0; o replay segue com os outros objetos.
+- **Efeito colateral aceito:** durante o replay a hora de chegada dos registros é agora, então o tray mostra o host como ativo (alerta "host sem dado" não dispara).
+- **Fora desta fatia:** restore automático do Archive; leitura direta do bucket pelo DuckDB (§ "Opções consideradas").
+- **Código:** `agent_studio/replay.py`, `studio_replay` no `scripts/oute`. Teste: `tests/agent-studio-replay.test.sh` (bucket falso por um `rclone` falso, `agent_studio.replay` real contra o serviço e o SurrealDB de verdade).
 
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
