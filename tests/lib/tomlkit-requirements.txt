@@ -1,0 +1,4 @@
+# tomlkit na versão da imagem (apt python3-tomlkit, Ubuntu 24.04), para o tests/entrypoint-config.test.sh quando o
+# python3 do ambiente não o tem (runner do CI): venv em cache, instalado só com hash.
+tomlkit==0.12.4 \
+    --hash=sha256:5cd82d48a3dd89dee1f9d64420aa20ae65cfbd00668d6f094d7578a78efbb77b
