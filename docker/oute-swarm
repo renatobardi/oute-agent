@@ -424,7 +424,7 @@ cmd_close() {
     if [[ -z "$id" && "${tab:--}" != - ]] && tab_exists "$tab"; then id="$tab"; fi
     if [[ -z "$id" ]]; then
       (( ! yes )) || mark_closed "$state" "$slug"
-      (( all )) || echo "já fechada: $label"
+      echo "já fechada: $label"
       continue
     fi
     pending=1
