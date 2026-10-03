@@ -160,11 +160,13 @@ check "últimas 24 h: nada (tudo chegou agora, fato em 2025)" jqe '.totals.calls
 studio_stop
 
 # ---------------------------------------------------------------- 6. lógica reusável (#204-#206), direto no módulo
-PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/prices.toml" "$ROOT/config/agent-studio/config.toml" > "$TMP/py.out" 2>&1 <<'PY'
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/prices.toml" "$ROOT/config/agent-studio/config.toml" "$ROOT/config/select/models.toml" > "$TMP/py.out" 2>&1 <<'PY'
 import sys, duckdb
-from agent_studio import config, cost, usage
+from agent_studio import config, cost, otlp, usage
+from agent_studio.store import Store
+from otlp_json import rs, span
 from pycheck import check as out
-db, test_cfg, repo_cfg = sys.argv[1:]
+db, test_cfg, repo_cfg = sys.argv[1:4]
 P = cost.ModelPrice
 out("estimativa sem preço = None", cost.estimate_cost_usd(10, 10, 0, 0, None) is None)
 out("estimativa pelos 4 eixos", round(cost.estimate_cost_usd(1e6, 1e6, 1e6, 1e6, P(1, 2, 0.5, 4)), 9) == 7.5)
@@ -181,6 +183,22 @@ c = config.load(repo_cfg)
 out("config do repo carrega sem erro e tem o Codex", not c.errors and c.prices.lookup("gpt-5-codex") is not None)
 out("config do repo: preço de reserva dos modelos Claude da tabela do ADR-02 (#157)",
     all(c.prices.lookup(m) is not None for m in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001")))
+# unpriced_models vazio para toda a tabela do ADR-02 (Claude e reserva gpt-6-*), com o preço do config do repo (#157)
+import tomllib
+sel = tomllib.load(open(sys.argv[4], "rb"))
+table = sorted({m for blk in (sel["default"], *sel["line"], *sel["exception"]) for k, m in blk.items() if k in ("claude", "codex")})
+out("tabela do ADR-02 lida: Claude e reserva", {"gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "claude-opus-5-5"} <= set(table))
+stp = Store(":memory:")
+rp = {"host.name": "h", "oute.agent": "codex"}
+sp = [span("session_task.turn", 1759000000 + i, 1, {"model": m, "codex.turn.token_usage.non_cached_input_tokens": 1000,
+      "codex.turn.token_usage.output_tokens": 100}) for i, m in enumerate(table)]
+stp.write({"spans": otlp.span_rows({"resourceSpans": [rs(rp, sp)]}, 1), "logs": []})
+gp = usage.aggregate(stp.con, 1759000000 * 10**9, (1759000000 + 100) * 10**9, c.prices, ("model",))
+out("tabela do ADR-02 sem preço: nenhum modelo", not any(v["unpriced_models"] or v["unpriced_calls"] for v in gp.values()) and len(gp) == len(table))
+out("reserva gpt-6-*: 4 eixos do models.dev", [c.prices.lookup(m) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")]
+    == [P(10, 50, 1, 12.5), P(2, 10, 0.1, 2.5), P(0.1, 0.5, 0.01, 0.125)])
+out("reserva gpt-6-*: custo estimado de 1000 de entrada + 100 de saída", [round(gp[(m,)]["estimated_usd"], 9) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")] == [0.015, 0.003, 0.00015])
+stp.close()
 out("config ausente: vazia, com o motivo", (lambda c: len(c.prices) == 0 and "não encontrada" in c.errors[0])(config.load("/nao/existe.toml")))
 import tempfile, os
 with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
@@ -202,8 +220,6 @@ except ValueError:
     out("chave inválida recusada", True)
 
 # custo do Claude pelo log (#157): casos de borda da regra, num banco em memória montado pela ingestão
-from agent_studio import otlp
-from agent_studio.store import Store
 from otlp_json import api_request, claude_call, rl, rs, span
 st = Store(":memory:")
 res = {"host.name": "h", "oute.agent": "claude"}
