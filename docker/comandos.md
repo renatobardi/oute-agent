@@ -41,6 +41,11 @@ Dois lugares, dois conjuntos de comandos:
   oute build           build local (fallback; o normal é o CI)
   oute sync-shared     monta o bucket OCI em ~/.oute/shared
   oute storage [ls|lsl|about] [path]   bucket direto no OCI
+  oute studio replay --from <ISO> --to <ISO> [--signal logs|traces|metrics] [--host <máquina>] [--legacy]
+                       só no oute-server (OUTE_AGENT_STUDIO=1): reenvia o bucket de telemetria à ingestão do
+                       agent-studio, com dedupe (rodar de novo não duplica; o SurrealDB volta junto). Faixa em UTC
+                       pela partição do bucket, com 1 h de folga de cada lado. Objeto ilegível (Archive, mais de
+                       90 dias) é listado e pulado, com rc ≠ 0: restaure-o antes (ADR-08 §7)
   oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
 
