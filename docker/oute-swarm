@@ -12,6 +12,9 @@
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #              [--wait [--timeout <s>]]             --wait: espera a sessão parar (relê a cada 5 s, OUTE_SWARM_TELL_POLL) e
 #                                                   envia; sem --force; timeout padrão 600 s, recusa final com código 3
+#   oute-swarm ask "<pergunta curta>"               (usado pelo dispatcher) a rodada parou esperando uma decisão do Bardi:
+#                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
+#   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
 #   oute-swarm list                                 abas abertas por este dispatcher + worktrees de tarefa
 #
@@ -404,6 +407,38 @@ cmd_tell() {
   refuse "o campo de entrada não contém exatamente a mensagem" "sem Enter; confira o pane $pane"
 }
 
+# rodada de ask/answered: a do round_id; sem ela, a mais recente. Vale a rodada sem aba aberta (a triagem ainda não tem
+# `spawned`), mas tem que existir o `meta`
+ask_dir() {
+  local d
+  if d="$(round_id)"; then d="$STATE_ROOT/$d"
+  else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; d="${d%/}"; fi
+  [[ -n "$d" && -f "$d/meta" ]] || die "nenhuma rodada (${d:-$STATE_ROOT})"
+  printf '%s' "$d"
+}
+
+# #386: a rodada esperando uma decisão do Bardi. Texto de uma linha, sem controles, até ASK_MAX caracteres: é a
+# pergunta que o dispatcher escreve, nunca saída de comando nem do host (vai ao log, ao bucket e ao agent-studio)
+ASK_MAX=300
+cmd_ask() {
+  local text state
+  [[ $# -eq 1 ]] || die 'uso: oute-swarm ask "<pergunta curta>"'
+  text="$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | tr -s ' ')"; text="${text# }"; text="${text% }"
+  [[ -n "$text" ]] || die "pergunta vazia"
+  (( ${#text} <= ASK_MAX )) || text="${text:0:ASK_MAX-1}…"
+  state="$(ask_dir)"
+  slog "$state" "$(date -u +%FT%TZ) pergunta $text"
+  echo "pergunta registrada na rodada $(basename "$state")"
+}
+
+cmd_answered() {
+  local state
+  [[ $# -eq 0 ]] || die "uso: oute-swarm answered (sem argumentos: a resposta do Bardi não vai ao log)"
+  state="$(ask_dir)"
+  slog "$state" "$(date -u +%FT%TZ) resposta"
+  echo "resposta registrada na rodada $(basename "$state")"
+}
+
 cmd_close() {
   local yes=0 all=0 want="" slug pane agent ts tab label id closed=0 pending=0 found=0 failed=0 state
   while [[ $# -gt 0 ]]; do
@@ -724,9 +759,11 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
+  ask) shift; cmd_ask "$@" ;;
+  answered) shift; cmd_answered "$@" ;;
   close) shift; cmd_close "$@" ;;
   watch) shift; cmd_watch "$@" ;;
   list) cmd_list ;;

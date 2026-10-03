@@ -75,6 +75,11 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24r
 .alertas h2 { margin: 0 0 .25rem; font-size: .95rem; }
 .alertas p, .alertas ul { margin: 0; }
 .alertas ul { padding-left: 1.2rem; }
+/* decisão pendente do Bardi (#386) no topo das páginas */
+.decisoes { margin: 0; padding: .6rem 1.25rem; border-bottom: 1px solid var(--est); background: var(--painel);
+            color: var(--est); }
+.decisoes h2 { margin: 0 0 .25rem; font-size: .95rem; }
+.decisoes ul { margin: 0; padding-left: 1.2rem; }
 /* pedidos: o script inteiro à vista, sem rolagem própria */
 pre.script { max-height: none; padding: .8rem; background: var(--painel); border: 1px solid var(--linha); border-radius: 4px; }
 .root { color: var(--erro); font-weight: 600; }

@@ -38,6 +38,19 @@
 <div id="alertas" data-alertas="0" hidden></div>
 {% endif %}
 {% endif %}
+{# decisão pendente do Bardi (#386): rodada do swarm esperando resposta; fora do #conteudo, como os alertas #}
+{% if decisions is defined and decisions %}
+<section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" role="status">
+  <h2>{{ decisions|length }} {{ "decisão pendente" if decisions|length == 1 else "decisões pendentes" }}</h2>
+  <ul>
+    {% for d in decisions %}
+    <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
+      <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 <main id="conteudo">
 {% block main %}{% endblock %}
 </main>

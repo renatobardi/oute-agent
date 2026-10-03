@@ -792,4 +792,28 @@ quota spawn OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT/custo
 check "cota, endpoint de logs fora do padrão: evento enviado, sem métrica" [ "$(n '.name == "oute.quota.unknown"')" -eq 1 -a "$(mp 'true' | grep -c .)" -eq 0 ]
 rcv_stop
 
+# ---------------------------------------------------------------- 6. decisão pendente (#386): pergunta e resposta da rodada
+# `pergunta <texto>` -> oute.swarm.round.asked (texto no corpo); `resposta` -> oute.swarm.round.answered (sem corpo);
+# pergunta sem texto não vira evento; o backfill (por janela) lê as mesmas linhas e leva o mesmo oute.event.id
+QH="$TMP/ask"; QR="$QH/.oute/swarm/swarm-1003-1211"; mkdir -p "$QR"
+printf 'repo=/workspace/oute-agent\nmax=3\nlabel=\nstarted=2026-10-03T12:11:00Z\nagent=claude\n' > "$QR/meta"
+QA='2026-10-03T12:20:00Z pergunta 1. aprovar a triagem (#386, #387) 2. cortar a #387'
+QB='2026-10-03T12:35:00Z resposta'
+QC='2026-10-03T12:36:00Z pergunta'
+printf '%s\n%s\n%s\n' "$QA" "$QB" "$QC" > "$QR/log"
+rcv_start "$TMP/r16a"
+for ln in "$QA" "$QB" "$QC"; do HOME="$QH" oute-emit swarm swarm-1003-1211 "$ln"; done
+check "decisão: asked com a pergunta no corpo"          [ "$(n '.name == "oute.swarm.round.asked" and .attrs["oute.swarm.round"] == "swarm-1003-1211" and .attrs["oute.agent"] == "claude"
+                                                              and .body == "1. aprovar a triagem (#386, #387) 2. cortar a #387" and (.time | tonumber / 1e9 | todate) == "2026-10-03T12:20:00Z"')" -eq 1 ]
+check "decisão: answered sem corpo, na hora da linha"   [ "$(n '.name == "oute.swarm.round.answered" and .body == null and (.time | tonumber / 1e9 | todate) == "2026-10-03T12:35:00Z"')" -eq 1 ]
+check "decisão: pergunta sem texto não vira evento"     [ "$(n 'true')" -eq 2 ]
+LIVE_IDS="$(ids "$RCV_DIR" true)"
+rcv_stop
+rcv_start "$TMP/r16b"
+HOME="$QH" oute-emit backfill --from 2026-10-03T00:00:00Z >"$TMP/bf.out" 2>"$TMP/bf.err"; RC=$?
+check "decisão, backfill: rc 0, os dois eventos e a linha vazia pulada" bash -c '[ "$1" -eq 0 ] && grep -qF "asked" "$2" && grep -qF "answered" "$2"' _ "$RC" "$TMP/bf.err"
+check "decisão, backfill: dois eventos, com oute.backfill=true" [ "$(n '(.name | startswith("oute.swarm.round.a")) and .attrs["oute.backfill"] == true')" -eq 2 ]
+check "decisão, backfill: mesmo oute.event.id do ao vivo" [ -n "$LIVE_IDS" -a "$(ids "$RCV_DIR" '.name | startswith("oute.swarm.round.a")')" == "$LIVE_IDS" ]
+rcv_stop
+
 check_end

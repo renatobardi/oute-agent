@@ -21,6 +21,8 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
   (`session.spawned` sem `session.closed`; `evidence.kind = "sessions"`) ou sem nenhuma (triagem sem resposta;
   `kind = "triage"`). Passadas `lookback_hours` sem evento a rodada deixa de ser "parada" e vira, por mais
   `lookback_hours`, `round_old` ("rodada antiga sem fechamento"); depois some. Falha deste cálculo não derruba os outros.
+  A pergunta ao Bardi (`oute.swarm.round.asked`, #386) também é evento `oute.swarm.*`: rodada com a pergunta de menos de
+  `round_stalled_minutes` não conta como parada. A decisão pendente em si não é alerta (`decisions.py`).
 
 **Host parado** = sem nenhum registro há mais de `no_data_minutes`. Host parado não liga fila, recusa, spool nem cota
 (o último valor dele é velho): o Mac fechado não alerta; o host sempre ligado parado alerta só "host sem dado".

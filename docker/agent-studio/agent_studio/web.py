@@ -108,7 +108,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     def page(request, name, status=200, headers=None, **ctx):
         # os alertas só existem em página de quem passou pelo `gate` (o login não os mostra)
         shown = hasattr(request.state, "alerts")
-        html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=getattr(request.state, "alerts", None))
+        html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=getattr(request.state, "alerts", None),
+                                             decisions=getattr(request.state, "decisions", None))
         return HTMLResponse(html, status_code=status, headers={**HEADERS, **(headers or {})})
 
     def error(request, status, message):
@@ -128,12 +129,23 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             detail_log.exception("tela: cálculo dos alertas falhou")
             return None
 
+    async def pending_decisions():
+        """Decisões pendentes do Bardi (#386) para o topo das páginas. Falha não derruba a página: sem o bloco."""
+        try:
+            return (await run_in_threadpool(store.decisions, time.time_ns(), config.alerts))["pending"]
+        except Exception as e:  # noqa: BLE001 — o bloco acompanha a página; sem ele, ela sai igual
+            tel.warn("web-decisions-failed", "tela: decisões pendentes falhou, a página saiu sem elas: %s",
+                     type(e).__name__, level=logging.ERROR)
+            detail_log.exception("tela: decisões pendentes falhou")
+            return None
+
     async def gate(request):
         """`None` se pode ler (e a página leva os alertas); senão a resposta que manda para o login."""
         if auth.reader(request):
             # trecho pedido pelo htmx não leva o topo da página
             if not is_htmx(request):
                 request.state.alerts = await active_alerts()
+                request.state.decisions = await pending_decisions()
             return None
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         login = "/login?next=" + quote(target, safe="")

@@ -130,6 +130,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     espera a sessão parar (relê a cada 5 s) e envia; uma linha só no log
                                     (ok (--wait, Ns) ou a recusa final). Timeout padrão 600 s: recusa e sai com 3.
                                     Não combina com --force
+  oute-swarm ask "pergunta"         (o dispatcher usa) a rodada parou esperando a sua decisão: registra a pergunta
+                                    (aparece como decisão pendente no agent-studio e no tray); oute-swarm answered
+                                    registra que você respondeu
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm watch [--interval s] [--round ID]

@@ -611,6 +611,10 @@ def swarm_event(rnd, line, nth=1):
     if kind == "close" and rest:
         slug = rest.split(" ", 1)[0]
         return event("oute.swarm.session.closed", agent, ts, {**base, "oute.swarm.session": slug}, key=slug, **fact)
+    if kind == "pergunta" and rest.strip():  # #386: o dispatcher parou esperando o Bardi; o corpo é a pergunta
+        return event("oute.swarm.round.asked", agent, ts, base, rest.strip()[:300], **fact)
+    if kind == "resposta":  # #386: o Bardi respondeu; sem corpo (a resposta não vai ao log)
+        return event("oute.swarm.round.answered", agent, ts, base, **fact)
     if kind == "rodada" and rest.startswith("fechada"):
         return event("oute.swarm.round.closed", agent, ts, base, **fact)
     raise Skip(f"tipo de linha desconhecido: {kind}")

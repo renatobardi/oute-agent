@@ -1142,4 +1142,48 @@ check "dispatcher: regra nunca digite no pane com exceção do esc (#373)" grep 
 check "dispatcher: retrospectiva lista blocked com causa (#373)" grep -qF -- '- **Sessões `blocked`:** liste-as com a causa de cada uma' "$D"
 check "dispatcher: sem placeholder no prompt"            [ -z "$(grep -o '{{[A-Z_]*}}' "$D")" ]
 
+# 13. decisão pendente do Bardi (#386): `ask` e `answered` gravam no log da rodada e emitem os eventos
+CASE=ask; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+sw ask "1. aprovar a triagem  (#386, #387)  2. cortar a #387"
+check "ask: código 0 e confirmação com a rodada"         bash -c '[ "$1" -eq 0 ] && grep -qF "swarm-test" <<<"$2"' _ "$RC" "$OUT"
+check "ask: linha pergunta com hora no log"              grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z pergunta 1\. aprovar a triagem \(#386, #387\) 2\. cortar a #387$' "$STATE/log"
+check "ask: oute.swarm.round.asked com a pergunta no corpo" [ "$(n '.name == "oute.swarm.round.asked" and .attrs["oute.swarm.round"] == "swarm-test" and .attrs["oute.agent"] == "claude" and .body == "1. aprovar a triagem (#386, #387) 2. cortar a #387"')" -eq 1 ]
+sw ask "$(printf 'linha um\nlinha\tdois\r\001fim')"
+check "ask: quebra de linha, TAB e controle viram uma linha só" bash -c '[ "$1" -eq 0 ] && grep -qE " pergunta linha um linha dois fim\$" "$2" && [ "$(grep -c "" "$2")" -eq 2 ]' _ "$RC" "$STATE/log"
+LONG="$(printf 'x%.0s' $(seq 1 450))"
+sw ask "$LONG"
+check "ask: texto longo cortado em 300 caracteres, com …"  bash -c 'l="$(grep " pergunta x" "$1" | tail -1 | sed "s/^[^ ]* pergunta //")"; [ "${#l}" -eq 300 ] && [ "${l: -1}" = "…" ]' _ "$STATE/log"
+check "ask: evento do texto longo também limitado"       [ "$(n '.name == "oute.swarm.round.asked" and (.body | length) == 300 and (.body | endswith("…"))')" -eq 1 ]
+t0="$(wc -l < "$STATE/log")"
+sw ask ""
+check "ask vazio: erro de uso, sem linha no log"         bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ] && grep -qF "pergunta vazia" <<<"$4"' _ "$RC" "$(wc -l < "$STATE/log")" "$t0" "$ERR"
+sw ask
+check "ask sem argumento: erro de uso"                   bash -c '[ "$1" -eq 1 ] && grep -qF "uso: oute-swarm ask" <<<"$2" && [ "$3" -eq "$4" ]' _ "$RC" "$ERR" "$(wc -l < "$STATE/log")" "$t0"
+sw ask "a" "b"
+check "ask com argumento a mais: erro de uso"            bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ]' _ "$RC" "$(wc -l < "$STATE/log")" "$t0"
+sw answered
+check "answered: código 0 e linha resposta no log"       bash -c '[ "$1" -eq 0 ] && grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z resposta\$" "$2"' _ "$RC" "$STATE/log"
+check "answered: oute.swarm.round.answered sem corpo"    [ "$(n '.name == "oute.swarm.round.answered" and .attrs["oute.swarm.round"] == "swarm-test" and .body == null')" -eq 1 ]
+t0="$(wc -l < "$STATE/log")"
+sw answered "sim, a 1"
+check "answered com argumento: erro, a resposta não vai ao log" bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ] && ! grep -qF "sim, a 1" "$4"' _ "$RC" "$(wc -l < "$STATE/log")" "$t0" "$STATE/log"
+# triagem: a rodada ainda não tem aba (sem spawned)
+rm -f "$STATE/spawned"; t0="$(wc -l < "$STATE/log")"
+sw ask "1. aprovar a triagem"
+check "ask na triagem (sem spawned): grava e emite"      bash -c '[ "$1" -eq 0 ] && [ "$(wc -l < "$2")" -eq "$(( $3 + 1 ))" ]' _ "$RC" "$STATE/log" "$t0"
+# sem OUTE_SWARM_ID e fora da worktree do dispatcher: a rodada mais recente
+OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" "$SWARM" ask "sem id" 2>"$FAKE/err")"; RC=$?
+check "ask sem OUTE_SWARM_ID: usa a rodada mais recente"  bash -c '[ "$1" -eq 0 ] && grep -qE " pergunta sem id\$" "$2"' _ "$RC" "$STATE/log"
+EMPTYH="$TMP/$CASE/vazio"; mkdir -p "$EMPTYH"
+OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID PATH="$BIN:$PATH" HOME="$EMPTYH" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" "$SWARM" ask "x" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+check "ask sem nenhuma rodada: erro, nada gravado"        bash -c '[ "$1" -eq 1 ] && grep -qF "nenhuma rodada" <<<"$2"' _ "$RC" "$ERR"
+rcv_stop
+# prompt do dispatcher, ajuda e comandos
+opn --max 2
+D="$FAKE/oute-task.last"
+check "dispatcher: chama ask ao parar com opções numeradas (#386)" grep -qF 'toda vez que parar com opções numeradas para o Bardi' "$D"
+check "dispatcher: ask com pergunta curta, sem saída de host (#386)" grep -qF 'nunca saída de comando, de host ou de tela' "$D"
+check "dispatcher: answered ao receber a resposta (#386)" grep -qF 'o primeiro passo é `oute-swarm answered`' "$D"
+check "ajuda e comandos.md citam ask e answered (#386)"   bash -c 'for f in "$@"; do grep -qF "oute-swarm ask" "$f" && grep -qF "oute-swarm answered" "$f" || exit 1; done' _ "$SWARM" "$ROOT/docker/comandos.md"
+
 check_end
