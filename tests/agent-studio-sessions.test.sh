@@ -34,7 +34,7 @@ S1=oute-agent-207-tela-20250927190000; S2=lab-ajuste-20250927191000; S3='repo <b
 RND=swarm-0927-1900
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
-from otlp_json import kv, rs
+from otlp_json import api_request, kv, rs
 tmp = sys.argv[1]
 D1 = 1759000000
 S1, S2, S3, S4, S0 = ("oute-agent-207-tela-20250927190000", "lab-ajuste-20250927191000", "repo <b>x</b>&y=é",
@@ -48,27 +48,36 @@ def call(conv, start, dur, attrs, name="claude_code.llm_request", err=False):
          "attributes": kv({"session.id": conv, **attrs})}
     if err: s["status"] = {"code": 2, "message": "comando falhou"}
     return s
+# chamada do Claude com custo real, como em produção (#157): o span leva o request_id, e o custo vem no log
+# api_request de mesmo request_id, no fim da chamada (guardado em `paid` por resource)
+paid = {}
+def paid_call(res, conv, start, dur, attrs, cost):
+    s = call(conv, start, dur, {**attrs, "request_id": f"req-{n[0] + 1}"})
+    paid.setdefault(res, []).append(api_request(start + dur, f"req-{n[0]}", cost, {"session.id": conv, **attrs}))
+    return s
 server = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "claude-code", "oute.agent": "claude"}
 mac = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "codex_exec", "oute.agent": "codex"}
 sonnet, opus = {"model": "claude-sonnet-5"}, {"model": "claude-opus-5"}
 codex_turn = {"model": "gpt-5-codex", "codex.turn.token_usage.non_cached_input_tokens": 1_000_000,
               "codex.turn.token_usage.output_tokens": 100_000, "codex.turn.token_usage.cached_input_tokens": 2_000_000}
+R1, R0 = "r1", "r0"
+res = {R1: {**server, "oute.task.id": S1, "oute.swarm.round": RND}, R0: {**server, "oute.task.id": S0}, "solta": server}
 traces = {"resourceSpans": [
-  rs({**server, "oute.task.id": S1, "oute.swarm.round": RND}, [
-    call("s1-0", D1 - 2 * 86400, 1, {**sonnet, "input_tokens": 10, "cost_usd": 0.25}),
-    call("s1-a", D1 + 1, 2, {**sonnet, "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 1000,
-                             "cache_creation_tokens": 10, "cost_usd": 0.01}),
+  rs(res[R1], [
+    paid_call(R1, "s1-0", D1 - 2 * 86400, 1, {**sonnet, "input_tokens": 10}, 0.25),
+    paid_call(R1, "s1-a", D1 + 1, 2, {**sonnet, "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 1000,
+                                      "cache_creation_tokens": 10}, 0.01),
     call("s1-a", D1 + 5, 4, {**sonnet, "input_tokens": 1_000_000}),
-    call("s1-b", D1 + 100, 10, {**opus, "input_tokens": 7, "cost_usd": 0.5}),
+    paid_call(R1, "s1-b", D1 + 100, 10, {**opus, "input_tokens": 7}, 0.5),
     # não é chamada ao modelo: o cost_usd dele não entra em soma; o erro conta
     call("s1-b", D1 + 111, 1, {"tool_name": "Bash", "cost_usd": 50.0}, name="claude_code.tool", err=True),
   ]),
   rs({**mac, "oute.task.id": S2}, [call("s2-a", D1 + 700, 10, codex_turn, name="session_task.turn")]),
   rs({**server, "oute.task.id": S3}, [call("s3-a", D1 + 300, 1, {"model": "modelo-sem-preco", "input_tokens": 500})]),
-  rs({**server, "oute.task.id": S0}, [call("s0-a", 1735689600, 1, {**sonnet, "input_tokens": 5, "cost_usd": 100.0})]),
+  rs(res[R0], [paid_call(R0, "s0-a", 1735689600, 1, {**sonnet, "input_tokens": 5}, 100.0)]),
   rs(server, [
-    call("solta-1", D1 + 400, 3, {**sonnet, "input_tokens": 20, "cost_usd": 0.02}),
-    call("solta-jan", 1735689700, 1, {**sonnet, "input_tokens": 5, "cost_usd": 200.0}),
+    paid_call("solta", "solta-1", D1 + 400, 3, {**sonnet, "input_tokens": 20}, 0.02),
+    paid_call("solta", "solta-jan", 1735689700, 1, {**sonnet, "input_tokens": 5}, 200.0),
   ]),
   rs(mac, [call("solta 2/&é", D1 + 500, 6, codex_turn, name="session_task.turn")]),
 ]}
@@ -105,6 +114,7 @@ logs = {"resourceLogs": [
     log(D1 + 101, "falhou <b>feio</b>", {"session.id": "s1-b"}, "claude_code.api_error", sev=17),
     log(D1 + 2, "claude_code.user_prompt", {"session.id": "s1-a"}, "claude_code.user_prompt"),
   ]),
+  *(rl(res[k], recs) for k, recs in paid.items()),
 ]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
 PY

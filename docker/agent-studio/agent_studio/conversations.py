@@ -7,7 +7,7 @@ fato** (`time_unix_nano`), nunca pela de chegada. Chamadas, tokens e custo (real
 import json
 
 from . import usage as usage_mod
-from .cost import MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost
+from .cost import MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, spans_with_cost
 
 LIST_LIMIT = 200    # conversas por página da lista (as mais recentes)
 SPAN_LIMIT = 5000   # spans na árvore de uma conversa (os primeiros, pela hora do fato)
@@ -124,11 +124,13 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE):
         return None
     conv = head[0]
     _with_usage(con, [conv], prices)
+    # custo efetivo de cada span (o do span ou o do log `api_request` da conversa, #157), pela regra do `cost.py`
+    table, params = spans_with_cost("session_id = ?", [session_id], "session_id = ?", [session_id])
     spans = _dicts(con.execute(
         "SELECT trace_id, span_id, parent_span_id, name, time_unix_nano, duration_ns, model, input_tokens, "
         f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, ({MODEL_CALL_SQL}) AS is_call "
-        "FROM spans WHERE session_id = ? ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
-        [*MODEL_CALL_PARAMS, session_id, span_limit]))
+        f"FROM {table} ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
+        [*MODEL_CALL_PARAMS, *params, span_limit]))
     for s in spans:
         s["error"] = s["status_code"] == SPAN_STATUS_ERROR
         # tokens e custo só nas chamadas ao modelo: o que aparece na coluna é o que entra na soma (#203)

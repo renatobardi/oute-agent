@@ -164,8 +164,9 @@ SPAN_TOKENS = {
                           "codex.turn.token_usage.cached_input_tokens"),
     "cache_creation_tokens": ("gen_ai.usage.cache_creation_input_tokens", "cache_creation_tokens"),
 }
-# custo real (Claude manda cost_usd; oute.cost_usd = OpenRouter no jev.decision, histórico até 2026-09-30);
-# estimado fica para a API (#156)
+# custo real que vem no span (oute.cost_usd = OpenRouter no jev.decision, histórico até 2026-09-30). O span do
+# Claude Code chega sem custo: o dele vem no log api_request de mesmo request_id, lido na consulta (cost.py, #157).
+# Estimado fica para a API (#156)
 SPAN_COST = ("oute.cost_usd", "cost_usd", "gen_ai.usage.cost")
 
 

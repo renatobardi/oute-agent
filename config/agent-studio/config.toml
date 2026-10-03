@@ -1,16 +1,18 @@
 # Config do agent-studio (ADR-08, #203). Montada só leitura no container (/etc/oute/agent-studio/config.toml):
 # mudança entra com `git pull` + `oute down/up`, sem release. Preços (#203) e alertas (#204).
 
-# Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (hoje, o
-# Codex). O Claude Code manda o custo real e não depende desta tabela (nem o `jev.decision` do roteador, só em
-# registro histórico, até 2026-09-30).
+# Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (o Codex).
+# O Claude Code manda o custo real, mas não no span: no log `api_request` de mesmo `request_id`, que o agent-studio
+# junta na consulta (#157). O preço do Claude abaixo é só a reserva para a chamada que ficou sem esse log (marcada
+# como estimada, nunca somada ao real). O `jev.decision` do roteador (registro histórico, até 2026-09-30) traz o real.
 #   input          = entrada não cacheada        output         = saída
 #   cache_read     = entrada lida do cache       cache_creation = escrita no cache
 # `input` e `output` são obrigatórios; cache ausente = preço de `input` (estima para cima, nunca de graça).
 # O nome é o modelo do span (sem diferenciar maiúsculas; `openai/gpt-5` também acha `gpt-5`).
 # Modelo sem entrada = sem custo estimado (nunca zero): o `/v1/usage` lista esses modelos em `unpriced_models`;
 # é a deixa para acrescentar o preço aqui.
-# Fonte: preços de lista da OpenAI (API, tier padrão).
+# Fonte: preços de lista da OpenAI (API, tier padrão). A reserva do ADR-02 (`gpt-6-astra`, `gpt-6.1-sol`,
+# `gpt-6-luna`) fica sem preço até o Bardi dar a fonte (#157): aparece em `unpriced_models`, nunca como zero.
 
 [prices."gpt-5"]
 input = 1.25
@@ -46,6 +48,39 @@ cache_read = 0.025
 input = 0.05
 output = 0.4
 cache_read = 0.005
+
+# Claude (#157): os modelos da tabela do ADR-02 e os que aparecem nas sessões. Só reserva (chamada sem o log
+# `api_request`). Fonte: preços de lista da Anthropic (API, conferidos em 2026-10-02); `cache_creation` = escrita de
+# cache de 5 min (1,25 × `input`); a de 1 h custa 2 × `input` e fica subestimada aqui.
+[prices."claude-opus-5-5"]
+input = 4.0
+output = 20.0
+cache_read = 0.2
+cache_creation = 5.0
+
+[prices."claude-sonnet-5-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.2
+cache_creation = 2.5
+
+[prices."claude-sonnet-5"]
+input = 2.0
+output = 10.0
+cache_read = 0.2
+cache_creation = 2.5
+
+[prices."claude-haiku-4-5-20251001"]
+input = 1.0
+output = 5.0
+cache_read = 0.1
+cache_creation = 1.25
+
+[prices."claude-fable-5-1"]
+input = 10.0
+output = 50.0
+cache_read = 0.25
+cache_creation = 12.5
 
 # Alertas do pipeline (ADR-08 §8, #204), devolvidos pelo `GET /v1/alerts`. Chave ausente = o valor abaixo (que é
 # também o padrão do código); chave desconhecida ou valor inválido = o padrão, com o motivo em `config.errors`.
