@@ -71,7 +71,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
                                     confiança do Jev, sem abrir sessão; --text-file: o texto da tarefa para o Jev
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
-  oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal
+  oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal; pula as em uso (#374; --force-in-use só a pedido do Bardi)
                                     dos repos com worktree nele (sem --yes: só mostra)
     --space <nome> | --all          limpa outro space | todos os spaces e o formato antigo
   Formato antigo (/workspace/.worktrees/<repo>-<slug>, antes da #277): reabre e aparece no list, sem migração;
