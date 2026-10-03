@@ -845,6 +845,10 @@ check "dispatcher: oute-task com --phase plan"           [ "$RC" -eq 0 -a "$(hea
 check "dispatcher: abre no claude"                       [ "$(sed -n '5,6p' "$FAKE/oute-task.args" | tr '\n' ' ')" == "$(nova) claude " ]
 check "triagem: oute-select por issue, no repo da rodada" grep -qF "\`oute-select --json --repo $REPO --issue <n>\`" "$FAKE/oute-task.last"
 check "triagem: tabela com fase e modelo"                grep -qF 'agente da sessão, fase, modelo (com a origem' "$FAKE/oute-task.last"
+check "triagem: as quatro origens do seletor (#312)"     grep -qF '`origin` (`manual`, `label`, `jev` ou `padrao`)' "$FAKE/oute-task.last"
+check "triagem: sem label de fase é jev?, não padrao (#312)" grep -qF 'escreva o modelo com `jev?` no lugar de `padrao` (ex.: `claude-sonnet-5-5 (jev?)`)' "$FAKE/oute-task.last"
+check "triagem: tabela com jev? para issue sem label (#312)" grep -qF 'issue sem label de fase leva `jev?`, nunca `padrao`), ordem de abertura' "$FAKE/oute-task.last"
+check "abertura: modelo diferente por jev não é divergência (#312)" grep -qF 'issue sem label de fase (`jev?` na triagem) pode abrir com modelo diferente do mostrado na triagem, com origem `jev` (o Jev classificou a fase pela instrução) ou `padrao` (ele não decidiu, Sonnet). Isso não é divergência a reportar.' "$FAKE/oute-task.last"
 check "triagem: regra comum sozinha ou primeiro elo (#255)" grep -qF -- '- **Regra comum:** issue que muda uma **regra que todo PR segue** entra **sozinha** na rodada ou como **primeiro elo**' "$FAKE/oute-task.last"
 check "triagem: o que conta como regra comum"            grep -qF 'a seção "Regras" ou "Validar antes do PR" do `AGENTS.md`; o fluxo do changelog' "$FAKE/oute-task.last"
 check "triagem: registro compartilhado não é regra comum" grep -qF 'Registro compartilhado continua fora da sobreposição' "$FAKE/oute-task.last"
