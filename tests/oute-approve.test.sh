@@ -8,7 +8,7 @@
 # Uso: tests/oute-approve.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 # credenciais reais nunca chegam ao scripts/oute daqui (docker é falso, mas o script lê o ambiente)
-for v in $(compgen -e | grep -E '^(OCI_|GH_TOKEN$|GITHUB_TOKEN$|AGENT_STUDIO_|BW_|LANGFUSE_)' || true); do unset "$v"; done
+for v in $(compgen -e | grep -E '^(OCI_|GH_TOKEN$|GITHUB_TOKEN$|AGENT_STUDIO_|BW_)' || true); do unset "$v"; done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTE="$ROOT/scripts/oute"

@@ -9,7 +9,7 @@ Fase: `ship` (AI-DLC, ADR-07) · Outcome: deploy verificado em cada host, com ev
 
 Você **só lê**. O deploy (`oute update`, `oute down/up`) é do Bardi; esta skill não reinicia, não puxa imagem, não corrige nada no host. Falha vira relatório e, se for bug, `oute-aidlc-ops-diagnose`.
 
-Três coisas, por host: **versão** (repo e imagem rodando), **serviços** do compose (com `oute-agent-studio` e `oute-surrealdb` no host que liga o profile `agent-studio`, o oute-server; nos outros o script diz que não conferiu) e **presença** de telemetria recente no bucket `oute-observability`. Presença é só "chegou objeto novo nos últimos minutos". Análise do que chegou (volume, erros, Langfuse) é da `oute-aidlc-ops-observe`; se ela não estiver instalada, reporte a presença e pare aí.
+Três coisas, por host: **versão** (repo e imagem rodando), **serviços** do compose (com `oute-agent-studio` e `oute-surrealdb` no host que liga o profile `agent-studio`, o oute-server; nos outros o script diz que não conferiu) e **presença** de telemetria recente no bucket `oute-observability`. Presença é só "chegou objeto novo nos últimos minutos". Análise do que chegou (volume, erros) é da `oute-aidlc-ops-observe`; se ela não estiver instalada, reporte a presença e pare aí.
 
 ## 1. Alvo
 

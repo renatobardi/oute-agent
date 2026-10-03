@@ -1,7 +1,7 @@
 # OTel Collector do oute-agent (issue #13, ADR-04) — porta de entrada única de telemetria.
 # Fontes (rede docker "oute", sem porta publicada): Claude Code e Codex.
 # Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt.
-# Destino 2 (opcional, langfuse.yaml): Langfuse Cloud — só traces, só metadados (allowlist).
+# Destino 2 (opcional, agent-studio.yaml): agent-studio — tudo, com conteúdo (ADR-08).
 # Sem perda no bucket (#161, #152): fila em disco por exporter, lote formado na fila (não em memória),
 # retry sem prazo. kill -9 ou OCI fora por dias não perdem o que o collector aceitou (tests/otelcol-queue.test.sh).
 # Métricas do próprio collector no pipeline metrics (#162, tests/otelcol-metrics.test.sh).

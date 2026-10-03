@@ -160,8 +160,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
-  oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao
-  Langfuse. A saída do script executado no host nunca vai.
+  oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host. A saída do script executado no host nunca vai.
   O oute-swarm, o oute-propose, o oute-task e o oute approve chamam sozinhos; falha nunca muda o comando.
   Endpoint e origem: OTEL_* do ambiente; sem elas (o shell do Bash tool do Claude Code não as
   herda), do ~/.oute_env, só lido (variável com valor no ambiente vence, uma a uma).

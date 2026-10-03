@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """oute-emit — eventos operacionais (ADR-04, adendo #124): um log OTel por fato de rodada, pedido ou sessão, ao bucket e
-ao agent-studio (ADR-08, pipeline logs/studio do collector); nada ao Langfuse.
+ao agent-studio (ADR-08, pipeline logs/studio do collector).
 
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada

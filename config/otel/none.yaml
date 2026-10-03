@@ -1,2 +1,2 @@
-# sem pipeline extra (Langfuse desligado)
+# sem pipeline extra (serve o OUTE_OTEL_STUDIO sem o token do agent-studio)
 {}

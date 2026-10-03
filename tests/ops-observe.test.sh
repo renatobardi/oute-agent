@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Testes do observe.sh da skill oute-aidlc-ops-observe (#259, ADR-08 §9): a seção `studio` lê o `GET /v1/usage`
 # (janela e base) e o `GET /v1/alerts` do agent-studio de verdade (tests/lib/agent-studio.sh), com a credencial de
-# leitura fora do argv e sem nada do Langfuse. O DuckDB de exemplo nasce pela ingestão (POST /v1/traces, /v1/logs e
+# leitura fora do argv. O DuckDB de exemplo nasce pela ingestão (POST /v1/traces, /v1/logs e
 # /v1/metrics), com fatos relativos a agora: o script usa a hora corrente. A seção do bucket roda com um rclone
 # falso. Sem Docker e sem rede externa.
 # Uso: tests/ops-observe.test.sh   (sai != 0 se algum caso falhar)
@@ -18,7 +18,6 @@ CHECK_OUT=+1   # o bad mostra a saída inteira
 
 [[ -f "$SCRIPT" ]] || die "script ausente: $SCRIPT"
 check "sintaxe (bash -n)"                              bash -n "$SCRIPT"
-check "script sem nada do Langfuse"                    bash -c '! grep -qi langfuse "$0"' "$SCRIPT"
 
 # ---------------------------------------------------------------- DuckDB de exemplo (fatos relativos a agora)
 # janela = últimas 24 h; base = os 7 dias antes dela. Na base, dois dias com dado (há 2 e há 4 dias).
@@ -79,7 +78,7 @@ SH
 chmod +x "$BIN/curl" "$BIN/rclone"
 printf '[{"Path":"host=h1/instance=i1/year=2026/x.json.gz","Size":10,"ModTime":"%s"}]\n' "$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S.000000000Z)" > "$TMP/ls.json"
 
-# run [VAR=valor…] <args do observe.sh>: ambiente limpo, só com o que o agent tem (sem LANGFUSE_*)
+# run [VAR=valor…] <args do observe.sh>: ambiente limpo, só com o que o agent tem
 run() {
   local envs=(); while [[ "${1:-}" == *=* ]]; do envs+=("$1"); shift; done
   : > "$ARGV"
@@ -91,7 +90,6 @@ run() {
 run studio
 check "studio: código 0, sem ERRO"                     bash -c '[ "$1" -eq 0 ] && ! grep -q "^ERRO" <<<"$0"' "$OUT" "$RC"
 check "studio: cabeçalho com a URL, a janela e a base" has "^## agent-studio ($STUDIO_URL) · janela .*Z → .*Z · base 7 dia(s) antes$"
-check "studio: nada do Langfuse na saída"              bash -c '! grep -qi langfuse <<<"$0"' "$OUT"
 check "studio: lê /v1/usage da janela e da base e /v1/alerts" test "$(grep -c '/v1/usage?from=.*&to=' "$ARGV") $(grep -c '/v1/alerts$' "$ARGV") $(wc -l < "$ARGV")" = "2 1 3"
 check "studio: credencial fora do argv e da saída"     bash -c '! grep -qF -- "$2" "$1" && ! grep -qF -- "$2" <<<"$0" && ! grep -qi "bearer" "$1"' "$OUT" "$ARGV" "$READ"
 check "tabela: colunas (real e estimado separados)"    has_line "host	agente	chamadas	spans	erros_span	erros_log	custo_real_usd	custo_estimado_usd	sem_preço	tokens	p95_ms	base_custo_usd/dia"
@@ -120,8 +118,8 @@ run studio --hours 1000
 check "janela longa (> 30 dias): código 0, base vira janela" bash -c '[ "$1" -eq 0 ] && grep -q "^oute-velho	codex	1	1	" <<<"$0"' "$OUT" "$RC"
 
 # ---------------------------------------------------------------- argumentos
-run langfuse
-check "modo langfuse não existe mais: código 2"        bash -c '[ "$1" -eq 2 ] && grep -q "argumento desconhecido: langfuse" <<<"$0"' "$OUT" "$RC"
+run xpto
+check "modo desconhecido: código 2"                    bash -c '[ "$1" -eq 2 ] && grep -q "argumento desconhecido: xpto" <<<"$0"' "$OUT" "$RC"
 run studio --hours 0
 check "--hours 0: código 2"                            [ "$RC" -eq 2 ]
 run --help

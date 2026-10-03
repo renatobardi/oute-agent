@@ -107,8 +107,7 @@ run bash "$SCRIPT" rodadas --desde '60 days ago'
 check "--desde amplia a janela"                has 'swarm-velha'
 
 run bash "$SCRIPT" canal --desde '2000-01-01'
-check "janela > 30 dias: sem lacuna de telemetria (o agent-studio guarda tudo)" bash -c '! grep -qi "langfuse" <<<"$0" && grep -q "^horas	[0-9]\{6\}$" <<<"$0"' "$OUT"
-check "script sem nada do Langfuse"            bash -c '! grep -qi langfuse "$0"' "$SCRIPT"
+check "janela > 30 dias: sem lacuna de telemetria (o agent-studio guarda tudo)" bash -c 'grep -q "^horas	[0-9]\{6\}$" <<<"$0"' "$OUT"
 
 run env OUTE_OBSERVE="$TMP/nao-existe" bash "$SCRIPT" telemetria
 check "sem observe.sh: lacuna, código 0"       bash -c '[ "$1" -eq 0 ] && grep -q "LACUNA	telemetria" <<<"$0"' "$OUT" "$RC"
