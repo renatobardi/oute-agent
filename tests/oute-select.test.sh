@@ -76,6 +76,17 @@ check "docs: Haiku, mesmo com aidlc:build"              is build label claude "$
 labels 22 kaizen
 sel --issue 22
 check "kaizen sem fase: Haiku, fase vazia, sem aviso"   bash -c '[ -z "$1" ] && jq -e ".phase == \"\" and .origin == \"label\" and .model == \"$2\"" <<<"$3" >/dev/null' _ "$ERR" "$HAIKU" "$OUT"
+labels 23 aidlc:learn spike
+sel --issue 23
+check "spike: Sonnet, mesmo com aidlc:learn"           is learn label claude "$SONNET" ""
+check "spike: motivo diz a exceção"                    jqe '.reason == "label spike da issue #23"' <<<"$OUT"
+labels 24 spike kaizen
+sel --issue 24
+check "spike + kaizen: Sonnet vence Haiku"             is "" label claude "$SONNET" ""
+check "spike + kaizen: motivo diz o spike"             jqe '.reason == "label spike da issue #24"' <<<"$OUT"
+labels 25 aidlc:build spike
+sel --issue 25
+check "spike em build: Sonnet"                         is build label claude "$SONNET" ""
 
 # ---------------------------------------------------------------- 3. sem label: Sonnet, com aviso, sem bloquear
 labels 30 bug agentes

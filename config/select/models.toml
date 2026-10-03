@@ -32,7 +32,13 @@ claude = "claude-haiku-4-5-20251001"
 codex = "gpt-6-luna"
 effort = "medium"
 
-# Exceções por label de tipo, antes da fase, na ordem em que aparecem aqui.
+# Exceções por label de tipo, antes da fase, na ordem em que aparecem aqui (precedência).
+[[exception]]
+label = "spike"
+claude = "claude-sonnet-5-5"
+codex = "gpt-6.1-sol"
+effort = "high"
+
 [[exception]]
 label = "kaizen"
 claude = "claude-haiku-4-5-20251001"
