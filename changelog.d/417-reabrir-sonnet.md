@@ -1,0 +1,2 @@
+### Changed
+- **Swarm: sessão em Haiku reprovada 2× pelo mesmo motivo é reaberta em Sonnet** (#417). O `docker/swarm.md` §3 manda o dispatcher, quando a 2ª auditoria de um PR de sessão em Haiku repete o bloqueio da 1ª, fechar a aba e reabrir a issue em Sonnet (`--model claude-sonnet-5-5`) sobre o branch do PR (fast-forward), sem esperar a 3ª reprovação. **Precisa de release** (`docker/swarm.md` vai na imagem).

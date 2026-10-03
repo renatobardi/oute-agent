@@ -1230,4 +1230,10 @@ check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'Fal
 check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
 check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 11k. Haiku reprovado 2x pelo mesmo motivo reabre em Sonnet (#417)
+opn --max 2
+D="$FAKE/oute-task.last"
+check "dispatcher: Haiku reprovado 2x pelo mesmo motivo reabre em Sonnet (#417)" grep -qF 'Sessão em Haiku reprovada 2× pelo mesmo motivo (#417)' "$D"
+check "dispatcher: reabre com --model claude-sonnet-5-5 sobre o branch do PR (#417)" bash -c 'grep -qF -- "--model claude-sonnet-5-5" "$1" && grep -qF "parte do branch do PR e empurra para ele em fast-forward" "$1"' _ "$D"
+
 check_end
