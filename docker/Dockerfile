@@ -146,6 +146,8 @@ COPY docker/oute-task /usr/local/bin/
 COPY docker/oute-select /usr/local/bin/
 # leitura do SonarCloud (#226): bash + curl + jq, só GET; o token vem do agent_env (SONAR_TOKEN)
 COPY docker/oute-sonar /usr/local/bin/
+# cota das assinaturas Claude e Codex (#346): bash + curl + jq, só GET, nunca escreve nem renova credencial
+COPY docker/oute-quota /usr/local/bin/
 # sessões paralelas coordenadas (oute-swarm; prompts do dispatcher e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
 COPY docker/swarm.md docker/swarm-worker.md /usr/local/lib/oute/
@@ -159,7 +161,7 @@ RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
-      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-swarm /usr/local/bin/oute
+      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace

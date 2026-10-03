@@ -129,6 +129,16 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   organização: OUTE_SONAR_ORG. Token: SONAR_TOKEN (item `sonar` do vault, pelo agent_env). Saída: 0 gate aprovado,
   1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise.
 
+## CONTAINER — cota das assinaturas (oute-quota, #346)
+  oute-quota [--json] [--agent claude|codex]   janelas 5h e 7d de cada agente: % usada e hora do reset (UTC), ou
+                                    `unknown` com o motivo (sem-credencial, token-expirado, rede, timeout, http-<código>,
+                                    formato); --json no contrato do spike #55 (read_at, max_pct, reset_grace_s, agents)
+  Só leitura: só GET por https (api.anthropic.com e chatgpt.com), token pelo stdin do curl, nunca escreve nem renova a
+  credencial do agente (token expirado = unknown até o próprio claude/codex renovar). Cache de 120 s em
+  ~/.cache/oute-quota (só % e reset); com 429, rede ou timeout devolve o cache de até 30 min com stale:true.
+  Saída: 0 leitura feita (mesmo com unknown), 1 todos os agentes lidos ficaram unknown, 2 uso. A fonte da reserva
+  por cota do ADR-02 (#258).
+
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
   oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao
