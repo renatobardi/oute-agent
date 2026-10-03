@@ -17,8 +17,9 @@ Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/selec
 
 Jev (#257): só sem label de fase (sessão sem issue, ou issue sem `aidlc:<fase>`), com texto da tarefa e sem --model.
 Chamado direto na TypeSafe (primitivo `choice`), com teto de 3 s; a chave vem de $OUTE_TYPESAFE_API_KEY e só o texto
-da tarefa sai da máquina. Confiança >= 0,6: origem `jev` e o modelo da fase classificada. Confiança menor, erro,
-tempo esgotado ou sem a chave: padrão, com aviso. `confidence` é a do Jev sempre que ele respondeu (senão, "").
+da tarefa sai da máquina, e só por `https://` (#313): com $OUTE_SELECT_JEV_URL em outro esquema o Jev não é chamado.
+Confiança >= 0,6: origem `jev` e o modelo da fase classificada. Confiança menor, erro, tempo esgotado, sem a chave ou
+endereço sem `https://`: padrão, com aviso. `confidence` é a do Jev sempre que ele respondeu (senão, "").
 
 Nunca bloqueia a abertura: `gh` fora do ar, issue sem label, Jev fora do ar ou tabela ausente dão o padrão, com aviso
 em stderr e código 0 (sem tabela, `model` sai vazio e o agente abre com o modelo dele). Código 2 só para argumento
@@ -41,8 +42,11 @@ PHASE_RE = re.compile(r"[a-z]+")
 USAGE = "uso: oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] " \
         "[--agent claude|codex] [--model <id>] [--text-file <arquivo>|-]"
 
-# Jev direto na TypeSafe (ADR-02, #257). A URL só muda nos testes (TypeSafe falsa).
-JEV_URL = os.environ.get("OUTE_SELECT_JEV_URL", "https://api.typesafe.ai/v1/systemone")
+# Jev direto na TypeSafe (ADR-02, #257). A URL só muda nos testes (TypeSafe falsa, com TLS) e só vale com https://
+# (#313): sem TLS, o texto da tarefa e a chave iriam em claro.
+JEV_URL_ENV = "OUTE_SELECT_JEV_URL"
+JEV_URL = os.environ.get(JEV_URL_ENV, "https://api.typesafe.ai/v1/systemone")
+JEV_URL_RE = re.compile(r"https://[A-Za-z0-9.-]+(:[0-9]+)?(/[!-~]*)?")   # sem usuário, espaço ou caractere de controle
 JEV_MODEL = "jev-1.13.0"     # id exato, como os da tabela
 JEV_KEY_ENV = "OUTE_TYPESAFE_API_KEY"
 JEV_TIMEOUT = 3.0            # teto da chamada inteira, em segundos
@@ -202,6 +206,9 @@ def fmt_conf(c):
 
 def by_jev(text, phases, why):
     """(linha ou None, fase, origem, motivo, aviso, confiança ou None) pelo Jev, quando a issue não deu a fase (`why`)"""
+    if not JEV_URL_RE.fullmatch(JEV_URL):   # o valor não vai no aviso: pode levar credencial
+        w = f"{why}, e o endereço do Jev (${JEV_URL_ENV}) não é https://: o Jev não é chamado"
+        return None, "", "padrao", w, w, None
     key = os.environ.get(JEV_KEY_ENV, "").strip()
     if not key:
         w = f"{why}, e sem a chave da TypeSafe (${JEV_KEY_ENV}) o Jev não classifica"

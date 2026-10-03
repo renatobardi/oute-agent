@@ -45,7 +45,7 @@ O `claude-fable-5-1` (um nível acima do Opus, 2,5× o preço dele na API) não 
 
 ### Jev direto na TypeSafe
 - O Jev (`jev-1.13.0`) é chamado **direto na API da TypeSafe** (`POST https://api.typesafe.ai/v1/systemone`, primitivo `choice` → opção + confiança), sem intermediário. US$ 0,042/M tokens de entrada, saída grátis.
-- Só o texto da tarefa vai ao Jev. Nenhum token de assinatura passa por proxy.
+- Só o texto da tarefa vai ao Jev, e só por `https://` (#313). Nenhum token de assinatura passa por proxy.
 - Chave da TypeSafe no vault (pasta `oute-agent`, item `typesafe`, campo `OUTE_TYPESAFE_API_KEY`) → `agent_env`. É opcional: o `oute up` não a exige, e sem ela o seletor não chama o Jev (gate de `spec`, 2026-10-02).
 - Skill da TypeSafe (`typesafe-ai/skills`): nada de `claude plugin install`/`npx skills add` (nada do marketplace). Fork revisado e pinado em `addons/skills/`, ou só referência no build.
 
@@ -70,7 +70,7 @@ Cada escolha vai como atributos do `oute.task.opened` (sem evento novo): fase, o
 
 ### Como o Jev é chamado (fatia 2, #257)
 - **Quem chama:** só o `oute-select`, em processo (sem `curl`, sem intermediário), e só quando se sabe que não há label de fase: sessão sem issue, ou issue lida pelo `gh` sem `aidlc:<fase>` da tabela. Com o `gh` fora do ar, com a fase fixa do dispatcher, com exceção por label ou com `--model`, o Jev não é chamado. `--agent codex` sem `--model` chama: a fase escolhe a linha do Codex, e a origem segue `manual`.
-- **Texto da tarefa:** o prompt com que a sessão abre. No `oute-task`, o último argumento do agente, se não é opção e tem mais de uma palavra; no `oute-swarm spawn`, a instrução, sem as regras do worker. Vai ao `oute-select` pelo stdin (`--text-file -`), cortado em 16 000 caracteres. Sessão aberta na mão (sem prompt) não tem texto: Sonnet, sem chamada.
+- **Texto da tarefa:** o prompt com que a sessão abre. No `oute-task`, o último argumento do agente, se é posicional (o anterior não é uma opção que possa ser a dona do valor, ou é `--opção=valor` ou `--`; #313), não é opção e tem mais de uma palavra; no `oute-swarm spawn`, a instrução, sem as regras do worker. Vai ao `oute-select` pelo stdin (`--text-file -`), cortado em 16 000 caracteres. Sessão aberta na mão (sem prompt) não tem texto: Sonnet, sem chamada.
 - **Pedido:** `POST` ao `/v1/systemone` com `state` = o texto, `model` = `jev-1.13.0` (id exato, como os da tabela) e uma pergunta `choice` cujas opções são as fases da tabela, cada uma com uma linha do que a fase faz. Nada do repo, da issue ou do ambiente entra no pedido.
 - **Resposta:** a fase (`choice`) e a confiança (`confidence`, 0 a 1). Confiança ≥ 0,6: origem `jev` e a linha da fase. Abaixo disso: padrão Sonnet, origem `padrao`, com a confiança registrada.
 - **Teto de 3 s** para a chamada inteira (DNS, conexão e resposta). Tempo esgotado, erro HTTP (inclusive 401 e 429), redirecionamento (não seguido: levaria a chave a outro endereço), resposta fora do formato ou fase que não está na tabela: padrão Sonnet, com aviso, sem nova tentativa. A abertura nunca espera mais que isso nem é bloqueada.
