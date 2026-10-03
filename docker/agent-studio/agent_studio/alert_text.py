@@ -8,7 +8,11 @@ from . import alerts as alerts_mod
 
 TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFUSING: "Destino recusando",
           alerts_mod.NO_DATA: "Host sem dado", alerts_mod.SPOOL: "Spool do oute-emit",
-          alerts_mod.QUOTA: "Cota da assinatura"}
+          alerts_mod.QUOTA: "Cota da assinatura",
+          # preços (#339): critérios em `price_alerts.py`
+          "price_changed": "Preço trocado", "price_sources_diverge": "Fontes de preço divergem",
+          "price_source_down": "Fonte de preço fora do ar", "price_model_unpriced": "Modelo em uso sem preço",
+          "price_fixed_differs": "Preço fixo difere da fonte"}
 
 
 def br(text):
@@ -54,6 +58,11 @@ def text(alert):
         return f"{mib(v)} (limite {mib(limit)})"
     if unit == "seconds":
         return f"há {dur(int(v * 1e9))} (limite {dur(int(limit * 1e9))})"
+    if unit == "usd_per_mtok":  # preço trocado (#339): o campo, o valor antigo e o novo
+        old, new = br(format(ev["old"], "g")), br(format(v, "g"))
+        return f"{ev['model']} · {ev['field']}: US$ {old} → US$ {new} por 1M tokens"
+    if unit == "days":  # fonte de preço fora do ar (#339)
+        return f"falhou em {num(round(v))} dias seguidos (limite {num(round(limit))})"
     if unit in ("failed_items", "dropped_events"):
         what = "itens recusados" if unit == "failed_items" else "eventos descartados"
         return f"{num(round(v))} {what} nos últimos {br(format(ev.get('window_minutes', 0), 'g'))} min"

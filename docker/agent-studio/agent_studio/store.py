@@ -8,8 +8,8 @@ import threading
 
 import duckdb
 
-from . import (alerts as alerts_mod, conversations as conv_mod, proposals as prop_mod, sessions as sess_mod,
-               tray as tray_mod, usage as usage_mod)
+from . import (alerts as alerts_mod, conversations as conv_mod, prices as prices_mod, proposals as prop_mod,
+               sessions as sess_mod, tray as tray_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -126,6 +126,7 @@ class Store:
         with self.lock:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
+            prices_mod.create(self.con)  # histórico de preços (#339)
 
     def close(self):
         with self.lock:
@@ -211,3 +212,20 @@ class Store:
     def proposal(self, proposal_id):
         with self.lock:
             return prop_mod.event(self.con, proposal_id)
+
+    # histórico de preços (#339): a rotina e o `GET /v1/prices`, sob a mesma trava
+    def read(self, fn):
+        with self.lock:
+            return fn(self.con)
+
+    def transact(self, fn):
+        """`fn(con)` numa transação: ou grava tudo, ou nada (e levanta a exceção)."""
+        with self.lock:
+            self.con.execute("BEGIN TRANSACTION")
+            try:
+                result = fn(self.con)
+                self.con.execute("COMMIT")
+            except BaseException:
+                self.con.execute("ROLLBACK")
+                raise
+            return result
