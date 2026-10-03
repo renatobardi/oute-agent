@@ -22,7 +22,7 @@ otelcol_bin
 export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT="http://127.0.0.1:$(closed_port)" \
   LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
   AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
-  AGENT_STUDIO_TOKEN=x AGENT_STUDIO_URL=http://agent-studio:8430
+  AGENT_STUDIO_INGEST_TOKEN=x AGENT_STUDIO_URL=http://agent-studio:8430
 C="$ROOT/config/otel"; CFG="$C/collector.yaml"; LF="$C/langfuse.yaml"
 check "validate collector + langfuse"                   "$OTELCOL" validate --config="$CFG" --config="$LF"
 check "validate collector + none"                       "$OTELCOL" validate --config="$CFG" --config="$C/none.yaml"
