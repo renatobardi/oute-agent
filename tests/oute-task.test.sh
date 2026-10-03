@@ -762,6 +762,7 @@ t clean --yes --force-in-use
 check "--force-in-use: remove as em uso"                    [ ! -d "$SP11/proj-501-vivo" -a ! -d "$SP11/proj-swarm-0303-1001" -a ! -d "$SP11/proj-505-agente" ]
 kill "$agpid" 2>/dev/null; wait "$agpid" 2>/dev/null
 t clean --force-in-use --bogus
-check "opção desconhecida: erro com o uso novo"             [ "$RC" -ne 0 ] && grep -qF -- '[--force-in-use]' <<<"$ERR"
+check "opção desconhecida: código diferente de 0"           [ "$RC" -ne 0 ]
+check "opção desconhecida: o uso cita --force-in-use"       grep -qF -- '[--force-in-use]' <<<"$ERR"
 
 check_end
