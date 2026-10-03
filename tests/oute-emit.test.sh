@@ -558,4 +558,33 @@ HOME="$XH" noenv oute-emit reconcile
 check "oute_env válido de novo: reconcile manda e marca" [ "$(n '.name == "oute.canal.decided"')" -eq 1 -a -e "$XH/.oute/emit/decided/20261002-080200-dec" ]
 rcv_stop
 
+# ---------------------------------------------------------------- 10. oute.regression.run (#366)
+RH="$TMP/regr"; mkdir -p "$RH"; rcv_start "$TMP/r10"
+reg() { HOME="$RH" oute-emit regression "$@"; }
+reg run=regression-20261003-120000-abc image=0.9.9 claude=2.1.9 codex=0.5.0 rounds=3 result=vermelho green=3 red=1 \
+  unverified=1 cost=0.0912 tasks=root=verde,select=vermelho,root:codex=verde,studio=nao-verificado agent=claude
+e="$(ev '.name == "oute.regression.run"')"
+check "regression: um evento oute.regression.run"       [ "$(grep -c . <<<"$e")" -eq 1 ]
+check "regression: versões, rodadas, resultado e custo" jqe '.attrs["oute.regression.image"] == "0.9.9" and .attrs["oute.regression.cli.claude"] == "2.1.9"
+  and .attrs["oute.regression.cli.codex"] == "0.5.0" and .attrs["oute.regression.rounds"] == "3" and .attrs["oute.regression.result"] == "vermelho"
+  and .attrs["oute.regression.cost_usd"] == 0.0912 and .attrs["oute.regression.red"] == "1"' <<<"$e"
+check "regression: verde/vermelho por tarefa"           jqe '.attrs["oute.regression.tasks"] == "root=verde,select=vermelho,root:codex=verde,studio=nao-verificado"' <<<"$e"
+check "regression: oute.agent de quem causou, sem corpo" jqe '.attrs["oute.agent"] == "claude" and .body == null and .res["oute.agent"] == "claude"' <<<"$e"
+check "regression: origem do ambiente"                  jqe '.res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e"
+reg run=regression-20261003-120000-abc image=0.9.9 result=vermelho
+check "regression: mesmo run = mesmo oute.event.id (dedupe)" [ "$(ev '.name == "oute.regression.run"' | jq -r '.attrs["oute.event.id"]' | sort -u | grep -c .)" -eq 1 ]
+sem="$(posts)"
+for bad in "run=Maiusculo result=verde" "run=regression-x result=talvez" "run=regression-x result=verde tasks=root=verde;rm" \
+           "run=regression-x result=verde cost=abc" "run=regression-x result=verde claude=a;b" "run=regression-x result=verde extra=1" \
+           "result=verde"; do
+  # shellcheck disable=SC2086
+  reg $bad
+done
+check "regression: entrada inválida não envia nada"     [ "$(posts)" -eq "$sem" ]
+reg run=regression-x result=verde agent="Mau Agente"
+check "regression: agente fora do formato = unknown"    [ "$(n '.attrs["oute.agent"] == "unknown" and .attrs["oute.regression.run"] == "regression-x"')" -eq 1 ]
+reg
+check "regression: sem campos não envia nada"           [ "$(n '.attrs["oute.regression.run"] == null and .name == "oute.regression.run"')" -eq 0 ]
+rcv_stop
+
 check_end
