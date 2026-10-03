@@ -29,6 +29,24 @@ Whenever the spec lists acceptance criteria (the "Critérios de aceite" section 
 
 A post-deploy criterion gets **its own item**, marked `(ship)`. Never put it on the same line as a build criterion. A criterion with both parts is split in two. Otherwise the build session ticks the whole line after checking only the local half, and the post-deploy half never reaches the `## Falta` of the PR.
 
+## Acceptance criteria: criteria that assert existing code or CLI behavior must be verified
+
+When a spec lists a criterion that **asserts the behavior of existing code or an external CLI** (e.g., "setting X does Y", "running command Z outputs W"), verify the claim **before the spec goes to the gate**:
+
+- **Read the code** or **run the CLI** (`--help`, a dry-run, or inspection) to check that the behavior exists as stated.
+- If the behavior is **not possible** with current code, **different from what the criterion claims**, or **contradicts an ADR or prior decision**, then:
+  - Remove the false criterion from the spec, or
+  - Reword it to match the actual behavior, or
+  - If uncertain, turn it into a question to the Bardi in the spec body — never let a false claim pass as-is.
+
+**Evidence goes in the spec**: a line reference (e.g., `docker/codex_config.py:26`), a `--help` snippet, or a link to the ADR that contradicts it.
+
+<criterion-verification-example>
+**Example from #365:** The spec criterion stated that `OUTE_AGENT_YOLO=0` would prevent `sandbox_mode` from being set to `"danger-full-access"`. Reading `docker/codex_config.py:26` shows that `sandbox_mode` is **always** set to that value, regardless of the YOLO flag (line 28–31 only control `approval_policy`, not `sandbox_mode`). **False criterion detected.** Without this check, the criterion would have passed to the gate despite contradicting the code. The correct response: remove or reword the criterion before the gate, or turn it into a question for the Bardi, citing line 26 as evidence.
+
+**How to avoid this:** before committing the spec, spot-check assertions about existing behavior. Even a 30-second skim of the relevant file or CLI output catches most cases.
+</criterion-verification-example>
+
 <acceptance-criteria-example>
 Mixed (wrong):
 
