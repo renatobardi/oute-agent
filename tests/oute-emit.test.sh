@@ -255,33 +255,35 @@ rcv_stop
 # corte (since) nem o backfill.done; retomada própria por janela. Fixtures: IH (seção 5, ids ao vivo em $live) e BH (seção 4)
 win() { local h="$1"; shift; HOME="$h" oute-emit backfill "$@" >"$TMP/w.out" 2>"$TMP/w.err"; RC=$?; }
 no_out() { [ ! -s "$TMP/w.out" ]; }
-touch "$IH/.oute/emit/backfill.done"          # o backfill único já foi feito neste host: a janela ignora
+not() { ! "$@"; }
+# all <comando> ,, <comando> …: o check só conta o comando que recebe; condição composta entra inteira aqui (#285)
+all() { local -a cmd=(); local a; for a in "$@"; do if [ "$a" = ,, ]; then "${cmd[@]}" || return 1; cmd=(); else cmd+=("$a"); fi; done; "${cmd[@]}"; }
+echo "2026-09-28T10:00:00Z 13" > "$IH/.oute/emit/backfill.done"   # o backfill único já foi feito neste host: a janela ignora
 rcv_start "$TMP/r5w"
 win "$IH" --from 2026-09-28T09:01:00Z --to 2026-09-28T09:05:00Z
 WIN_DIR="$RCV_DIR"
-check "janela: rc 0, sem stdout"                       [ "$RC" -eq 0 ] && no_out
+check "janela: rc 0, sem stdout" all [ "$RC" -eq 0 ] ,, no_out
 check "janela: ignora since (2099) e backfill.done"    [ "$(n 'true')" -eq 7 ]
 check "janela: ids da janela = ids do ao vivo"         [ "$(ids "$RCV_DIR" true)" == "$(grep -E '^oute\.swarm\.(session\.spawned|tell|watch\.ci|session\.closed) ' <<<"$live")" ]
 check "janela: oute.backfill=true em todos"            [ "$(n '.attrs["oute.backfill"] == true')" -eq 7 ]
 check "janela: hora do fato original"                  [ "$(n '.name == "oute.swarm.session.spawned" and (.time | tonumber / 1e9 | todate) == "2026-09-28T09:01:00Z"')" -eq 1 ]
 check "janela: from entra (09:01), to não (09:05, 09:00 e 09:10 fora)" [ "$(n '.name == "oute.swarm.round.opened" or .name == "oute.swarm.round.closed" or .name == "oute.canal.proposed" or .name == "oute.canal.decided"')" -eq 0 ]
-check "janela: não grava since, nem mexe no backfill.done" [ "$(cat "$IH/.oute/emit/since")" == 2099-01-01T00:00:00Z ] && [ ! -s "$IH/.oute/emit/backfill.done" ]
+check "janela: não grava since, nem mexe no backfill.done" all [ "$(cat "$IH/.oute/emit/since")" == 2099-01-01T00:00:00Z ] ,, [ "$(cat "$IH/.oute/emit/backfill.done")" == "2026-09-28T10:00:00Z 13" ]
 check "janela: resumo por tipo no stderr"              grep -qF 'oute.swarm.tell: candidatos 3, enviados 3, pulados 0' "$TMP/w.err"
 check "janela: resumo traz a janela e o total"         grep -qF 'janela [2026-09-28T09:01:00Z, 2026-09-28T09:05:00Z); 7 candidato(s)' "$TMP/w.err"
 check "janela: tipo fora da janela não aparece no resumo" bash -c '! grep -q "oute.canal" "$1"' _ "$TMP/w.err"
 before="$(posts)"
 win "$IH" --from 2026-09-28T09:01:00Z --to 2026-09-28T09:05:00Z
-check "janela de novo: zero POSTs, tudo pulado"        [ "$RC" -eq 0 -a "$(posts)" -eq "$before" ] && grep -qF 'oute.swarm.tell: candidatos 3, enviados 0, pulados 3' "$TMP/w.err"
+check "janela de novo: zero POSTs, tudo pulado" all [ "$RC" -eq 0 -a "$(posts)" -eq "$before" ] ,, grep -qF 'oute.swarm.tell: candidatos 3, enviados 0, pulados 3' "$TMP/w.err"
 win "$IH" --from 2026-09-28T09:00:00Z --to 2026-09-28T09:11:00Z
-check "outra janela (mais larga): retomada própria, reenvia tudo" [ "$(posts)" -eq $((before + 1)) ] && grep -qF '13 candidato(s)' "$TMP/w.err" && grep -qF 'oute.swarm.tell: candidatos 3, enviados 3, pulados 0' "$TMP/w.err"
+check "outra janela (mais larga): retomada própria, reenvia tudo" all [ "$(posts)" -eq $((before + 1)) ] ,, grep -qF '13 candidato(s)' "$TMP/w.err" ,, grep -qF 'oute.swarm.tell: candidatos 3, enviados 3, pulados 0' "$TMP/w.err"
 check "janela larga: os ids são os 13 do ao vivo"      [ "$(events "$RCV_DIR" | jq -r '.attrs["oute.event.id"]' | sort -u | grep -c .)" -eq 13 ]
 # janela aberta: retoma de onde parou (só o fato novo sai)
 win "$IH" --from 2026-09-28T09:00:00Z
 before="$(posts)"
 printf '%s\n' "2026-09-28T09:06:00Z watch [pr] PR #13 aberto (issue #8) https://x/pull/13" >> "$IR/log"
 win "$IH" --from 2026-09-28T09:00:00Z
-check "janela aberta: retoma, manda só o fato novo"    [ "$RC" -eq 0 -a "$(posts)" -eq $((before + 1)) -a "$(events "$RCV_DIR" | tail -1 | jq -r .name)" == oute.swarm.watch.pr ] \
-                                                          && grep -qF 'oute.swarm.watch.pr: candidatos 1, enviados 1, pulados 0' "$TMP/w.err" && grep -qF 'janela [2026-09-28T09:00:00Z, sem fim)' "$TMP/w.err"
+check "janela aberta: retoma, manda só o fato novo" all [ "$RC" -eq 0 -a "$(posts)" -eq $((before + 1)) -a "$(events "$RCV_DIR" | tail -1 | jq -r .name)" == oute.swarm.watch.pr ] ,, grep -qF 'oute.swarm.watch.pr: candidatos 1, enviados 1, pulados 0' "$TMP/w.err" ,, grep -qF 'janela [2026-09-28T09:00:00Z, sem fim)' "$TMP/w.err"
 rcv_stop
 
 # agent-studio de teste: os POSTs capturados (da janela e do ao vivo), entregues duas vezes, não criam linha nova
@@ -300,35 +302,33 @@ printf '%s\n' "2026-09-27T13:30:00Z watch [sessao] #7 foo: idle (no limite do to
 printf '# oute-propose\n# titulo: sem hora\n# como: user\n# agente: codex\n\necho s\n' > "$BH/outbox/20260927-120000-semhora.sh"
 BH_DONE="$(cat "$BH/.oute/emit/backfill.done")"
 win "$BH" --from 2026-09-26T00:00:00Z --to 2026-09-27T03:00:00Z --dry-run
-check "dry-run: rc 0, sem stdout, nenhum POST"         [ "$RC" -eq 0 -a "$(posts)" -eq 0 ] && no_out
-check "dry-run: resumo com candidatos por tipo"        grep -qF 'dry-run: nada enviado' "$TMP/w.err" && grep -qF 'oute.canal.proposed: candidatos 2, enviados 0, pulados 0' "$TMP/w.err" \
-                                                          && grep -qF 'oute.canal.decided: candidatos 2, enviados 0, pulados 0' "$TMP/w.err" && grep -qF 'oute.swarm.tell: candidatos 3' "$TMP/w.err"
+check "dry-run: rc 0, sem stdout, nenhum POST" all [ "$RC" -eq 0 -a "$(posts)" -eq 0 ] ,, no_out
+check "dry-run: resumo com candidatos por tipo" all grep -qF 'dry-run: nada enviado' "$TMP/w.err" ,, grep -qF 'oute.canal.proposed: candidatos 2, enviados 0, pulados 0' "$TMP/w.err" ,, grep -qF 'oute.canal.decided: candidatos 2, enviados 0, pulados 0' "$TMP/w.err" ,, grep -qF 'oute.swarm.tell: candidatos 3' "$TMP/w.err"
 check "dry-run: não grava estado da janela"            [ ! -e "$BH/.oute/emit/backfill.janela" ]
 win "$BH" --from 2026-09-26T00:00:00Z --to 2026-09-27T03:00:00Z
-check "janela dos pedidos: enviados"                   [ "$RC" -eq 0 ] && [ "$(n '.name == "oute.canal.proposed"')" -eq 2 ] && [ "$(n '.name == "oute.canal.decided"')" -eq 2 ]
+check "janela dos pedidos: enviados" all [ "$RC" -eq 0 ] ,, [ "$(n '.name == "oute.canal.proposed"')" -eq 2 ] ,, [ "$(n '.name == "oute.canal.decided"')" -eq 2 ]
 check "janela dos pedidos: saída dos .out em nenhum POST" [ -z "$(grep -l 'SEGREDO-DA-SAIDA' "$RCV_DIR"/*.json)" ]
 check "janela dos pedidos: decided na hora original"   [ "$(n '.name == "oute.canal.decided" and .attrs["oute.canal.id"] == "20260926-015053-antigo" and (.time | tonumber / 1e9 | todate) == "2026-09-26T01:51:34Z"')" -eq 1 ]
 win "$BH" --from 2026-09-27T02:26:00Z --to 2026-09-27T13:30:00Z
-check "janela: from exato entra, to exato fica fora"   [ "$(n '.attrs["oute.canal.id"] == "20260927-022600-rec" and .name == "oute.canal.proposed"')" -ge 1 ] \
-                                                          && grep -qF 'oute.swarm.watch.sessao: candidatos 1, enviados 1' "$TMP/w.err"
+check "janela: from exato entra, to exato fica fora" all [ "$(n '.attrs["oute.canal.id"] == "20260927-022600-rec" and .name == "oute.canal.proposed"')" -ge 1 ] ,, grep -qF 'oute.swarm.watch.sessao: candidatos 1, enviados 1' "$TMP/w.err"
 check "janela depois do corte: pedido pendente e novo sai" [ "$(n '.attrs["oute.canal.id"] == "20260927-123000-novo"')" -eq 1 -a "$(n '.attrs["oute.canal.id"] == "20260927-110000-pend"')" -ge 1 ]
-check "janela: pedido sem criado (sem hora do fato) fica fora" [ "$(n '.attrs["oute.canal.id"] == "20260927-120000-semhora"')" -eq 0 ] && grep -qF '1 linha(s) não reconhecida(s) ou pedido sem hora' "$TMP/w.err"
+check "janela: pedido sem criado (sem hora do fato) fica fora" all [ "$(n '.attrs["oute.canal.id"] == "20260927-120000-semhora"')" -eq 0 ] ,, grep -qF '3 linha(s) não reconhecida(s) ou pedido sem hora' "$TMP/w.err"
 check "janela: backfill.done e since do BH intactos"   [ "$(cat "$BH/.oute/emit/backfill.done")" == "$BH_DONE" -a "$(cat "$BH/.oute/emit/since")" == 2026-09-27T12:00:00Z ]
 rcv_stop
 # coletor fora do ar: avisa, rc 0, não grava estado; de novo com o coletor no ar, entrega tudo
 rm -rf "${BH:?}/.oute/emit/backfill.janela"
 OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)" win "$BH" --from 2026-09-26T00:00:00Z --to 2026-09-27T03:00:00Z
-check "janela, coletor fora: rc 0, sem stdout, avisa a mesma janela" [ "$RC" -eq 0 ] && no_out && grep -qF 'rode de novo com a mesma janela' "$TMP/w.err" && grep -qF 'enviados 0' "$TMP/w.err"
+check "janela, coletor fora: rc 0, sem stdout, avisa a mesma janela" all [ "$RC" -eq 0 ] ,, no_out ,, grep -qF 'rode de novo com a mesma janela' "$TMP/w.err" ,, grep -qF 'enviados 0' "$TMP/w.err"
 check "janela, coletor fora: não grava estado"         [ ! -s "$BH/.oute/emit/backfill.janela/20260926T000000Z_20260927T030000Z" ]
 rcv_start "$TMP/r5y"
 win "$BH" --from 2026-09-26T00:00:00Z --to 2026-09-27T03:00:00Z
-check "janela, coletor de volta: entrega tudo (retoma)" [ "$RC" -eq 0 ] && [ "$(n 'true')" -gt 0 ] && ! grep -qF 'falhou' "$TMP/w.err"
+check "janela, coletor de volta: entrega tudo (retoma)" all [ "$RC" -eq 0 ] ,, [ "$(n 'true')" -gt 0 ] ,, not grep -qF 'falhou' "$TMP/w.err"
 sem_endpoint() { env -u OTEL_EXPORTER_OTLP_ENDPOINT HOME="$1" oute-emit backfill "${@:2}" >"$TMP/w.out" 2>"$TMP/w.err"; RC=$?; }
 mkdir -p "$TMP/semep"; cp -r "$BH/outbox" "$BH/inbox" "$TMP/semep/"
 sem_endpoint "$TMP/semep" --from 2026-09-26T00:00:00Z
-check "janela, sem endpoint: rc 0, avisa, sem estado"  [ "$RC" -eq 0 ] && no_out && grep -qF 'sem endpoint' "$TMP/w.err" && [ ! -e "$TMP/semep/.oute/emit/backfill.janela" ]
+check "janela, sem endpoint: rc 0, avisa, sem estado" all [ "$RC" -eq 0 ] ,, no_out ,, grep -qF 'sem endpoint' "$TMP/w.err" ,, [ ! -e "$TMP/semep/.oute/emit/backfill.janela" ]
 sem_endpoint "$TMP/semep" --from 2026-09-26T00:00:00Z --dry-run
-check "dry-run não precisa de endpoint"                [ "$RC" -eq 0 ] && grep -qF 'candidatos' "$TMP/w.err" && ! grep -qF 'falhou' "$TMP/w.err"
+check "dry-run não precisa de endpoint" all [ "$RC" -eq 0 ] ,, grep -qF 'candidatos' "$TMP/w.err" ,, not grep -qF 'falhou' "$TMP/w.err"
 # uso inválido: rc 0, sem stdout, motivo no stderr, nenhum POST
 before="$(posts)"
 bad_use() { local why="$1"; shift; win "$BH" "$@"; check "uso inválido ($why): rc 0, sem stdout, sem POST, motivo no stderr" \
@@ -345,7 +345,7 @@ bad_use "fora do formato ISO" --from
 check "uso inválido: nenhum POST em nenhum dos casos"  [ "$(posts)" -eq "$before" ]
 # `--from=<ISO>` também vale
 win "$BH" --from=2026-09-26T00:00:00Z --to=2026-09-27T03:00:00Z --dry-run
-check "--from=<ISO> --to=<ISO>"                        [ "$RC" -eq 0 ] && grep -qF 'janela [2026-09-26T00:00:00Z, 2026-09-27T03:00:00Z)' "$TMP/w.err"
+check "--from=<ISO> --to=<ISO>" all [ "$RC" -eq 0 ] ,, grep -qF 'janela [2026-09-26T00:00:00Z, 2026-09-27T03:00:00Z)' "$TMP/w.err"
 rcv_stop
 
 # ---------------------------------------------------------------- 6. spool (#166)
