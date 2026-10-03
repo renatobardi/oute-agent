@@ -17,9 +17,9 @@ trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 . "$ROOT/tests/lib/otlp.sh"
 . "$ROOT/tests/lib/surreal.sh"
+trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
-trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
 # o script que a página mostra, como texto (o conteúdo do <pre data-script>, sem o escape do HTML)

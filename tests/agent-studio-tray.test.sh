@@ -17,9 +17,9 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
+trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 
 # "hoje" é o dia UTC: perto da virada, os fatos de agora cairiam em dias diferentes no meio do teste. Espera passar.
 while s=$(( $(date +%s) % 86400 )); (( s < 120 || s > 86400 - 300 )); do sleep 20; done

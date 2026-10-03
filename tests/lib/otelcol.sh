@@ -2,7 +2,7 @@
 # e de carregar o tests/lib/check.sh (die, check, ok, bad) e o tests/lib/otlp.sh (closed_port). Ao carregar, confere
 # python3, jq, curl e tar (sem eles, sai com 1) e a versão do collector no compose.
 # otelcol_bin: usa o otelcol-contrib do PATH se for a versão do compose; senão baixa o binário fixado e confere o
-# sha256 (cache em ~/.cache/oute-tests). Define OTELCOL e V. otelcol_version_ok: o binário é o da versão V.
+# sha256 (cache em ~/.cache/oute-tests, sem corrida entre testes em paralelo: tests/lib/parallel.sh). Define OTELCOL e V. otelcol_version_ok: o binário é o da versão V.
 # otelcol_env: exporta o ambiente que o config/otel/collector.yaml lê (origem, S3 numa porta fechada,
 # credenciais de mentira); o teste exporta por cima o que for dele.
 # otelcol_print <--config=…>: o config final em JSON; jqp <filtro jq>: `jq -e` sem saída sobre $P, o config impresso.
@@ -11,8 +11,10 @@
 # otelcol_ports: define HTTP, GRPC e HC (portas livres). otelcol_test_yaml [s3]: o começo do config só do teste
 # (health check, diretório da fila e receiver em 127.0.0.1); com `s3`, mais os exporters do bucket com flush_timeout
 # de 5 s (produção: 5 min), e o teste acrescenta os exporters dele logo depois.
-# otelcol_start <--config=…>: sobe o collector (log em $TMP/collector.log), define CPID e espera o health check;
-# se não subir, mostra o fim do log e devolve 1. otelcol_kill: `kill -9` no collector.
+# otelcol_start <--config=…>: sobe o collector (log em $TMP/collector.log), define CPID e espera o health check por
+# STARTUP_TIMEOUT; se o processo morre antes (porta tomada por outro teste), sorteia outras HTTP, GRPC e HC, troca nos
+# configs de $TMP e tenta de novo, até START_TRIES (tests/lib/parallel.sh, #336); se não subir, mostra o fim do log e
+# devolve 1. Uma porta que só o config do teste conhece (a do Prometheus, no otelcol-studio) não troca. otelcol_kill: `kill -9` no collector.
 # otelcol_tally <aceitos>: lê do stdin os ids que chegaram ao destino, um por linha, e imprime "aceitos recebidos
 # perdidos duplicados" (recebidos e perdidos só entre os aceitos). O teste define counts <run> com ele.
 # wait_all <run> <s>: espera até <s> segundos por todos os aceitos no destino (usa o counts do teste).
@@ -21,11 +23,12 @@
 # otelcol_log: com caso falhando, mostra o fim do log do collector; vai antes do check_end.
 for c in python3 jq curl tar; do command -v "$c" >/dev/null || die "precisa de $c"; done
 OTELCOL_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$OTELCOL_LIB/parallel.sh"
 V=0.161.0
 grep -q "opentelemetry-collector-contrib:\${OUTE_OTELCOL_VERSION:-$V}" "$ROOT/docker/compose.yaml" \
   || die "a versão do collector no compose mudou: atualize V e os checksums deste teste"
 otelcol_bin() {
-  local p os arch sum url cache tgz got
+  local p os arch sum url
   p="$(command -v otelcol-contrib || true)"
   if [[ -n "$p" ]] && "$p" --version 2>/dev/null | grep -q " $V\$"; then OTELCOL="$p"; return; fi
   case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) die "SO sem binário fixado: $(uname -s)" ;; esac
@@ -38,17 +41,8 @@ otelcol_bin() {
     darwin-arm64) sum=ccc0cf5de5242adcaedc7b5aebed43a1dc56aa2dc7de6ebc495d5db60512d34c ;;
   esac
   url="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v$V/otelcol-contrib_${V}_${os}_${arch}.tar.gz"
-  cache="${XDG_CACHE_HOME:-$HOME/.cache}/oute-tests"; tgz="$cache/otelcol-contrib_${V}_${os}_${arch}.tar.gz"
-  mkdir -p "$cache"
-  sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64; }
-  if [[ ! -f "$tgz" || "$(sha "$tgz")" != "$sum" ]]; then
-    echo "# baixando otelcol-contrib $V ($os/$arch)"
-    curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$tgz.part" "$url" || die "download do otelcol-contrib falhou"
-    got="$(sha "$tgz.part")"
-    [[ "$got" == "$sum" ]] || { rm -f "$tgz.part"; die "checksum do otelcol-contrib não confere ($got)"; }
-    mv "$tgz.part" "$tgz"
-  fi
-  tar -xzf "$tgz" -C "$TMP" otelcol-contrib || die "tar do otelcol-contrib falhou"
+  cache_download "otelcol-contrib_${V}_${os}_${arch}.tar.gz" "$url" "$sum" || die "download do otelcol-contrib falhou"
+  tar -xzf "$CACHE_FILE" -C "$TMP" otelcol-contrib || die "tar do otelcol-contrib falhou"
   OTELCOL="$TMP/otelcol-contrib"
 }
 otelcol_version_ok() { "$OTELCOL" --version | grep -q " $V\$"; }
@@ -82,9 +76,31 @@ exporters:
   awss3/logs: {sending_queue: {batch: {flush_timeout: 5s}}}
 EOF
 }
+otelcol_health() { curl -fs --max-time 2 -o /dev/null "127.0.0.1:${HC}"; }
+# otelcol_repick <--config=…>: sorteia outras portas para HTTP, GRPC e HC (as que o teste definiu) e troca, nos configs
+# do próprio teste (os que estão em $TMP), as antigas pelas novas; os configs de produção não têm porta de teste.
+otelcol_repick() {
+  local v old new a f
+  for v in HTTP GRPC HC; do
+    old="${!v:-}"; [[ -n "$old" ]] || continue
+    new="$(free_port)"; printf -v "$v" %s "$new"
+    for a in "$@"; do
+      f="${a#--config=}"; [[ "$a" == --config="$TMP"/* && -f "$f" ]] || continue
+      sed "s/127\.0\.0\.1:$old\([^0-9]\|\$\)/127.0.0.1:$new\1/g" "$f" > "$f.new" && mv "$f.new" "$f"
+    done
+  done
+}
 otelcol_start() {
-  "$OTELCOL" "$@" >>"$TMP/collector.log" 2>&1 & CPID=$!
-  local i; for i in $(seq 1 100); do curl -fs -o /dev/null "127.0.0.1:$HC" && return 0; sleep 0.1; done
+  local n rc
+  for ((n = 1; n <= START_TRIES; n++)); do
+    "$OTELCOL" "$@" >>"$TMP/collector.log" 2>&1 & CPID=$!
+    spawn_wait "$CPID" otelcol_health; rc=$?
+    [[ "$rc" -ne 0 ]] || return 0
+    kill -9 "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null
+    [[ "$rc" -eq 1 && "$n" -lt "$START_TRIES" ]] || break
+    echo "# collector morreu antes do health (tentativa $n de $START_TRIES): outras portas" >&2
+    otelcol_repick "$@"
+  done
   echo "# collector não subiu"; tail -20 "$TMP/collector.log"; return 1
 }
 otelcol_kill() { kill -9 "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null; CPID=""; }
