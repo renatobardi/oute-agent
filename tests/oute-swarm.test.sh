@@ -587,4 +587,89 @@ check "fora do ar: rápido"                               [ $(( $(date +%s) - t0
 check "fora do ar: log continua sendo gravado"           grep -q ' spawn 9-baz claude$' "$STATE/log"
 unset OTEL_EXPORTER_OTLP_ENDPOINT
 
+
+# ---------------------------------------------------------------- #212: agente das sessões da rodada (--agent na abertura)
+# opn <args>: abre o dispatcher no repo da rodada de teste (HOME do caso); stdout em $OUT, stderr em $ERR.
+# so_teste: nenhuma rodada nova nem oute-task chamado. sp_agent <rodada> <slug>: agente gravado no spawned
+opn() {
+  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" \
+         OUTE_LIB="$ROOT/docker" HERDR_ENV=1 "$SWARM" "$REPO" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+}
+nova() { ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1; }
+so_teste() { [ "$(ls "$H/.oute/swarm")" == swarm-test ] && [ ! -e "$FAKE/oute-task.last" ]; }
+sp_agent() { awk -v s="$2" '$1 == s {print $3}' "$H/.oute/swarm/$1/spawned"; }
+ran() { grep -qF -- "oute-task -r $REPO $1 $2 " "$FAKE/herdr.log"; }
+
+# 10. abertura com --agent: meta, prompt, aviso, log e oute.swarm.round.opened
+CASE=agente-abre; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+opn --max 2 --agent codex
+nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
+check "--agent: código 0 e rodada nova"                  [ "$RC" -eq 0 -a -n "$nr" ]
+check "--agent: meta com workers=codex e agent=claude"   [ "$(grep -cxE 'workers=codex|agent=claude' "$M")" -eq 2 ]
+check "--agent: prompt com o agente da rodada"           grep -qF 'Agente das sessões: `codex` (escolhido pelo Bardi na abertura, `--agent codex`).' "$FAKE/oute-task.last"
+check "--agent: prompt manda não passar --agent"         grep -qF -- '- **Agente:** não passe `--agent` no `spawn`' "$FAKE/oute-task.last"
+check "--agent: triagem com o agente de cada sessão"     grep -qF 'área tocada, agente da sessão,' "$FAKE/oute-task.last"
+check "--agent: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
+check "--agent: aviso com o agente"                      grep -qxF "dispatcher $nr · repo repo · max 2 · agente codex" <<<"$ERR"
+check "--agent: linha do log com o agente"               grep -q " abertura $nr (repo repo, max 2, agente codex)$" "$H/.oute/swarm/$nr/log"
+check "--agent: round.opened com oute.swarm.round.agent" [ "$(n '.name == "oute.swarm.round.opened" and .attrs["oute.swarm.round.agent"] == "codex" and .attrs["oute.agent"] == "claude"')" -eq 1 ]
+rcv_stop
+
+# 10b. abertura sem --agent: meta sem workers=, prompt com "seletor", evento sem o atributo
+CASE=agente-sem; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+opn --max 2
+nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
+check "sem --agent: código 0 e rodada nova"              [ "$RC" -eq 0 -a -n "$nr" ]
+check "sem --agent: meta sem workers="                   [ -z "$(grep '^workers' "$M")" -a "$(grep -cx 'agent=claude' "$M")" -eq 1 ]
+check "sem --agent: prompt com seletor"                  grep -qF 'Agente das sessões: seletor (a rodada abriu sem `--agent`' "$FAKE/oute-task.last"
+check "sem --agent: aviso e log como antes"              [ "$(grep -cxF "dispatcher $nr · repo repo · max 2" <<<"$ERR")" -eq 1 -a "$(grep -c " abertura $nr (repo repo, max 2)$" "$H/.oute/swarm/$nr/log")" -eq 1 ]
+check "sem --agent: round.opened sem round.agent"        [ "$(n '.name == "oute.swarm.round.opened"')" -eq 1 -a "$(n '.name == "oute.swarm.round.opened" and (.attrs | has("oute.swarm.round.agent"))')" -eq 0 ]
+sw spawn 8-bar "instrução"
+check "sem --agent: spawn usa claude"                    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 8-bar)" == claude ]
+check "sem --agent: oute-task com claude"                ran 8-bar claude
+rcv_stop
+
+# 10c. --agent inválido: erro claro, sem rodada nem oute-task
+CASE=agente-invalido; round "$CASE"
+opn --agent foo
+check "inválido: código != 0"                            [ "$RC" -ne 0 ]
+check "inválido: mensagem clara"                         grep -qF 'agente inválido: foo; use claude ou codex' <<<"$ERR"
+check "inválido: nenhuma rodada criada"                  so_teste
+opn --max 2 --agent pi
+check "Pi na abertura: recusado, sem rodada"             [ "$RC" -ne 0 -a "$(grep -c 'Pi saiu do stack (#217)' <<<"$ERR")" -eq 1 ]
+check "Pi na abertura: nenhuma rodada criada"            so_teste
+
+# 10d. spawn numa rodada com workers=codex: padrão do meta, sobreposição e kaizen
+CASE=agente-spawn; round "$CASE"; echo workers=codex >> "$STATE/meta"
+sw spawn 8-def "instrução"
+check "padrão do meta: código 0"                         [ "$RC" -eq 0 ]
+check "padrão do meta: spawned com codex"                [ "$(sp_agent swarm-test 8-def)" == codex ]
+check "padrão do meta: oute-task com codex"              ran 8-def codex
+check "padrão do meta: saída e log com codex"            [ "${OUT##* · }" == "agente codex" -a "$(grep -c ' spawn 8-def codex$' "$STATE/log")" -eq 1 ]
+sw spawn 9-ovr "instrução" --agent claude
+check "--agent sobrepõe: claude no spawned e no oute-task" [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-ovr)" == claude ]
+check "--agent sobrepõe: oute-task com claude"           ran 9-ovr claude
+sw spawn 10-kz "instrução" --kaizen
+check "kaizen: segue o padrão da rodada"                 [ "$RC" -eq 0 -a "$(awk '$1 == "10-kz" {print $3, $7}' "$STATE/spawned")" == "codex kaizen" ]
+check "kaizen: oute-task com codex"                      ran 10-kz codex
+
+# 10e. dispatcher reiniciado sem OUTE_SWARM_ID: o padrão vem do meta da rodada assumida
+WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
+swc "$WT" spawn 11-rei "instrução" --kaizen
+check "reinício: assume a rodada e usa codex"            [ "$RC" -eq 0 -a "$(sp_agent swarm-test 11-rei)" == codex ]
+check "reinício: aviso de rodada assumida"               grep -qF "$ASSUME" <<<"$ERR"
+
+# 10f. spawn avulso não herda o agente de rodada nenhuma
+swc "$REPO" spawn 12-av "instrução"
+check "avulso: claude, mesmo com rodada workers=codex"   [ "$RC" -eq 0 -a "$(sp_agent avulso 12-av)" == claude ]
+
+# 10g. workers= inválido no meta: erro claro, nada aberto; --agent explícito não depende dele
+sed -i.bak 's/^workers=.*/workers=pi/' "$STATE/meta"; before="$(cat "$STATE/spawned")"; tabs="$(grep -c 'tab create' "$FAKE/herdr.log")"
+sw spawn 13-x "instrução" --kaizen
+check "meta inválido: código != 0"                       [ "$RC" -ne 0 ]
+check "meta inválido: mensagem com a origem"             grep -qF 'Pi saiu do stack (#217), use claude ou codex (workers= do meta da rodada swarm-test)' <<<"$ERR"
+check "meta inválido: nada registrado nem aberto"        [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs" ]
+sw spawn 13-y "instrução" --kaizen --agent claude
+check "meta inválido + --agent: abre com o explícito"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 13-y)" == claude ]
+
 check_end

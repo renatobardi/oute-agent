@@ -74,14 +74,16 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     automático, `codex update`. O Pi saiu do stack (#217): `pi` só avisa
 
 ## CONTAINER — rodada paralela (oute-swarm)
-  oute-swarm <repo> [--max N] [--label L]
+  oute-swarm <repo> [--max N] [--label L] [--agent claude|codex]
       abre o dispatcher: tria issues → ESPERA SEU OK → abre uma aba por issue →
       acompanha PRs/CI/pedidos → retrospectiva kaizen (lições numeradas; você escolhe:
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
+      --agent = agente de todas as sessões da rodada, kaizen inclusive (sem ele: claude).
       Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--force] [--repo R] [--kaizen]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
+      --agent: sobrepõe o agente da rodada (sem ele: o da rodada; spawn avulso: claude)
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (o dispatcher usa quando você decide).
