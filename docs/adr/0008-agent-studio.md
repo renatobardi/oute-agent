@@ -81,7 +81,8 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
   - tela mínima: lista de conversas por host/agente, detalhe de uma conversa (árvore de spans), agrupamento por sessão (`session.id`, `oute.task.*`) e o A/B do Jev (por nome do trace).
 - **Custo:** **real** quando chega (o do Claude vem no `cost_usd` do log `api_request`, não no span: ver "Consulta agregada", #157; histórico até 2026-09-30, #218: OpenRouter no `jev.decision`); **estimado**, marcado como tal, por uma tabela de preços pequena para o que não manda (Codex, e o Claude como reserva); sem contar duas vezes os tokens do router e do `jev.decision`.
 - Fora do v1: scores/evals, prompts, datasets, tags, users, links públicos.
-- **Troca:** 1 semana com Langfuse e agent-studio em paralelo. Desliga quando a `ops-observe` roda no agent-studio e os números (custo e contagem por agente) batem com os do Langfuse, com diferença pequena. **Desligar** = remover o pipeline `langfuse.yaml` (fica o `none`) e o item `langfuse` do vault. O histórico do Langfuse **não migra** (o bucket já tem tudo, com mais detalhe).
+- **Troca (executada, #160):** 1 semana com Langfuse e agent-studio em paralelo. Desliga quando a `ops-observe` roda no agent-studio e os números (custo e contagem por agente) batem com os do Langfuse, com diferença pequena. **Desligar** = remover o pipeline `langfuse.yaml` (fica o `none`) e o item `langfuse` do vault. O histórico do Langfuse **não migra** (o bucket já tem tudo, com mais detalhe).
+  - **Desligado em 2026-10-03 (#160), antecipado pelo Bardi** sem esperar a semana: em 2026-10-01, chamadas e tokens de saída iguais entre Langfuse e agent-studio, custo do Claude no agent-studio = bucket (US$ 24,67), e a `ops-observe` já lia do agent-studio (#259). Saíram `config/otel/langfuse.yaml`, o ramo do `scripts/oute` e as variáveis `LANGFUSE_*` do compose; `none.yaml` ficou (serve o `OUTE_OTEL_STUDIO`).
 
 ### 10. Tray no Mac e API só leitura (#145, #146)
 - **Tray:** app nativo pequeno em Swift (`MenuBarExtra`), código neste repo, instalado por `oute tray install` (compila no Mac, abre no login; sem App Store nem assinatura).
@@ -92,7 +93,7 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - Nenhuma outra ação no v1. Ação nova entra depois, no mesmo padrão: abrir o Terminal no comando que já existe.
 
 ### 11. Regra de ferramenta nova (substitui a do ADR-04)
-**Nenhuma ferramenta entra no stack se não mandar consumo ao bucket + agent-studio**, pelo collector, com a origem (`host.name` + `oute.instance`) e `oute.agent` (ADR-04). Enquanto o Langfuse roda em paralelo (item 9), ele continua recebendo o que já recebe, mas não é mais exigência para ferramenta nova.
+**Nenhuma ferramenta entra no stack se não mandar consumo ao bucket + agent-studio**, pelo collector, com a origem (`host.name` + `oute.instance`) e `oute.agent` (ADR-04). O Langfuse foi desligado em 2026-10-03 (#160, item 9).
 
 ## Implementação
 ### Ingestão de logs (#185)

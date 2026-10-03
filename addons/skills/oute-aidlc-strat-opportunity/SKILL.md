@@ -19,7 +19,7 @@ Pronto quando: o tema está numa frase e você sabe se já há issue sobre ele. 
 ### 2. Oportunidade
 Responda com evidência, não com impressão:
 - **Quem** sofre (Bardi, um agente, um host, um usuário do produto) e **o quê**, em termos do glossário do `CONTEXT.md`.
-- **Evidência:** issues, relatos, telemetria (ADR-04: bucket + Langfuse), incidentes de rodada, lições do swarm. Cite a fonte de cada uma.
+- **Evidência:** issues, relatos, telemetria (ADR-04 e ADR-08: bucket + agent-studio), incidentes de rodada, lições do swarm. Cite a fonte de cada uma.
 - **Custo de não fazer:** o que acontece se o tema ficar parado.
 
 Fato externo que precisa de fonte primária (doc oficial, código, spec de terceiro) vai para `oute-aidlc-strat-research`; sem ela, leia as fontes você mesmo, em sequência, e cite.

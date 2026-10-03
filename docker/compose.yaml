@@ -234,7 +234,6 @@ services:
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:
       - --config=/etc/otelcol/collector.yaml
-      - --config=/etc/otelcol/${OUTE_OTEL_LANGFUSE:-none}.yaml
       # agent-studio (#189, #190): o `oute up` põe agent-studio quando há o token (rede docker no host que o roda, vhost
       # da tailnet nos outros); sem o token, none
       - --config=/etc/otelcol/${OUTE_OTEL_STUDIO:-none}.yaml
@@ -251,8 +250,6 @@ services:
       # when_required = só calcula checksum quando a operação exige (comportamento antigo, compatível com S3-compat).
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
-      OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
       # credencial de ingestão do agent-studio (item agent-studio da pasta oute-services do vault, #256), só com o
       # pipeline do agent-studio ligado
       AGENT_STUDIO_INGEST_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}

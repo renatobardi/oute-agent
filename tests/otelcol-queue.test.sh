@@ -21,7 +21,8 @@ check "otelcol-contrib $V"                              otelcol_version_ok
 # ---------------------------------------------------------------- 1. config de produção
 otelcol_env
 CFG="$ROOT/config/otel/collector.yaml"
-check "validate collector.yaml + langfuse.yaml"         "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/langfuse.yaml"
+export AGENT_STUDIO_INGEST_TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")" AGENT_STUDIO_URL=https://studio.invalid
+check "validate collector.yaml + agent-studio.yaml"     "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/agent-studio.yaml"
 check "validate collector.yaml + none.yaml"             "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/none.yaml"
 P="$(otelcol_print --config="$CFG")"
 for x in traces:314572800 metrics:104857600 logs:629145600; do

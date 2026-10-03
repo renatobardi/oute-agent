@@ -3,8 +3,8 @@
 # python3, jq, curl e tar (sem eles, sai com 1) e a versão do collector no compose.
 # otelcol_bin: usa o otelcol-contrib do PATH se for a versão do compose; senão baixa o binário fixado e confere o
 # sha256 (cache em ~/.cache/oute-tests). Define OTELCOL e V. otelcol_version_ok: o binário é o da versão V.
-# otelcol_env: exporta o ambiente que o config/otel/collector.yaml lê (origem, S3 numa porta fechada, Langfuse
-# inválido, credenciais de mentira); o teste exporta por cima o que for dele.
+# otelcol_env: exporta o ambiente que o config/otel/collector.yaml lê (origem, S3 numa porta fechada,
+# credenciais de mentira); o teste exporta por cima o que for dele.
 # otelcol_print <--config=…>: o config final em JSON; jqp <filtro jq>: `jq -e` sem saída sobre $P, o config impresso.
 # otelcol_s3_start <dir> [modo]: sobe o S3 falso (fakes3.py; modo ok ou down em <dir>/mode), define S3PID e aponta o
 # OCI_S3_ENDPOINT para ele; sem ele no ar, sai com 1.
@@ -54,7 +54,7 @@ otelcol_bin() {
 otelcol_version_ok() { "$OTELCOL" --version | grep -q " $V\$"; }
 otelcol_env() {
   export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT="http://127.0.0.1:$(closed_port)" \
-    LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
+    AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
     AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 }
 otelcol_print() { "$OTELCOL" print-config --mode=unredacted --format=json "$@" 2>/dev/null; }
