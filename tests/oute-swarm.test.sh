@@ -1121,7 +1121,7 @@ sw spawn 373-semacao "instrução"
 P="$STATE/373-semacao.prompt"
 check "worker sem ação manual: código 0, com o prompt"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
 check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF 'Não use o diálogo interativo de pergunta do harness' "$P"
-check "worker sem ação manual: dúvida em texto PERGUNTA (#373)" grep -qF 'termina o turno com texto: `PERGUNTA #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
+check "worker sem ação manual: dúvida em texto BLOQUEADO (#373)" grep -qF 'termina o turno com texto: `BLOQUEADO #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
 check "worker sem ação manual: lista de comandos com prompt (#373)" grep -qF '**Comandos que abrem prompt de permissão mesmo com as permissões liberadas**' "$P"
 check "worker sem ação manual: rm com variável é o primeiro item (#373)" grep -qF '`rm` com variável sem proteção' "$P"
 check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
