@@ -10,6 +10,8 @@
 #                                                   --kaizen: sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
+#              [--wait [--timeout <s>]]             --wait: espera a sessão parar (relê a cada 5 s, OUTE_SWARM_TELL_POLL) e
+#                                                   envia; sem --force; timeout padrão 600 s, recusa final com código 3
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
 #   oute-swarm list                                 abas abertas por este dispatcher + worktrees de tarefa
 #
@@ -304,15 +306,24 @@ field_text() {
 }
 
 cmd_tell() {
-  local force=0 want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text got try
+  local force=0 wait=0 timeout="" want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text got try
+  local rc=1 start poll waited=0 tag=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force) force=1 ;;
+      --wait) wait=1 ;;
+      --timeout) [[ $# -ge 2 ]] || die "--timeout precisa de um valor (segundos)"; timeout="$2"; shift ;;
       -*) die "opção desconhecida: $1" ;;
       *) if (( have == 0 )); then want="$1"; elif (( have == 1 )); then msg="$1"; else die "argumento a mais: $1"; fi; have=$((have + 1)) ;;
     esac; shift
   done
-  (( have == 2 )) || die 'uso: oute-swarm tell <n>-<slug> "<mensagem>" [--force]'
+  (( have == 2 )) || die 'uso: oute-swarm tell <n>-<slug> "<mensagem>" [--force | --wait [--timeout <s>]]'
+  # erros de uso: antes de qualquer linha no log
+  (( ! (wait && force) )) || die "--wait e --force não combinam: --force manda já, --wait espera a sessão parar"
+  [[ -z "$timeout" ]] || (( wait )) || die "--timeout só vale com --wait"
+  [[ -z "$timeout" || "$timeout" =~ ^[0-9]+$ ]] || die "--timeout precisa de um número inteiro de segundos: $timeout"
+  timeout="${timeout:-600}"
+  poll="${OUTE_SWARM_TELL_POLL:-5}"
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
   want="$(slugify "$want")"
   # quebra de linha no send-text viraria Enter sem conferência: a mensagem vai numa linha só, sem controles
@@ -323,9 +334,14 @@ cmd_tell() {
   read -r slug spane _ _ tab _ <<<"$line"
   label="#${slug%%-*} ${slug#*-}"
   # a partir daqui toda recusa fica no log da rodada; a mensagem vai depois de um TAB (ela nunca tem TAB)
-  refuse() { slog "$state" "$(date -u +%FT%TZ) tell $slug recusado: ${1//[$'\n\t']/ }"$'\t'"$msg"; die "$1; ${2:-nada enviado}"; }
+  # rc: código de saída da recusa (3 = timeout da espera do --wait, como o oute-inbox)
+  refuse() { slog "$state" "$(date -u +%FT%TZ) tell $slug recusado: ${1//[$'\n\t']/ }"$'\t'"$msg"; printf 'oute-swarm: %s; %s\n' "$1" "${2:-nada enviado}" >&2; exit "$rc"; }
+  # a espera do --wait não grava nada: cada volta relê aba, pane e agente e recusa na hora pelas mensagens de sempre
+  start=$SECONDS
+  while :; do
   ! is_closed "$state" "$slug" || refuse "aba $label já fechada (oute-swarm close)"
   # `pane list` não tem --tab (herdr 0.9.1); cada pane traz tab_id, então filtra no jq
+  pane=""
   panes="$(herdr pane list 2>&1)" || refuse "herdr pane list falhou: $panes"
   jq -e . >/dev/null 2>&1 <<<"$panes" || refuse "herdr pane list devolveu algo que não é JSON: $panes"
   tab="$(tab_by_label "$label" || true)"
@@ -344,9 +360,17 @@ cmd_tell() {
   [[ "$agent" != - && "$agent" != null ]] || refuse "nenhum agente no pane $pane de $label"
   case "$st" in
     idle|done|blocked) ;;
-    *) (( force )) || refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
+    *) if (( wait )); then
+         waited=$(( SECONDS - start ))
+         if (( waited >= timeout )); then rc=3; refuse "sessão $label ocupada ($st) depois de $waited s de espera"; fi
+         sleep "$poll"; continue
+       fi
+       (( force )) || refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
        echo "aviso: sessão $label em '$st'; seguindo por --force" >&2 ;;
   esac
+  break
+  done
+  (( ! wait )) || { waited=$(( SECONDS - start )); tag=" (--wait, ${waited}s)"; }
   # 2) digita, confere o campo e só então Enter. Não bateu: limpa (ctrl+c, só com a sessão pronta) e tenta uma vez
   text="[dispatcher $(basename "$state"), repassando o Bardi] $msg"
   # acima de 800 caracteres o Claude Code mostra "[Pasted text #n]" e o campo não dá para conferir
@@ -359,7 +383,7 @@ cmd_tell() {
     got="$(field_text "$pane" "$agent")" || got="(campo de entrada não encontrado na tela)"
     if [[ "$(tr -d '[:space:]' <<<"$got")" == "$(tr -d '[:space:]' <<<"$text")" ]]; then
       herdr pane send-keys "$pane" enter >/dev/null || refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter"
-      slog "$state" "$(date -u +%FT%TZ) tell $slug ok$( (( force )) && echo " (--force, $st)")"$'\t'"$msg"
+      slog "$state" "$(date -u +%FT%TZ) tell $slug ok$( (( force )) && echo " (--force, $st)")$tag"$'\t'"$msg"
       echo "enviado a $label ($pane)"
       return 0
     fi
