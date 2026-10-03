@@ -859,6 +859,11 @@ check "triagem: registro compartilhado não é regra comum" grep -qF 'Registro c
 check "triagem: tabela com ordem de abertura e marca"    grep -qF 'ordem de abertura, precisa de ação no host (s/n), risco. A ordem de abertura é `1` para as que abrem logo depois do ok; a issue de regra comum leva a marca **regra comum**' "$FAKE/oute-task.last"
 check "triagem: outras abrem juntas até o limite"        grep -qF 'depois do merge as outras abrem juntas, até 2;' "$FAKE/oute-task.last"
 check "abertura: ordem só com o merge da regra comum"    grep -qF -- '- **Ordem de abertura:** issue com `depois do merge da #<n>` na tabela da triagem só abre com o PR da #<n> mergeado' "$FAKE/oute-task.last"
+# reinício do monitor sem evento novo (#267): no máximo uma linha, sem repetir a pergunta pendente
+check "monitor: reinício sem evento não repete a pergunta (#267)" grep -qF 'não repita a pergunta pendente, as opções numeradas nem o estado da rodada' "$FAKE/oute-task.last"
+check "monitor: no máximo uma linha (#267)"              grep -qF 'Escreva no máximo uma linha (ex.: "monitor reiniciado, sem eventos")' "$FAKE/oute-task.last"
+check "monitor: a pergunta pendente continua valendo (#267)" grep -qF 'A pergunta pendente continua valendo sem ser repetida' "$FAKE/oute-task.last"
+check "monitor: a regra fica no trecho do reinício, no §3 (#267)" bash -c '[ "$(grep -c "reinicie o mesmo comando sem perguntar.*só avise o Bardi se o reinício falhar\. \*\*Reinício sem evento novo não é motivo de mensagem:\*\*" "$1")" -eq 1 ] && [ "$(grep -n -e "^## 3\. " -e "Reinício sem evento novo" -e "^## 4\. " "$1" | sed "s/^[0-9]*:\(.\{4\}\).*/\1/" | tr "\n" "|")" = "## 3|- Ro|## 4|" ]' _ "$FAKE/oute-task.last"
 # merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
 check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.last"
 check "merges em série: fica no §3, antes do §4"         [ "$(grep -n -e '^## 3\. ' -e 'Merges em série\*\*' -e '^## 4\. ' "$FAKE/oute-task.last" | cut -d: -f2 | cut -c1-6 | tr '\n' '|')" == '## 3. |  - **|## 4. |' ]
