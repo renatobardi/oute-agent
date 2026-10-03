@@ -35,6 +35,8 @@ A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
 - **`indisponivel`:** o Claude falha ao abrir (erro, auth);
 - **`cota`:** qualquer janela da assinatura do Claude ≥ 90% (medição na #55).
 
+**Fonte da cota (#55, #346):** o comando `oute-quota [--json]` da imagem (bash + `curl` + `jq`), que lê só por `GET https` o uso das duas assinaturas: Claude em `api.anthropic.com/api/oauth/usage`, Codex em `chatgpt.com/backend-api/wham/usage`, com o token que já está no arquivo de credencial do agente (`~/.claude/.credentials.json`, `~/.codex/auth.json`). **Nunca escreve nem renova a credencial:** o refresh token do Claude rotaciona (medido no spike), então quem renovasse invalidaria o do `claude`; token expirado vira `unknown` (`token-expirado`) até o próprio agente renovar. Janelas `5h` e `7d`, `used_pct` de 0 a 100; cache de 120 s (o endpoint do Claude dá 429 em rajada) e, com 429, rede ou timeout, o cache de até 30 min volta com `stale:true`. O seletor (#258) consome o `--json` e aplica a regra; o `oute-quota` só lê.
+
 Cota desconhecida (leitura falhou) não troca de agente: abre no Claude e avisa. Os dois esgotados: aviso claro, nunca bloqueio em silêncio.
 
 ### Sessão do dispatcher
