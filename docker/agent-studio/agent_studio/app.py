@@ -10,6 +10,7 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, credencial de leitura; janela inválida = 400; leitura que falha = 500.
 - `GET /v1/alerts`: só leitura, credencial de leitura; `at` inválido = 400; leitura que falha = 500.
+- `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
   `proposals.available` = `false` (o resto do menu segue).
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
@@ -28,7 +29,8 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import auth as auth_mod, config as config_mod, otlp, state, telemetry, tray as tray_mod, web
+from . import (auth as auth_mod, config as config_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
+               web)
 
 log = logging.getLogger("agent_studio")
 detail = logging.getLogger("agent_studio_detail")
@@ -60,7 +62,7 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None):
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None):
     """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256)."""
     auth = auth_mod.Auth(token, read_token)
     tel = tel or telemetry.Noop()
@@ -70,7 +72,11 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     # roda; exportar o resto da telemetria e fechar o DuckDB fica aqui
     @contextlib.asynccontextmanager
     async def lifespan(_app):
+        if price_job:
+            price_job.start()  # a conferência de preços (#339) em segundo plano; falha dela nunca chega aqui
         yield
+        if price_job:
+            price_job.stop()
         tel.shutdown()
         if on_shutdown:
             on_shutdown()
@@ -185,6 +191,23 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         return JSONResponse({"at": _iso(at_ns), "time": "hora do fato (UTC)", **result,
                              "config": {"errors": config.errors}})
+
+    # ------------------------------------------------ preços: vigente e histórico (#339)
+    @app.get("/v1/prices")
+    async def v1_prices(request: Request):
+        """Preço vigente e histórico de cada modelo, com origem e vigência, e a última conferência de cada fonte."""
+        if not auth.reader(request):
+            tel.warn("unauthorized", "recusado: token ausente ou errado (prices)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        at_ns = time.time_ns()
+        try:
+            result = await run_in_threadpool(store.read, lambda con: prices_mod.view(con, config.fixed, at_ns))
+        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+            tel.warn("prices-failed", "consulta de preços falhou, respondi 500: %s", type(e).__name__,
+                     level=logging.ERROR)
+            detail.exception("consulta de preços falhou")
+            return JSONResponse({"message": "consulta falhou"}, status_code=500)
+        return JSONResponse({**result, "config": {"errors": config.errors}})
 
     # ------------------------------------------------ endpoint do tray (#205)
     def _tray_pending(at_ns):

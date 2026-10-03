@@ -138,7 +138,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE):
         if s["is_call"]:
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
-                s["cache_creation_tokens"], prices.lookup(s["model"]))
+                s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]))
     return {"conversation": conv, "spans": tree(spans), "spans_truncated": conv["spans"] > len(spans),
             **logs(con, session_id, 0, log_limit)}
 

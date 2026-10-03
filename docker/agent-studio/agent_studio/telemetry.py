@@ -27,6 +27,9 @@ class Noop:
     def written(self, signal, n, dup, seconds, ok):
         pass  # sem endpoint OTLP: não há o que contar
 
+    def price_run(self, changes, failures):
+        pass  # sem endpoint OTLP: não há o que contar
+
     def warn(self, kind, msg, *args, level=logging.WARNING):
         log.log(level, msg, *args)
 
@@ -46,6 +49,14 @@ class Telemetry(Noop):
             "agent_studio.records.written", unit="{record}", description="registros gravados no DuckDB (novos)")
         self.c_dup = meter.create_counter(
             "agent_studio.records.duplicate", unit="{record}", description="registros repetidos (dedupe)")
+        self.c_price_checks = meter.create_counter(
+            "agent_studio.prices.checks", unit="{check}",
+            description="conferências diárias de preço (#339), por resultado: ok, parcial (uma fonte falhou) ou falha")
+        self.c_price_changes = meter.create_counter(
+            "agent_studio.prices.changes", unit="{change}", description="preços trocados pela conferência (#339)")
+        self.c_price_failures = meter.create_counter(
+            "agent_studio.prices.failures", unit="{failure}",
+            description="falhas da conferência de preço, por fonte e código (#339)")
         self.h_write = meter.create_histogram(
             "agent_studio.write.duration", unit="s", description="duração da gravação (DuckDB + SurrealDB)")
 
@@ -57,6 +68,15 @@ class Telemetry(Noop):
             self.c_written.add(n, {"signal": signal})
             self.c_dup.add(dup, {"signal": signal})
         self.h_write.record(seconds, {"signal": signal, "result": "ok" if ok else "error"})
+
+    def price_run(self, changes, failures):
+        """Uma conferência de preço: `failures` = {fonte: código} (`rotina` = falha interna)."""
+        result = "ok" if not failures else "falha" if len(failures) >= 2 or "rotina" in failures else "parcial"
+        self.c_price_checks.add(1, {"result": result})
+        if changes:
+            self.c_price_changes.add(changes)
+        for source, code in failures.items():
+            self.c_price_failures.add(1, {"source": source, "reason": code})
 
     def warn(self, kind, msg, *args, level=logging.WARNING):
         """Aviso com teto por tipo: no máximo um por janela; o próximo diz quantos foram suprimidos."""
