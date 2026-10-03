@@ -522,7 +522,7 @@ w_snapshot() {
     fi
   done < <(awk -v m="$main" '{print ($6 == "" ? m : $6)}' "$state/spawned" 2>/dev/null | sort -u)
   if (( gh_ok )); then
-    w_keep "oldhead|"; w_keep "oldci|"
+    w_keep "oldhead|"; w_keep "oldci|"; w_keep "merged|"
     while IFS=$'\t' read -r kind num n st mg url oid; do
       case "$kind" in
         pr)
@@ -574,7 +574,7 @@ w_snapshot() {
       fi
     done
   else
-    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; W_CUR["falha|gh"]=1
+    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; w_keep "falha|"; W_CUR["falha|gh"]=1
   fi
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do
@@ -617,7 +617,7 @@ w_diff() {
         [[ -n "$new" ]] || continue
         case "$new" in
           OPEN) w_ev pr "PR $(w_ref "$a") aberto (issue $(w_ref "$b")) ${W_CUR[url|$a]:-}" ;;
-          MERGED) w_ev pr "PR $(w_ref "$a") mergeado (issue $(w_ref "$b"))" ;;
+          MERGED) w_ev pr "PR $(w_ref "$a") mergeado (issue $(w_ref "$b"))"; W_CUR["merged|$a"]="$b|$(date +%s)" ;;
           CLOSED) w_ev pr "PR $(w_ref "$a") fechado sem merge (issue $(w_ref "$b"))" ;;
           *) w_ev pr "PR $(w_ref "$a"): $new (issue $(w_ref "$b"))" ;;
         esac ;;
@@ -647,6 +647,25 @@ w_diff() {
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
              | awk -F'|' 'BEGIN { split("falha tab agent pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
+}
+
+w_check_merged_issues() {
+  local k pr_num issue_num ts_merged now_ts elapsed delay="${OUTE_WATCH_ISSUE_DELAY:-120}"
+  for k in "${!W_CUR[@]}"; do
+    [[ "$k" == "merged|"* ]] || continue
+    pr_num="${k#merged|}"
+    IFS='|' read -r issue_num ts_merged <<<"${W_CUR[$k]}"
+    now_ts="$(date +%s)"
+    elapsed=$(( now_ts - ts_merged ))
+    # Se passaram $delay segundos ou mais, confira se a issue continua aberta
+    if (( elapsed >= delay )); then
+      if gh issue view "$issue_num" --json state --jq '.state' 2>/dev/null | grep -q "^OPEN$"; then
+        w_ev issue "$(w_ref "$issue_num") aberta depois do merge do PR $(w_ref "$pr_num")"
+      fi
+      # Remove a marca após conferência
+      unset "W_CUR[$k]"
+    fi
+  done
 }
 
 cmd_watch() {
@@ -681,7 +700,7 @@ cmd_watch() {
       rm -f "$W_STATE/watch.pid"; exit 0
     fi
     w_snapshot "$W_STATE" "$main" "$since"
-    (( first )) || w_diff
+    (( first )) || { w_diff; w_check_merged_issues; }
     first=0
     tmp="$(mktemp "$W_STATE/.watch.XXXXXX")"
     for k in "${!W_CUR[@]}"; do printf '%s\t%s\n' "$k" "${W_CUR[$k]}"; done | sort > "$tmp"

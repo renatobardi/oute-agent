@@ -92,6 +92,19 @@ Não chama modelo: lê o binário do `claude`, o `~/.codex/models_cache.json` e 
 - **3, linha `desconhecido`** (cache do Codex ausente ou com mais de 7 dias, binário do `claude` não encontrado, `gh` sem resposta): não foi conferido, e não vale como ok. O aviso em stderr diz a causa; o cache o Codex renova ao abrir. Sem conseguir conferir, vai ao relatório como pendência, para o Bardi decidir.
 - **0:** tudo `ok`.
 
+**Issues abertas após merge do PR** (#387): confira quais PRs mergeados desde `LAST` têm issue (citada em `Closes` ou `Refs` no corpo) que continua aberta. Use:
+
+```bash
+git log "$LAST"..origin/main --format='%B' | grep -oE '^(Closes|Refs) #[0-9]+' | sort -u | while read line; do
+  n="${line#* #}"; echo -n "$n: "; gh issue view "$n" --json state --jq '.state'
+done
+```
+
+- **Aberta com `## Falta` só de `(ship)`:** é problema (deveria estar fechada); diga qual PR.
+- **Aberta com `## Falta` tem critério de build:** esperado (a issue fica aberta até o critério entrar); continue.
+- **Fechada:** ok.
+- **Erro no `gh`:** pendência, não conferido.
+
 **Alerta de preço aberto** (#340, ADR-08 adendo "Preços"): o agent-studio confere os preços dos modelos todo dia, e um preço errado só aparece no custo estimado depois. Leia os alertas ativos, só `GET`, com a credencial de leitura pelo stdin do `curl` (nunca no argv) e só os tipos e os modelos, sem abrir a tela:
 
 ```bash
@@ -115,12 +128,13 @@ Uma mensagem, nesta ordem:
 3. **CHANGELOG:** ok, ou a lista de achados (fragmento inválido, commit sem entrada, entrada incoerente, fora do lugar), com a correção sugerida. Achado bloqueia a release até virar PR mergeado: diga isso.
 4. **Pré-condições:** ok ou o que falhou.
 5. **Versões de claude/codex:** as dos `ARG`s, `ok` ou o `DIFERENTE` (bloqueio), e as mais recentes, se estiverem à frente. **Tabela do seletor:** `ok`, cada `FALTA` (bloqueio) ou cada `desconhecido` (pendência, com a causa).
-6. **Comandos do Bardi** (no checkout da `main`, no Mac ou no oute-server):
+6. **Issues abertas após merge:** PRs mergeados com issue aberta sem motivo escrito (problema a resolver), ou aberta com motivo escrito (normal; diga qual). Nenhuma = ok.
+7. **Comandos do Bardi** (no checkout da `main`, no Mac ou no oute-server):
    ```bash
    scripts/release <nova> && git push && git push origin v<nova>
    ```
    Depois do CI `image` da tag terminar (Actions → image), em cada host: `oute update`.
    Sem release: em cada host, `git pull` + `oute down` + `oute up`.
-7. **Próximo passo:** depois do deploy, `oute-aidlc-ship-verify` em cada host.
+8. **Próximo passo:** depois do deploy, `oute-aidlc-ship-verify` em cada host.
 
-Pare aqui. Não rode os comandos do item 6.
+Pare aqui. Não rode os comandos do item 7.
