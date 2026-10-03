@@ -135,7 +135,7 @@ cat > "$TMP/traces.json" <<'EOF'
     "attributes":[{"key":"session.id","value":{"stringValue":"sess-c"}},{"key":"model","value":{"stringValue":"claude-sonnet-5"}},
       {"key":"input_tokens","value":{"intValue":"120"}},{"key":"output_tokens","value":{"intValue":"45"}},
       {"key":"cache_read_tokens","value":{"intValue":"1000"}},{"key":"cache_creation_tokens","value":{"intValue":"7"}},
-      {"key":"cost_usd","value":{"doubleValue":0.0123}}],
+      {"key":"request_id","value":{"stringValue":"req_011CfeRV8czH1ekSXWhWUQtd"}}],
     "events":[{"timeUnixNano":"1759000001000000000","name":"primeiro_token","attributes":[{"key":"n","value":{"intValue":"1"}}]}]}]}]},
  {"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"oute-mac"}},{"key":"service.name","value":{"stringValue":"codex_exec"}},
    {"key":"oute.agent","value":{"stringValue":"codex"}}]},
@@ -192,7 +192,8 @@ studio_stop
 check "spans: reenvio não duplica (3 spans)"           test "$(count spans)" = 3
 check "metrics: reenvio não duplica (6 pontos)"        test "$(count metrics)" = 6
 row="$(studio_sql "$DB" "SELECT * FROM spans WHERE name = 'claude_code.llm_request'")"
-check "span Claude: modelo, tokens e custo"            jqe '.model == "claude-sonnet-5" and .input_tokens == 120 and .output_tokens == 45 and .cache_read_tokens == 1000 and .cache_creation_tokens == 7 and .cost_usd == 0.0123' <<<"$row"
+# como em produção, o span do Claude chega sem custo: ele vem no log api_request de mesmo request_id, lido na consulta (#157)
+check "span Claude: modelo, tokens, sem custo no span"  jqe '.model == "claude-sonnet-5" and .input_tokens == 120 and .output_tokens == 45 and .cache_read_tokens == 1000 and .cache_creation_tokens == 7 and .cost_usd == null' <<<"$row"
 check "span Claude: ids em minúsculas, pai, duração"   jqe '.trace_id == "0af7651916cd43dd8448eb211c80319c" and .span_id == "b7ad6b7169203331" and .parent_span_id == "00f067aa0ba902b7" and .duration_ns == 2500000000' <<<"$row"
 check "span Claude: origem, agente, sessão, hora"      jqe '.host_name == "oute-server" and .oute_agent == "claude" and .session_id == "sess-c" and (.time | startswith("2025-09-27 19:06:40"))' <<<"$row"
 check "span Claude: chave trace_id + span_id"          jqe '.dedupe_key == "s:0af7651916cd43dd8448eb211c80319c:b7ad6b7169203331"' <<<"$row"

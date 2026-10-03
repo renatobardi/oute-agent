@@ -1,7 +1,7 @@
 """Regras de custo e de escopo do uso (ADR-08 §9, #203): módulo puro, sem I/O e sem banco.
 
-Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`) e, depois, os alertas (#204), o tray e a
-tela (#205, #206), que reusam este módulo e o `usage.aggregate`.
+Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas (#204), o tray e a tela (#205 a
+#207), que reusam este módulo e o `usage.aggregate`. O SQL sai daqui montado, com os valores sempre em parâmetro.
 
 - **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex) ou
   `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
@@ -12,9 +12,13 @@ tela (#205, #206), que reusam este módulo e o `usage.aggregate`.
     ingestão é por trace + span), mesmo se chegou sem o `oute.agent` do cliente;
   - os spans do LiteLLM (`oute.agent=router`) ficam fora das somas, para não contar duas vezes: o `jev.decision`
     da mesma chamada já traz tokens e custo.
-- **Custo real** = `cost_usd` do span (Claude Code; OpenRouter no `jev.decision` histórico).
-- **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real (Codex). Modelo sem
-  preço = **sem estimativa** (`None`), nunca zero.
+- **Custo real** = `cost_usd` do span (OpenRouter no `jev.decision` histórico) ou, sem ele, o do log `api_request`
+  de mesmo `request_id` (#157): o span `claude_code.llm_request` chega sem custo, e o Claude Code o manda no log da
+  mesma chamada. A unidade segue sendo o span: log sem span não é chamada, log repetido conta uma vez (um custo por
+  `request_id`). Tudo na consulta (`spans_with_cost`), sem mudar schema nem ingestão: vale para o que já está
+  gravado.
+- **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real (Codex; Claude sem log
+  `api_request`). Modelo sem preço = **sem estimativa** (`None`), nunca zero.
 - **Erros** = spans com status de erro (qualquer span, inclusive os do LiteLLM: o `jev.decision` só nasce de
   chamada que deu certo, então não há duplicata) e logs de severidade ERROR ou acima.
 """
@@ -30,6 +34,13 @@ DECISION_SPAN = "jev.decision"
 MODEL_CALL_SQL = (f"name IN ({', '.join('?' * len(MODEL_CALL_SPANS))}) "
                   "AND (name = ? OR oute_agent IS DISTINCT FROM ?)")
 MODEL_CALL_PARAMS = (*MODEL_CALL_SPANS, DECISION_SPAN, ROUTER_AGENT)
+
+# custo do Claude no log (#157): o span da chamada e o log `api_request` levam o mesmo `request_id`
+CLAUDE_CALL_SPAN = "claude_code.llm_request"
+API_REQUEST_EVENTS = ("api_request", "claude_code.api_request")  # `event.name` do Claude Code (e com o prefixo)
+# o log sai no fim da chamada e o span tem a hora do início: numa janela, os logs são lidos com esta folga de cada
+# lado, para a chamada na borda manter o custo (a chamada mais longa do Claude Code fica bem abaixo de 1 h)
+LOG_COST_MARGIN_NS = 3_600_000_000_000
 
 # status de erro do OTLP (STATUS_CODE_ERROR = 2), como fica na coluna `spans.status_code`
 SPAN_STATUS_ERROR = 2
@@ -101,9 +112,29 @@ def estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_crea
 
 
 def call_cost(cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price):
-    """Custo de UMA chamada ao modelo, pela mesma regra das somas do `usage.aggregate`: `("real", usd)` quando o
-    span trouxe custo; senão `("estimated", usd)` pela tabela; modelo sem preço = `("unpriced", None)`, nunca zero."""
+    """Custo de UMA chamada ao modelo, pela mesma regra das somas do `usage.aggregate`: `("real", usd)` quando a
+    chamada tem custo efetivo (`cost_usd` de `spans_with_cost`); senão `("estimated", usd)` pela tabela; modelo sem preço = `("unpriced", None)`, nunca zero."""
     if cost_usd is not None:
         return "real", cost_usd
     est = estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price)
     return ("unpriced", None) if est is None else ("estimated", est)
+
+
+def spans_with_cost(span_where, span_params, log_where, log_params):
+    """(SQL, parâmetros) de uma subconsulta com as colunas de `spans` filtradas por `span_where`, em que `cost_usd` é
+    o **custo efetivo**: o do span ou, sem ele, o do log `api_request` de mesmo `request_id` (só no span da chamada
+    do Claude). Os logs lidos são os de `log_where`; vários logs do mesmo `request_id` dão um custo só."""
+    sql = ("(SELECT s.* REPLACE (COALESCE(s.cost_usd, l.cost_usd) AS cost_usd) FROM spans s LEFT JOIN ("
+           "SELECT json_extract_string(attributes, '$.request_id') AS request_id, "
+           "max(TRY_CAST(json_extract_string(attributes, '$.cost_usd') AS DOUBLE)) AS cost_usd FROM logs "
+           f"WHERE event_name IN ({', '.join('?' * len(API_REQUEST_EVENTS))}) AND {log_where} GROUP BY ALL) l "
+           "ON s.name = ? AND l.request_id = json_extract_string(s.attributes, '$.request_id') "
+           f"WHERE {span_where})")
+    return sql, [*API_REQUEST_EVENTS, *log_params, CLAUDE_CALL_SPAN, *span_params]
+
+
+def window_spans_with_cost(from_ns, to_ns):
+    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga."""
+    return spans_with_cost("time_unix_nano >= ? AND time_unix_nano < ?", [from_ns, to_ns],
+                           "time_unix_nano >= ? AND time_unix_nano < ?",
+                           [max(from_ns - LOG_COST_MARGIN_NS, 0), to_ns + LOG_COST_MARGIN_NS])

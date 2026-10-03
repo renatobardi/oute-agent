@@ -38,7 +38,7 @@ NOW="$(date +%s)"
 P1=20260930-120000-reiniciar-nginx; P2=20260930-110000-listar-backups; P5='p <b>5</b>&x=é'
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import json, sys
-from otlp_json import canal_decided, canal_proposed, kv, queue_metrics, rl, rs, span
+from otlp_json import canal_decided, canal_proposed, claude_call, kv, queue_metrics, rl, rs, span
 tmp, NOW = sys.argv[1], int(sys.argv[2])
 DAY = NOW // 86400 * 86400
 P1, P2, P5 = "20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "p <b>5</b>&x=é"
@@ -49,12 +49,16 @@ router = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.na
 cl = lambda **a: {"model": "claude-sonnet-5", **a}
 cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,
                                "codex.turn.token_usage.output_tokens": o, "codex.turn.token_usage.cached_input_tokens": c}
+# Claude no formato de produção (#157): o custo real vem no log api_request de mesmo request_id
+calls = [
+  claude_call(NOW - 30, 2, cl(input_tokens=100, output_tokens=50), 0.01),
+  claude_call(NOW - 20, 4, cl(input_tokens=200, output_tokens=20), 0.02),
+  claude_call(NOW - 15, 3, cl(input_tokens=1_000_000)),          # sem log: 3,00 estimado
+  claude_call(DAY - 3600, 1, cl(input_tokens=5), 100.0),          # ontem
+]
 traces = {"resourceSpans": [
   rs(claude, [
-    span("claude_code.llm_request", NOW - 30, 2, cl(input_tokens=100, output_tokens=50, cost_usd=0.01)),
-    span("claude_code.llm_request", NOW - 20, 4, cl(input_tokens=200, output_tokens=20, cost_usd=0.02)),
-    span("claude_code.llm_request", NOW - 15, 3, cl(input_tokens=1_000_000)),                # sem custo: 3,00 estimado
-    span("claude_code.llm_request", DAY - 3600, 1, cl(input_tokens=5, cost_usd=100.0)),       # ontem
+    *(s for s, _ in calls),
     span("claude_code.tool", NOW - 40, 1, {}, err=True),
     span("claude_code.tool", NOW - 7200, 1, {}, err=True),                                    # há 2 h
   ]),
@@ -69,6 +73,7 @@ traces = {"resourceSpans": [
 json.dump(traces, open(f"{tmp}/traces.json", "w"))
 oute = lambda host, agent: {"host.name": host, "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": agent}
 logs = {"resourceLogs": [
+  rl(claude, [l for _, l in calls if l]),
   rl(oute("oute-server", "claude"), [canal_proposed(NOW - 300, P1, "ev-p1", "Reiniciar <b>nginx</b> & cia", "root", "sudo systemctl reload nginx\n")]),
   rl(oute("oute-mac", "codex"), [canal_proposed(NOW - 60, P5, "ev-p5", "Pedido de id estranho", "user", "true\n"),
                                  canal_proposed(NOW - 3600, P2, "ev-p2", "Listar backups", "user", "ls -la /backup\n")]),
@@ -293,7 +298,8 @@ INSERT INTO metrics (dedupe_key, time, time_unix_nano, host_name, oute_instance,
 SELECT 'o:' || m || '-' || h || '-' || k, {TS}, t, 'oute-' || ['server', 'mac'][h], 'oute-agent', ['claude', 'codex'][1 + k % 2],
        'claude-code', 'claude_code.metric.' || k, 'sum', k, json_object('type', 'x' || k), {TS}, t
 FROM (SELECT m, h, k, {now} - m * {MIN} - k * 1000 AS t FROM range({mins}) a(m), range(1, 3) b(h), range(30) d(k))""")
-# spans: 10 por minuto (1 em 10 é chamada ao modelo; 1 em 200 com erro); logs: 15 por minuto, com o estado do spool
+# spans: 10 por minuto (1 em 10 é chamada ao modelo; 1 em 200 com erro); logs: 15 por minuto, com o estado do spool.
+# Claude como em produção (#157): o span sem custo, com o request_id; o custo no log api_request da mesma hora
 c.execute(f"""
 INSERT INTO spans (dedupe_key, time, time_unix_nano, duration_ns, host_name, oute_instance, oute_agent, service_name, session_id,
                    trace_id, span_id, name, status_code, model, input_tokens, output_tokens, cost_usd, attributes,
@@ -302,15 +308,17 @@ SELECT 's:' || i, {TS}, t, 1000000 * (1 + i % 5000), 'oute-' || ['server', 'mac'
        ['claude', 'codex', 'pi'][1 + i % 3], 'x', 'conv-' || (i // 500), 't' || i, 's' || i,
        CASE WHEN i % 10 = 0 THEN ['claude_code.llm_request', 'session_task.turn', 'jev.decision'][1 + i % 3] ELSE 'claude_code.tool' END,
        CASE WHEN i % 200 = 7 THEN 2 ELSE 0 END, ['claude-sonnet-5', 'gpt-5-codex', 'openai/gpt-oss-20b'][1 + i % 3],
-       1000 + i % 9000, 100 + i % 900, CASE WHEN i % 3 = 1 THEN NULL ELSE 0.01 END, '{{}}', {TS}, t
+       1000 + i % 9000, 100 + i % 900, CASE WHEN i % 3 = 0 OR i % 3 = 1 THEN NULL ELSE 0.01 END,
+       CASE WHEN i % 30 = 0 THEN json_object('request_id', 'r' || i) ELSE '{{}}' END, {TS}, t
 FROM (SELECT i, {now} - i * 6 * 1000000000 AS t FROM range({mins * 10}) a(i))""")
 c.execute(f"""
 INSERT INTO logs (dedupe_key, time, time_unix_nano, host_name, oute_instance, oute_agent, service_name, session_id, event_name,
                   oute_event_id, severity_number, body, attributes, received_at, received_unix_nano)
 SELECT 'l:' || i, {TS}, t, 'oute-' || ['server', 'mac'][1 + i % 2], 'oute-agent', ['claude', 'codex'][1 + i % 2], 'x',
-       'conv-' || (i // 500), 'claude_code.api_request', 'ev-' || i, CASE WHEN i % 300 = 3 THEN 17 ELSE 9 END,
+       'conv-' || (i // 500), CASE WHEN i % 45 = 0 THEN 'api_request' ELSE 'claude_code.api_request' END, 'ev-' || i, CASE WHEN i % 300 = 3 THEN 17 ELSE 9 END,
        repeat('texto do log ', 20),
-       CASE WHEN i % 50 = 0 THEN json_object('oute.emit.spool.bytes', 1000, 'oute.emit.spool.dropped', 0) ELSE '{{}}' END,
+       CASE WHEN i % 45 = 0 THEN json_object('event.name', 'api_request', 'request_id', 'r' || (i * 2 // 3), 'cost_usd', 0.01)
+            WHEN i % 50 = 0 THEN json_object('oute.emit.spool.bytes', 1000, 'oute.emit.spool.dropped', 0) ELSE '{{}}' END,
        {TS}, t
 FROM (SELECT i, {now} - i * 4 * 1000000000 AS t FROM range({mins * 15}) a(i))""")
 c.execute("COMMIT")
@@ -320,6 +328,7 @@ PY
 check "volume de exemplo montado ($(tail -1 "$TMP/gen.out"))" grep -q '^metrics=561600 spans=43200 logs=64800$' "$TMP/gen.out"
 studio_start "$TMP/v" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml" || { cat "$TMP/v/stderr"; die "agent-studio não subiu"; }
 check "volume: 200, com máquinas, custo e erros"       jqe '(.machines | length == 2) and .cost_today.usd > 0 and (.cost_today.agents | length == 3) and .errors_last_hour.total > 0' <<<"$(tray)"
+check "volume: Claude com custo real, todo pelo log api_request" jqe '.cost_today.agents[0] | .agent == "claude" and .real_usd > 0 and .estimated == false and .unpriced_calls == 0' <<<"$(tray)"
 for i in 1 2 3 4 5 6 7; do curl -s -o /dev/null -w '%{time_total}\n' "${C[@]}" "$STUDIO_URL/v1/tray"; done | sort -n > "$TMP/times"
 studio_stop
 MED="$(sed -n 4p "$TMP/times")"; MAX="$(tail -1 "$TMP/times")"

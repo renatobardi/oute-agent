@@ -7,7 +7,7 @@ dias em UTC. As regras de escopo e de custo estão no `cost.py`.
 from datetime import datetime, timezone
 
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
-                   estimate_cost_usd)
+                   estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
 KEYS = ("day", "host", "agent", "model", "conversation", "session")
@@ -21,7 +21,8 @@ _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"
 
 
 def _query(con, keys, cols, aggs, table, where, params):
-    """Linhas como dict; sem chaves, uma linha só (total)."""
+    """Linhas como dict; sem chaves, uma linha só (total). `table` = nome ou subconsulta (os parâmetros dela vêm
+    antes dos de `where` em `params`)."""
     select = [f"{cols[k]} AS {k}" for k in keys] + aggs
     group = " GROUP BY ALL" if keys else ""
     cur = con.execute(f"SELECT {', '.join(select)} FROM {table} WHERE {where}{group}", params)
@@ -34,8 +35,9 @@ def _calls(con, keys, from_ns, to_ns):
     for t in ("input", "output", "cache_read", "cache_creation"):
         aggs.append(f"COALESCE(sum({t}_tokens), 0) AS {t}")
         aggs.append(f"COALESCE(sum({t}_tokens) FILTER (WHERE cost_usd IS NULL), 0) AS est_{t}")
-    return _query(con, keys, _COLS, aggs, "spans", f"{_WINDOW} AND {MODEL_CALL_SQL}",
-                  [from_ns, to_ns, *MODEL_CALL_PARAMS])
+    # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
+    table, params = window_spans_with_cost(from_ns, to_ns)
+    return _query(con, keys, _COLS, aggs, table, MODEL_CALL_SQL, [*params, *MODEL_CALL_PARAMS])
 
 
 def _p95(con, keys, from_ns, to_ns):
@@ -43,9 +45,10 @@ def _p95(con, keys, from_ns, to_ns):
                   f"{_WINDOW} AND duration_ns IS NOT NULL AND {MODEL_CALL_SQL}", [from_ns, to_ns, *MODEL_CALL_PARAMS])
 
 
-def _span_errors(con, keys, from_ns, to_ns):
-    return _query(con, keys, _COLS, ["count(*) AS n"], "spans", f"{_WINDOW} AND status_code = ?",
-                  [from_ns, to_ns, SPAN_STATUS_ERROR])
+def _spans(con, keys, from_ns, to_ns):
+    """Todos os spans (o denominador da taxa de erro) e os com status de erro."""
+    return _query(con, keys, _COLS, ["count(*) AS spans", "count(*) FILTER (WHERE status_code = ?) AS n"], "spans",
+                  _WINDOW, [SPAN_STATUS_ERROR, from_ns, to_ns])
 
 
 def _log_errors(con, keys, from_ns, to_ns):
@@ -56,7 +59,7 @@ def _log_errors(con, keys, from_ns, to_ns):
 def _empty():
     return {"calls": 0, "tokens": dict.fromkeys(("input", "output", "cache_read", "cache_creation"), 0),
             "real_usd": None, "estimated_usd": None, "real_calls": 0, "estimated_calls": 0, "unpriced_calls": 0,
-            "unpriced_models": set(), "span_errors": 0, "log_errors": 0, "p95": None}
+            "unpriced_models": set(), "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
 
 
 def _add(a, b):
@@ -96,9 +99,10 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model")):
     for rec in _p95(con, keys, from_ns, to_ns):
         if rec["p95"] is not None:
             acc(rec)["p95"] = rec["p95"]
-    for rec in _span_errors(con, keys, from_ns, to_ns):
-        if rec["n"]:
-            acc(rec)["span_errors"] += rec["n"]
+    for rec in _spans(con, keys, from_ns, to_ns):
+        a = acc(rec)
+        a["spans"] += rec["spans"]
+        a["span_errors"] += rec["n"]
     for rec in _log_errors(con, keys, from_ns, to_ns):
         if rec["n"]:
             acc(rec)["log_errors"] += rec["n"]
@@ -116,9 +120,10 @@ def render(key, a, keys):
         out[k] = _day(v) if k == "day" else v
     out.update({
         "calls": a["calls"],
+        "spans": a["spans"],  # todos os spans do grupo (chamada ao modelo ou não): o denominador de `errors.spans`
         "tokens": a["tokens"],
         "cost": {
-            "real_usd": a["real_usd"],            # custo que veio no span; null = nenhuma chamada com custo real
+            "real_usd": a["real_usd"],            # custo que veio na chamada (span ou log api_request); null = nenhuma chamada com custo real
             "estimated_usd": a["estimated_usd"],  # estimado pela tabela; null = nada estimado (ver unpriced_calls)
             "real_calls": a["real_calls"],
             "estimated_calls": a["estimated_calls"],

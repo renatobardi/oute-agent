@@ -24,7 +24,7 @@ PKG="$ROOT/docker/agent-studio/agent_studio"
 #   conv-c (janeiro de 2025): fora da janela. Um span sem session.id: fora de toda conversa.
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
-from otlp_json import kv, rl, rs
+from otlp_json import api_request, kv, rl, rs
 tmp = sys.argv[1]
 D1 = 1759000000
 def span(trace, sid, parent, name, start, dur, attrs, err=False):
@@ -47,15 +47,15 @@ traces = {"resourceSpans": [
     span(1, 0xa4, 0xa3, "claude_code.tool.execution", D1 + 4.5, 1, A, err=True),
     span(1, 0xa1, None, "claude_code.interaction", D1, 20, {**A, "user_prompt": "<script>alert('span')</script>"}),
     span(1, 0xa2, 0xa1, "claude_code.llm_request", D1 + 1, 2,
-         {**A, **sonnet, "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 1000, "cache_creation_tokens": 10, "cost_usd": 0.01}),
+         {**A, **sonnet, "input_tokens": 100, "output_tokens": 50, "cache_read_tokens": 1000, "cache_creation_tokens": 10, "request_id": "req-a2"}),
     # não é chamada ao modelo: o cost_usd dele não entra em soma nem aparece na coluna
     span(1, 0xa3, 0xa1, "claude_code.tool", D1 + 4, 2, {**A, "tool_name": "Bash", "cost_usd": 50.0, "input_tokens": 999}),
     # órfão: o pai (0xff) nunca chegou; modelo sem preço na tabela
     span(1, 0xa6, 0xff, "claude_code.llm_request", D1 + 12, 1, {**A, "model": "modelo-sem-preco", "input_tokens": 500}),
     span(2, 0xa7, None, "claude_code.interaction", D1 + 30, 1, A),
-    span(3, 0xc1, None, "claude_code.llm_request", 1735689600, 1, {**C, **sonnet, "input_tokens": 5, "cost_usd": 100.0}),
+    span(3, 0xc1, None, "claude_code.llm_request", 1735689600, 1, {**C, **sonnet, "input_tokens": 5}),
     # sem session.id: não é de conversa nenhuma
-    span(4, 0xe1, None, "claude_code.llm_request", D1, 1, {**sonnet, "input_tokens": 7, "cost_usd": 9.0}),
+    span(4, 0xe1, None, "claude_code.llm_request", D1, 1, {**sonnet, "input_tokens": 7, "request_id": "req-e1"}),
   ]),
   rs(codex, [
     span(5, 0xb1, None, "session_task.turn", D1 + 100, 10,
@@ -63,8 +63,8 @@ traces = {"resourceSpans": [
           "codex.turn.token_usage.output_tokens": 100_000, "codex.turn.token_usage.cached_input_tokens": 2_000_000}),
   ]),
   rs(mac_claude, [
-    span(6, 0xd1, None, "claude_code.llm_request", D1 - 2 * 86400, 1, {**D, **sonnet, "input_tokens": 10, "cost_usd": 0.5}),
-    span(7, 0xd2, None, "claude_code.llm_request", D1 + 50, 1, {**D, **sonnet, "input_tokens": 20, "cost_usd": 0.25}),
+    span(6, 0xd1, None, "claude_code.llm_request", D1 - 2 * 86400, 1, {**D, **sonnet, "input_tokens": 10, "request_id": "req-d1"}),
+    span(7, 0xd2, None, "claude_code.llm_request", D1 + 50, 1, {**D, **sonnet, "input_tokens": 20, "request_id": "req-d2"}),
   ]),
 ]}
 json.dump(traces, open(f"{tmp}/traces.json", "w"))
@@ -76,8 +76,12 @@ logs = {"resourceLogs": [
   rl(claude, [
     log(D1 + 8, 17, "falhou <b>feio</b>", A, "claude_code.api_error"),
     log(D1 + 0.5, 9, "claude_code.user_prompt", {**A, "prompt": "<script>alert('log')</script> & cia"}, "claude_code.user_prompt"),
-    log(D1 + 2, 9, "claude_code.api_request", {**A, "model": "claude-sonnet-5"}, "claude_code.api_request"),
+    # o custo real do Claude chega no log api_request de mesmo request_id (#157), não no span
+    api_request(D1 + 3, "req-a2", 0.01, {**A, **sonnet}),
   ]),
+  rl(claude, [api_request(D1 + 1, "req-e1", 9.0, sonnet)]),
+  rl(mac_claude, [api_request(D1 - 2 * 86400 + 1, "req-d1", 0.5, {**D, **sonnet}),
+                  api_request(D1 + 51, "req-d2", 0.25, {**D, **sonnet})]),
   rl(codex, [log(D1 + 100 + i / 1000, 9, f"linha {i:03d}", B) for i in range(205)]),
 ]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
@@ -220,7 +224,7 @@ check "resumo = soma das linhas da árvore (mesma regra)" jqe --argjson r "$R" \
    and ([.[] | select(.["cost-kind"] == "estimated") | .cost | tonumber] | add) == ($r["estimated-usd"] | tonumber)
    and ([.[] | select(.["cost-kind"] == "unpriced")] | length) == ($r["unpriced-calls"] | tonumber)' <<<"$S"
 G="$(jq -c '[.[] | select(.log)]' <<<"$DA")"
-check "logs: em ordem da hora do fato"                 jqe 'map(.log) == ["1759000000500000000", "1759000002000000000", "1759000008000000000"]' <<<"$G"
+check "logs: em ordem da hora do fato"                 jqe 'map(.log) == ["1759000000500000000", "1759000003000000000", "1759000008000000000"]' <<<"$G"
 check "logs: o conteúdo aparece (corpo e atributos)"   jqe '.[0].text | test("claude_code.user_prompt") and test("alert\\(.log.\\)</script> & cia")' <<<"$G"
 check "logs: nível e evento"                           jqe '.[2].text | test("17 claude_code.api_error falhou <b>feio</b>")' <<<"$G"
 check "conteúdo escapado: nenhum HTML do dado vira tag" bash -c '! grep -qE "<script>alert|<b>feio" "$1" && grep -q "&lt;script&gt;alert" "$1" && grep -q "&lt;b&gt;feio" "$1"' _ "$TMP/a.html"
