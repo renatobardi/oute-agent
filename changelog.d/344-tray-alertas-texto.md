@@ -1,2 +1,0 @@
-### Added
-- **`/v1/tray`: título e texto prontos em cada alerta** (#344). Cada alerta ganha `title` e `text` (valor e limite por extenso, o mesmo texto da tela); os outros campos seguem iguais aos do `/v1/alerts`, que não muda. O texto sai de um módulo só (`agent_studio/alert_text.py`), usado pela tela e pelo tray. Fixture do app do tray em `tray/Tests/Fixtures/` (`tray.json` e `tray-sem-surrealdb.json`), conferida contra a resposta real pelo `tests/agent-studio-tray.test.sh`. **Precisa de release** (o agent-studio vai na imagem).

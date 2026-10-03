@@ -1,2 +1,0 @@
-### Fixed
-- **`oute-swarm watch` só acompanha PR de sessão desta rodada** (#419). O monitor escolhia os PRs pelo número da issue no branch, e o PR de outra rodada com o mesmo número entrava nos eventos `[pr]` e `[ci]` mesmo depois de a sessão da rodada fechar. Agora só entra PR de sessão ainda aberta; o PR que o watch já tinha visto segue acompanhado depois do close, até o merge. **Precisa de release** (`docker/oute-swarm` vai na imagem).

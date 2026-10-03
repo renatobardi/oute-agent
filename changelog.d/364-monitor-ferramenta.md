@@ -1,2 +1,0 @@
-### Changed
-- **Dispatcher do swarm: o `oute-swarm watch` roda na ferramenta `Monitor`** (#364). O `swarm.md` §3 dizia só "monitor em segundo plano", e o dispatcher que usou `Bash run_in_background` não era acordado pelos eventos da rodada. Agora o prompt manda usar a ferramenta `Monitor` com o `timeout_ms` no máximo, religar na expiração enquanto houver sessão aberta, PR aberto ou pergunta pendente e conferir o estado da rodada ao religar; `run_in_background` fica só para o `tell --wait`. **Precisa de release** (o `swarm.md` vai na imagem).

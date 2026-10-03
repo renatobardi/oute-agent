@@ -1,2 +1,0 @@
-### Added
-- **`oute-swarm tell --wait [--timeout <s>]`** (#181). Espera a sessão parar (`idle`/`done`/`blocked`, relendo o estado a cada 5 s, `OUTE_SWARM_TELL_POLL`) e então envia; sem laço de reenvio na coordenadora e com uma única linha no log (`ok (--wait, <s>s)` ou a recusa final, que no timeout de 600 s sai com código 3). Não combina com `--force`. Uso no `swarm.md` §3 só para instrução que não depende do estado da sessão ou do PR. **Precisa de release** (`oute-swarm`, `swarm.md` e `comandos.md` vão na imagem).

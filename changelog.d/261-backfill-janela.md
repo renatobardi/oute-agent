@@ -1,2 +1,0 @@
-### Added
-- **`oute-emit backfill --from <ISO> [--to <ISO>] [--dry-run]`** (#261). Reenvia os eventos de uma janela [from, to) pela hora do fato, pelos mesmos leitores e com o mesmo `oute.event.id` do ao vivo (o agent-studio deduplica), sem olhar o corte nem o `backfill.done`; `oute.backfill=true`, retomada própria por janela e resumo por tipo em stderr. `--dry-run` só conta, sem enviar. Serve para recuperar o que a #250 deixou de enviar. `oute.task.*` fica fora (não há artefato com a hora do fato). **Precisa de release** (o `docker/oute-emit` vai na imagem).

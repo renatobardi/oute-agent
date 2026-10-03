@@ -1,2 +1,0 @@
-### Fixed
-- **Teste do `oute-task clean` não casa mais com trecho do `mktemp`** (#294). O caso "clean (simulação): nada de fora do space" confere os caminhos inteiros das worktrees de fora do space (`proj-b1`, `outro-b2`, `proj-semlabel`, `proj-legado`) em vez de `b1|b2|legado|fica|semlabel`, que falhava de forma intermitente quando o `TMPDIR` sorteado continha `b1`. Só teste; **não precisa de release**.

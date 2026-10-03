@@ -1,2 +1,0 @@
-### Fixed
-- **Título do pedido inteiro no agent-studio** (#337). Título do tipo `ship: verificar deploy` aparecia como `ship:verificar` em `/pedido`, `/pedidos` e `/v1/tray`: o `/rpc` do SurrealDB lia a variável como record id. O texto do estado derivado agora vai em base64 e é decodificado no SurrealDB. **Precisa de release** (`state.py` vai na imagem do agent-studio). Pedidos já gravados continuam com o título cortado no SurrealDB (o DuckDB tem o certo) até o mesmo evento ser reenviado (`oute-emit backfill`); pedido novo já sai certo.
