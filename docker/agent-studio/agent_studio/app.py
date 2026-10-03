@@ -130,7 +130,8 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         tel.written(signal, n, dup, time.monotonic() - t0, ok=True)
         # só no stderr (INFO não sai como log OTel: seria um registro novo por requisição, em laço)
         log.info("%s: %d gravados, %d repetidos", signal, n, dup)
-        return JSONResponse({})
+        # quantos entraram e quantos já estavam: o `replay` (#159) soma isso; o collector ignora
+        return JSONResponse({}, headers={"X-Agent-Studio-Written": str(n), "X-Agent-Studio-Duplicate": str(dup)})
 
     @app.post("/v1/logs")
     async def v1_logs(request: Request):
