@@ -1000,11 +1000,8 @@ check "worker spike: relatório no comentário final da issue (#100)" grep -qF '
 check "worker spike: PRONTO com o comentário do relatório (#100)" grep -qF 'Termine com `PRONTO #100: <url do comentário com o relatório> — sem PR`.' "$P"
 check "worker spike: sem proposta nem espera do ok (#100)" grep -qF 'Aqui não há proposta nem espera do ok (a regra acima): o relatório não aplica nada.' "$P"
 check "worker spike: PR de doc quando a instrução pede arquivo (#100)" grep -qF 'entregue por PR de doc (só o doc e o fragmento do changelog), com as regras de PR acima, e o comentário final na issue leva o resumo e o link do PR.' "$P"
-check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova: o que valer virar issue vai no relatório, como recomendação.' "$P"
+check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova, salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
+check "worker spike: exceção para spike com critério (opção 1) (#356)" grep -qF 'salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
 check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
-
-# 11h. spike com critério que pede abrir issue (#356): § 1 e § 2 variam conforme a escolha do Bardi
-# testes na triagem: marca de critério que pede abrir issues (acima, já feito em "spike com critério")
-# testes na instrução do worker: não há prompt do worker que varia por label, sempre segue o texto fixo da §2
 
 check_end
