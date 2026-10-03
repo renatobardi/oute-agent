@@ -120,8 +120,12 @@ spool_max_bytes = 41943040
 spool_dropped_window_minutes = 60
 # Até onde a consulta olha para trás (spool, "desde quando").
 lookback_hours = 24
-# Cota das assinaturas (#55): previsto, desligado até a #55 emitir a métrica (nome provisório; a #55 fixa).
-# Ligado: alerta quando o último ponto da métrica (por host, agente e atributos, ex.: a janela) chega a quota_max_pct.
-quota_enabled = false
+# Cota das assinaturas (#55, #347): o oute-swarm (spawn e close) e o oute-task (abertura) mandam um snapshot, sem coleta
+# periódica. Alerta quando o último ponto de quota_metric, por host, agente e janela (5h, 7d), chega a quota_max_pct.
+# O ponto só vale até o reset da janela (quota_reset_metric, mesma hora): passou, o alerta some. Exceção só da janela
+# de 5h: reset em menos de quota_reset_grace_minutes, abaixo de 100% e com a 7d do agente abaixo do corte, não alerta.
+quota_enabled = true
 quota_max_pct = 90
 quota_metric = "oute.quota.used_pct"
+quota_reset_metric = "oute.quota.reset_in_seconds"
+quota_reset_grace_minutes = 20

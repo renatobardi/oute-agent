@@ -169,6 +169,10 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                     (o oute-task usa) emite o evento da sessão, sem corpo
+  oute-emit quota <spawn|close|open>  (o oute-swarm e o oute-task usam, em segundo plano) lê o
+                                    oute-quota --json e emite oute.quota.used_pct e
+                                    oute.quota.reset_in_seconds por agente e janela (métricas) e
+                                    oute.quota.unknown com o motivo; sem coleta periódica (#347)
   oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
                                     (~/.oute/emit/since) com a hora original; resumo no stderr;
                                     rodar de novo não emite nada (retoma se falhou no meio)

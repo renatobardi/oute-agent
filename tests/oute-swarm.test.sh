@@ -963,6 +963,9 @@ check "spike: instrução da sessão, sem proposta (#100)"  grep -qF 'a sessão 
 check "spike: conferência de que não entrou código de produção (#100)" grep -qF 'confira também que o relatório responde à pergunta da issue, com evidência, e que não entrou código de produção' "$FAKE/oute-task.last"
 check "spike: código de produção é divergência (#100)"   grep -qF 'Código de produção em spike é divergência: mostre ao Bardi.' "$FAKE/oute-task.last"
 check "spike: cada regra na sua seção, §1 a §3 (#100)"   [ "$(grep -n -e '^## [1-4]\. ' -e '^- \*\*Spike com `ready`:\*\*' -e '^- \*\*Spike (relatório):\*\*' "$FAKE/oute-task.last" | cut -d: -f2- | cut -c1-12 | tr '\n' '|')" == '## 1. Triage|- **Spike co|## 2. Abertu|- **Spike (r|## 3. Acompa|- **Spike (r|## 4. Fecham|' ]
+check "spike com critério: marca na triagem (#356)"       grep -qF 'critério pede abrir issues' "$FAKE/oute-task.last"
+check "spike com critério: opção numerada ao Bardi (#356)" grep -qF 'a sessão cria as issues do relatório' "$FAKE/oute-task.last"
+check "spike com critério: dispatcher oferece as issues (#356)" grep -qF 'o dispatcher as oferece numa opção numerada' "$FAKE/oute-task.last"
 check "merge: triagem oferece a autorização permanente (#243)" grep -qF -- '- **Autorização permanente de merge:** junto das opções de abertura, ofereça também, como opção numerada à parte' "$FAKE/oute-task.last"
 check "merge: condições da autorização permanente (#243)" grep -qF 'auditoria com ação `merge como está` (nenhum CRITICAL nem BLOCKING), CI verde no head auditado, com o SonarCloud concluído' "$FAKE/oute-task.last"
 check "merge: repasse da sessão de upstream cita a rodada (#243)" grep -qF 'quando a mensagem diz que é repasse da sessão de upstream, cita esta rodada (`'"$(nova)"'`) e traz as condições acima' "$FAKE/oute-task.last"
@@ -986,6 +989,49 @@ check "worker sem PR: não fecha a issue (#115)"          grep -qF 'Não feche a
 check "worker sem PR: o PRONTO com PR continua (#115)"   grep -qF 'termine com uma linha `PRONTO #115: <url do PR>`' "$P"
 check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 12. snapshot da cota (#347): spawn e close chamam `oute-emit quota` em segundo plano; a leitura nunca atrasa nem derruba
+CASE=cota; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+QB="$TMP/$CASE/qbin"; mkdir -p "$QB"
+# oute-quota falso: o JSON e a espera vêm de arquivos (o sw só repassa o ambiente que ele escolhe); rc de $QB/rc
+cat > "$QB/oute-quota" <<'SH'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+[[ ! -f "$d/sleep" ]] || sleep "$(cat "$d/sleep")"
+[[ ! -f "$d/json" ]] || cat "$d/json"
+exit "$(cat "$d/rc" 2>/dev/null || echo 0)"
+SH
+chmod +x "$QB/oute-quota"
+R5="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":{"used_pct":15,"resets_at":"%s"}}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' "$R5" > "$QB/json"
+# espera (até 10 s) o que o segundo plano ainda vai entregar
+until_n() { local i; for i in $(seq 1 100); do [[ "$(eval "$1")" -ge "$2" ]] && return 0; sleep 0.1; done; return 1; }
+OLDPATH="$PATH"; export PATH="$QB:$PATH"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#9 cota=idle"
+sw spawn 9-cota "faça a issue 9"
+check "cota, spawn: código 0 e nada de cota na tela"     bash -c '[ "$1" -eq 0 ] && ! grep -qi "quota" <<<"$2"' _ "$RC" "$OUT$ERR"
+check "cota, spawn: pontos da cota chegam (used_pct e reset_in_seconds do Claude)" until_n "mp '.name == \"oute.quota.used_pct\" and .res[\"oute.agent\"] == \"claude\" and .value == 15' | grep -c ." 1
+check "cota, spawn: evento unknown do Codex com momento spawn" until_n "n '.name == \"oute.quota.unknown\" and .attrs[\"oute.quota.moment\"] == \"spawn\" and .attrs[\"oute.agent\"] == \"codex\"'" 1
+sw close 9-cota --yes
+check "cota, close: fecha e emite o evento com momento close" bash -c '[ "$1" -eq 0 ]' _ "$RC"
+check "cota, close: unknown do Codex com momento close"  until_n "n '.name == \"oute.quota.unknown\" and .attrs[\"oute.quota.moment\"] == \"close\"'" 1
+# close sem nada fechado (já fechada): não lê a cota
+c0="$(n '.name == "oute.quota.unknown"')"; p0="$(ls "$RCV_DIR"/*.json | wc -l)"
+sw close 9-cota --yes
+sleep 1
+check "cota, close sem nada a fechar: sem snapshot novo" [ "$(ls "$RCV_DIR"/*.json | wc -l)" -eq "$p0" -a "$(n '.name == "oute.quota.unknown"')" -eq "$c0" ]
+# oute-quota lento (6 s): o spawn volta antes, com a mesma saída
+echo 6 > "$QB/sleep"
+FAKE="$FAKE" "$BIN/fake-tabs" "#10 lenta=idle"
+t0=$(date +%s); sw spawn 10-lenta "faça a issue 10"; dt=$(( $(date +%s) - t0 ))
+check "cota lenta: o spawn não espera a leitura ($dt s)" bash -c '[ "$1" -eq 0 ] && [ "$2" -le 4 ] && grep -q "aberta: #10" <<<"$3"' _ "$RC" "$dt" "$OUT"
+# oute-quota que falha (rc 2, sem saída) e que não existe: spawn igual
+rm -f "$QB/sleep"; echo 2 > "$QB/rc"; : > "$QB/json"
+FAKE="$FAKE" "$BIN/fake-tabs" "#11 falha=idle"
+sw spawn 11-falha "faça a issue 11"
+check "cota com falha na leitura: spawn abre normalmente" bash -c '[ "$1" -eq 0 ] && grep -q "aberta: #11" <<<"$2"' _ "$RC" "$OUT"
+export PATH="$OLDPATH"
+rcv_stop
+
 # 11g. sessão de spike (#100): o pronto é o relatório no comentário final da issue, sem código de produção
 CASE=spike; round "$CASE"
 sw spawn 100-spike "instrução"
@@ -997,7 +1043,19 @@ check "worker spike: relatório no comentário final da issue (#100)" grep -qF '
 check "worker spike: PRONTO com o comentário do relatório (#100)" grep -qF 'Termine com `PRONTO #100: <url do comentário com o relatório> — sem PR`.' "$P"
 check "worker spike: sem proposta nem espera do ok (#100)" grep -qF 'Aqui não há proposta nem espera do ok (a regra acima): o relatório não aplica nada.' "$P"
 check "worker spike: PR de doc quando a instrução pede arquivo (#100)" grep -qF 'entregue por PR de doc (só o doc e o fragmento do changelog), com as regras de PR acima, e o comentário final na issue leva o resumo e o link do PR.' "$P"
-check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova: o que valer virar issue vai no relatório, como recomendação.' "$P"
+check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova, salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
+check "worker spike: exceção para spike com critério (opção 1) (#356)" grep -qF 'salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
 check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
+# 11h. regra de rm com variável protegida em teste e script (#358): evita prompt de permissão
+CASE=rm-var; round "$CASE"
+sw spawn 358-rmvar "instrução"
+P="$STATE/358-rmvar.prompt"
+check "worker rm var: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker rm var: regra sobre rm com variável (#358)" grep -qF -- '- **Em teste e script, `rm` com variável usa `"${VAR:?}"/…` ou caminho literal**' "$P"
+check "worker rm var: motivo da regra: não dispara prompt (#358)" grep -qF 'para não disparar o prompt de permissão' "$P"
+check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
+check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
+check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end

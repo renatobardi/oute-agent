@@ -9,6 +9,9 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector); nada ao Langfuse.
                                      escolha do seletor (#219): phase, origin, model, effort
   oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366): run, image, claude, codex,
                                      rounds, result, green, red, unverified, cost, tasks, agent (quem causou)
+  oute-emit quota <spawn|close|open> snapshot da cota das assinaturas (#347): lê `oute-quota --json` (teto de 8 s) e manda
+                                     oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
+                                     /v1/metrics) e, para agente sem leitura, o evento oute.quota.unknown com o motivo
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
   oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
@@ -23,7 +26,8 @@ endpoint como par). Sem endpoint em nenhum dos dois, não envia nem guarda no sp
 Best-effort: teto de ~2 s por chamada, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com
 OUTE_EMIT_DEBUG=1 (o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida:
 o leitor do .out para na primeira linha em branco.
-Spool (#166): POST que falha (coletor fora, timeout, 5xx) vai para ~/.oute/emit/spool/ (um arquivo por envio,
+Métricas (#347): vão ao mesmo coletor em /v1/metrics (o endpoint de logs com o sufixo trocado), sem spool: o
+snapshot seguinte substitui o que se perdeu. Spool (#166), dos eventos: POST que falha (coletor fora, timeout, 5xx) vai para ~/.oute/emit/spool/ (um arquivo por envio,
 gravação atômica, até 50 MB; cheio = descarta e conta em ~/.oute/emit/spool.dropped). Toda chamada reenvia o
 spool antes, como foi gravado (mesmo oute.event.id e hora do fato), dentro do mesmo teto.
 Reconciliação (#167): ~/.oute/emit/decided/<id> marca o pedido cujo oute.canal.decided já foi enviado (POST aceito
@@ -35,7 +39,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
+import subprocess
 import sys
 import time
 import urllib.error
@@ -206,16 +212,30 @@ def resource_logs(events):
             for a, recs in by_agent.items()]
 
 
+def metrics_endpoint():
+    """/v1/metrics do mesmo coletor: o endpoint de logs com o sufixo trocado; fora do padrão /v1/logs, sem métrica"""
+    ep = endpoint()
+    if not ep:
+        return None
+    if ep.endswith("/v1/logs"):
+        return ep[: -len("/v1/logs")] + "/v1/metrics"
+    debug(f"endpoint de logs fora do padrão /v1/logs ({ep}): sem como derivar o de métricas")
+    return None
+
+
 def post_logs(logs, timeout):
     """um POST com os resourceLogs. "ok" = aceito; "retry" = coletor fora, timeout, 5xx/408/429 (vale guardar);
     "bad" = recusa permanente (4xx: reenviar não adianta)"""
-    ep = endpoint()
+    return post_json(endpoint(), {"resourceLogs": logs}, timeout)
+
+
+def post_json(ep, payload, timeout):
     if not ep:
         debug("sem endpoint (OTEL_EXPORTER_OTLP_ENDPOINT vazio no ambiente e no ~/.oute_env)")
         return "bad"
     if timeout < MIN_POST:
         return "retry"
-    req = urllib.request.Request(ep, data=json.dumps({"resourceLogs": logs}).encode(), method="POST",
+    req = urllib.request.Request(ep, data=json.dumps(payload).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     # teto de verdade: o timeout do urllib vale por operação de socket, não para o POST inteiro
     signal.signal(signal.SIGALRM, _alarm)
@@ -700,6 +720,79 @@ def cmd_regression(pairs):
         caller = "unknown"
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return [event("oute.regression.run", caller, ts, attrs, scope=f"regression/{f['run']}")]
+# ---------------------------------------------------------------- cota das assinaturas (#347)
+QUOTA_MOMENTS = ("spawn", "close", "open")
+QUOTA_AGENTS = ("claude", "codex")
+QUOTA_WINDOWS = ("5h", "7d")
+QUOTA_READ_TIMEOUT = float(os.environ.get("OUTE_EMIT_QUOTA_TIMEOUT") or 8)  # o oute-quota tem teto de ~6 s; a variável só existe para os testes
+QUOTA_REASON_RE = re.compile(r"^[a-z0-9-]{1,32}$")
+
+
+def read_quota():
+    """o JSON do `oute-quota --json` ou None (comando ausente, estouro do teto, saída que não é JSON). Saída 1 (todos
+    unknown) também traz JSON; só a falta de JSON válido (ex.: uso, código 2) é falha"""
+    exe = shutil.which("oute-quota")
+    if not exe:
+        debug("oute-quota ausente: sem snapshot de cota")
+        return None
+    try:
+        r = subprocess.run([exe, "--json"], capture_output=True, text=True, timeout=QUOTA_READ_TIMEOUT,
+                           stdin=subprocess.DEVNULL, check=False)
+        data = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        debug(f"oute-quota: {e}")
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("agents"), dict) else None
+
+
+def quota_resource(agent):
+    """a origem do host e o agente da assinatura; a marca de sessão (oute.task.*, oute.swarm.*) não vale para um
+    snapshot do host"""
+    attrs = {k: v for k, v in resource(agent).items() if not k.startswith(("oute.task.", "oute.swarm."))}
+    return {"attributes": kvs(attrs)}
+
+
+def gauge(name, unit, points):
+    return {"name": name, "unit": unit, "gauge": {"dataPoints": points}}
+
+
+def cmd_quota(moment, data, now_ns):
+    """-> (eventos oute.quota.unknown, resourceMetrics). Agente `ok`: um ponto por janela de oute.quota.used_pct (%,
+    0–100) e de oute.quota.reset_in_seconds (s), com o atributo oute.quota.window. Leitura de cache (stale) leva a hora
+    da leitura (now − age_s) e o reset contado a partir dela: ponto + reset_in = a hora do reset. `unknown` não
+    emite ponto (zero seria mentira): vai o evento com o motivo"""
+    if moment not in QUOTA_MOMENTS:
+        raise Skip(f"momento de cota inválido: {moment}")
+    events, rms = [], []
+    ts = datetime.fromtimestamp(now_ns // 10**9, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for agent in QUOTA_AGENTS:
+        a = data["agents"].get(agent)
+        if not isinstance(a, dict):
+            continue
+        if a.get("status") != "ok":
+            reason = a.get("reason")
+            reason = reason if isinstance(reason, str) and QUOTA_REASON_RE.match(reason) else "formato"
+            events.append(event("oute.quota.unknown", agent, ts, {"oute.quota.reason": reason, "oute.quota.moment": moment},
+                                scope=f"quota/{agent}", key=f"{moment}/{reason}"))
+            continue
+        age = a.get("age_s")
+        t_ns = now_ns - int(age) * 10**9 if isinstance(age, (int, float)) and not isinstance(age, bool) and age > 0 else now_ns
+        used, reset = [], []
+        for w in QUOTA_WINDOWS:
+            win = (a.get("windows") or {}).get(w)
+            pct = win.get("used_pct") if isinstance(win, dict) else None
+            at = win.get("resets_at") if isinstance(win, dict) else None
+            if isinstance(pct, bool) or not isinstance(pct, (int, float)) or not 0 <= pct <= 100 \
+                    or not isinstance(at, str) or not TS_RE.match(at):
+                continue
+            attrs = kvs({"oute.quota.window": w})
+            used.append({"attributes": attrs, "timeUnixNano": str(t_ns), "asDouble": float(pct)})
+            reset.append({"attributes": attrs, "timeUnixNano": str(t_ns), "asInt": str(max(0, (ns(at) - t_ns) // 10**9))})
+        if used:
+            rms.append({"resource": quota_resource(agent),
+                        "scopeMetrics": [{"scope": {"name": "oute-emit"}, "metrics": [
+                            gauge("oute.quota.used_pct", "%", used), gauge("oute.quota.reset_in_seconds", "s", reset)]}]})
+    return events, rms
 
 
 # ---------------------------------------------------------------- reconciliação (#167)
@@ -854,7 +947,7 @@ def main(argv):
     if verb in ("-h", "--help", ""):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
-    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1}
+    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2}
     if verb == "regression":
         bad = len(argv) < 2
     elif verb == "task":
@@ -864,6 +957,15 @@ def main(argv):
     if bad:
         debug(f"uso inválido: {' '.join(argv)}")
         return
+    quota = None
+    if verb == "quota":
+        if argv[1] not in QUOTA_MOMENTS:
+            debug(f"momento de cota inválido: {argv[1]}")
+            return
+        quota = read_quota()
+        if quota is None:
+            return
+        deadline = time.monotonic() + TIMEOUT  # a leitura tem o teto dela; o envio, o de sempre
     drained = drain(deadline)  # toda chamada: primeiro o que ficou para trás
     if verb == "canal":
         events = cmd_canal(argv[1])
@@ -877,6 +979,11 @@ def main(argv):
         send(cmd_task(argv[1], argv[2], argv[3:]), deadline, drained)
     elif verb == "regression":
         send(cmd_regression(argv[1:]), deadline, drained)
+    elif verb == "quota":
+        events, rms = cmd_quota(argv[1], quota, time.time_ns())
+        if rms:
+            post_json(metrics_endpoint(), {"resourceMetrics": rms}, deadline - time.monotonic())
+        send(events, deadline, drained)
     elif verb == "backfill":
         cmd_backfill()
 

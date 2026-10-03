@@ -189,7 +189,7 @@ git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"
 
 **Gates:** os que o repo documenta, lidos do `AGENTS.md` **da base** (no oute-agent, a seção "Validar antes do PR"), e os que o CI do repo roda (`.github/workflows/` da base). Não invente tabela genérica por linguagem. No oute-agent hoje:
 - `bash -n` em todo script alterado;
-- `docker compose --project-directory . -f docker/compose.yaml config`, com as variáveis exigidas preenchidas por valores fictícios;
+- `docker compose config` (gate no CI pelo teste `tests/compose-config.test.sh`; no container sem Docker, pula);
 - `tests/addons-link.test.sh`;
 - `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/langfuse.yaml --config=config/otel/agent-studio.yaml`, se `config/otel/` mudou;
 - modo `100755` nos executáveis: `bash scripts/exec-files` e `git ls-files -s` no head;
