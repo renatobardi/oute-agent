@@ -877,9 +877,36 @@ check "merges em série: sem credencial real (#322)"      grep -qF '**Ambiente l
 check "merges em série: o que rodar aponta o ambiente limpo (#322)" grep -qF '**O que rodar**, dentro de `$d/wt`, em ambiente limpo e sem credencial real (item 3)' "$FAKE/oute-task.last"
 check "merges em série: falha não mergeia e refaz a pergunta" grep -qF '**Falha** (o merge de teste conflita ou um gate falha): não mergeie esse PR nem os seguintes da opção. Refaça a pergunta ao Bardi, com opções numeradas e o que você achou' "$FAKE/oute-task.last"
 check "merges em série: worktree removida no fim"        grep -qF '**No fim, passando ou falhando,** remova a worktree: `git worktree remove --force "$d/wt"` e `rm -rf "$d"`. Nada é empurrado' "$FAKE/oute-task.last"
+# issue sem PR (#115): entrega só no GitHub, da triagem ao fechamento
+check "sem PR: triagem classifica a entrega (#115)"      grep -qF -- '- **Entrega de cada issue escolhida:** `PR` ou `só GitHub`. É `só GitHub` a issue cuja entrega é só uma ação no GitHub (labels, comentários, fechar ou editar issue), sem arquivo alterado no repo: ela não gera PR.' "$FAKE/oute-task.last"
+check "sem PR: coluna da entrega na tabela da triagem (#115)" grep -qF -- '- Apresente uma tabela: issue, título, entrega: PR / só GitHub, área tocada, agente da sessão,' "$FAKE/oute-task.last"
+check "sem PR: instrução manda publicar a proposta e parar (#115)" grep -qF 'publicar a proposta como comentário na issue (o que vai aplicar, item por item) e parar até o ok do Bardi' "$FAKE/oute-task.last"
+check "sem PR: aplicar e comentar o resultado só depois do ok (#115)" grep -qF 'só depois do ok, aplicar e comentar o resultado na issue, terminando com `PRONTO #<n>: <url do comentário com o resultado> — sem PR`' "$FAKE/oute-task.last"
+check "sem PR: done sem PR não é alerta para esse tipo (#115)" grep -qF 'para a issue com `só GitHub` na tabela da triagem, `done` sem PR não é alerta: é o esperado.' "$FAKE/oute-task.last"
+check "sem PR: o alerta continua para issue que deveria gerar PR (#115)" grep -qF 'O alerta `idle`/`done` sem PR continua valendo para a issue que deveria gerar PR (`PR` na tabela).' "$FAKE/oute-task.last"
+check "sem PR: o alerta geral do monitor fica como estava (#115)" grep -qF 'uma sessão ficar `blocked` ou `idle`/`done` sem PR; um PR abrir;' "$FAKE/oute-task.last"
+check "sem PR: ok do Bardi por opção numerada, repassado por tell (#115)" grep -qF 'Só com a escolha dele repasse o ok à sessão com `oute-swarm tell`.' "$FAKE/oute-task.last"
+check "sem PR: conferência com gh, só leitura, no lugar da auditoria (#115)" grep -qF '**Conferência, no lugar da auditoria do PR:** com a sessão parada no `PRONTO #<n>: … — sem PR`, confira o critério de aceite da issue com `gh`, só leitura' "$FAKE/oute-task.last"
+check "sem PR: dispatcher não aplica nem corrige no GitHub (#115)" grep -qF 'Você não aplica nem corrige nada no GitHub' "$FAKE/oute-task.last"
+check "sem PR: opção numerada fecha a issue e a aba (#115)" grep -qF '`1. fechar a issue #<n> (gh issue close) e a aba <n>-<slug>`' "$FAKE/oute-task.last"
+check "sem PR: fechamento com gh issue close e close da aba (#115)" grep -qF '`gh issue close <n> --comment "<resumo da conferência>"` e `oute-swarm close <n>-<slug> --yes`' "$FAKE/oute-task.last"
+check "sem PR: cada regra na sua seção, §1 a §4 (#115)" [ "$(grep -n -e '^## [1-4]\. ' -e '^### 4\.1 ' -e 'Entrega de cada issue escolhida' -e '^- \*\*Issue `só GitHub` (sem PR):\*\*' "$FAKE/oute-task.last" | cut -d: -f2- | cut -c1-12 | tr '\n' '|')" == '## 1. Triage|- **Entrega |## 2. Abertu|- **Issue `s|## 3. Acompa|- **Issue `s|## 4. Fecham|- **Issue `s|### 4.1 Retr|' ]
+check "sem PR: rodada só termina com as issues só GitHub fechadas (#115)" grep -qF 'e todas as issues `só GitHub` fechadas ou abandonadas (confirme com o Bardi)' "$FAKE/oute-task.last"
 check "triagem: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 CASE=seletor-abre-cx; round "$CASE"
 opn --max 2 --agent codex
 check "triagem de rodada com --agent: oute-select com o agente" grep -qF "\`oute-select --json --repo $REPO --issue <n> --agent codex\`" "$FAKE/oute-task.last"
+
+# 11f. sessão de issue sem arquivo alterado (#115): sem PR, proposta na issue, ok do Bardi, resultado na issue
+CASE=sem-pr; round "$CASE"
+sw spawn 115-sempr "instrução"
+P="$STATE/115-sempr.prompt"
+check "worker sem PR: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sem PR: sem arquivo alterado, não abre PR (#115)" grep -qF -- '- **Issue sem arquivo alterado** (a entrega é só uma ação no GitHub: labels, comentários, fechar ou editar issue): não abra PR' "$P"
+check "worker sem PR: proposta na issue, e para (#115)"  grep -qF 'Publique a proposta como comentário na issue #115 (o que vai aplicar, item por item) e pare, terminando com `BLOQUEADO #115: proposta em <url do comentário>, aplico com o ok do Bardi`.' "$P"
+check "worker sem PR: aplica só depois do ok e registra o resultado na issue (#115)" grep -qF 'Só depois do ok do Bardi (dele ou repassado pelo dispatcher) aplique, registre o resultado em outro comentário na issue e termine com `PRONTO #115: <url do comentário com o resultado> — sem PR`.' "$P"
+check "worker sem PR: não fecha a issue (#115)"          grep -qF 'Não feche a issue #115: quem fecha é o dispatcher, com o ok do Bardi.' "$P"
+check "worker sem PR: o PRONTO com PR continua (#115)"   grep -qF 'termine com uma linha `PRONTO #115: <url do PR>`' "$P"
+check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end
