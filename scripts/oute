@@ -447,6 +447,32 @@ studio_replay() {
   return "$rc"
 }
 
+# --- oute studio rebuild-state (#345, ADR-08 §7): remonta o estado do SurrealDB (pedidos, rodadas, sessões) a partir
+# dos logs e spans do DuckDB, sem ler o bucket. Para o agent-studio (o DuckDB aceita um escritor só), roda o one-off
+# `agent_studio.rebuild_state` na mesma imagem e no mesmo ambiente do serviço (as credenciais vêm do compose, nunca de
+# argv nem de log) e sobe o serviço de novo, qualquer que seja o resultado. Enquanto ele está parado, o collector
+# segura a ingestão na fila em disco (ADR-08 §7). Só no host com o agent-studio.
+studio_rebuild_state() {
+  agent_studio_enabled \
+    || die "oute studio rebuild-state só roda no host com o agent-studio (OUTE_AGENT_STUDIO=1 no .env, o oute-server)"
+  need docker
+  host_secrets 0; agent_studio_up
+  [[ ",${COMPOSE_PROFILES:-}," == *",$STUDIO_PROFILE,"* ]] \
+    || die "o agent-studio não está configurado (credenciais ausentes no services.env, aviso acima): oute up --refresh-secrets"
+  docker ps -q -f name='^oute-surrealdb$' -f status=running | grep -q . \
+    || die "o container oute-surrealdb não está de pé (oute up)"
+  echo "parando o agent-studio (a ingestão fica na fila do collector)..."
+  "${COMPOSE[@]}" stop agent-studio >/dev/null || die "não consegui parar o agent-studio"
+  local rc=0 up=0
+  "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint /opt/agent-studio/venv/bin/python agent-studio \
+    -m agent_studio.rebuild_state || rc=$?
+  echo "subindo o agent-studio de novo..."
+  "${COMPOSE[@]}" up -d --no-build --no-deps agent-studio >/dev/null || up=1
+  if [[ "$up" != 0 ]]; then echo "oute: o agent-studio não subiu de novo: rode oute up" >&2; return 1; fi
+  [[ "$rc" == 0 ]] || echo "oute: rebuild-state falhou (rc $rc); o que já entrou fica e rodar de novo termina" >&2
+  return "$rc"
+}
+
 # --- rede (#230): derivação e validação de OUTE_NET_IP_RANGE
 # derive_ip_range <subnet>: extrai a metade alta (/17) de uma subnet /16
 # Ex.: 172.19.0.0/16 -> 172.19.128.0/17
@@ -901,9 +927,13 @@ case "${1:-}" in
   storage)   # acesso direto ao bucket, sem passar pelo mount: oute storage ls | lsl | about | <qualquer subcomando rclone>
     oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
     sub="${2:-ls}"; rclone "$sub" "oci:${OUTE_BUCKET:-oute-shared}${3:+/$3}" "${@:4}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
-  studio)  # #159: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]
-    [[ "${2:-}" == replay ]] || { echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]" >&2; exit 2; }
-    studio_replay "${@:3}" ;;
+  studio)  # #159: replay; #345: rebuild-state
+    case "${2:-}" in
+      replay) studio_replay "${@:3}" ;;
+      rebuild-state) [[ $# == 2 ]] || { echo "uso: oute studio rebuild-state (sem argumentos)" >&2; exit 2; }
+                     studio_rebuild_state ;;
+      *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state" >&2; exit 2 ;;
+    esac ;;
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   secrets)   # #21: relê o vault (pede a master password), regrava agent.env e services.env (#256) e tranca a sessão
     [[ "${2:-}" == refresh ]] || { echo "uso: oute secrets refresh" >&2; exit 2; }
@@ -946,6 +976,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   sync-shared  monta bucket OCI em ~/.oute/shared via rclone (credencial: item oci-storage do vault)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]  só no oute-server: reenvia o bucket de telemetria ao agent-studio (ADR-08 §7)
+  studio rebuild-state  só no oute-server: remonta o estado do SurrealDB a partir do DuckDB, com o agent-studio parado (ADR-08 §7)
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas
   version      versão do repo e da imagem em execução

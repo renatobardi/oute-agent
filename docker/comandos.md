@@ -46,6 +46,10 @@ Dois lugares, dois conjuntos de comandos:
                        agent-studio, com dedupe (rodar de novo não duplica; o SurrealDB volta junto). Faixa em UTC
                        pela partição do bucket, com 1 h de folga de cada lado. Objeto ilegível (Archive, mais de
                        90 dias) é listado e pulado, com rc ≠ 0: restaure-o antes (ADR-08 §7)
+  oute studio rebuild-state
+                       só no oute-server (OUTE_AGENT_STUDIO=1): remonta o estado do SurrealDB (pedidos, rodadas,
+                       sessões) a partir do DuckDB, sem ler o bucket. Para o agent-studio, roda o one-off e sobe
+                       de novo (a ingestão espera na fila do collector). Imprime a contagem antes e depois (ADR-08 §7)
   oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
 
