@@ -46,7 +46,9 @@ services:
       OUTE_HOST: ${OUTE_HOST:-oute}
       OUTE_INSTANCE: ${OUTE_INSTANCE:-oute-agent}
       OTEL_RESOURCE_ATTRIBUTES: host.name=${OUTE_HOST:-oute},oute.instance=${OUTE_INSTANCE:-oute-agent},deployment.environment=${OUTE_HOST:-oute}
-    # #6: sem acesso ao Vaultwarden (nem DNS do vault): só os valores da pasta oute-agent, resolvidos no host
+    # #6: sem acesso ao Vaultwarden (nem DNS do vault): só os valores da pasta oute-agent, resolvidos no host.
+    # #256: segredo de serviço (pasta oute-services: ingestão do agent-studio, root do SurrealDB) nunca entra aqui,
+    # nem no arquivo nem no environment acima; do agent-studio o agent só tem a credencial de leitura.
     secrets:
       - agent_env
     volumes:
@@ -129,7 +131,7 @@ services:
   agent-studio:
     # ADR-08 (#185): recebe OTLP/HTTP JSON do collector de cada host e grava no DuckDB (dedupe; 2xx só depois do
     # commit). Só no host com OUTE_AGENT_STUDIO=1 no .env (o oute-server): o `oute up` liga o profile quando o
-    # agent.env tem o item agent-studio do vault. No Mac não sobe. Mesma imagem do agent, outro comando; um
+    # services.env tem o item agent-studio do vault. No Mac não sobe. Mesma imagem do agent, outro comando; um
     # processo só (o DuckDB aceita um escritor só).
     profiles: [agent-studio]
     image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
@@ -139,13 +141,18 @@ services:
     user: "10001:10001"
     entrypoint: ["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"]
     environment:
-      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_TOKEN:-}
+      # duas credenciais (#256, ADR-08 §6): ingestão (pasta oute-services do vault; só o collector manda com ela) e
+      # leitura (pasta oute-agent; agente, tray e tela). Sem a de leitura, uma só para tudo (transição).
+      AGENT_STUDIO_INGEST_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}
+      AGENT_STUDIO_READ_TOKEN: ${AGENT_STUDIO_READ_TOKEN:-}
+      # nome de antes da #256: imagem antiga (até a release desta mudança) só conhece este; a nova ignora
+      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}
       AGENT_STUDIO_DB: /data/agent-studio/agent-studio.duckdb
       AGENT_STUDIO_PORT: "8430"
       PYTHONPATH: /opt/agent-studio/app
       # config (#203: preços do custo estimado; #204: hosts e limites), montada só leitura logo abaixo
       AGENT_STUDIO_CONFIG: /etc/oute/agent-studio/config.toml
-      # estado derivado (#187): o SurrealDB pela rede oute; os dois bancos juntos ou nenhum (503)
+      # estado derivado (#187): o SurrealDB pela rede studio (#256); os dois bancos juntos ou nenhum (503)
       AGENT_STUDIO_SURREAL_URL: http://surrealdb:8000
       AGENT_STUDIO_SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
       # telemetria própria (#188): logs (só avisos, com teto) e métricas pelo SDK OTel ao collector local, com a
@@ -172,7 +179,8 @@ services:
     depends_on:
       surrealdb:
         condition: service_healthy
-    networks: [oute]
+    # oute: o collector local e o agent chegam aqui; studio: só para falar com o SurrealDB (#256)
+    networks: [oute, studio]
 
   surrealdb:
     # ADR-08 (#187): estado derivado (rodadas, workers, sessões, pedidos, conversas), consultado pelo tray e pela
@@ -191,7 +199,7 @@ services:
       SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
     # obrigatório: sem limite, o cache do RocksDB mede pela RAM do host (~metade dela, #139)
     mem_limit: ${OUTE_SURREALDB_MEM:-1g}
-    # sem porta publicada: só o agent-studio, pela rede oute
+    # sem porta publicada: só o agent-studio, pela rede studio
     volumes:
       - oute-surrealdb:/data/surrealdb
     healthcheck:
@@ -202,7 +210,8 @@ services:
     depends_on:
       volume-init:
         condition: service_completed_successfully
-    networks: [oute]
+    # #256: fora da rede oute. O agent (yolo) não resolve nem alcança surrealdb:8000; só o agent-studio está nas duas
+    networks: [studio]
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:${OUTE_OTELCOL_VERSION:-0.161.0}
@@ -233,8 +242,9 @@ services:
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
       OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
-      # token da ingestão do agent-studio (item agent-studio do vault), só com o pipeline do agent-studio ligado
-      AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_TOKEN:-}
+      # credencial de ingestão do agent-studio (item agent-studio da pasta oute-services do vault, #256), só com o
+      # pipeline do agent-studio ligado
+      AGENT_STUDIO_INGEST_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}
       # destino do pipeline do agent-studio, escolhido pelo `oute up` por host (#190)
       AGENT_STUDIO_URL: ${AGENT_STUDIO_URL:-http://agent-studio:8430}
     volumes:
@@ -248,7 +258,8 @@ services:
 
 secrets:
   agent_env:
-    # `export K='v'` da pasta oute-agent do vault, gerado pelo `oute up` no host (0600). Nada de sessão/API key do bw.
+    # `export K='v'` da pasta oute-agent do vault, gerado pelo `oute up` no host (0600). Nada de sessão/API key do bw,
+    # nem segredo de serviço (pasta oute-services -> ~/.oute/services.env, que nenhum container monta, #256).
     file: ${OUTE_AGENT_ENV_FILE:-~/.oute/agent.env}
 
 volumes:
@@ -269,3 +280,8 @@ networks:
         - subnet: ${OUTE_NET_SUBNET:-172.19.0.0/16}
           gateway: ${OUTE_NET_GATEWAY:-172.19.0.1}
           ip_range: ${OUTE_NET_IP_RANGE:-172.19.128.0/17}
+  # #256: rede só do agent-studio com o SurrealDB. internal = sem saída e sem rota a partir do host; o agent não
+  # está nela. Só é criada no host com o profile agent-studio.
+  studio:
+    driver: bridge
+    internal: true

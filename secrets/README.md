@@ -1,6 +1,16 @@
 # Segredos — Vaultwarden (vault.oute.pro) é a única fonte
 
-Nenhum valor real vive neste repo. Estrutura esperada no vault, pasta `oute-agent`:
+Nenhum valor real vive neste repo. Três pastas no vault, cada uma com um destino:
+
+| pasta | vai para | quem recebe |
+|---|---|---|
+| `oute-agent` | `~/.oute/agent.env` → `/run/secrets/agent_env` | o container `agent` (agentes em yolo) |
+| `oute-services` | `~/.oute/services.env` | só os serviços do compose (`agent-studio`, `surrealdb`, `otel-collector`); **nunca o `agent`** |
+| `oute-admin` | nada em disco | só o `oute oci-bootstrap` |
+
+**Segredo novo: em que pasta?** (ADR-01, adendo #256) Pergunte "o agente usa?". Se só um serviço usa, ou se o valor dá **escrita** em algo que o Bardi lê para decidir (telemetria, estado de pedido), é `oute-services`. Na dúvida, `oute-services`. Nome que existe na `oute-services` nunca entra no `agent.env`, mesmo repetido na `oute-agent`.
+
+Pasta `oute-agent`:
 
 | item        | tipo | campos (custom fields)                                                       |
 |-------------|------|-------------------------------------------------------------------------------|
@@ -12,6 +22,15 @@ Nenhum valor real vive neste repo. Estrutura esperada no vault, pasta `oute-agen
 | langfuse    | Note | LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST (opcional; default `https://cloud.langfuse.com`) — liga o painel de metadados (#13) |
 | ai-memory   | Note | AI_MEMORY_AUTH_TOKEN (opcional)                                               |
 | anthropic   | Note | ANTHROPIC_API_KEY (só se quiser ai-memory consolidando com LLM)               |
+| agent-studio | Note | AGENT_STUDIO_READ_TOKEN: credencial **só de leitura** do agent-studio (`GET /v1/usage`, `/v1/alerts`, `/v1/tray` e a tela; na ingestão = 403). Valor próprio: igual à de ingestão, o `oute up` não entrega ao `agent` |
+
+Pasta **`oute-services`** (#256; nunca vai ao `agent`):
+
+| item         | tipo | campos (custom fields) |
+|--------------|------|------------------------|
+| agent-studio | Note | AGENT_STUDIO_INGEST_TOKEN (credencial de ingestão: só o collector manda com ela, nos dois hosts); AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, só no oute-server) |
+
+Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
 
 Pasta **`oute-admin`** (separada, NUNCA exportada pro container; só o `oute oci-bootstrap` lê):
 
@@ -26,4 +45,4 @@ No host (Mac / LXC), só dois arquivos fora do repo:
 ~/.ssh/id_ed25519.pub     # chave que entra no container
 ```
 
-`~/.oute/agent.env` (0600, gerado pelo host) é o cache: `oute up`, `pull` e `sync-shared`/`storage` leem só ele, sem vault e sem senha. A master password é pedida só quando o vault é aberto — `oute secrets refresh` (ou `up --refresh-secrets`, ou `up` sem `agent.env`) e `oute oci-bootstrap` — e a sessão é trancada (`bw lock`) logo depois; nada de sessão em disco. Mudou um segredo no vault? `oute secrets refresh` e `oute restart`. `BW_PASSWORD` no ambiente pula o prompt.
+`~/.oute/agent.env` e `~/.oute/services.env` (0600, gerados pelo host) são o cache: `oute up`, `pull` e `sync-shared`/`storage` leem só eles, sem vault e sem senha. Uma senha abre as duas pastas. A master password é pedida só quando o vault é aberto — `oute secrets refresh` (ou `up --refresh-secrets`, ou `up` sem `agent.env`) e `oute oci-bootstrap` — e a sessão é trancada (`bw lock`) logo depois; nada de sessão em disco. Mudou um segredo no vault? `oute secrets refresh` e `oute restart`. `BW_PASSWORD` no ambiente pula o prompt.

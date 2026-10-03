@@ -5,6 +5,9 @@
 # Docker: `docker` e `crontab` são falsos, com o estado em arquivos, e um sshd de mentira devolve o banner que o `up`
 # espera. O scripts/oute roda de uma cópia num checkout git temporário: a limpeza mexe no checkout, nunca no real.
 # Os nomes antigos levam [-] nos padrões, como no scripts/oute, para não voltarem a aparecer no repo.
+# Segredos de serviço (#256, casos 9 a 15): os nomes de serviço saem do arquivo do agent (cache antigo ou vault sem
+# a pasta oute-services), vão para o services.env e chegam só ao compose; o vault é um scripts/oute-secrets.sh falso
+# no checkout de mentira, e o `docker compose up` falso grava o ambiente que recebeu.
 # Uso: tests/oute-up.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -22,7 +25,13 @@ cat > "$BIN/docker" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$F_LOG"
 case "$1" in
-  compose) case " $* " in *" ps "*) echo "NAME  STATUS" ;; esac ;;
+  compose) case " $* " in
+             *" ps "*) echo "NAME  STATUS" ;;
+             # o que o compose interpolaria (#256): só o que os casos de segredo de serviço conferem
+             *" up "*) printf '%s\n' "ingest=${AGENT_STUDIO_INGEST_TOKEN:-}" "read=${AGENT_STUDIO_READ_TOKEN:-}" \
+                         "pass=${AGENT_STUDIO_SURREAL_PASS:-}" "antigo=${AGENT_STUDIO_TOKEN:-}" "otel=${OUTE_OTEL_STUDIO:-}" \
+                         "url=${AGENT_STUDIO_URL:-}" "profiles=${COMPOSE_PROFILES:-}" "bw=${BW_SESSION:-}" > "$F_ENV" ;;
+           esac ;;
   image)   exit 0 ;;
   volume)  exit 1 ;;
   run)     echo "10485760 0" ;;
@@ -42,7 +51,7 @@ case "${1:-}" in
 esac
 SH
 chmod +x "$BIN"/*
-export F_LOG="$TMP/docker.log" F_LEGACY="$TMP/legacy" F_CRON="$TMP/cron" F_CRON_LOG="$TMP/cron.log"
+export F_LOG="$TMP/docker.log" F_LEGACY="$TMP/legacy" F_CRON="$TMP/cron" F_CRON_LOG="$TMP/cron.log" F_ENV="$TMP/compose.env"
 : > "$F_LOG"; : > "$F_CRON_LOG"
 
 # sshd de mentira: manda o banner a quem conecta (o `up` espera o SSH-2.0 antes de voltar)
@@ -75,10 +84,16 @@ OLDDIR="config/lite""llm"   # pasta dos gerados do roteador (#271), com o nome p
 gerados() { mkdir -p "$REPO/$OLDDIR"; for f in router.yaml config.yaml candidates.json catalog.json; do echo x > "$REPO/$OLDDIR/$f"; done; }
 
 # oute <cmd>: roda o scripts/oute de verdade com os falsos; guarda saída em $OUT e código em $RC. Sem OCI_S3_* no
-# ambiente: com eles (e rclone no host) o `up` montaria o bucket de verdade dentro de $TMP
+# ambiente: com eles (e rclone no host) o `up` montaria o bucket de verdade dentro de $TMP. Sem as credenciais do
+# agent-studio nem do vault de quem roda o teste; F_AMBIENT=<valor> põe uma credencial de ingestão no ambiente e
+# F_SESSION=<valor> uma sessão do vault já aberta por quem chama (#256)
 oute() {
   OUT="$(env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
+    -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
+    -u OUTE_AGENT_STUDIO_URL -u OUTE_VAULT_FOLDER -u OUTE_VAULT_SERVICES_FOLDER -u GH_TOKEN -u GHCR_TOKEN \
+    -u BW_SESSION -u BW_PASSWORD -u BW_CLIENTID -u BW_CLIENTSECRET \
+    ${F_AMBIENT:+AGENT_STUDIO_INGEST_TOKEN="$F_AMBIENT" AGENT_STUDIO_SURREAL_PASS="$F_AMBIENT"} ${F_SESSION:+BW_SESSION="$F_SESSION"} \
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/id_ed25519.pub" \
     "$REPO/scripts/oute" "$@" 2>&1)"; RC=$?
@@ -202,5 +217,170 @@ oute schedule
 check "schedule saiu: comando desconhecido"            has 'comando desconhecido: schedule'
 oute --help
 check "ajuda sem o roteador"                           hasnt 'router'
+
+# ================================================================ segredos de serviço fora do agent (#256)
+command -v jq >/dev/null || die "jq ausente (leitura do vault)"
+rnd() { python3 -c "import secrets; print(secrets.token_hex(12))"; }
+T_OLD="$(rnd)"; S_OLD="$(rnd)"; T_ING="$(rnd)"; T_READ="$(rnd)"; S_NEW="$(rnd)"; T_GH="$(rnd)"; T_FOO="$(rnd)"
+AENV="$TMP/oute/agent.env"; SENV="$TMP/oute/services.env"
+SVC_RE='^export (AGENT_STUDIO_SURREAL_PASS|AGENT_STUDIO_INGEST_TOKEN|AGENT_STUDIO_TOKEN)='
+cenv() { sed -n "s/^$1=//p" "$F_ENV"; }
+# nenhum valor de segredo na saída do `oute`
+quiet() { local v; for v in "$T_OLD" "$S_OLD" "$T_ING" "$T_READ" "$S_NEW" "$T_GH" "$T_FOO"; do ! grep -qF -- "$v" <<<"$OUT" || return 1; done; }
+# vault falso: uma pasta = um arquivo em $F_VAULT com as linhas do `oute-secrets export`; pasta sem arquivo = rc 4
+# (como o scripts/oute-secrets.sh de verdade); <pasta>.rc = falha de leitura com esse código. Chamadas em $F_VAULT_LOG
+export F_VAULT="$TMP/vault" F_VAULT_LOG="$TMP/vault.log"; mkdir -p "$F_VAULT"; : > "$F_VAULT_LOG"
+cat > "$REPO/scripts/oute-secrets.sh" <<'SH'
+#!/usr/bin/env bash
+folder="${OUTE_VAULT_FOLDER:-oute-agent}"
+echo "$1 $folder sessao=${BW_SESSION:-nenhuma}" >> "$F_VAULT_LOG"
+case "$1" in
+  session) [[ ! -e "$F_VAULT/session.rc" ]] || exit 1; echo sessao-de-teste ;;
+  export)  [[ ! -e "$F_VAULT/$folder.rc" ]] || exit "$(cat "$F_VAULT/$folder.rc")"
+           [[ -f "$F_VAULT/$folder" ]] || { echo "pasta '$folder' não existe no vault" >&2; exit 4; }
+           cat "$F_VAULT/$folder" ;;
+esac
+SH
+printf '#!/usr/bin/env bash\necho "bw $*" >> "$F_VAULT_LOG"\n' > "$BIN/bw"
+chmod +x "$REPO/scripts/oute-secrets.sh" "$BIN/bw"; : > "$TMP/oute/bw_client.env"
+old_cache() {   # agent.env como a versão anterior gravava: tudo da pasta oute-agent, com os segredos de serviço
+  printf 'export AGENT_STUDIO_SURREAL_PASS=%s\nexport AGENT_STUDIO_TOKEN=%s\nexport GH_TOKEN=%s\nexport PEM=%q\n' \
+    "$S_OLD" "$T_OLD" "$T_GH" $'linha1\nlinha2' > "$AENV"; rm -f "$SENV"
+}
+
+# ---------------------------------------------------------------- 9. cache antigo, sem abrir o vault (Mac)
+old_cache; rm -f "$REPO/.env"
+oute up
+check "cache antigo: rc 0"                             [ "$RC" -eq 0 ]
+check "cache antigo: agent.env sem os nomes de serviço" bash -c '! grep -qE "$1" "$0"' "$AENV" "$SVC_RE"
+check "cache antigo: agent.env sem os valores"         bash -c '! grep -qF -e "$1" -e "$2" "$0"' "$AENV" "$T_OLD" "$S_OLD"
+check "cache antigo: o resto do agent.env fica igual"  test "$(cat "$AENV")" = "$(printf 'export GH_TOKEN=%s\nexport PEM=%q' "$T_GH" $'linha1\nlinha2')"
+check "cache antigo: services.env com os dois"         test "$(sort "$SENV")" = "$(printf 'export AGENT_STUDIO_SURREAL_PASS=%s\nexport AGENT_STUDIO_TOKEN=%s' "$S_OLD" "$T_OLD")"
+check "cache antigo: services.env e agent.env 0600"    test "$(find "$SENV" "$AENV" -perm 600 | wc -l)" -eq 2
+check "cache antigo: avisa, com os nomes"              has 'aviso: segredo de serviço fora do arquivo do agent (#256): AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_TOKEN estava'
+check "cache antigo: avisa a pasta a criar"            has 'pasta oute-services do vault'
+check "cache antigo: saída sem valor de segredo"       quiet
+check "cache antigo: o vault não é aberto"             test ! -s "$F_VAULT_LOG"
+check "Mac: collector recebe a credencial de ingestão" test "$(cenv ingest)" = "$T_OLD"
+check "Mac: pipeline ligado, pelo vhost da tailnet"    test "$(cenv otel) $(cenv url)" = "agent-studio https://agent-studio.oute.pro"
+check "Mac: sem o profile do agent-studio"             test -z "$(cenv profiles)"
+check "Mac: o nome antigo não segue ao compose"        test -z "$(cenv antigo)"
+check "Mac: avisa a transição do token"                has 'aviso: transição (#256)'
+cp "$AENV" "$TMP/aenv.1"; cp "$SENV" "$TMP/senv.1"
+oute up
+check "de novo: rc 0, arquivos iguais"                 bash -c '[ "$0" -eq 0 ] && cmp -s "$1" "$2" && cmp -s "$3" "$4"' "$RC" "$AENV" "$TMP/aenv.1" "$SENV" "$TMP/senv.1"
+check "de novo: sem o aviso de limpeza"                hasnt 'segredo de serviço fora do arquivo'
+check "de novo: a transição segue avisada"             has 'aviso: transição (#256)'
+check "de novo: collector segue com a ingestão"        test "$(cenv ingest)" = "$T_OLD"
+
+# ---------------------------------------------------------------- 10. cache antigo no host com o agent-studio
+old_cache; printf 'OUTE_AGENT_STUDIO=1\n' > "$REPO/.env"
+oute up
+check "servidor: rc 0 e profile ligado"                test "$RC $(cenv profiles)" = "0 agent-studio"
+check "servidor: agent-studio e surrealdb recebem"     test "$(cenv ingest) $(cenv pass)" = "$T_OLD $S_OLD"
+check "servidor: collector pela rede docker"           test "$(cenv url)" = "http://agent-studio:8430"
+check "servidor: sem credencial de leitura, avisa"     has 'aviso: AGENT_STUDIO_READ_TOKEN não está em'
+check "servidor: agent.env sem os nomes de serviço"    bash -c '! grep -qE "$1" "$0"' "$AENV" "$SVC_RE"
+check "servidor: saída sem valor de segredo"           quiet
+
+# ---------------------------------------------------------------- 11. vault sem a pasta oute-services (transição)
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\nexport BW_CLIENTID='x'\n" \
+  "$T_GH" "$T_OLD" "$S_OLD" "$T_READ" > "$F_VAULT/oute-agent"
+rm -f "$AENV" "$SENV" "$F_VAULT/oute-services"; : > "$F_VAULT_LOG"
+oute up --refresh-secrets
+check "sem a pasta: rc 0 (sobe)"                       [ "$RC" -eq 0 ]
+check "sem a pasta: avisa que ela não existe"          has 'aviso: a pasta oute-services não existe no vault (#256)'
+check "sem a pasta: agent.env sem os nomes de serviço" bash -c '! grep -qE "$1" "$0"' "$AENV" "$SVC_RE"
+check "sem a pasta: agent.env com a leitura e o resto, sem BW_*" test "$(cat "$AENV")" = "$(printf 'export AGENT_STUDIO_READ_TOKEN=%s\nexport GH_TOKEN=%s' "$T_READ" "$T_GH")"
+check "sem a pasta: services.env com os da pasta oute-agent" test "$(sort "$SENV")" = "$(printf 'export AGENT_STUDIO_SURREAL_PASS=%s\nexport AGENT_STUDIO_TOKEN=%s' "$S_OLD" "$T_OLD")"
+check "sem a pasta: serviços recebem ingestão, leitura e senha" test "$(cenv ingest) $(cenv read) $(cenv pass) $(cenv profiles)" = "$T_OLD $T_READ $S_OLD agent-studio"
+check "sem a pasta: saída sem valor de segredo"        quiet
+check "vault: uma sessão para as duas pastas"          test "$(cut -d' ' -f1-2 "$F_VAULT_LOG" | tr '\n' ';')" = "session oute-agent;export oute-agent;export oute-services;bw lock;"
+check "vault: as duas leituras com a sessão aberta"    test "$(grep -c '^export .* sessao=sessao-de-teste$' "$F_VAULT_LOG")" = 2
+check "vault: a sessão não chega ao compose"           test -z "$(cenv bw)"
+
+# ---------------------------------------------------------------- 12. vault com a pasta oute-services
+# SURREAL_PASS repetido nas duas pastas e FOO_SVC (nome que o script não conhece) também: nome da pasta de serviço
+# nunca entra no arquivo do agent, e o valor dela vence
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\nexport FOO_SVC='%s'\n" "$T_ING" "$S_NEW" "$T_FOO" > "$F_VAULT/oute-services"
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\nexport FOO_SVC='da-pasta-do-agent'\n" \
+  "$T_GH" "$S_OLD" "$T_READ" > "$F_VAULT/oute-agent"
+oute up --refresh-secrets
+check "com a pasta: rc 0, sem aviso"                   bash -c '[ "$0" -eq 0 ] && ! grep -q aviso <<<"$1"' "$RC" "$OUT"
+check "com a pasta: agent.env só com o que é do agent" test "$(cat "$AENV")" = "$(printf 'export AGENT_STUDIO_READ_TOKEN=%s\nexport GH_TOKEN=%s' "$T_READ" "$T_GH")"
+check "com a pasta: services.env = a pasta (o antigo sai)" test "$(cat "$SENV")" = "$(printf 'export AGENT_STUDIO_INGEST_TOKEN=%s\nexport AGENT_STUDIO_SURREAL_PASS=%s\nexport FOO_SVC=%s' "$T_ING" "$S_NEW" "$T_FOO")"
+check "com a pasta: serviços com as credenciais novas" test "$(cenv ingest) $(cenv read) $(cenv pass) $(cenv antigo)" = "$T_ING $T_READ $S_NEW "
+check "com a pasta: saída sem valor de segredo"        quiet
+# item de serviço esquecido na pasta oute-agent (nome conhecido): sai do agent.env, avisa, e o da pasta de serviço vence
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_TOKEN='%s'\nexport AGENT_STUDIO_INGEST_TOKEN='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\n" \
+  "$T_GH" "$T_OLD" "${T_ING}x" "$T_READ" > "$F_VAULT/oute-agent"
+oute up --refresh-secrets
+check "esquecido na oute-agent: fora do agent.env"     bash -c '! grep -qE "$1" "$0"' "$AENV" "$SVC_RE"
+check "esquecido na oute-agent: avisa o nome"          has 'segredo de serviço fora do arquivo do agent (#256): AGENT_STUDIO_TOKEN estava'
+check "esquecido na oute-agent: a pasta de serviço vence" test "$(cenv ingest)" = "$T_ING"
+check "esquecido na oute-agent: sem aviso de transição" hasnt 'aviso: transição'
+# no Mac, com a pasta: o collector manda com a de ingestão e o agent só tem a de leitura
+rm -f "$REPO/.env"
+oute up
+check "Mac com a pasta: collector com a ingestão, agent sem ela" bash -c '[ "$(sed -n "s/^ingest=//p" "$F_ENV")" = "$1" ] && ! grep -qF "$1" "$0"' "$AENV" "$T_ING"
+printf 'OUTE_AGENT_STUDIO=1\n' > "$REPO/.env"
+
+# ---------------------------------------------------------------- 13. leitura igual à ingestão: não vai ao agent
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\n" "$T_GH" "$T_ING" > "$F_VAULT/oute-agent"
+oute up --refresh-secrets
+check "leitura = ingestão: rc 0"                       [ "$RC" -eq 0 ]
+check "leitura = ingestão: fora do agent.env"          test "$(cat "$AENV")" = "export GH_TOKEN=$T_GH"
+check "leitura = ingestão: avisa"                      has 'aviso: AGENT_STUDIO_READ_TOKEN é igual à credencial de ingestão'
+check "leitura = ingestão: o agent-studio sobe sem ela" test "$(cenv ingest)|$(cenv read)|$(cenv profiles)" = "$T_ING||agent-studio"
+check "leitura = ingestão: saída sem valor de segredo" quiet
+
+# ---------------------------------------------------------------- 14. vault que falha: nada regravado, não sobe
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\n" "$T_GH" "$T_READ" > "$F_VAULT/oute-agent"
+cp "$AENV" "$TMP/aenv.2"; cp "$SENV" "$TMP/senv.2"; echo 1 > "$F_VAULT/oute-services.rc"; : > "$F_LOG"; : > "$F_VAULT_LOG"
+oute up --refresh-secrets
+check "pasta de serviço ilegível: rc != 0"             [ "$RC" -ne 0 ]
+check "pasta de serviço ilegível: diz qual"            has 'não consegui ler a pasta oute-services do vault'
+check "pasta de serviço ilegível: arquivos intactos"   bash -c 'cmp -s "$0" "$1" && cmp -s "$2" "$3"' "$AENV" "$TMP/aenv.2" "$SENV" "$TMP/senv.2"
+check "pasta de serviço ilegível: compose up não roda" bash -c '! grep -q -- " up -d" "$F_LOG"'
+check "pasta de serviço ilegível: sessão trancada"     grep -qx 'bw lock' "$F_VAULT_LOG"
+rm -f "$F_VAULT/oute-services.rc"; echo 1 > "$F_VAULT/oute-agent.rc"; : > "$F_VAULT_LOG"
+oute secrets refresh
+check "pasta do agent ilegível: rc != 0, sem ler a de serviço" bash -c '[ "$0" -ne 0 ] && ! grep -q "^export oute-services" "$F_VAULT_LOG" && grep -qx "bw lock" "$F_VAULT_LOG"' "$RC"
+check "pasta do agent ilegível: arquivos intactos"     bash -c 'cmp -s "$0" "$1" && cmp -s "$2" "$3"' "$AENV" "$TMP/aenv.2" "$SENV" "$TMP/senv.2"
+rm -f "$F_VAULT/oute-agent.rc"; : > "$F_VAULT/session.rc"; : > "$F_VAULT_LOG"
+oute up --refresh-secrets
+check "vault não abre: rc != 0, nenhuma pasta lida"    bash -c '[ "$0" -ne 0 ] && grep -q "não consegui abrir o vault" <<<"$1" && ! grep -q "^export " "$F_VAULT_LOG"' "$RC" "$OUT"
+check "vault não abre: arquivos intactos"              bash -c 'cmp -s "$0" "$1" && cmp -s "$2" "$3"' "$AENV" "$TMP/aenv.2" "$SENV" "$TMP/senv.2"
+rm -f "$F_VAULT/session.rc"; : > "$F_VAULT_LOG"
+# sessão já aberta por quem chama (oci-bootstrap): usa essa e não tranca (quem abriu é quem tranca)
+F_SESSION=de-quem-chama oute secrets refresh
+check "sessão de quem chama: usada, sem abrir outra nem trancar" test "$RC $(tr '\n' ';' < "$F_VAULT_LOG")" = "0 export oute-agent sessao=de-quem-chama;export oute-services sessao=de-quem-chama;"
+
+# ---------------------------------------------------------------- 15. credencial só no ambiente de quem chama
+printf 'export GH_TOKEN=%s\n' "$T_GH" > "$AENV"; : > "$SENV"
+F_AMBIENT="$T_FOO" oute up
+check "ambiente de quem chama: não vira credencial dos serviços" test "$RC|$(cenv ingest)|$(cenv pass)|$(cenv otel)" = "0|||none"
+check "ambiente de quem chama: arquivos não mudam"     bash -c '[ "$(cat "$0")" = "export GH_TOKEN=$2" ] && [ ! -s "$1" ]' "$AENV" "$SENV" "$T_GH"
+
+# ---------------------------------------------------------------- 16. scripts/oute-secrets.sh: pasta ausente = rc 4
+# o script de verdade, com um bw falso (sessão já aberta, duas pastas no cofre, uma com item)
+cat > "$TMP/bwbin-bw" <<'SH'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "status "*)      echo '{"status":"unlocked","serverUrl":"https://vault.oute.pro"}' ;;
+  "list folders")  echo '[{"id":"f1","name":"oute-agent"}]' ;;
+  "list items")    jq -n --arg v "$F_BW_VALUE" '[{name:"github",notes:null,fields:[{name:"GH_TOKEN",value:$v}]}]' ;;
+  *) : ;;
+esac
+SH
+mkdir -p "$TMP/bwbin"; mv "$TMP/bwbin-bw" "$TMP/bwbin/bw"; chmod +x "$TMP/bwbin/bw"
+secrets() { OUT="$(env -u BW_PASSWORD PATH="$TMP/bwbin:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" BW_SESSION=sessao-de-teste \
+  F_BW_VALUE="$T_GH" OUTE_VAULT_FOLDER="$1" "$ROOT/scripts/oute-secrets.sh" export 2>&1)"; RC=$?; }
+check "oute-secrets: sintaxe (bash -n)"                bash -n "$ROOT/scripts/oute-secrets.sh"
+secrets oute-services
+check "oute-secrets: pasta ausente = rc 4"             [ "$RC" -eq 4 ]
+check "oute-secrets: diz a pasta"                      has "pasta 'oute-services' não existe no vault"
+secrets oute-agent
+check "oute-secrets: pasta existente = rc 0 e as linhas" test "$RC|$OUT" = "0|export GH_TOKEN='$T_GH'"
 
 check_end

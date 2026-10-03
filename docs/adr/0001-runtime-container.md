@@ -16,7 +16,7 @@ Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) M
 | Roteamento LLM | *(substituído: ADR-02)* Seleção de agente e modelo por sessão, pela fase. O roteamento híbrido do Pi saiu com ele (#217) e o roteador de modelos na #218 | Ver ADR-02 (Histórico) |
 | Memória | **ai-memory** (Akita) como serviço, hooks+MCP instalados em todos os agentes, dados em volume | Handoff entre agentes, SQLite embutido, arm64 nativo |
 | Storage comum | **OCI Object Storage** (bucket `oute-shared`) montado via **rclone** em `/data/shared` nos dois hosts | Já está na cloud dele, free tier, S3-compat |
-| Segredos | **Vaultwarden (vault.oute.pro) obrigatório, lido só pelo HOST.** O `oute up` resolve a pasta `oute-agent` e grava `~/.oute/agent.env` (0600); o container recebe só esses valores via docker secret em `/run/secrets/agent_env`. **O container não tem sessão, API key nem estado do `bw`** (0.7.0). **Decisão 2026-09-26 (#21): o host também não guarda sessão** — `agent.env` é o cache; o vault só é aberto quando um segredo muda (`--refresh-secrets`) ou em comando admin, com senha digitada e sessão descartada | Fonte única; agentes em yolo não alcançam segredos de outros projetos nem o `oute-admin`; nenhuma chave viva do cofre em disco/backup |
+| Segredos | **Vaultwarden (vault.oute.pro) obrigatório, lido só pelo HOST.** O `oute up` resolve a pasta `oute-agent` e grava `~/.oute/agent.env` (0600); o container recebe só esses valores via docker secret em `/run/secrets/agent_env`. Segredo de serviço fica na pasta `oute-services` e nunca chega ao `agent` (adendo #256). **O container não tem sessão, API key nem estado do `bw`** (0.7.0). **Decisão 2026-09-26 (#21): o host também não guarda sessão** — `agent.env` é o cache; o vault só é aberto quando um segredo muda (`--refresh-secrets`) ou em comando admin, com senha digitada e sessão descartada | Fonte única; agentes em yolo não alcançam segredos de outros projetos nem o `oute-admin`; nenhuma chave viva do cofre em disco/backup |
 | Acesso ao host | **Só como `oute-ops`** (lab#178): IP fixo do agent `172.19.0.5` (rede `oute` com subnet `172.19.0.0/16`), chave própria `~/.ssh/oute-ops_ed25519`, `ssh oute-server` → gateway `172.19.0.1`. Sem `lxd`/`docker`/`sudo`; sudo só para uma allowlist | Yolo exige fronteira real entre container e host |
 | Ações privilegiadas no host | **Canal de aprovação**: o agente propõe (`oute-propose`), o humano aprova e executa fora do container (`oute approve`) | O agente faz o trabalho sem ganhar privilégio; ninguém copia comando da tela |
 | Usuário do container | uid/gid **10001** fixos, que não existem no host (0.7.3) | Nada que o agente grava vira arquivo de usuário do host |
@@ -35,6 +35,8 @@ volume-init    one-shot (root)          chown dos volumes para 10001 quando prec
 agent          herdr + sshd + CLIs      172.19.0.5 · :2222 (ssh, bind 127.0.0.1)   vols: workspace, home, shared · secret: agent_env
 ai-memory      akitaonrails/ai-memory   :49374 (interno)              vol: oute-memory
 otel-collector                          (interno)                     → bucket oute-observability + Langfuse (ADR-04)
+agent-studio   só no oute-server        :8430 (bind 127.0.0.1)        redes oute + studio (ADR-08)
+rede studio (interna): só agent-studio + surrealdb; o agent não está nela (#256)
 ```
 
 Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (10 MB × 3).
@@ -48,8 +50,8 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 ## Fluxo de boot
 **Host (`oute up`):**
 1. Com `~/.oute/agent.env` presente, **não abre o vault** (#21). Sem ele, ou com `--refresh-secrets` / `oute secrets refresh`, lê o vault com a master password digitada; a sessão fica só no processo e é trancada (`bw lock`) em seguida. Sem `bw` nativo, o `bw` roda via `docker run` da imagem oute-agent **local** (a atual ou a mais nova, `--pull never`), com o uid do host.
-2. Grava `~/.oute/agent.env`: uma linha `export NOME=<%q>` por variável da pasta `oute-agent`, sem `BW_*`.
-3. Exporta para o compose só o que ai-memory e otel-collector usam, mais a origem (`OUTE_HOST`, `OUTE_INSTANCE`).
+2. Grava `~/.oute/agent.env`: uma linha `export NOME=<%q>` por variável da pasta `oute-agent`, sem `BW_*` e sem segredo de serviço; e `~/.oute/services.env`, com a pasta `oute-services` (adendo #256).
+3. Exporta para o compose só o que ai-memory, otel-collector, agent-studio e surrealdb usam, mais a origem (`OUTE_HOST`, `OUTE_INSTANCE`).
 4. `compose up`.
 
 **Container (entrypoint):**
@@ -122,6 +124,16 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
   - Os agentes aprendem o canal por um bloco gerenciado (`<!-- oute:managed:ops-handoff -->`) em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (até a #217, também no arquivo equivalente do Pi).
   - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal serve para diagnóstico, ajuste pontual e para rodar o deploy de um PR já mergeado.
 - **Risco residual:** fadiga de aprovação. Mitigação: um objetivo por pedido e script curto; `--root` sempre em destaque.
+
+## Adendo 2026-10-03 — segredo do agente × segredo de serviço (#256)
+- **Achado:** o adendo #6 entregava ao `agent` "os valores da pasta `oute-agent`", sem separar o que é do agente do que só um serviço usa. Com isso o `agent` (yolo, sudo sem senha) tinha a senha root do SurrealDB e o token de ingestão do agent-studio: podia alterar o estado de um pedido e forjar telemetria, que é o que a tela e o tray mostram ao Bardi para decidir. Em 2026-10-02 a senha saiu na saída de uma ferramenta (bucket e transcripts).
+- **Decisão: duas pastas no vault, dois arquivos no host.**
+  - **`oute-agent`** → `~/.oute/agent.env` → `/run/secrets/agent_env` → ambiente do `agent`. Só o que **o agente** usa.
+  - **`oute-services`** → `~/.oute/services.env` (0600) → variáveis do `oute up` → `environment` dos serviços que precisam (`agent-studio`, `surrealdb`, `otel-collector`), pela interpolação do compose. **Nenhum container monta o arquivo, e nada dele entra no `agent_env`.**
+- **Regra para segredo novo:** a pergunta é "o agente usa?". Se só um serviço usa, ou se o valor dá **escrita** em algo que o Bardi lê para decidir, vai na pasta `oute-services`. Na dúvida, `oute-services`. A separação mora no vault: nome que existe na pasta `oute-services` nunca entra no `agent.env`, mesmo repetido na `oute-agent`, sem depender de lista no código.
+- **Rede de segurança no código:** os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` antigo) saem do `agent.env` em todo `oute up`, com aviso que diz só os nomes, inclusive do `agent.env` em cache gravado por versão antiga (sem abrir o vault). O valor vai para o `services.env` quando ele ainda não tem o nome. Sem a pasta `oute-services` (transição), o `oute up` sobe assim e avisa.
+- **agent-studio:** duas credenciais, ingestão (serviço) e leitura (agente); ADR-08 §6. O `surrealdb` sai da rede `oute` para a rede `studio`, só com o agent-studio.
+- **Resíduo aceito:** `OCI_S3_*` segue nas duas pontas (o agente usa o bucket e o collector grava nele); `LANGFUSE_*` sai com a #160; allowlist de variáveis por agente é a #58. `services.env` em texto (0600) no host e nos backups, como o `agent.env`.
 
 ## Adendo 2026-09-30 — agentes no home sem `curl | sh` (#199, #200)
 - **Problema:** o `oute-agents-install` (#195) rodava `curl … | sh` dos instaladores oficiais (`claude.ai/install.sh`, `chatgpt.com/codex/install.sh`) sem conferir nada, como `oute` (sudo sem senha no container). E a reserva npm da imagem ia sem versão: o build da `v0.7.26` pegou um `@openai/codex` publicado 23 s antes, ainda 404 no registry, e a tag ficou sem imagem.

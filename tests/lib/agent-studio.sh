@@ -1,6 +1,8 @@
 # Funções dos testes do agent-studio (ADR-08, #185), para `source` depois do tests/lib/check.sh (usa o die).
 # Precisa de python3; as dependências (duckdb, fastapi, uvicorn) vêm do docker/agent-studio/requirements.txt (hashes
-# fixados), num venv em cache. O AGENT_STUDIO_TOKEN do ambiente sai: vale o token do teste (STUDIO_TOKEN).
+# fixados), num venv em cache. As credenciais do agent-studio do ambiente saem: vale o token do teste (STUDIO_TOKEN),
+# que sobe como credencial de ingestão; sem AGENT_STUDIO_READ_TOKEN nos [env…] do studio_start, ele também lê (uma
+# credencial só, #256).
 # studio_init: confere jq, python3 e curl e prepara o venv (studio_venv, que define STUDIO_PY); sem eles, sai com 1.
 # studio_start <dir> [env…]: sobe o app em 127.0.0.1 (porta livre), DuckDB em <dir>/db.duckdb, e define STUDIO_URL;
 # studio_stop: derruba. studio_sql <db> <sql>: uma linha JSON por registro (com o servidor parado: o DuckDB aceita um
@@ -14,7 +16,7 @@ STUDIO_ROOT="$(cd "$STUDIO_LIB/../.." && pwd)"
 # token só do teste, aleatório a cada execução
 STUDIO_TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
 # o token do teste, nunca um do ambiente (dentro do container, o agent.env traz o de verdade)
-unset AGENT_STUDIO_TOKEN
+unset AGENT_STUDIO_TOKEN AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_READ_TOKEN
 studio_init() {
   command -v jq >/dev/null && command -v python3 >/dev/null && command -v curl >/dev/null || die "precisa de jq, python3 e curl"
   studio_venv || die "não montei o venv do agent-studio (docker/agent-studio/requirements.txt)"
@@ -37,7 +39,7 @@ studio_start() {
   STUDIO_DIR="$1"; shift; mkdir -p "$STUDIO_DIR"
   local port i
   port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
-  env "$@" AGENT_STUDIO_TOKEN="${AGENT_STUDIO_TOKEN-$STUDIO_TOKEN}" AGENT_STUDIO_DB="$STUDIO_DIR/db.duckdb" \
+  env "$@" AGENT_STUDIO_INGEST_TOKEN="${AGENT_STUDIO_INGEST_TOKEN-$STUDIO_TOKEN}" AGENT_STUDIO_DB="$STUDIO_DIR/db.duckdb" \
     AGENT_STUDIO_BIND=127.0.0.1 AGENT_STUDIO_PORT="$port" PYTHONPATH="$STUDIO_ROOT/docker/agent-studio" \
     "$STUDIO_PY" "$STUDIO_LIB/agent-studio-run.py" 2>>"$STUDIO_DIR/stderr" & STUDIO_PID=$!
   STUDIO_URL="http://127.0.0.1:$port"

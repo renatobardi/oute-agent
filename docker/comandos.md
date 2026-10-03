@@ -31,7 +31,7 @@ Dois lugares, dois conjuntos de comandos:
   oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
                                        (no oute-server, com OUTE_AGENT_STUDIO=1 no .env, o up liga também
                                        o agent-studio, se o vault tem o item agent-studio; ADR-08)
-  oute secrets refresh                 relê o Vaultwarden, regrava ~/.oute/agent.env e tranca a sessão
+  oute secrets refresh                 relê o Vaultwarden, regrava ~/.oute/agent.env e services.env e tranca a sessão
                                        (depois: oute restart, se a stack estiver de pé)
   oute attach          ssh → herdr
   oute ssh [cmd]       ssh no container (com cmd: roda e volta)
@@ -44,6 +44,8 @@ Dois lugares, dois conjuntos de comandos:
   oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
 
+  Segredo de serviço (pasta oute-services do vault) fica em ~/.oute/services.env e vai só aos serviços,
+  nunca ao container agent (#256).
   Senha do Vaultwarden: ~/.oute/agent.env é o cache do host. up, pull, sync-shared e storage
   usam só ele, sem senha. A master password só é pedida em secrets refresh, up --refresh-secrets
   (ou up sem agent.env) e oci-bootstrap; a sessão é trancada logo depois, nada fica em disco. Faltou um segredo? oute secrets refresh.

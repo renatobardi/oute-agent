@@ -2,14 +2,15 @@
 consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipeline (`GET /v1/alerts`, ADR-08 §8,
 #204), o endpoint do tray (`GET /v1/tray`, ADR-08 §10, #205) e a tela (`web.py`, #206, #207 e #208).
 
-- `Authorization: Bearer <token>` (item `agent-studio` do vault); sem token ou com token errado = 401.
+- Duas credenciais (`auth.py`, #256): a ingestão (`POST /v1/*`) aceita só o `Bearer` da credencial de ingestão
+  (sem ela ou errada = 401; com a de leitura = 403); a leitura aceita só a de leitura.
 - 2xx só depois do commit. Qualquer falha na gravação = 503 (retentável): o collector guarda na fila em disco e
   reenvia, e a dedupe absorve a repetição.
 - Corpo que não é OTLP JSON = 400 (permanente: reenviar não mudaria nada).
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
-- `GET /v1/usage`: só leitura, mesmo token; janela inválida = 400; leitura que falha = 500.
-- `GET /v1/alerts`: só leitura, mesmo token; `at` inválido = 400; leitura que falha = 500.
-- `GET /v1/tray`: só leitura, mesmo token; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
+- `GET /v1/usage`: só leitura, credencial de leitura; janela inválida = 400; leitura que falha = 500.
+- `GET /v1/alerts`: só leitura, credencial de leitura; `at` inválido = 400; leitura que falha = 500.
+- `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
   `proposals.available` = `false` (o resto do menu segue).
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
   (#206); a ingestão, só o `Bearer`.
@@ -59,8 +60,9 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None):
-    auth = auth_mod.Auth(token)
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None):
+    """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256)."""
+    auth = auth_mod.Auth(token, read_token)
     tel = tel or telemetry.Noop()
     config = config or config_mod.Config()
 
@@ -75,16 +77,17 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
-    def authorized(request):
-        return auth.bearer(request)
-
     async def ingest(signal, request):
         resp = await _ingest(signal, request)
         tel.request(signal, resp.status_code)
         return resp
 
     async def _ingest(signal, request):
-        if not authorized(request):
+        if not auth.ingest(request):
+            if auth.split and auth.bearer(request):
+                # credencial de leitura na ingestão (#256): quem lê não escreve
+                tel.warn("forbidden", "recusado: credencial de leitura na ingestão (%s)", signal)
+                return JSONResponse({"message": "forbidden"}, status_code=403)
             tel.warn("unauthorized", "recusado: token ausente ou errado (%s)", signal)
             return JSONResponse({"message": "unauthorized"}, status_code=401)
         ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()

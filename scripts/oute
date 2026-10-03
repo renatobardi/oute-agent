@@ -52,6 +52,15 @@ export -f bw
 # (`oute up --refresh-secrets` / `oute secrets refresh`) ou em comando admin, com a master password, e a
 # sessão é trancada logo depois (nada de sessão do Vaultwarden em disco).
 AGENT_ENV_FILE="$OUTE_HOME/agent.env"
+# --- segredo de serviço (#256): a pasta oute-services do vault vai para services.env (0600), que só o host lê e só
+# os serviços (agent-studio, surrealdb, otel-collector) recebem, pela interpolação do compose. Nunca é montado no
+# agent nem entra no agent.env.
+SERVICES_ENV_FILE="$OUTE_HOME/services.env"
+SERVICES_FOLDER="${OUTE_VAULT_SERVICES_FOLDER:-oute-services}"
+# nomes de serviço conhecidos: nunca ficam no agent.env, venham de onde vierem (transição: pasta oute-services
+# ainda não criada, item ainda na pasta oute-agent, agent.env gravado por versão antiga). AGENT_STUDIO_TOKEN é o
+# token único de antes da #256 (ingestão + leitura).
+SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN"
 
 # fallback de quem precisa de um segredo e não o tem no ambiente: só o agent.env, nunca o vault
 load_agent_env() {
@@ -59,26 +68,91 @@ load_agent_env() {
   # shellcheck disable=SC1090
   . "$AGENT_ENV_FILE"
 }
+load_services_env() {
+  [[ -s "$SERVICES_ENV_FILE" ]] || return 0
+  # shellcheck disable=SC1090
+  . "$SERVICES_ENV_FILE"
+}
 no_secret() { die "$1 ausente em $AGENT_ENV_FILE; rode: oute secrets refresh${2:+ ($2)}"; }
 
-# 1 leitura do vault (pasta oute-agent, pede a master password) -> agent.env. oute-secrets tranca a sessão
-# ao sair; com BW_SESSION já aberta pelo chamador (oci-bootstrap), usa essa e não tranca.
+# nomes das variáveis de uma saída do `oute-secrets export`, sem BW_*, um por linha
+env_names() { grep -oE '^export [A-Za-z_][A-Za-z0-9_]*' <<<"$1" | cut -d' ' -f2 | grep -v '^BW_' | sort -u || true; }
+# write_env_file <arquivo> <nomes…>: 1 linha `export NOME=<%q>` por variável (%q escapa quebras de linha de
+# PEM/JSON) -> o entrypoint valida linha a linha. 0600, troca atômica.
+write_env_file() {
+  local f="$1" n; shift
+  ( umask 077
+    for n in "$@"; do printf 'export %s=%q\n' "$n" "${!n}"; done > "$f.tmp" && mv "$f.tmp" "$f" )
+}
+# env_file_drop <arquivo> <nomes…>: tira as linhas desses nomes (1 linha por variável; só este script escreve o arquivo)
+env_file_drop() {
+  local f="$1" pat; shift
+  pat="^export ($(printf '%s' "$*" | tr ' ' '|'))="
+  ( umask 077; { grep -vE "$pat" "$f" || true; } > "$f.tmp" && mv "$f.tmp" "$f" )
+}
+
+# 1 leitura do vault (pastas oute-agent e oute-services, uma senha só) -> agent.env e services.env. A sessão é
+# aberta aqui e trancada ao fim; com BW_SESSION já aberta pelo chamador (oci-bootstrap), usa essa e não tranca.
 vault_to_agent_env() {
   need jq
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
-  echo "lendo o Vaultwarden (pasta ${OUTE_VAULT_FOLDER:-oute-agent})…" >&2
-  local envs; envs="$("$ROOT/scripts/oute-secrets.sh" export)" || die "não consegui ler o vault"
-  eval "$envs"
+  local own=0 envs="" svc="" rc=0 src=0 n names=()
+  if [[ -z "${BW_SESSION:-}" ]]; then
+    BW_SESSION="$("$ROOT/scripts/oute-secrets.sh" session)" || die "não consegui abrir o vault"
+    export BW_SESSION; own=1
+  fi
+  echo "lendo o Vaultwarden (pastas ${OUTE_VAULT_FOLDER:-oute-agent} e $SERVICES_FOLDER)…" >&2
+  envs="$("$ROOT/scripts/oute-secrets.sh" export)" || rc=$?
+  # pasta de serviço: rc 4 = a pasta não existe (transição); outro erro não vira "sem pasta"
+  [[ $rc -ne 0 ]] || svc="$(OUTE_VAULT_FOLDER="$SERVICES_FOLDER" "$ROOT/scripts/oute-secrets.sh" export)" || src=$?
+  if (( own )); then bw lock >/dev/null 2>&1 || true; unset BW_SESSION; fi
+  [[ $rc -eq 0 ]] || die "não consegui ler o vault"
+  case "$src" in
+    0) ;;
+    4) svc=""
+       echo "aviso: a pasta $SERVICES_FOLDER não existe no vault (#256). Os segredos de serviço que ainda estão na" \
+         "pasta ${OUTE_VAULT_FOLDER:-oute-agent} seguem só para os serviços, fora do arquivo do agent. Crie a pasta," \
+         "mova os itens e rode: oute secrets refresh" >&2 ;;
+    *) die "não consegui ler a pasta $SERVICES_FOLDER do vault" ;;
+  esac
   # #6: o container dos agentes NÃO recebe acesso ao cofre (sem BW_SESSION, estado do bw ou API key).
   # Recebe só os VALORES da pasta oute-agent, num arquivo 0600 montado como docker secret (read-only).
   # Em disco (não tmpfs) para o container voltar sozinho depois de reboot do host.
-  # 1 linha por variável (%q escapa quebras de linha de PEM/JSON) -> o entrypoint valida linha a linha
-  local n; ( umask 077
-    for n in $(grep -oE '^export [A-Za-z_][A-Za-z0-9_]*' <<<"$envs" | cut -d' ' -f2 | grep -v '^BW_' | sort -u); do
-      printf 'export %s=%q\n' "$n" "${!n}"
-    done > "$AGENT_ENV_FILE.tmp" && mv "$AGENT_ENV_FILE.tmp" "$AGENT_ENV_FILE" )
+  # #256: nome que existe na pasta de serviço nunca entra no arquivo do agent, mesmo repetido na oute-agent.
+  local svc_names; svc_names=" $(env_names "$svc" | tr '\n' ' ')"
+  eval "$envs"
+  for n in $(env_names "$envs"); do [[ "$svc_names" == *" $n "* ]] || names+=("$n"); done
+  write_env_file "$AGENT_ENV_FILE" ${names[@]+"${names[@]}"}
   echo "agent.env regravado ($AGENT_ENV_FILE)" >&2
+  # services.env sempre regravado (sem a pasta, vazio: o service_secrets_split põe nele o que achar no agent.env)
+  eval "$svc"
+  # shellcheck disable=SC2086
+  write_env_file "$SERVICES_ENV_FILE" $svc_names
+  echo "services.env regravado ($SERVICES_ENV_FILE)" >&2
+}
+
+# #256: os nomes de serviço conhecidos saem do agent.env em todo `up`, com ou sem leitura do vault (o agent.env em
+# cache de uma versão antiga também é limpo). O valor vai para o services.env quando ele ainda não tem o nome; o da
+# pasta oute-services vence. Só nomes na mensagem, nunca valores.
+service_secrets_split() {
+  [[ -s "$AGENT_ENV_FILE" ]] || return 0
+  local n found="" pat
+  for n in $SERVICE_SECRET_NAMES; do
+    grep -q "^export $n=" "$AGENT_ENV_FILE" && found="$found${found:+ }$n"
+  done
+  [[ -n "$found" ]] || return 0
+  # primeiro guarda, depois tira: se cair no meio, nenhum valor se perde
+  ( umask 077
+    { [[ ! -e "$SERVICES_ENV_FILE" ]] || cat "$SERVICES_ENV_FILE"
+      for n in $found; do
+        grep -q "^export $n=" "$SERVICES_ENV_FILE" 2>/dev/null || grep "^export $n=" "$AGENT_ENV_FILE" | tail -1
+      done; } > "$SERVICES_ENV_FILE.tmp" && mv "$SERVICES_ENV_FILE.tmp" "$SERVICES_ENV_FILE" )
+  # shellcheck disable=SC2086
+  env_file_drop "$AGENT_ENV_FILE" $found
+  echo "aviso: segredo de serviço fora do arquivo do agent (#256): $found estava em $AGENT_ENV_FILE (pasta" \
+    "${OUTE_VAULT_FOLDER:-oute-agent} do vault) e agora fica só em $SERVICES_ENV_FILE, que o agent não recebe." \
+    "Mova o item para a pasta $SERVICES_FOLDER do vault e rode: oute secrets refresh" >&2
 }
 
 # só o mínimo que o compose precisa antes do agent subir; $1=1 força a releitura do vault
@@ -88,7 +162,18 @@ host_secrets() {
     "$ROOT/scripts/oute-secrets.sh" lock >/dev/null 2>&1 || true
     rm -f "$OUTE_HOME/bw_session"
   fi
-  if [[ "${1:-0}" == 1 || ! -s "$AGENT_ENV_FILE" ]]; then vault_to_agent_env; else load_agent_env; fi
+  # o que vale é o que está nos arquivos: nome de serviço herdado do ambiente de quem chamou não conta
+  local n; for n in $SERVICE_SECRET_NAMES AGENT_STUDIO_READ_TOKEN; do unset "$n"; done
+  if [[ "${1:-0}" == 1 || ! -s "$AGENT_ENV_FILE" ]]; then vault_to_agent_env; fi
+  service_secrets_split
+  load_agent_env; load_services_env
+  # credencial de leitura igual à de ingestão daria a ingestão ao agent: não vai ao arquivo dele (#256)
+  local ingest="${AGENT_STUDIO_INGEST_TOKEN:-${AGENT_STUDIO_TOKEN:-}}"
+  if [[ -n "${AGENT_STUDIO_READ_TOKEN:-}" && "$AGENT_STUDIO_READ_TOKEN" == "$ingest" ]]; then
+    env_file_drop "$AGENT_ENV_FILE" AGENT_STUDIO_READ_TOKEN; unset AGENT_STUDIO_READ_TOKEN
+    echo "aviso: AGENT_STUDIO_READ_TOKEN é igual à credencial de ingestão do agent-studio: tirado do arquivo do" \
+      "agent (#256). Gere um valor próprio para a leitura no vault e rode: oute secrets refresh" >&2
+  fi
   export OUTE_AGENT_ENV_FILE="$AGENT_ENV_FILE"
   export AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
   export OCI_S3_ACCESS_KEY="${OCI_S3_ACCESS_KEY:-}" OCI_S3_SECRET_KEY="${OCI_S3_SECRET_KEY:-}" \
@@ -103,38 +188,55 @@ host_secrets() {
 }
 
 # --- agent-studio (ADR-08, #185): só no host que o liga com OUTE_AGENT_STUDIO=1 no .env (o oute-server; no Mac
-# fica desligado). Item agent-studio da pasta oute-agent do vault, via agent.env: campos AGENT_STUDIO_TOKEN (token da
-# ingestão e da API) e AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, #187).
+# fica desligado). Duas credenciais (#256, ADR-08 §6): a de ingestão (AGENT_STUDIO_INGEST_TOKEN) e a senha root do
+# SurrealDB (AGENT_STUDIO_SURREAL_PASS, #187) são do item agent-studio da pasta oute-services, via services.env, e
+# vão só aos serviços; a de leitura (AGENT_STUDIO_READ_TOKEN) é do item agent-studio da pasta oute-agent, via
+# agent.env, e é a única que o agent recebe.
 STUDIO_PROFILE=agent-studio
 # destino do collector (#190): no host com o agent-studio, a rede docker; nos outros (Mac), o vhost só na tailnet
-# (lab#244), com o mesmo token. OUTE_AGENT_STUDIO_URL no .env troca o vhost.
+# (lab#244), com a mesma credencial de ingestão. OUTE_AGENT_STUDIO_URL no .env troca o vhost.
 STUDIO_LOCAL_URL=http://agent-studio:8430
 STUDIO_REMOTE_URL=https://agent-studio.oute.pro
 agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
-# `oute up`: liga o profile do compose quando o host tem o agent-studio e o token existe; sem o item, avisa e sobe
-# o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio (config/otel/agent-studio.yaml,
-# #189): pela rede docker no host com o agent-studio, pelo vhost nos outros (#190). Sem o token, none.yaml e o
-# collector não muda (a fila não enche de 401).
+# `oute up`: liga o profile do compose quando o host tem o agent-studio e as credenciais existem; sem o item, avisa
+# e sobe o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio
+# (config/otel/agent-studio.yaml, #189): pela rede docker no host com o agent-studio, pelo vhost nos outros (#190).
+# Sem a credencial de ingestão, none.yaml e o collector não muda (a fila não enche de 401).
 agent_studio_up() {
   export OUTE_OTEL_STUDIO=none AGENT_STUDIO_URL="$STUDIO_LOCAL_URL"
+  # transição (#256): sem a credencial nova, a ingestão segue com o token único de antes
+  if [[ -z "${AGENT_STUDIO_INGEST_TOKEN:-}" && -n "${AGENT_STUDIO_TOKEN:-}" ]]; then
+    AGENT_STUDIO_INGEST_TOKEN="$AGENT_STUDIO_TOKEN"
+    echo "aviso: transição (#256): a ingestão do agent-studio segue com o AGENT_STUDIO_TOKEN antigo. Crie" \
+      "AGENT_STUDIO_INGEST_TOKEN no item agent-studio da pasta $SERVICES_FOLDER do vault e rode: oute up --refresh-secrets" >&2
+  fi
+  # o nome antigo não segue para o compose: os serviços recebem só as duas credenciais novas
+  unset AGENT_STUDIO_TOKEN
   if ! agent_studio_enabled; then
-    if [[ -z "${AGENT_STUDIO_TOKEN:-}" ]]; then
-      echo "aviso: AGENT_STUDIO_TOKEN não está em $AGENT_ENV_FILE (item agent-studio da pasta oute-agent do vault)." \
-        "O collector não manda ao agent-studio do oute-server; crie o item e rode: oute up --refresh-secrets" >&2
+    if [[ -z "${AGENT_STUDIO_INGEST_TOKEN:-}" ]]; then
+      echo "aviso: AGENT_STUDIO_INGEST_TOKEN não está em $SERVICES_ENV_FILE (item agent-studio da pasta" \
+        "$SERVICES_FOLDER do vault). O collector não manda ao agent-studio do oute-server; crie o item e rode:" \
+        "oute up --refresh-secrets" >&2
       return 0
     fi
     AGENT_STUDIO_URL="${OUTE_AGENT_STUDIO_URL:-$(env_get OUTE_AGENT_STUDIO_URL || true)}"
-    export AGENT_STUDIO_TOKEN AGENT_STUDIO_URL="${AGENT_STUDIO_URL:-$STUDIO_REMOTE_URL}" OUTE_OTEL_STUDIO=agent-studio
+    export AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_URL="${AGENT_STUDIO_URL:-$STUDIO_REMOTE_URL}" OUTE_OTEL_STUDIO=agent-studio
     return 0
   fi
   local v falta=""
-  for v in AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
+  for v in AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
   if [[ -n "$falta" ]]; then
-    echo "aviso: OUTE_AGENT_STUDIO=1, mas $falta não está em $AGENT_ENV_FILE (item agent-studio da pasta" \
-      "oute-agent do vault). O agent-studio não sobe; crie o item e rode: oute up --refresh-secrets" >&2
+    echo "aviso: OUTE_AGENT_STUDIO=1, mas $falta não está em $SERVICES_ENV_FILE (item agent-studio da pasta" \
+      "$SERVICES_FOLDER do vault). O agent-studio não sobe; crie o item e rode: oute up --refresh-secrets" >&2
     return 0
   fi
-  export AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS OUTE_OTEL_STUDIO=agent-studio
+  if [[ -z "${AGENT_STUDIO_READ_TOKEN:-}" ]]; then
+    echo "aviso: AGENT_STUDIO_READ_TOKEN não está em $AGENT_ENV_FILE (item agent-studio da pasta" \
+      "${OUTE_VAULT_FOLDER:-oute-agent} do vault). O agent-studio sobe com uma credencial só: a tela e o tray leem" \
+      "com a de ingestão e o agent fica sem leitura; crie o campo e rode: oute up --refresh-secrets" >&2
+  fi
+  export AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_READ_TOKEN="${AGENT_STUDIO_READ_TOKEN:-}" \
+    OUTE_OTEL_STUDIO=agent-studio
   COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
   export COMPOSE_PROFILES
 }
@@ -360,7 +462,7 @@ oci_bootstrap() {
     -v "$OUTE_HOME/bwcli:/bwcli" -v "$ROOT/scripts:/opt/oute-scripts:ro" \
     --entrypoint bash "ghcr.io/renatobardi/oute-agent:${OUTE_VERSION}" /opt/oute-scripts/oci-bootstrap.sh "$@"
   # item oci-storage pode ter sido criado agora: agent.env relido com a mesma sessão (sem pedir a senha de novo)
-  [[ "${DRY_RUN:-0}" == 1 ]] || vault_to_agent_env
+  [[ "${DRY_RUN:-0}" == 1 ]] || { vault_to_agent_env; service_secrets_split; }
 }
 
 # --- canal de aprovação (`oute approve`): o agente PROPÕE (oute-propose, dentro do container), o humano
@@ -564,7 +666,7 @@ case "${1:-}" in
     oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
     sub="${2:-ls}"; rclone "$sub" "oci:${OUTE_BUCKET:-oute-shared}${3:+/$3}" "${@:4}" ;;   # DRY_RUN=1 oute oci-bootstrap pra só ver o que faria
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
-  secrets)   # #21: relê o vault (pede a master password), regrava agent.env e tranca a sessão
+  secrets)   # #21: relê o vault (pede a master password), regrava agent.env e services.env (#256) e tranca a sessão
     [[ "${2:-}" == refresh ]] || { echo "uso: oute secrets refresh" >&2; exit 2; }
     host_secrets 1
     docker ps -q -f name='^oute-agent$' -f status=running | grep -q . && echo "o container lê agent.env ao subir: oute restart"
@@ -590,11 +692,12 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
-  up [--refresh-secrets]  sobe agent + ai-memory + otel-collector com os segredos de ~/.oute/agent.env
+  up [--refresh-secrets]  sobe agent + ai-memory + otel-collector com os segredos de ~/.oute/agent.env (agent) e
+               ~/.oute/services.env (só os serviços, nunca o agent; pasta oute-services do vault, #256)
                (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08;
-                nos outros, o collector manda ao agent-studio.oute.pro pela tailnet com o mesmo token, #190)
+                nos outros, o collector manda ao agent-studio.oute.pro pela tailnet com a credencial de ingestão, #190)
                (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)
-  secrets refresh  relê o Vaultwarden (pede a master password), regrava ~/.oute/agent.env e tranca a sessão
+  secrets refresh  relê o Vaultwarden (pede a master password), regrava agent.env e services.env e tranca a sessão
   down|restart
   attach       ssh -> herdr
   ssh [cmd]    ssh direto no container

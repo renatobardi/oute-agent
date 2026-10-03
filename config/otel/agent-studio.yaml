@@ -1,7 +1,8 @@
 # Pipeline extra: tudo -> agent-studio (ADR-08, #189). Destino em AGENT_STUDIO_URL, escolhido pelo `oute up` por host
 # (#190): no oute-server (OUTE_AGENT_STUDIO=1) a rede docker "oute" (http://agent-studio:8430); nos outros (Mac) o
-# vhost https://agent-studio.oute.pro, só na tailnet (lab#244). Mesclado sobre collector.yaml só com o token do
-# agent-studio no agent.env (o `oute up` decide, como no langfuse.yaml); sem ele entra o none.yaml e nada muda.
+# vhost https://agent-studio.oute.pro, só na tailnet (lab#244). Mesclado sobre collector.yaml só com a credencial de
+# ingestão do agent-studio no services.env (pasta oute-services do vault, #256; o `oute up` decide, como no
+# langfuse.yaml); sem ela entra o none.yaml e nada muda.
 # Sem filtro: o agent-studio guarda tudo, com conteúdo, como o bucket. Mesmos processors do bucket.
 # Sem perda como o bucket (#161, #152): fila em disco própria por exporter (arquivo próprio na mesma file_storage/queue),
 # retry sem prazo e lote formado na fila. O agent-studio só responde 2xx depois do commit e 503 (retentável) se a
@@ -11,7 +12,7 @@ exporters:
     endpoint: ${env:AGENT_STUDIO_URL}
     encoding: json
     headers: &studio_auth
-      Authorization: "Bearer ${env:AGENT_STUDIO_TOKEN}"
+      Authorization: "Bearer ${env:AGENT_STUDIO_INGEST_TOKEN}"
     compression: gzip
     timeout: 30s
     # agent-studio fora (ou sem tailnet, no Mac): retenta para sempre; o limite é o tamanho da fila

@@ -117,10 +117,10 @@ studio_stop
 check "reenvio depois da falha grava uma vez"          test "$(count logs "WHERE time_unix_nano = 1759000000999999999")" = 1
 
 # ---------------------------------------------------------------- 6. sem token configurado, não sobe
-OUT="$(env AGENT_STUDIO_TOKEN= AGENT_STUDIO_DB="$TMP/x.duckdb" PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio 2>&1)"; RC=$?
-check "AGENT_STUDIO_TOKEN vazio: sai com erro"         test "$RC" -ne 0
-check "AGENT_STUDIO_TOKEN vazio: diz o item do vault"  grep -q "item agent-studio" <<<"$OUT"
-check "AGENT_STUDIO_TOKEN vazio: não cria o banco"     test ! -e "$TMP/x.duckdb"
+OUT="$(env AGENT_STUDIO_INGEST_TOKEN= AGENT_STUDIO_DB="$TMP/x.duckdb" PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio 2>&1)"; RC=$?
+check "credencial de ingestão vazia: sai com erro"         test "$RC" -ne 0
+check "credencial de ingestão vazia: diz o item do vault"  grep -q "item agent-studio" <<<"$OUT"
+check "credencial de ingestão vazia: não cria o banco"     test ! -e "$TMP/x.duckdb"
 
 # ---------------------------------------------------------------- 6b. spans e métricas (#186)
 # spans do Claude Code (claude_code.llm_request), do Codex (session_task.turn) e o jev.decision do jev-router
@@ -236,7 +236,8 @@ check "compose: volume nomeado para o DuckDB"          has '^      - oute-agent-
 check "compose: volume declarado"                      grep -qx '  oute-agent-studio:' "$ROOT/docker/compose.yaml"
 check "compose: mesma imagem do agent"                 has 'image: ghcr\.io/renatobardi/oute-agent:\$\{OUTE_VERSION:-latest\}'
 check "compose: um processo (python -m agent_studio)"  has 'entrypoint: \["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"\]'
-check "compose: token do ambiente (agent.env)"         has 'AGENT_STUDIO_TOKEN: \$\{AGENT_STUDIO_TOKEN:-\}'
+check "compose: credencial de ingestão do ambiente (services.env)" has 'AGENT_STUDIO_INGEST_TOKEN: \$\{AGENT_STUDIO_INGEST_TOKEN:-\}'
+check "compose: credencial de leitura do ambiente (agent.env)" has 'AGENT_STUDIO_READ_TOKEN: \$\{AGENT_STUDIO_READ_TOKEN:-\}'
 check "Dockerfile: copia o pacote e instala por hash"  bash -c 'grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$0" && grep -q -- "--require-hashes -r /opt/agent-studio/requirements.txt" "$0"' "$ROOT/docker/Dockerfile"
 
 # ---------------------------------------------------------------- 8. `oute up`: item do vault -> profile
@@ -246,26 +247,37 @@ check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 envf="$TMP/env"; : > "$envf"
 T1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"; S1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
 up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
+  SERVICES_ENV_FILE=~/.oute/services.env; SERVICES_FOLDER=oute-services
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
-  $FUNCS"$'\n'"agent_studio_up; echo \"profiles=\${COMPOSE_PROFILES:-}\"; echo \"token=\${AGENT_STUDIO_TOKEN:-}\"" 2>&1)"; RC=$?; }
+  $FUNCS"$'\n'"agent_studio_up; echo \"profiles=\${COMPOSE_PROFILES:-}\"; echo \"token=\${AGENT_STUDIO_INGEST_TOKEN:-}\"; echo \"antigo=\${AGENT_STUDIO_TOKEN:-}\"" 2>&1)"; RC=$?; }
 rm -f "$TMP/.env"
-up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
-check "sem OUTE_AGENT_STUDIO (Mac): não liga, sem aviso" test "$OUT" = "profiles="$'\n'"token=$T1"
+R1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
+up AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
+check "sem OUTE_AGENT_STUDIO (Mac): não liga, sem aviso" test "$OUT" = "profiles="$'\n'"token=$T1"$'\n'"antigo="
 printf 'OUTE_AGENT_STUDIO=1\n' > "$TMP/.env"
-up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
-check ".env com OUTE_AGENT_STUDIO=1, token e senha: liga" grep -qx 'profiles=agent-studio' <<<"$OUT"
+up AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_READ_TOKEN=$R1 AGENT_STUDIO_SURREAL_PASS=$S1
+check ".env com OUTE_AGENT_STUDIO=1, credenciais e senha: liga" grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "…e sem aviso"                                   bash -c '! grep -q aviso <<<"$0"' "$OUT"
-up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1 COMPOSE_PROFILES=outro
+# transição (#256): só o token único de antes
+up AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
+check "só o token antigo: liga, com ele na ingestão"   bash -c 'grep -qx "profiles=agent-studio" <<<"$0" && grep -qx "token=$1" <<<"$0"' "$OUT" "$T1"
+check "só o token antigo: o nome antigo não segue ao compose" grep -qx 'antigo=' <<<"$OUT"
+check "só o token antigo: avisa a transição e a pasta" grep -q 'aviso: transição (#256).*AGENT_STUDIO_INGEST_TOKEN.*pasta oute-services' <<<"$OUT"
+check "sem a credencial de leitura: avisa e sobe"      grep -q 'aviso: AGENT_STUDIO_READ_TOKEN não está em .*pasta oute-agent' <<<"$OUT"
+check "avisos sem valor de segredo"                    bash -c '! grep -qF -e "$1" -e "$2" <<<"$(grep aviso <<<"$0")"' "$OUT" "$T1" "$S1"
+up AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_TOKEN=${T1}velho AGENT_STUDIO_SURREAL_PASS=$S1 AGENT_STUDIO_READ_TOKEN=$R1
+check "credencial nova vence o token antigo, sem aviso" bash -c 'grep -qx "token=$1" <<<"$0" && ! grep -q aviso <<<"$0"' "$OUT" "$T1"
+up AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_READ_TOKEN=$R1 AGENT_STUDIO_SURREAL_PASS=$S1 COMPOSE_PROFILES=outro
 check "soma ao COMPOSE_PROFILES que já existe"         grep -qx 'profiles=outro,agent-studio' <<<"$OUT"
 up
 check "sem o item no vault: não liga"                  grep -qx 'profiles=' <<<"$OUT"
-check "sem o item no vault: avisa e cita o item"       grep -q 'aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS não está em .*item agent-studio' <<<"$OUT"
+check "sem o item no vault: avisa e cita o item"       grep -q 'aviso: OUTE_AGENT_STUDIO=1, mas AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS não está em .*services.env (item agent-studio da pasta oute-services' <<<"$OUT"
 check "sem o item no vault: não bloqueia (rc 0)"       test "$RC" = 0
-up AGENT_STUDIO_TOKEN=$T1
+up AGENT_STUDIO_INGEST_TOKEN=$T1
 check "item sem a senha do SurrealDB: não liga"        grep -qx 'profiles=' <<<"$OUT"
 check "item sem a senha do SurrealDB: avisa qual falta" grep -q 'mas AGENT_STUDIO_SURREAL_PASS não está em' <<<"$OUT"
 rm -f "$TMP/.env"
-up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
+up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
 check "OUTE_AGENT_STUDIO=1 no ambiente também liga"    grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "up chama agent_studio_up depois dos segredos"   grep -q 'host_secrets "$refresh"; agent_studio_up;' "$ROOT/scripts/oute"
 check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
@@ -328,7 +340,7 @@ cat > "$TMP/task.json" <<'EOF'
 EOF
 
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS")
-OUT="$(env AGENT_STUDIO_TOKEN="$T1" AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS= AGENT_STUDIO_DB="$TMP/y.duckdb" \
+OUT="$(env AGENT_STUDIO_INGEST_TOKEN="$T1" AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS= AGENT_STUDIO_DB="$TMP/y.duckdb" \
   PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio 2>&1)"; RC=$?
 check "SurrealDB sem senha: não sobe e diz o item"     bash -c '[[ $0 -ne 0 ]] && grep -q "AGENT_STUDIO_SURREAL_PASS vazio" <<<"$1"' "$RC" "$OUT"
 DB="$TMP/s2/db.duckdb"
