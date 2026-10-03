@@ -423,13 +423,13 @@ cmd_close() {
     id="$(tab_by_label "$label")"
     if [[ -z "$id" && "${tab:--}" != - ]] && tab_exists "$tab"; then id="$tab"; fi
     if [[ -z "$id" ]]; then
-      echo "já fechada: $label"
       (( ! yes )) || mark_closed "$state" "$slug"
+      echo "já fechada: $label"
       continue
     fi
     pending=1
     if (( yes )); then
-      if herdr tab close "$id" >/dev/null 2>&1; then echo "fechada: $label ($id)"; closed=1; mark_closed "$state" "$slug"
+      if herdr tab close "$id" >/dev/null 2>&1; then mark_closed "$state" "$slug"; echo "fechada: $label ($id)"; closed=1
       else echo "falhou fechar $label ($id); feche manualmente" >&2; failed=1; fi
     else echo "fechar: $label ($id)"; fi
   done < "$state/spawned"

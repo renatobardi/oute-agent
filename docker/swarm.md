@@ -112,6 +112,7 @@ oute-swarm spawn <n>-<slug-curto> "<instrução>"
 
 ## 4. Fechamento
 - Assim que o PR de uma sessão for mergeado (ou o Bardi abandonar a issue), feche a aba dela: `oute-swarm close <n>-<slug> --yes`. Se ela terminou com `— aplicar no host depois do merge`, feche só depois de aplicado (ou de o Bardi dispensar). Não feche aba de sessão com PR aberto ou trabalho em andamento.
+  - **Não corte a saída do close** com `| head`, `| grep -m1` ou outros pipes que fecham cedo. Se o `spawn` recusar com `limite da rodada atingido (3/3)` depois de fechar uma aba visualmente (sumiu do herdr), repita `oute-swarm close <n>-<slug> --yes` sem piping.
 - **Issue `só GitHub` (sem PR):** com o critério de aceite conferido (§3), ofereça ao Bardi uma opção numerada que fecha a issue e a aba (ex.: `1. fechar a issue #<n> (gh issue close) e a aba <n>-<slug>`, `2. pedir ajuste à sessão`, `3. deixar a #<n> aberta e fechar só a aba`). Só com a escolha dele, e nesta ordem: `gh issue close <n> --comment "<resumo da conferência>"` e `oute-swarm close <n>-<slug> --yes`. `gh issue close` é ação externa: vale a regra de confirmar do §3.
 
 Quando todos os PRs da triagem estiverem mergeados ou abandonados, e todas as issues `só GitHub` fechadas ou abandonadas (confirme com o Bardi), siga nesta ordem: retrospectiva kaizen, PRs kaizen, fechamento final.

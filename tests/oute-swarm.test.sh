@@ -427,6 +427,27 @@ check "watch --round: sai com 0"                         [ "$RC" -eq 0 ]
 check "watch --round: ganha da worktree"                 grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR"
 check "watch --round: sem aviso"                         bash -c '! grep -q assumindo' _ <<<"$ERR"
 
+# ---------------------------------------------------------------- #407: close registra a baixa antes de escrever
+# quando a saída é cortada por | head -1 (SIGPIPE), mark_closed tem que ter rodado antes do echo
+CASE=close407; round "$CASE"
+# abrir 3 abas (max=3): já tem uma (7-foo), faltam 2
+sw spawn 8-baz "instrução"
+check "407: primeira aba aberta"                         [ "$RC" -eq 0 ]
+sw spawn 9-qux "instrução"
+check "407: segunda aba aberta"                          [ "$RC" -eq 0 ]
+# agora temos 3 abas abertas (7-foo, 8-baz, 9-qux), total 3; o limit é 3
+check "407: max atingido"                                [ "$(grep -c '^' "$STATE/spawned")" -eq 3 ]
+# simular close com | head -1 (SIGPIPE cortando a saída) — não usar sw() porque captura tudo
+env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+  OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX=3 \
+  "$SWARM" close 8-baz --yes 2>/dev/null | head -1 >/dev/null
+# verificar que a baixa foi registrada mesmo com pipe cortando a saída
+check "407: close com | head -1 registra a baixa"       grep -qxF '8-baz' "$STATE/closed"
+# tentar spawn novo — deve funcionar porque a vaga foi liberada
+MAX=3 sw spawn 10-test "instrução"
+check "407: novo spawn passa (vaga liberada)"           [ "$RC" -eq 0 ]
+check "407: spawned tem 7-foo, 9-qux e 10-test"         [ "$(awk 'NR <= 1 || $1 ~ /(7-foo|9-qux|10-test)/ { print $1 }' "$STATE/spawned" | grep -c .)" -eq 3 ]
+
 # ---------------------------------------------------------------- #266: falha de CI em head já substituído
 # fake-pr <sha do head> [<estado>] [<checks do head, JSON>]: PR #12 da issue #7 no repo da rodada (usável nos ganchos)
 cat > "$BIN/fake-pr" <<'SH'
