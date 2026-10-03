@@ -193,8 +193,8 @@ host_secrets() {
 # vão só aos serviços; a de leitura (AGENT_STUDIO_READ_TOKEN) é do item agent-studio da pasta oute-agent, via
 # agent.env, e é a única que o agent recebe.
 STUDIO_PROFILE=agent-studio
-# destino do collector (#190): no host com o agent-studio, a rede docker; nos outros (Mac), o vhost só na tailnet
-# (lab#244), com a mesma credencial de ingestão. OUTE_AGENT_STUDIO_URL no .env troca o vhost.
+# destino do collector (#190) e de onde o agent lê (#259): no host com o agent-studio, a rede docker; nos outros
+# (Mac), o vhost só na tailnet (lab#244), com a mesma credencial de ingestão. OUTE_AGENT_STUDIO_URL no .env troca o vhost.
 STUDIO_LOCAL_URL=http://agent-studio:8430
 STUDIO_REMOTE_URL=https://agent-studio.oute.pro
 agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}" == 1 ]]; }
@@ -213,14 +213,16 @@ agent_studio_up() {
   # o nome antigo não segue para o compose: os serviços recebem só as duas credenciais novas
   unset AGENT_STUDIO_TOKEN
   if ! agent_studio_enabled; then
+    # o vhost vale mesmo sem a credencial de ingestão: o agent lê por ele, com a de leitura (ops-observe, #259)
+    AGENT_STUDIO_URL="${OUTE_AGENT_STUDIO_URL:-$(env_get OUTE_AGENT_STUDIO_URL || true)}"
+    export AGENT_STUDIO_URL="${AGENT_STUDIO_URL:-$STUDIO_REMOTE_URL}"
     if [[ -z "${AGENT_STUDIO_INGEST_TOKEN:-}" ]]; then
       echo "aviso: AGENT_STUDIO_INGEST_TOKEN não está em $SERVICES_ENV_FILE (item agent-studio da pasta" \
         "$SERVICES_FOLDER do vault). O collector não manda ao agent-studio do oute-server; crie o item e rode:" \
         "oute up --refresh-secrets" >&2
       return 0
     fi
-    AGENT_STUDIO_URL="${OUTE_AGENT_STUDIO_URL:-$(env_get OUTE_AGENT_STUDIO_URL || true)}"
-    export AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_URL="${AGENT_STUDIO_URL:-$STUDIO_REMOTE_URL}" OUTE_OTEL_STUDIO=agent-studio
+    export AGENT_STUDIO_INGEST_TOKEN OUTE_OTEL_STUDIO=agent-studio
     return 0
   fi
   local v falta=""

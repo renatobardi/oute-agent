@@ -116,7 +116,9 @@ if docker compose version >/dev/null 2>&1; then
   check "compose config: surrealdb só na rede studio"   jqe '.services.surrealdb.networks | keys == ["studio"]' <<<"$CFG"
   check "compose config: agent só na rede oute"         jqe '.services.agent.networks | keys == ["oute"]' <<<"$CFG"
   check "compose config: rede studio interna"           jqe '.networks.studio.internal == true' <<<"$CFG"
-  check "compose config: agent sem credencial de serviço no environment" jqe '.services.agent.environment | keys | map(select(test("AGENT_STUDIO|SURREAL"))) == []' <<<"$CFG"
+  check "compose config: agent sem credencial de serviço no environment" jqe '.services.agent.environment | keys | map(select(test("AGENT_STUDIO_[A-Z_]*(TOKEN|PASS)|SURREAL"))) == []' <<<"$CFG"
+  # o endereço não é credencial: o agent lê o agent-studio por ele, com a de leitura do agent_env (#259)
+  check "compose config: do agent-studio, o agent só recebe o endereço" jqe '.services.agent.environment | keys | map(select(test("AGENT_STUDIO"))) == ["AGENT_STUDIO_URL"]' <<<"$CFG"
   check "compose config: surrealdb sem porta"           jqe '.services.surrealdb.ports == null' <<<"$CFG"
 else
   echo "# compose config: pulado (sem docker compose neste host)"
