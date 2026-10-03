@@ -329,9 +329,10 @@ env -i OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" OTEL_RESOURCE_
   | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' > "$HOME/.oute_env"
 t semotel claude
 OUT="$(cd "$WS/proj" && env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_RESOURCE_ATTRIBUTES CLAUDECODE=1 "$TASK" clean --yes 2>&1 </dev/null)"; RC=$?
-check "clean --yes sem OTEL_*: removed com a origem do ~/.oute_env" [ "$RC" -eq 0 ] && grep -qx "removida $SP/proj-semotel (sem commits além de origin/main)" <<<"$OUT" \
-  && jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "semotel" and .attrs["oute.agent"] == "claude"
-          and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent"' <<<"$(last)"
+check "clean --yes sem OTEL_*: rc 0 e a worktree removida" bash -c '[[ $1 -eq 0 ]] && grep -qxF "$2" <<<"$3"' _ "$RC" \
+  "removida $SP/proj-semotel (sem commits além de origin/main)" "$OUT"
+check "clean --yes sem OTEL_*: removed com a origem do ~/.oute_env" jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "semotel"
+  and .attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent"' <<<"$(last)"
 rm -f "$HOME/.oute_env"
 
 check "nenhum oute.task.* com corpo (2ª parte)"        [ "$(task_ev '.body != null' | grep -c .)" -eq 0 -a "$(total)" -gt 10 ]

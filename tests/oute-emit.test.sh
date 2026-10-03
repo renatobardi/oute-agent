@@ -510,8 +510,8 @@ check "oute_env coletor fora: spool com a origem do arquivo" [ "$(events "$SH8/.
 rcv_start "$TMP/r8c"
 envfile "$SH8" OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
 OUT="$(HOME="$SH8" noenv oute-emit flush 2>&1)"; RC=$?
-check "oute_env flush sem OTEL_*: entrega o mesmo id"   [ "$RC" -eq 0 -a -z "$OUT" -a "$(n true)" -eq 1 -a "$(ev true | jq -r '.attrs["oute.event.id"]')" == "$sid" ] \
-                                                         && [ -z "$(ls "$SH8/.oute/emit/spool/"*.json 2>/dev/null)" ]
+check "oute_env flush sem OTEL_*: entrega o mesmo id"   [ "$RC" -eq 0 -a -z "$OUT" -a "$(n true)" -eq 1 -a "$(ev true | jq -r '.attrs["oute.event.id"]')" == "$sid" ]
+check "oute_env flush sem OTEL_*: spool vazio"          [ -z "$(ls "$SH8/.oute/emit/spool/"*.json 2>/dev/null)" ]
 rcv_stop
 # teto de 2 s com o endpoint do arquivo e o coletor lento
 RCV_SLEEP=6 rcv_start "$TMP/r8d"
