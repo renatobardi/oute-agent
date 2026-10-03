@@ -183,8 +183,8 @@ Só com o trust gate `livre` (passo 4): é ele, e não o ambiente limpo, que pro
 AUD=$(mktemp -d)
 git worktree add --detach "$AUD/head" "$HEAD_SHA"
 git worktree add --detach "$AUD/base" "$BASE_SHA"     # para os testes que devem falhar na base
-# ... gates ...
-git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"; rm -rf "$AUD"
+# ... gates, com a saída de cada um em "$AUD/<gate>.out" (veja "Saída dos gates") ...
+git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"; rm -rf "$AUD"   # só com o relatório pronto
 ```
 
 **Gates:** os que o repo documenta, lidos do `AGENTS.md` **da base** (no oute-agent, a seção "Validar antes do PR"), e os que o CI do repo roda (`.github/workflows/` da base). Não invente tabela genérica por linguagem. No oute-agent hoje:
@@ -198,7 +198,7 @@ git worktree remove --force "$AUD/head"; git worktree remove --force "$AUD/base"
 Regras de execução:
 - **sem segredos no ambiente:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>'`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente. O `env -i` **não isola o sistema de arquivos**: o gate roda como o mesmo usuário e lê qualquer caminho absoluto que ele lê (`~/.config`, `~/.ssh`, `/run/secrets`, o `agent_env` montado). Por isso só execute depois do passo 4 `livre`, e nunca descreva o gate como "isolado" ou "sem acesso a segredos" no relatório;
 - sem rede, quando o gate não precisa dela; nada de `push`, `release`, `oute up`, deploy ou canal de aprovação;
-- anote comando, código de saída e o trecho relevante da saída de cada gate;
+- anote comando, código de saída e o trecho relevante da saída de cada gate, lido do arquivo da execução (veja "Saída dos gates", abaixo);
 - **testes que falham na base e passam no head:** para teste novo ou alterado que o PR apresenta como prova de correção, copie o teste para a worktree da base (`git -C "$AUD/base" checkout "$HEAD_SHA" -- <arquivos de teste>`) e rode. Tem que falhar na base e passar no head. Se passa nos dois, o teste não prova a mudança (slop: teste vazio, passo 8);
 - **CI do head:** leia os checks do SHA auditado, não do branch:
 
@@ -206,6 +206,21 @@ Regras de execução:
   gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" --jq '.check_runs[] | "\(.name) \(.status) \(.conclusion)"'
   gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/status" --jq '.statuses[] | "\(.context) \(.state)"'
   ```
+
+**Saída dos gates (#320).** A saída inteira de cada execução de gate (stdout e stderr) vai para um arquivo dentro de `$AUD` **antes de qualquer corte**. O corte se faz na leitura do arquivo, nunca na execução: nada de `<gate> 2>&1 | tail -1`, `| head`, `| grep` nem `> /dev/null` no comando que roda o gate, porque a linha da falha que não se repete some junto.
+
+```bash
+G=addons-link                                  # nome curto do gate
+( cd "$AUD/head" && env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash tests/addons-link.test.sh ) > "$AUD/$G.out" 2>&1; echo "rc=$?"
+tail -n 3 "$AUD/$G.out"                        # o resumo, lido do arquivo
+grep -n -E '^FAIL |[Ee]rror|falha' "$AUD/$G.out"   # as linhas da falha, com o número da linha
+```
+
+- **Um arquivo por execução**, nunca reescrito: a repetição do mesmo gate vai para `$AUD/$G.2.out`, `$AUD/$G.3.out`…, e a execução na worktree da base para `$AUD/$G.base.out`. Em laço: `for i in 2 3 4; do ( … ) > "$AUD/$G.$i.out" 2>&1; echo "$i rc=$?"; done`.
+- **O trecho do relatório é lido desse arquivo** (`tail`, `grep -n`, `sed -n '<a>,<b>p'`), com o código de saída que o `echo "rc=$?"` mostrou. O que não está no arquivo não entra no relatório como saída de gate.
+- **Gate que falha, mesmo uma vez só:** antes de rodar de novo, copie do arquivo para o rascunho do relatório as linhas da falha (o caso nomeado: a linha `FAIL <caso>`, a mensagem de erro e o resumo) e o código de saída. Só depois repita, em arquivo novo.
+- **Falhou uma vez e passou na repetição:** é achado **UNCERTAIN** (intermitente), com o caso nomeado, as linhas copiadas da execução que falhou, o comando, o código de saída e quantas repetições passaram; o que resolveria a dúvida é dito como em todo UNCERTAIN (passo 10). Nunca "não capturei qual caso": com a saída em arquivo, o caso está lá. A repetição que passa não apaga a falha, e o gate não entra na tabela como `passou`: entra como `falhou 1 de <n> (intermitente, achado #<n>)`. Se a saída da falha não nomeia caso nenhum, cole as últimas linhas dela como estão e diga isso.
+- Os arquivos somem com o `rm -rf "$AUD"`, que por isso só roda com o relatório pronto (passo 12). Eles não são publicados nem copiados para fora de `$AUD`, e o trecho que vai ao relatório segue a regra do passo 12 (nada de segredo).
 
 **Declare o que não rodou**, com o motivo (ferramenta ausente, precisa do host, do Mac, de release, de segredo). **Pendente, pulado, cancelado, neutro ou não rodado nunca é aprovado**: um gate nesse estado não sustenta `merge como está`. Gate documentado que falhou é BLOCKING. Gate que não rodou e cobre a área mudada é, no mínimo, UNCERTAIN, e o relatório diz quem pode rodá-lo.
 
