@@ -702,6 +702,7 @@ cat > "$FAKE/prs-repo.json" <<'J'
   "url":"https://github.com/x/y/pull/12","statusCheckRollup":[{"name":"test","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]}]
 J
 SH
+rm -f "$STATE/closed"   # #419: PR nunca visto só entra com a sessão aberta; aqui o foco é o evento, não o close
 watch
 check "watch: pr, ci e rodada como observação"           [ "$(n '.name == "oute.swarm.watch.pr" and .attrs["oute.swarm.source"] == "watch" and (.body | startswith("[pr] PR #12 aberto"))')" -eq 1 -a \
                                                            "$(n '.name == "oute.swarm.watch.ci" and .body == "[ci] PR #12 · test: fail"')" -eq 1 -a "$(n '.name == "oute.swarm.watch.rodada"')" -eq 1 ]
@@ -1229,5 +1230,42 @@ check "worker check-lib: diz no corpo do PR (#401)"        grep -qF 'Diga no cor
 check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'Falha ali é falha do PR' "$P"
 check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
 check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
+# 7n. watch só de PR de sessão desta rodada (#419): outra rodada com a mesma issue #7 não entra no monitor
+# a) a sessão #7 já fechada nesta rodada; o PR de outra rodada, com o mesmo número de issue, nunca foi visto
+CASE=outra-rodada; round "$CASE"
+echo '7-foo' > "$STATE/closed"
+cat > "$FAKE/on-sleep-1" <<'SH'
+fake-pr aaaaaaa1111111111111111111111111111111aa OPEN
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "outra rodada: código 0"                           [ "$RC" -eq 0 ]
+check "outra rodada: sem [pr] para o PR de outra rodada" [ -z "$(log_events | grep -F '[pr]')" ]
+check "outra rodada: sem [ci] nem [conflito]"            [ -z "$(log_events | grep -E '^\[(ci|conflito)\]')" ]
+# b) a sessão #7 aberta nesta rodada: o PR com o número dela entra (o caso de antes continua valendo)
+CASE=minha-rodada; round "$CASE"
+cat > "$FAKE/on-sleep-1" <<'SH'
+fake-pr aaaaaaa1111111111111111111111111111111aa OPEN
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "minha rodada: PR da sessão aberta entra"          logged "[pr] PR #12 aberto (issue #7) https://github.com/x/y/pull/12"
+# c) sessão fechada da própria rodada: o PR que o watch já tinha visto segue acompanhado até o merge
+CASE=fechada-vista; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+cat > "$FAKE/on-sleep-1" <<'SH'
+fake-pr aaaaaaa1111111111111111111111111111111aa OPEN '[{"name":"test","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]'
+echo '7-foo' >> "$STATE/closed"
+SH
+cat > "$FAKE/on-sleep-2" <<'SH'
+fake-pr aaaaaaa1111111111111111111111111111111aa MERGED
+SH
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_ISSUE_DELAY=0 watch
+check "fechada vista: código 0"                          [ "$RC" -eq 0 ]
+check "fechada vista: CI do PR depois do close"          logged "[ci] PR #12 · test: fail"
+check "fechada vista: mergeado depois do close"          logged "[pr] PR #12 mergeado (issue #7)"
+check "fechada vista: log = stdout"                      [ "$(log_events)" == "$(out_events)" ]
 
 check_end
