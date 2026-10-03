@@ -213,7 +213,8 @@ sw spawn 8-sem-pane "instrução"
 check "sem pane: falha"                                  [ "$RC" -ne 0 ]
 check "sem pane: fecha a aba pelo id da saída"           grep -qx 'tab close wA:t5' "$FAKE/herdr.log"
 check "sem pane: mensagem diz que fechou"                grep -q 'não achei o pane da aba nova na saída do herdr (aba wA:t5 fechada)' <<<"$ERR"
-check "sem pane: agente não iniciado nem registrado"     [ "$(cat "$STATE/spawned")" == "$before" ] && ! grep -q 'pane run' "$FAKE/herdr.log"
+check "sem pane: agente não registrado"                 [ "$(cat "$STATE/spawned")" == "$before" ]
+check "sem pane: agente não iniciado"                    bash -c '! grep -q "$1" "$2"' _ 'pane run' "$FAKE/herdr.log"
 echo 'herdr: resposta inesperada' > "$FAKE/tab-create.out"
 FAKE="$FAKE" "$BIN/fake-tabs" working '#8 sem-pane=idle'
 sw spawn 8-sem-pane "instrução"
@@ -225,7 +226,8 @@ sw spawn 8-sem-pane "instrução"
 check "aba não achada: falha"                            [ "$RC" -ne 0 ]
 check "aba não achada: pede para fechar à mão"           grep -q 'não consegui fechar a aba "#8 sem-pane" (feche à mão)' <<<"$ERR"
 check "aba não achada: não fecha outra aba"              [ "$(grep -c 'tab close' "$FAKE/herdr.log")" -eq 2 ]
-check "parse: nada registrado em nenhuma das falhas"     [ "$(cat "$STATE/spawned")" == "$before" ] && ! grep -q 'pane run' "$FAKE/herdr.log"
+check "parse: nada registrado em nenhuma das falhas"     [ "$(cat "$STATE/spawned")" == "$before" ]
+check "parse: nada iniciado em nenhuma das falhas"       bash -c '! grep -q "$1" "$2"' _ 'pane run' "$FAKE/herdr.log"
 
 # 6. watch multi-repo: mesma issue #7 e mesmo PR #12 em dois repos, sem colisão
 CASE=multi; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
@@ -317,22 +319,26 @@ check "meta sem max: nada registrado nem aberto"         [ "$(cat "$STATE/spawne
 CASE=pasta; round "$CASE"; ID=swarm-0101-0000; WT="$TMP/$CASE/repo-$ID"; coord "$WT" main
 mkdir -p "$H/.oute/swarm/$ID"; printf 'repo=%s\nmax=3\nlabel=\nstarted=2026-01-01T00:00:00Z\n' "$REPO" > "$H/.oute/swarm/$ID/meta"
 swc "$WT" spawn 8-bar "instrução"
-check "pasta: assume a rodada da pasta"                  [ "$RC" -eq 0 ] && grep -qF "assumindo a rodada $ID" <<<"$ERR"
+check "pasta: código 0"                                  [ "$RC" -eq 0 ]
+check "pasta: assume a rodada da pasta"                  grep -qF "assumindo a rodada $ID" <<<"$ERR"
 check "pasta: spawned da rodada, com o repo do meta"     [ "$(awk '$1=="8-bar" {print $6}' "$H/.oute/swarm/$ID/spawned")" == "$REPO" ]
 OUT="$(cd "$WT" && env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
        OUTE_SWARM_ID=swarm-test "$SWARM" spawn 9-baz "instrução" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
-check "variável ganha: grava na rodada do OUTE_SWARM_ID" [ "$RC" -eq 0 ] && grep -q '^9-baz ' "$STATE/spawned"
+check "variável ganha: código 0"                         [ "$RC" -eq 0 ]
+check "variável ganha: grava na rodada do OUTE_SWARM_ID" grep -q '^9-baz ' "$STATE/spawned"
 check "variável ganha: sem aviso"                        [ -z "$ERR" ]
 
 # 7d. fora de worktree de dispatcher (ou com branch swarm sem meta): avulso, como antes, sem aviso
 CASE=avulso; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-sem-meta
 swc "$REPO" spawn 8-bar "instrução"
 check "avulso: código 0, sem aviso"                      [ "$RC" -eq 0 -a -z "$ERR" ]
-check "avulso: grava em avulso (spawned e log)"          grep -q '^8-bar ' "$H/.oute/swarm/avulso/spawned" && grep -q ' spawn 8-bar claude$' "$H/.oute/swarm/avulso/log"
+check "avulso: grava em avulso (spawned)"                grep -q '^8-bar ' "$H/.oute/swarm/avulso/spawned"
+check "avulso: grava em avulso (log)"                    grep -q ' spawn 8-bar claude$' "$H/.oute/swarm/avulso/log"
 check "avulso: sessão avulsa, sem OUTE_SWARM_ROUND (#128)" grep -q -- "pane run w1:p[0-9]* OUTE_SWARM_WORKER=1 oute-task -r .* 8-bar claude" "$FAKE/herdr.log"
 check "avulso: a rodada não recebe nada"                 [ "$(wc -l < "$STATE/spawned")" -eq 1 ]
 swc "$WT" spawn 9-baz "instrução"
-check "branch swarm sem meta: avulso, sem aviso"         [ "$RC" -eq 0 -a -z "$ERR" ] && grep -q '^9-baz ' "$H/.oute/swarm/avulso/spawned"
+check "branch swarm sem meta: código 0, sem aviso"       [ "$RC" -eq 0 -a -z "$ERR" ]
+check "branch swarm sem meta: avulso"                    grep -q '^9-baz ' "$H/.oute/swarm/avulso/spawned"
 
 # 7e. spawn, tell, close e watch sem a variável, na worktree do dispatcher: a mesma rodada, mesmo com outra mais recente
 CASE=mesma; round "$CASE"; WT="$TMP/$CASE/wt"; coord "$WT" sessao/swarm-test
@@ -343,17 +349,22 @@ FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
 echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
 echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
 swc "$WT" tell 8-bar "pode seguir"
-check "mesma: tell acha a sessão na rodada da worktree"  [ "$RC" -eq 0 ] && grep -q " tell 8-bar ok"$'\t'"pode seguir\$" "$STATE/log"
+check "mesma: tell sai com 0"                            [ "$RC" -eq 0 ]
+check "mesma: tell acha a sessão na rodada da worktree"  grep -q " tell 8-bar ok"$'\t'"pode seguir\$" "$STATE/log"
 check "mesma: tell avisa a rodada assumida"              grep -qF "$ASSUME" <<<"$ERR"
 swc "$WT" close 8-bar --yes
-check "mesma: close na rodada da worktree"               [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-test" ] && grep -qx '8-bar' "$STATE/closed"
+check "mesma: close na rodada da worktree"               [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-test" ]
+check "mesma: close registra a sessão na rodada"         grep -qx '8-bar' "$STATE/closed"
 WATCHING=1 swc "$WT" watch
-check "mesma: watch na rodada da worktree"               [ "$RC" -eq 0 ] && grep -q 'oute-swarm watch: rodada swarm-test ' <<<"$ERR"
+check "mesma: watch sai com 0"                           [ "$RC" -eq 0 ]
+check "mesma: watch na rodada da worktree"               grep -q 'oute-swarm watch: rodada swarm-test ' <<<"$ERR"
 check "mesma: a rodada mais recente fica intacta"        [ ! -e "$NEW/log" -a ! -e "$NEW/closed" -a ! -e "$NEW/fechada" ]
 swc "$REPO" close 7-foo
 check "fora da worktree: close segue na mais recente"    [ "$RC" -eq 0 -a "$(head -1 <<<"$OUT")" == "rodada swarm-nova" -a -z "$ERR" ]
 STATE="$NEW" WATCHING=1 swc "$WT" watch --round swarm-nova
-check "watch --round: ganha da worktree, sem aviso"      [ "$RC" -eq 0 ] && grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR" && ! grep -q 'assumindo' <<<"$ERR"
+check "watch --round: sai com 0"                         [ "$RC" -eq 0 ]
+check "watch --round: ganha da worktree"                 grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR"
+check "watch --round: sem aviso"                         bash -c '! grep -q assumindo' _ <<<"$ERR"
 
 # ---------------------------------------------------------------- #266: falha de CI em head já substituído
 # fake-pr <sha do head> [<estado>] [<checks do head, JSON>]: PR #12 da issue #7 no repo da rodada (usável nos ganchos)
@@ -446,7 +457,8 @@ cp "\$STATE/log" "\$FAKE/log.p2"
 rm -f "\$FAKE/checks-$A.fail"
 SH
 watch
-check "gh falha: aviso na passada da falha, sem [ci]"    grep -qF '[aviso] gh falhou nesta passada' "$FAKE/log.p2" && ! grep -qF '[ci]' "$FAKE/log.p2"
+check "gh falha: aviso na passada da falha"              grep -qF '[aviso] gh falhou nesta passada' "$FAKE/log.p2"
+check "gh falha: sem [ci] na passada da falha"           bash -c '! grep -qF "[ci]" "$1"' _ "$FAKE/log.p2"
 check "gh falha: a falha sai quando o gh volta"          [ "$(ci_events)" == "$OLDFAIL" ]
 check "gh falha: aviso de volta"                         logged "[aviso] gh respondendo de novo"
 
@@ -461,7 +473,8 @@ cat > "$FAKE/on-sleep-2" <<SH
 fake-checks $A checks=FAILURE
 SH
 watch
-check "gh lixo: aviso e nova leitura"                    logged "[aviso] gh falhou nesta passada; mantendo o último estado conhecido" && [ "$(reads "$A")" -eq 2 ]
+check "gh lixo: aviso"                                   logged "[aviso] gh falhou nesta passada; mantendo o último estado conhecido"
+check "gh lixo: nova leitura"                            [ "$(reads "$A")" -eq 2 ]
 check "gh lixo: a falha sai na passada seguinte"         [ "$(ci_events)" == "$OLDFAIL" ]
 
 # 7k. PR fechado ou mergeado: o head antigo é lido uma vez (a falha concluída sai) e sai da observação mesmo com check rodando
@@ -542,7 +555,8 @@ check "abertura: oute.swarm.round.opened"                [ "$(ev '.name == "oute
                                                               and .attrs["oute.swarm.max"] == "2" and .attrs["oute.swarm.label"] == "bug" and .attrs["oute.agent"] == "claude")' | grep -c .)" -eq 1 ]
 sw spawn 8-bar "faça a issue 8" --agent codex
 e="$(ev '.name == "oute.swarm.session.spawned"')"
-check "spawn: código 0 e linha no log"                   [ "$RC" -eq 0 ] && grep -q ' spawn 8-bar codex$' "$STATE/log"
+check "spawn: código 0"                                  [ "$RC" -eq 0 ]
+check "spawn: linha no log"                              grep -q ' spawn 8-bar codex$' "$STATE/log"
 check "spawn: sessão, issue, agente da sessão, repo"     jq -e '.attrs["oute.swarm.round"] == "swarm-test" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.issue"] == "8"
                                                               and .attrs["oute.swarm.session.agent"] == "codex" and .attrs["oute.swarm.repo"] == "repo" and .attrs["oute.swarm.kaizen"] == false' <<<"$e" >/dev/null
 check "spawn: oute.agent = dispatcher, origem"         jq -e '.attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e" >/dev/null

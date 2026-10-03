@@ -103,7 +103,8 @@ check "abrir: o agente passa pelo shim sem nova worktree" [ "$(aenv claude OUTE_
 t s1 codex
 check "reabrir: código 0, saída do agente"             [ "$RC" -eq 0 -a "$OUT" == "agente falso codex" -a "$ERR" == "reabrindo $SP/proj-s1 (sessao/s1)" ]
 e="$(task_ev '.name == "oute.task.reopened"')"
-check "reabrir: um oute.task.reopened, com o mesmo id" [ "$(grep -c . <<<"$e")" -eq 1 ] && jqe --arg id "$id" '.attrs["oute.task.id"] == $id' <<<"$e"
+check "reabrir: um oute.task.reopened"                [ "$(grep -c . <<<"$e")" -eq 1 ]
+check "reabrir: reopened com o mesmo id"               jqe --arg id "$id" '.attrs["oute.task.id"] == $id' <<<"$e"
 check "reopened: agente da sessão codex, base, sem legacy" jqe '.attrs["oute.task.agent"] == "codex" and .attrs["oute.task.base"] == "main" and (.attrs | has("oute.task.legacy") | not)' <<<"$e"
 check "reabrir: id não muda na worktree"               [ "$(mark "$SP/proj-s1" id)" == "$id" ]
 check "marca no Codex: a mesma"                        [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
@@ -179,7 +180,9 @@ else
   FAKE_RC=5 OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=de-outra" t nogravo claude "segue"
   chmod u+w "$gd"
   check "falha ao gravar o id: a sessão abre igual (exec e código)" [ "$RC" -eq 5 -a "$OUT" == "agente falso claude" -a "$(cat "$FAKE/claude.args")" == "segue" ]
-  check "falha ao gravar o id: só um aviso a mais no stderr" [ "$(grep -c . <<<"$ERR")" -eq 2 ] && grep -q "^reabrindo $SP/proj-nogravo " <<<"$ERR" && grep -q '^aviso: não consegui gravar o id da sessão' <<<"$ERR"
+  check "falha ao gravar o id: só uma linha a mais no stderr" [ "$(grep -c . <<<"$ERR")" -eq 2 ]
+  check "falha ao gravar o id: reabre a worktree"      grep -q "^reabrindo $SP/proj-nogravo " <<<"$ERR"
+  check "falha ao gravar o id: a linha a mais é o aviso" grep -q '^aviso: não consegui gravar o id da sessão' <<<"$ERR"
   check "falha ao gravar o id: conversa sem marca (nem a de outra sessão)" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
   check "falha ao gravar o id: reopened sem id e sem legacy" jqe '.name == "oute.task.reopened" and .attrs["oute.task.slug"] == "nogravo" and (.attrs | has("oute.task.id") or has("oute.task.legacy") | not)' <<<"$(last)"
   # marca que já tem id e não aceita a rodada nova: o id fica, sem aviso; a rodada vale nesta abertura
@@ -187,8 +190,8 @@ else
   OUTE_SWARM_ID=swarm-0303-0000 t fixa claude
   chmod u+w "$(gitdir "$SP/proj-fixa")/oute-task"
   check "falha ao atualizar a marca: abre igual, sem aviso" [ "$RC" -eq 0 -a "$ERR" == "reabrindo $SP/proj-fixa (sessao/fixa)" ]
-  check "falha ao atualizar a marca: o id fica, com a rodada do ambiente" jqe --arg id "$fid" '.attrs["oute.task.id"] == $id and .attrs["oute.swarm.round"] == "swarm-0303-0000"' <<<"$(last)" \
-    && [ "$(mark "$SP/proj-fixa" id)" == "$fid" -a -z "$(mark "$SP/proj-fixa" round)" ]
+  check "falha ao atualizar a marca: o id fica, com a rodada do ambiente" jqe --arg id "$fid" '.attrs["oute.task.id"] == $id and .attrs["oute.swarm.round"] == "swarm-0303-0000"' <<<"$(last)"
+  check "falha ao atualizar a marca: a marca segue com o id, sem rodada" [ "$(mark "$SP/proj-fixa" id)" == "$fid" -a -z "$(mark "$SP/proj-fixa" round)" ]
 fi
 
 # ---------------------------------------------------------------- 5. shim: restore do herdr e agente aberto na worktree
@@ -237,17 +240,20 @@ t list
 check "list: lista as worktrees e não emite"           [ "$RC" -eq 0 -a "$(grep -c "^$SP/proj-" <<<"$OUT")" -eq 10 -a "$(total)" -eq "$base_n" ]
 t clean
 check "fora do herdr: clean só no _sem-space (#277)"   [ "$(head -n1 <<<"$OUT")" == "space _sem-space ($SP)" ]
-check "simulação: mostra o que removeria"              grep -qx "remover $SP/proj-s1 (PR mergeado)" <<<"$OUT" && grep -qx "(simulação — rode 'oute-task clean --yes' para aplicar)" <<<"$OUT"
+check "simulação: mostra o que removeria"              grep -qx "remover $SP/proj-s1 (PR mergeado)" <<<"$OUT"
+check "simulação: diz como aplicar"                    grep -qx "(simulação — rode 'oute-task clean --yes' para aplicar)" <<<"$OUT"
 check "simulação: não remove e não emite"              [ -d "$SP/proj-s1" -a -d "$SP/proj-old" -a "$(total)" -eq "$base_n" ]
 CLAUDECODE=1 t clean --yes
-check "clean --yes: código 0 e a saída de sempre, com o space no topo" [ "$RC" -eq 0 ] && grep -qx "removida $SP/proj-s1 (PR mergeado)" <<<"$OUT" \
-  && grep -qx "removida $SP/proj-old (detached, contida em origin/main)" <<<"$OUT" && grep -qx "removida $SP/proj-7-foo (sem commits além de origin/main)" <<<"$OUT" \
-  && grep -qx "mantém  $SP/proj-fica1 (mudanças locais)" <<<"$OUT" && grep -qx "mantém  $SP/proj-fica2 (sessao/fica2: 1 commit(s) sem PR mergeado)" <<<"$OUT" \
-  && [ "$(grep -c . <<<"$OUT")" -eq 11 -a -z "$ERR" ]
+check "clean --yes: código 0, 11 linhas, stderr vazio" [ "$RC" -eq 0 -a "$(grep -c . <<<"$OUT")" -eq 11 -a -z "$ERR" ]
+check "clean --yes: removida a do PR mergeado"         grep -qx "removida $SP/proj-s1 (PR mergeado)" <<<"$OUT"
+check "clean --yes: removida a detached"               grep -qx "removida $SP/proj-old (detached, contida em origin/main)" <<<"$OUT"
+check "clean --yes: removida a sem commits"            grep -qx "removida $SP/proj-7-foo (sem commits além de origin/main)" <<<"$OUT"
+check "clean --yes: mantém a com mudanças locais"      grep -qx "mantém  $SP/proj-fica1 (mudanças locais)" <<<"$OUT"
+check "clean --yes: mantém a com commit sem PR"        grep -qx "mantém  $SP/proj-fica2 (sessao/fica2: 1 commit(s) sem PR mergeado)" <<<"$OUT"
 check "clean --yes: worktrees removidas e mantidas"    [ ! -e "$SP/proj-s1" -a ! -e "$SP/proj-old" -a ! -e "$SP/proj-semid" -a -d "$SP/proj-fica1" -a -d "$SP/proj-fica2" ]
 r="$(task_ev '.name == "oute.task.removed"')"
-check "removed: um por worktree removida (8), nada das mantidas" [ "$(grep -c . <<<"$r")" -eq 8 -a "$(total)" -eq $((base_n + 8)) ] \
-  && ! grep -q 'fica' <<<"$r"
+check "removed: um por worktree removida (8), nada das mantidas" [ "$(grep -c . <<<"$r")" -eq 8 -a "$(total)" -eq $((base_n + 8)) ]
+check "removed: nada das mantidas"                     bash -c '! grep -q fica' _ <<<"$r"
 check "removed merged: PR mergeado, com o id da sessão" jqe -s --arg id "$id" 'map(select(.attrs["oute.task.slug"] == "s1")) | length == 1 and (.[0].attrs
                                                          | .["oute.task.id"] == $id and .["oute.task.reason"] == "merged" and .["oute.task.repo"] == "proj" and .["oute.task.base"] == "main")' <<<"$r"
 check "removed detached: com o id lido antes"          jqe -s --arg id "$oid" 'map(select(.attrs["oute.task.slug"] == "old")) | length == 1 and .[0].attrs["oute.task.id"] == $id
@@ -262,10 +268,12 @@ check "removed: motivo sempre de valores fechados"     jqe -s 'all(.attrs["oute.
 t travada claude; git -C "$WS/proj" worktree lock "$SP/proj-travada"
 before="$(total)"
 t clean --yes
-check "clean --yes: remoção recusada pelo git não emite" [ -d "$SP/proj-travada" -a "$(total)" -eq "$before" ] && ! grep -q "removida $SP/proj-travada" <<<"$OUT"
+check "clean --yes: remoção recusada pelo git não emite" [ -d "$SP/proj-travada" -a "$(total)" -eq "$before" ]
+check "clean --yes: remoção recusada não diz removida" bash -c '! grep -q "$1"' _ "removida $SP/proj-travada" <<<"$OUT"
 git -C "$WS/proj" worktree unlock "$SP/proj-travada"
 t clean --yes
-check "clean --yes: destravada, sai com o removed"     [ ! -e "$SP/proj-travada" ] && jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "travada"' <<<"$(last)"
+check "clean --yes: destravada, sai"                   [ ! -e "$SP/proj-travada" ]
+check "clean --yes: destravada, com o removed"         jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "travada"' <<<"$(last)"
 before="$(total)"
 t clean --yes
 check "clean --yes de novo: nada a remover, nada emitido" [ "$RC" -eq 0 -a "$(total)" -eq "$before" ]
@@ -275,8 +283,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
   t ramo claude; rid="$(mark "$SP/proj-ramo" id)"; chmod a-w "$WS/proj/.git/refs/heads/sessao"
   t clean --yes
   chmod u+w "$WS/proj/.git/refs/heads/sessao"
-  check "branch que não apaga: worktree removida, clean segue com código 0" [ "$RC" -eq 0 -a ! -e "$SP/proj-ramo" ] && ! grep -q "removida $SP/proj-ramo" <<<"$OUT" \
-    && grep -q "mantém  $SP/proj-fica2" <<<"$OUT"
+  check "branch que não apaga: worktree removida, clean segue com código 0" [ "$RC" -eq 0 -a ! -e "$SP/proj-ramo" ]
+  check "branch que não apaga: não diz removida"       bash -c '! grep -q "$1"' _ "removida $SP/proj-ramo" <<<"$OUT"
+  check "branch que não apaga: clean segue para as outras" grep -q "mantém  $SP/proj-fica2" <<<"$OUT"
   check "branch que não apaga: removed emitido com o id"  jqe --arg id "$rid" '.name == "oute.task.removed" and .attrs["oute.task.id"] == $id and .attrs["oute.task.reason"] == "empty"' <<<"$(last)"
   git -C "$WS/proj" branch -q -D sessao/ramo
 fi
@@ -348,47 +357,57 @@ git init -q --bare -b main "$TMP/remote2.git" && git -C "$TMP/seed" push -q "$TM
   && git clone -q "$TMP/remote2.git" "$WS/outro" || die "não montei o segundo repo"
 sp() { local w="$1"; shift; HERDR_ENV=1 HERDR_WORKSPACE_ID="$w" t "$@"; }   # sp <id do space> <args do oute-task…>
 sp w1 a1 claude
-check "space: worktree em <space>/<repo>-<slug>, label em nome de pasta" [ "$RC" -eq 0 -a "$ERR" == "worktree $S1/proj-a1 · branch sessao/a1 (de origin/main)" ] \
-  && [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$S1/proj-a1" && pwd -P)" ]
+check "space: worktree em <space>/<repo>-<slug>, label em nome de pasta" [ "$RC" -eq 0 -a "$ERR" == "worktree $S1/proj-a1 · branch sessao/a1 (de origin/main)" ]
+check "space: agente na worktree do space"             [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$S1/proj-a1" && pwd -P)" ]
 sp w2 b1 claude; sp w2 -r outro b2 claude
 check "space: outro space, outra pasta (e outro repo)" [ -d "$S2/proj-b1" -a -d "$S2/outro-b2" ]
 sp w9 semlabel claude
-check "space sem label no herdr: _sem-space, com aviso" [ "$RC" -eq 0 -a -d "$SP/proj-semlabel" ] && grep -q "^aviso: não achei o label do space w9 no herdr; usando _sem-space$" <<<"$ERR"
+check "space sem label no herdr: _sem-space"           [ "$RC" -eq 0 -a -d "$SP/proj-semlabel" ]
+check "space sem label no herdr: com aviso"            grep -q "^aviso: não achei o label do space w9 no herdr; usando _sem-space$" <<<"$ERR"
 git -C "$WS/proj" worktree add -q -b sessao/legado "$WT/proj-legado" origin/main
 sp w1 legado codex
-check "formato antigo: reabre onde está, sem migrar"   [ "$RC" -eq 0 -a "$ERR" == "reabrindo $WT/proj-legado (sessao/legado)" -a ! -e "$S1/proj-legado" ] \
-  && [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$WT/proj-legado" && pwd -P)" ]
+check "formato antigo: reabre onde está, sem migrar"   [ "$RC" -eq 0 -a "$ERR" == "reabrindo $WT/proj-legado (sessao/legado)" -a ! -e "$S1/proj-legado" ]
+check "formato antigo: agente na worktree antiga"      [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$WT/proj-legado" && pwd -P)" ]
 git -C "$WS/proj" worktree add -q -b sessao/x "$WT/proj-colide" origin/main
 sp w3 outra claude
-check "pasta do space ocupada por worktree antiga: recusa" [ "$RC" -ne 0 -a ! -e "$WT/proj-colide/proj-outra" ] && grep -q "formato antigo" <<<"$ERR"
+check "pasta do space ocupada por worktree antiga: recusa" [ "$RC" -ne 0 -a ! -e "$WT/proj-colide/proj-outra" ]
+check "pasta do space ocupada: diz o motivo"           grep -q "formato antigo" <<<"$ERR"
 git -C "$WS/proj" worktree remove "$WT/proj-colide"; git -C "$WS/proj" branch -q -D sessao/x
 sp w1 list
-check "list: todos os spaces e o formato antigo"       grep -q "^$S1/proj-a1 " <<<"$OUT" && grep -q "^$S2/proj-b1 " <<<"$OUT" && grep -q "^$S2/outro-b2 " <<<"$OUT" \
-  && grep -q "^$WT/proj-legado " <<<"$OUT"
+check "list: o space atual"                            grep -q "^$S1/proj-a1 " <<<"$OUT"
+check "list: o outro space"                            grep -q "^$S2/proj-b1 " <<<"$OUT"
+check "list: o outro space, do outro repo"             grep -q "^$S2/outro-b2 " <<<"$OUT"
+check "list: o formato antigo"                         grep -q "^$WT/proj-legado " <<<"$OUT"
 # main dos dois repos um commit atrás da origin
 git -C "$TMP/seed" commit -q --allow-empty -m novo && git -C "$TMP/seed" push -q "$TMP/remote.git" main && git -C "$TMP/seed" push -q "$TMP/remote2.git" main
 sp w1 clean
-check "clean (simulação): só o space atual"            [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "space frentes-engenharia ($S1)" ] && grep -qx "remover $S1/proj-a1 (sem commits além de origin/main)" <<<"$OUT" \
-  && ! grep -qE "b1|b2|legado|fica|semlabel" <<<"$OUT" && grep -q "^atualizar $WS/proj " <<<"$OUT" && ! grep -q "$WS/outro" <<<"$OUT"
+check "clean (simulação): o space atual no topo"       [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "space frentes-engenharia ($S1)" ]
+check "clean (simulação): remove a do space atual"     grep -qx "remover $S1/proj-a1 (sem commits além de origin/main)" <<<"$OUT"
+check "clean (simulação): nada de fora do space"       bash -c '! grep -qE "b1|b2|legado|fica|semlabel"' _ <<<"$OUT"
+check "clean (simulação): atualiza só a main do repo do space" bash -c 'grep -q "^atualizar $1 " <<<"$3" && ! grep -q "$2" <<<"$3"' _ "$WS/proj" "$WS/outro" "$OUT"
 check "clean (simulação): avisa do formato antigo"     grep -qx "formato antigo: 1 worktree(s) direto em $WT, fora do escopo; só o 'oute-task clean --all' as considera" <<<"$OUT"
 sp w1 clean --yes
 check "clean --yes: remove só a worktree do space"     [ "$RC" -eq 0 -a ! -e "$S1/proj-a1" -a -d "$S2/proj-b1" -a -d "$S2/outro-b2" -a -d "$WT/proj-legado" -a -d "$SP/proj-semlabel" ]
-check "clean --yes: só a main do repo com worktree no space" [ "$(git -C "$WS/proj" rev-parse HEAD)" == "$(git -C "$WS/proj" rev-parse origin/main)" ] \
-  && [ "$(git -C "$WS/outro" rev-list --count HEAD..origin/main)" -eq 1 ]
+check "clean --yes: só a main do repo com worktree no space" [ "$(git -C "$WS/proj" rev-parse HEAD)" == "$(git -C "$WS/proj" rev-parse origin/main)" ]
+check "clean --yes: a main do outro repo fica para trás" [ "$(git -C "$WS/outro" rev-parse HEAD)" != "$(git -C "$TMP/remote2.git" rev-parse main)" ]
 sp w1 clean --space "OUTE agent"
-check "clean --space: outro space, pelo nome normalizado" [ "$(head -n1 <<<"$OUT")" == "space oute-agent ($S2)" ] && grep -qx "remover $S2/outro-b2 (sem commits além de origin/main)" <<<"$OUT" \
-  && grep -qx "(simulação — rode 'oute-task clean --yes --space oute-agent' para aplicar)" <<<"$OUT" && [ -d "$S2/outro-b2" ]
+check "clean --space: outro space, pelo nome normalizado" [ "$(head -n1 <<<"$OUT")" == "space oute-agent ($S2)" ]
+check "clean --space: o que removeria do outro space"  grep -qx "remover $S2/outro-b2 (sem commits além de origin/main)" <<<"$OUT"
+check "clean --space: diz como aplicar, com o space"   grep -qx "(simulação — rode 'oute-task clean --yes --space oute-agent' para aplicar)" <<<"$OUT"
+check "clean --space: simulação não remove"            [ -d "$S2/outro-b2" ]
 sp w1 clean --yes --space oute-agent
-check "clean --space --yes: remove o outro space e avança a main dele" [ "$RC" -eq 0 -a ! -e "$S2/proj-b1" -a ! -e "$S2/outro-b2" -a -d "$WT/proj-legado" ] \
-  && [ "$(git -C "$WS/outro" rev-list --count HEAD..origin/main)" -eq 0 ]
+check "clean --space --yes: remove o outro space e avança a main dele" [ "$RC" -eq 0 -a ! -e "$S2/proj-b1" -a ! -e "$S2/outro-b2" -a -d "$WT/proj-legado" ]
+check "clean --space --yes: avança a main do outro repo" [ "$(git -C "$WS/outro" rev-parse HEAD)" == "$(git -C "$TMP/remote2.git" rev-parse main)" ]
 t clean --space _sem-space
-check "clean --space _sem-space: mantém o nome"         [ "$(head -n1 <<<"$OUT")" == "space _sem-space ($SP)" ] && grep -qx "remover $SP/proj-semlabel (sem commits além de origin/main)" <<<"$OUT"
+check "clean --space _sem-space: mantém o nome"         [ "$(head -n1 <<<"$OUT")" == "space _sem-space ($SP)" ]
+check "clean --space _sem-space: o que removeria"      grep -qx "remover $SP/proj-semlabel (sem commits além de origin/main)" <<<"$OUT"
 sp w2 clean --all --yes
-check "clean --all: todos os spaces e o formato antigo" [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "todos os spaces ($WT)" -a ! -e "$WT/proj-legado" -a ! -e "$SP/proj-semlabel" -a -d "$SP/proj-fica1" ] \
-  && ! grep -q "^formato antigo" <<<"$OUT"
+check "clean --all: todos os spaces e o formato antigo" [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "todos os spaces ($WT)" -a ! -e "$WT/proj-legado" -a ! -e "$SP/proj-semlabel" -a -d "$SP/proj-fica1" ]
+check "clean --all: sem o aviso do formato antigo"     bash -c '! grep -q "^formato antigo"' _ <<<"$OUT"
 for a in "--space x --all" "--all --space x" "--space" "--foo"; do
   t clean $a
-  check "clean $a: recusa, sem remover nada"           [ "$RC" -ne 0 -a -z "$OUT" -a -d "$SP/proj-fica1" ] && grep -q "^oute-task: " <<<"$ERR"
+  check "clean $a: recusa, sem remover nada"           [ "$RC" -ne 0 -a -z "$OUT" -a -d "$SP/proj-fica1" ]
+  check "clean $a: diz o erro"                         grep -q "^oute-task: " <<<"$ERR"
 done
 
 check_end

@@ -161,7 +161,8 @@ printf '# oute-propose\n# titulo: novo\n# como: user\n# agente: codex\n# criado:
 
 OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)" HOME="$BH" oute-emit backfill >"$TMP/bf.out" 2>"$TMP/bf.err"; RC=$?
 check "backfill fora do ar: rc 0, sem stdout"          [ "$RC" -eq 0 -a ! -s "$TMP/bf.out" ]
-check "backfill fora do ar: avisa e não marca feito"   [ ! -e "$BH/.oute/emit/backfill.done" ] && grep -q 'rode de novo' "$TMP/bf.err"
+check "backfill fora do ar: não marca feito"          [ ! -e "$BH/.oute/emit/backfill.done" ]
+check "backfill fora do ar: avisa"                     grep -q 'rode de novo' "$TMP/bf.err"
 rcv_start "$TMP/r4"
 HOME="$BH" oute-emit backfill >"$TMP/bf.out" 2>"$TMP/bf.err"; RC=$?
 check "backfill: rc 0, sem stdout"                     [ "$RC" -eq 0 -a ! -s "$TMP/bf.out" ]
@@ -291,7 +292,8 @@ OUT="$(HOME="$FH" OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" ou
 check "cheio: rc 0, nada na tela, nada gravado"         [ "$RC" -eq 0 -a -z "$OUT" -a -z "$(ls "$FH/.oute/emit/spool/" 2>/dev/null)" ]
 check "cheio: dropped = 1"                              [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 1 ]
 ERR="$(HOME="$FH" OUTE_EMIT_DEBUG=1 OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit canal 20260928-110000-f 2>&1 >/dev/null)"
-check "cheio: dropped acumula; aviso com OUTE_EMIT_DEBUG=1" [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 2 ] && grep -q 'spool cheio' <<<"$ERR"
+check "cheio: dropped acumula"                         [ "$(cat "$FH/.oute/emit/spool.dropped")" -eq 2 ]
+check "cheio: aviso com OUTE_EMIT_DEBUG=1"              grep -q 'spool cheio' <<<"$ERR"
 rcv_start "$TMP/r6b"
 HOME="$FH" oute-emit canal 20260928-110000-f
 check "cheio: próximo evento leva dropped = 2"          [ "$(n '(.attrs["oute.emit.spool.dropped"] | tonumber) == 2')" -eq 1 ]
@@ -345,8 +347,8 @@ check "4xx em lote: três arquivos no spool"             [ "$(ls "$MS/"*.json | 
 RCV_REJECT=RUIM rcv_start "$TMP/r6f"
 HOME="$MH" oute-emit flush
 check "4xx em lote: os bons chegam, um por um"          [ "$(n true)" -eq 2 -a "$(n '.attrs["oute.canal.title"] == "bom1"')" -eq 1 -a "$(n '.attrs["oute.canal.title"] == "bom2"')" -eq 1 ]
-check "4xx em lote: só o recusado vai para spool.bad"  [ -z "$(ls "$MS/"*.json 2>/dev/null)" -a "$(ls "$MH/.oute/emit/spool.bad/"*.json | wc -l)" -eq 1 ] \
-                                                         && grep -q RUIM "$MH/.oute/emit/spool.bad/"*.json
+check "4xx em lote: só o recusado vai para spool.bad"  [ -z "$(ls "$MS/"*.json 2>/dev/null)" -a "$(ls "$MH/.oute/emit/spool.bad/"*.json | wc -l)" -eq 1 ]
+check "4xx em lote: o spool.bad tem o recusado"         grep -q RUIM "$MH/.oute/emit/spool.bad/"*.json
 rcv_stop
 
 # laço de flush do entrypoint (a função flush_spool, extraída do entrypoint.sh): sleep falso conta as voltas
@@ -395,15 +397,15 @@ HOME="$RH" oute-emit canal 20260928-122000-vivospool
 check "reconcile: ao vivo no spool também marca"        [ -e "$RD/20260928-122000-vivospool" -a "$(ls "$RS/"*.json | wc -l)" -eq 1 ]
 # subida com o coletor fora: vai para o spool e marca
 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" subida
-check "reconcile coletor fora: decided pendentes no spool" [ "$(rspool '.name == "oute.canal.decided"' | grep -c .)" -eq 3 ] \
-                                                         && [ "$(events "$RS" | jq -r '.attrs["oute.canal.id"]' | sort | tr '\n' ' ')" == "20260928-120500-fora 20260928-121000-rec 20260928-122000-vivospool " ]
+check "reconcile coletor fora: decided pendentes no spool" [ "$(rspool '.name == "oute.canal.decided"' | grep -c .)" -eq 3 ]
+check "reconcile coletor fora: os ids pendentes"        [ "$(events "$RS" | jq -r '.attrs["oute.canal.id"]' | sort | tr '\n' ' ')" == "20260928-120500-fora 20260928-121000-rec 20260928-122000-vivospool " ]
 check "reconcile coletor fora: .out marcados"           [ -e "$RD/20260928-120500-fora" -a -e "$RD/20260928-121000-rec" ]
 check "reconcile: antes do corte, sem cabeçalho e id inválido ficam sem marca" \
                                                         [ ! -e "$RD/20260928-110000-velho" -a ! -e "$RD/20260928-122500-semcab" -a ! -e "$RD/lixo" ]
 check "reconcile: hora do fato e decisão do cabeçalho"  [ "$(rspool '.attrs["oute.canal.id"] == "20260928-121000-rec" and .attrs["oute.canal.decision"] == "recusado"
                                                               and (.time | tonumber / 1e9 | todate) == "2026-09-28T12:10:00Z" and .attrs["oute.agent"] == "human" and .body == null' | grep -c .)" -eq 1 ]
-check "reconcile: nunca lê a saída (segredo, cabeçalho falso)" [ -z "$(grep -l 'SEGREDO-DA-SAIDA\|intruso' "$RS"/*.json)" ] \
-                                                         && [ "$(rspool '.attrs["oute.canal.id"] == "20260928-120500-fora" and .attrs["oute.canal.decision"] == "executado"' | grep -c .)" -eq 1 ]
+check "reconcile: nunca lê a saída (segredo, cabeçalho falso)" [ -z "$(grep -l 'SEGREDO-DA-SAIDA\|intruso' "$RS"/*.json)" ]
+check "reconcile: a decisão vem do cabeçalho de verdade" [ "$(rspool '.attrs["oute.canal.id"] == "20260928-120500-fora" and .attrs["oute.canal.decision"] == "executado"' | grep -c .)" -eq 1 ]
 # subida com o coletor no ar: o spool chega, a reconciliação não repete nada
 rcv_start "$TMP/r7b"
 subida
