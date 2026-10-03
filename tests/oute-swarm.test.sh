@@ -17,7 +17,8 @@ command -v jq >/dev/null || { echo "FAIL precisa de jq"; exit 1; }
 # ---------------------------------------------------------------- fakes
 BIN="$TMP/bin"; mkdir -p "$BIN"
 # herdr: listas lidas de $FAKE/*.json; ações anotadas em $FAKE/herdr.log. `tab create` devolve o JSON do herdr
-# com ids no workspace pedido, ou $FAKE/tab-create.out, se existir (saída quebrada, #276). O campo de entrada do pane é
+# com ids no workspace pedido, ou $FAKE/tab-create.out, se existir (saída quebrada, #276); $FAKE/tabs-after.json, se
+# existir, vira o `tab list` de depois do `tab create` (a aba nova na lista, #289). O campo de entrada do pane é
 # $FAKE/field (send-text escreve, pane read mostra entre réguas como o Claude Code, ctrl+c limpa).
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -25,10 +26,11 @@ echo "$*" >> "$FAKE/herdr.log"
 case "$1 ${2:-}" in
   "tab list") cat "$FAKE/tabs.json" ;;
   "tab create") n=$(( $(cat "$FAKE/tabs.n" 2>/dev/null || echo 1) + 1 )); echo "$n" > "$FAKE/tabs.n"
+                [[ ! -e "$FAKE/tabs-after.json" ]] || mv "$FAKE/tabs-after.json" "$FAKE/tabs.json"
                 [[ ! -e "$FAKE/tab-create.out" ]] || { cat "$FAKE/tab-create.out"; exit 0; }
                 w="$4"   # --workspace <id>: o formato real do herdr 0.9 (root_pane e tab no result, #276)
                 echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$w:p$n\",\"tab_id\":\"$w:t$n\"},\"tab\":{\"tab_id\":\"$w:t$n\",\"label\":\"x\"}}}" ;;
-  "tab close") ;;
+  "tab close") [[ ! -e "$FAKE/tab-close.fail" ]] || exit 1 ;;
   "pane list") cat "$FAKE/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane run") ;;
   "pane read") printf '%s\n❯ %s\n%s\n' "──────────────────" "$(cat "$FAKE/field" 2>/dev/null)" "──────────────────" ;;
@@ -205,7 +207,7 @@ for ws in wA w9; do
 done
 check "workspace: nenhuma aba fechada"                   [ "$(grep -c 'tab close' "$FAKE/herdr.log")" -eq 0 ]
 
-# 5d. saída sem pane: fecha a aba recém-criada (pelo id da saída; sem id, pelo label) e nada entra no spawned
+# 5d. saída sem pane: fecha a aba recém-criada pelo id da saída e nada entra no spawned
 CASE=parse; round "$CASE"
 before="$(cat "$STATE/spawned")"
 echo '{"id":"cli:tab:create","result":{"tab":{"tab_id":"wA:t5"}}}' > "$FAKE/tab-create.out"
@@ -215,17 +217,55 @@ check "sem pane: fecha a aba pelo id da saída"           grep -qx 'tab close wA
 check "sem pane: mensagem diz que fechou"                grep -q 'não achei o pane da aba nova na saída do herdr (aba wA:t5 fechada)' <<<"$ERR"
 check "sem pane: agente não registrado"                 [ "$(cat "$STATE/spawned")" == "$before" ]
 check "sem pane: agente não iniciado"                    bash -c '! grep -q "$1" "$2"' _ 'pane run' "$FAKE/herdr.log"
+# 5e. saída sem o id da aba (#289): fecha só a aba que o spawn criou (a do label que não estava no `tab list` de antes)
 echo 'herdr: resposta inesperada' > "$FAKE/tab-create.out"
-FAKE="$FAKE" "$BIN/fake-tabs" working '#8 sem-pane=idle'
+# tabs_after <fake-tabs args>: o `tab list` de depois do próximo `tab create`
+tabs_after() { FAKE="$FAKE" "$BIN/fake-tabs" "$@"; mv "$FAKE/tabs.json" "$FAKE/tabs-after.json"; FAKE="$FAKE" "$BIN/fake-tabs" "${BEFORE[@]}"; }
+closes() { grep -c 'tab close' "$FAKE/herdr.log"; }
+BEFORE=(working '#8 sem-pane=idle')   # aba antiga com o mesmo label (w1:t2), de outra rodada
+tabs_after working '#8 sem-pane=idle' '#8 sem-pane=idle'
 sw spawn 8-sem-pane "instrução"
-check "não JSON: falha"                                  [ "$RC" -ne 0 ]
-check "não JSON: fecha a aba achada pelo label"          grep -qx 'tab close w1:t2' "$FAKE/herdr.log"
-check "não JSON: nada registrado"                        [ "$(cat "$STATE/spawned")" == "$before" ]
+check "aba antiga: falha"                                [ "$RC" -ne 0 ]
+check "aba antiga: fecha a aba nova"                     grep -qx 'tab close w1:t3' "$FAKE/herdr.log"
+check "aba antiga: a antiga continua aberta"             bash -c '! grep -qx "$1" "$2"' _ 'tab close w1:t2' "$FAKE/herdr.log"
+check "aba antiga: mensagem diz qual fechou"             grep -q '(aba w1:t3 fechada)' <<<"$ERR"
+check "aba antiga: só uma aba fechada"                   [ "$(closes)" -eq 2 ]
+BEFORE=(working)
+tabs_after working '#8 sem-pane=idle'
+sw spawn 8-sem-pane "instrução"
+check "aba nova: falha"                                  [ "$RC" -ne 0 ]
+check "aba nova: fechada pelo label"                     [ "$(grep -cx 'tab close w1:t2' "$FAKE/herdr.log")" -eq 1 ]
+# ambíguo: duas abas novas com o label (outro spawn da mesma issue no meio)
+nc="$(closes)"; BEFORE=(working '#8 sem-pane=idle')
+tabs_after working '#8 sem-pane=idle' '#8 sem-pane=idle' '#8 sem-pane=idle'
+sw spawn 8-sem-pane "instrução"
+check "ambíguo: falha"                                   [ "$RC" -ne 0 ]
+check "ambíguo: não fecha nada"                          [ "$(closes)" -eq "$nc" ]
+check "ambíguo: diz o label para fechar à mão"           grep -q 'não fechei a aba "#8 sem-pane" (2 abas novas com esse label; feche à mão)' <<<"$ERR"
+# nenhuma candidata: a aba antiga é a única com o label
+tabs_after working '#8 sem-pane=idle'
+sw spawn 8-sem-pane "instrução"
+check "nenhuma: falha"                                   [ "$RC" -ne 0 ]
+check "nenhuma: não fecha a aba antiga"                  [ "$(closes)" -eq "$nc" ]
+check "nenhuma: diz o label para fechar à mão"           grep -q 'não fechei a aba "#8 sem-pane" (nenhuma aba nova com esse label; feche à mão)' <<<"$ERR"
+# `tab list` ilegível antes do `tab create`: sem a lista de antes, nenhuma aba é dada como nova
+tabs_after working '#8 sem-pane=idle'; echo 'herdr: erro' > "$FAKE/tabs.json"
+sw spawn 8-sem-pane "instrução"
+check "sem lista antes: falha"                           [ "$RC" -ne 0 ]
+check "sem lista antes: não fecha nada"                  [ "$(closes)" -eq "$nc" ]
+check "sem lista antes: diz o label e o motivo"          grep -q 'não fechei a aba "#8 sem-pane" (herdr tab list falhou; feche à mão)' <<<"$ERR"
+# `tab list` ilegível depois do `tab create`
+BEFORE=(working); FAKE="$FAKE" "$BIN/fake-tabs" working; echo 'herdr: erro' > "$FAKE/tabs-after.json"
+sw spawn 8-sem-pane "instrução"
+check "sem lista depois: falha"                          [ "$RC" -ne 0 ]
+check "sem lista depois: não fecha nada"                 [ "$(closes)" -eq "$nc" ]
+check "sem lista depois: diz o label e o motivo"         grep -q 'não fechei a aba "#8 sem-pane" (herdr tab list falhou; feche à mão)' <<<"$ERR"
+# o `tab close` da aba nova falha: a mensagem pede para fechar à mão, com o id
+FAKE="$FAKE" "$BIN/fake-tabs" working; tabs_after working '#8 sem-pane=idle'; touch "$FAKE/tab-close.fail"
+sw spawn 8-sem-pane "instrução"; rm -f "$FAKE/tab-close.fail"
+check "close falha: falha"                               [ "$RC" -ne 0 ]
+check "close falha: diz o label e o id"                  grep -q 'não fechei a aba "#8 sem-pane" (herdr tab close falhou em w1:t2; feche à mão)' <<<"$ERR"
 FAKE="$FAKE" "$BIN/fake-tabs" working
-sw spawn 8-sem-pane "instrução"
-check "aba não achada: falha"                            [ "$RC" -ne 0 ]
-check "aba não achada: pede para fechar à mão"           grep -q 'não consegui fechar a aba "#8 sem-pane" (feche à mão)' <<<"$ERR"
-check "aba não achada: não fecha outra aba"              [ "$(grep -c 'tab close' "$FAKE/herdr.log")" -eq 2 ]
 check "parse: nada registrado em nenhuma das falhas"     [ "$(cat "$STATE/spawned")" == "$before" ]
 check "parse: nada iniciado em nenhuma das falhas"       bash -c '! grep -q "$1" "$2"' _ 'pane run' "$FAKE/herdr.log"
 

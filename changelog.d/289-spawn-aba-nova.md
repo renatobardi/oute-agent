@@ -1,0 +1,2 @@
+### Fixed
+- **`oute-swarm spawn` não fecha mais aba antiga com o mesmo label** (#289). Quando a saída do `herdr tab create` não traz o id da aba, o spawn fecha só a aba que ele criou: a daquele label que não estava no `herdr tab list` de antes do `tab create`. Com nenhuma candidata, mais de uma ou sem conseguir ler a lista, não fecha nada e o erro diz o label da aba para fechar à mão. Antes, fechava a primeira aba com o label, que podia ser a de outra rodada. **Precisa de release** (o `docker/oute-swarm` vai na imagem).
