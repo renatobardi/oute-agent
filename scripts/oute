@@ -462,12 +462,28 @@ approve_one() {
     *) echo "fica pendente." ;;
   esac
 }
+approve_usage() { echo "uso: oute approve [--watch | <id>]   (id: AAAAMMDD-HHMMSS-slug, como o oute-propose imprime)" >&2; }
 approve() {
+  # argumentos conferidos antes de tocar o container. #158: `oute approve <id>` decide só aquele pedido (o tray do
+  # Mac abre o Terminal nele); id fora do formato do oute-propose = rc 2, sem docker exec nenhum
+  local watch=0 one="" id seen=""
+  case "$#:${1:-}" in
+    0:) ;;
+    1:--watch|1:-w) watch=1 ;;
+    1:-*) approve_usage; return 2 ;;
+    1:*) [[ "$1" =~ ^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$ ]] || { echo "oute: id inválido: $(printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
+         one="$1" ;;
+    *) approve_usage; return 2 ;;
+  esac
   # #210: resultado guardado no host sai antes da guarda. `oute approve` chamado com o container fora (o script
   # aprovado reiniciou o agent) espera ele voltar por até OUTE_APPROVE_WAIT s e entrega, em vez de recusar de cara
   compgen -G "$approve_dir/runs/*.result" >/dev/null && approve_flush "${OUTE_APPROVE_WAIT:-90}"
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
-  local watch=0 id seen=""; [[ "${1:-}" == --watch || "${1:-}" == -w ]] && watch=1
+  if [[ -n "$one" ]]; then
+    approve_flush
+    grep -qxF "$one" <<<"$(approve_pending)" || { echo "oute: pedido $one não está pendente (já decidido ou não existe)" >&2; return 1; }
+    printf '\a'; approve_one "$one"; return 0
+  fi
   while :; do
     approve_flush
     local ids; ids="$(approve_pending)"
@@ -570,6 +586,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   install      link no PATH para chamar só `oute` de qualquer lugar
   update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
+  approve <id>       decide só aquele pedido (id do oute-propose); não pendente = rc 1, id inválido = rc 2
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
