@@ -1,0 +1,2 @@
+### Changed
+- **Triagem do swarm ciente do ciclo aberto** (#125). O `docker/swarm.md` §1 lê a issue `ciclo AAAA-MM-DD` aberta, a tabela da triagem ganha a coluna **ciclo** (`#<ciclo> (foco <n>)`, `fora` ou `sem ciclo`) e uma linha `ciclo #<n>: <x> das <y> escolhidas estão no ciclo; fora: …`. Entre candidatas que não se tocam, a do ciclo vem antes; escolha fora do ciclo só gera aviso, sem bloqueio. **Precisa de release** (`swarm.md` vai na imagem).
