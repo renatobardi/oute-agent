@@ -345,8 +345,10 @@ Antes de publicar, confira que o head não mudou: `gh pr view <N> --json headRef
 Escreva o relatório num arquivo temporário e publique **como comentário no PR** (alvo ref local: mostre na conversa, sem publicar):
 
 ```bash
-gh pr comment <N> --body-file <arquivo>
+REPORT_URL=$(gh pr comment <N> --body-file <arquivo>)   # o gh imprime o URL do comentário: guarde-o
 ```
+
+Guarde o `REPORT_URL` (e anote-o na conversa): é o único link válido do relatório, citado depois no passo 14 e na linha "relatório anterior" de uma reauditoria. Nunca escreva esse link à mão nem o reconstrua de memória; saída sem URL (comentário não publicado, alvo ref local) significa "sem link", não um valor inventado.
 
 Não use `gh pr review --approve` nem `--request-changes`. Cada auditoria é um comentário novo, e comentários antigos não são editados nem apagados. A primeira linha é sempre o marcador fixo, que serve para contar as auditorias depois. Nunca cole segredo nem saída que contenha segredo; corte a saída dos gates ao trecho relevante.
 
@@ -526,6 +528,7 @@ gh api "repos/{owner}/{repo}/commits/$MERGE_SHA/status" --jq '.state, (.statuses
 - **Estado da issue:** para cada issue do eixo Spec (`gh issue view <n> --json state,stateReason`):
   - PR com `Closes #n` mergeado na branch padrão → a issue tem que estar `CLOSED`. Se continua aberta (base não era a padrão, referência mal escrita), relate e pergunte antes de fechar;
   - PR com `Refs #n` → a issue continua `OPEN`, e o `## Falta` do PR é o que resta. Se ela foi fechada, relate.
+- **Link do relatório:** no campo "relatório" do comentário de merge use o `REPORT_URL` guardado no passo 12 para o head final, copiado como está. Sem ele (relatório não publicado, URL perdido), escreva "não registrado"; nunca monte, adivinhe nem complete o link à mão.
 - **Relatório do merge:** publique um comentário no PR com o marcador `<!-- oute-aidlc-qa-pr-audit:merge -->` (diferente do da auditoria, para a contagem não misturar), e repita o resumo na conversa:
 
   ```markdown
@@ -535,7 +538,7 @@ gh api "repos/{owner}/{repo}/commits/$MERGE_SHA/status" --jq '.state, (.statuses
   **Pedido:** "<texto curto do pedido do Bardi>" (conversa)
   **Base:** `<base>` (<mantida | retarget de `<antiga>`: motivo>)
   **Ajustes:** <commit curto: o quê> … | edição do corpo: <o quê> | "nenhum"
-  **Head final auditado:** `<HEAD_SHA>` (relatório: <link do comentário>)
+  **Head final auditado:** `<HEAD_SHA>` (relatório: <`REPORT_URL` guardado no passo 12 | "não registrado">)
   **Merge:** <squash | merge | rebase> → `<MERGE_SHA>`
   **CI no SHA do merge:** <check: estado> … | nenhum check roda neste SHA (<gatilhos>)
   **Issue:** #<n> <OPEN | CLOSED> (<esperado: sim | não: motivo>)
