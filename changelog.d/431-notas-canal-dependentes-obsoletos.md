@@ -1,0 +1,2 @@
+### Changed
+- **Notas do canal de aprovação: dependentes e pedido obsoleto** (#431). `docker/agent-notes.md` ganha duas regras: pedido que remove, recria ou para recurso do host lista antes quem depende dele e para sem alterar nada se achar dependente fora do esperado (ou vem depois de um ensaio); pedido pendente obsoleto é recusado pelo usuário antes do substituto, que diz no título que substitui. **Precisa de release** (`agent-notes.md` vai na imagem).
