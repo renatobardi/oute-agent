@@ -32,6 +32,12 @@ slog() {
   printf '%s\n' "$2" >> "$1/log" || true
   if command -v oute-emit >/dev/null 2>&1; then oute-emit swarm "$(basename "$1")" "$2" >/dev/null 2>&1 || true; fi
 }
+# snapshot da cota das assinaturas no spawn e no close (#347): o oute-emit lê o `oute-quota --json` e emite as métricas.
+# Em segundo plano e sem saída: a leitura (até ~6 s) nunca atrasa nem derruba o comando; sem oute-quota ou oute-emit, nada
+quota_snapshot() {
+  command -v oute-quota >/dev/null 2>&1 && command -v oute-emit >/dev/null 2>&1 || return 0
+  ( oute-emit quota "$1" </dev/null >/dev/null 2>&1 & ) >/dev/null 2>&1 || true
+}
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 
 # rodada da worktree de dispatcher em que o comando roda (#239): branch sessao/swarm-<id> ou pasta <repo>-swarm-<id>,
@@ -220,6 +226,7 @@ cmd_spawn() {
   printf '%s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \
     "$( (( kaizen )) && echo kaizen || echo -)" >> "$state/spawned"
   slog "$state" "$(date -u +%FT%TZ) spawn $slug $agent$( (( kaizen )) && echo ' kaizen')"
+  quota_snapshot spawn
   echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
@@ -432,6 +439,7 @@ cmd_close() {
     date -u +%FT%TZ > "$state/fechada"; slog "$state" "$(cat "$state/fechada") rodada fechada"
   fi
   if (( ! pending )); then (( ! all )) || echo "nada a fechar"; return 0; fi
+  (( ! closed )) || quota_snapshot close
   (( yes )) || echo "(simulação — rode com --yes para fechar)"
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
 }

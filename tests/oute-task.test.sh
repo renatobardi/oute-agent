@@ -669,4 +669,41 @@ ts_stop; ts_off
 check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
 rcv_stop
 
+# ---------------------------------------------------------------- 11. snapshot da cota na abertura (#347)
+rcv_start "$TMP/r11"
+QB="$TMP/qbin"; mkdir -p "$QB"
+cat > "$QB/oute-quota" <<'SH'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+[[ ! -f "$d/sleep" ]] || sleep "$(cat "$d/sleep")"
+[[ ! -f "$d/json" ]] || cat "$d/json"
+exit "$(cat "$d/rc" 2>/dev/null || echo 0)"
+SH
+chmod +x "$QB/oute-quota"
+R5="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":{"used_pct":15,"resets_at":"%s"}}},"codex":{"status":"unknown","reason":"sem-credencial","windows":{}}}}' "$R5" > "$QB/json"
+# espera (até 10 s) o que o segundo plano ainda vai entregar
+until_n() { local i; for i in $(seq 1 100); do [[ "$(eval "$1")" -ge "$2" ]] && return 0; sleep 0.1; done; return 1; }
+OLDPATH="$PATH"; export PATH="$QB:$PATH"
+FAKE_RC=5 t cota-1 claude "p"
+check "cota: a abertura mantém o exec e o código do agente" bash -c '[ "$1" -eq 5 ] && [ "$2" = "agente falso claude" ]' _ "$RC" "$OUT"
+check "cota: stderr só com a linha da worktree"        [ "$ERR" == "worktree $SP/proj-cota-1 · branch sessao/cota-1 (de origin/main)" ]
+check "cota: os pontos do Claude chegam (momento open no evento do Codex)" until_n "mp '.name == \"oute.quota.reset_in_seconds\" and .res[\"oute.agent\"] == \"claude\"' | grep -c ." 1
+check "cota: unknown do Codex com o motivo e o momento open" until_n "n '.name == \"oute.quota.unknown\" and .attrs[\"oute.quota.reason\"] == \"sem-credencial\" and .attrs[\"oute.quota.moment\"] == \"open\" and .attrs[\"oute.agent\"] == \"codex\"'" 1
+check "cota: o recurso do ponto leva a origem, não a marca da sessão" jqe -s 'length >= 1 and all(.[]; .res["host.name"] == "oute-mac" and (.res | has("oute.task.id") | not))' <<<"$(mp '.name | startswith("oute.quota.")')"
+before="$(mp 'true' | grep -c .)"
+t cota-1 codex
+check "cota: reabrir também faz o snapshot (novos pontos do Claude)" until_n "mp '.name == \"oute.quota.used_pct\"' | grep -c ." $((before / 2 + 1))
+# leitura lenta: a abertura volta antes e com a mesma saída
+echo 6 > "$QB/sleep"
+t0=$(date +%s); FAKE_RC=5 t cota-2 claude "p"; dt=$(( $(date +%s) - t0 ))
+check "cota lenta: a abertura não espera a leitura ($dt s)" bash -c '[ "$1" -eq 5 ] && [ "$2" -le 4 ] && [ "$3" = "agente falso claude" ]' _ "$RC" "$dt" "$OUT"
+# oute-quota que falha (rc 2, sem saída): a abertura é a mesma
+rm -f "$QB/sleep"; echo 2 > "$QB/rc"; : > "$QB/json"
+FAKE_RC=5 t cota-3 claude "p"
+check "cota com falha na leitura: abertura igual"      bash -c '[ "$1" -eq 5 ] && [ "$2" = "agente falso claude" ] && [ "$3" = "worktree $4/proj-cota-3 · branch sessao/cota-3 (de origin/main)" ]' _ "$RC" "$OUT" "$ERR" "$SP"
+check "cota com falha na leitura: o oute.task.opened sai" [ "$(task_ev '.attrs["oute.task.slug"] == "cota-3"' | grep -c .)" -eq 1 ]
+export PATH="$OLDPATH"
+rcv_stop
+
 check_end

@@ -558,4 +558,111 @@ HOME="$XH" noenv oute-emit reconcile
 check "oute_env válido de novo: reconcile manda e marca" [ "$(n '.name == "oute.canal.decided"')" -eq 1 -a -e "$XH/.oute/emit/decided/20261002-080200-dec" ]
 rcv_stop
 
+# ---------------------------------------------------------------- 15. snapshot da cota (#347)
+# oute-quota falso (a cota de verdade não roda aqui): imprime $FQ_JSON, sai com $FQ_RC e espera $FQ_SLEEP s
+QB="$TMP/qbin"; mkdir -p "$QB"
+cat > "$QB/oute-quota" <<'SH'
+#!/usr/bin/env bash
+[[ "$*" == "--json" ]] || exit 2
+[[ -z "${FQ_SLEEP:-}" ]] || sleep "$FQ_SLEEP"
+[[ -z "${FQ_JSON:-}" ]] || cat "$FQ_JSON"
+exit "${FQ_RC:-0}"
+SH
+chmod +x "$QB/oute-quota"
+iso_in() { python3 -c 'import sys, datetime as d; print((d.datetime.now(d.timezone.utc) + d.timedelta(seconds=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
+qw() { printf '{"used_pct":%s,"resets_at":"%s","resets_in_s":0}' "$1" "$2"; }   # janela
+# quota <momento> [env…]: roda o oute-emit quota com o oute-quota falso no PATH
+quota() { local m="$1"; shift; env PATH="$QB:$PATH" FQ_JSON="$TMP/fq.json" "$@" oute-emit quota "$m" </dev/null; }
+now_s() { date +%s; }
+rcv_start "$TMP/r15"
+R5="$(iso_in 3600)"; R7="$(iso_in 172800)"
+printf '{"schema":1,"read_at":"x","max_pct":90,"reset_grace_s":1200,"agents":{"claude":{"status":"ok","reason":null,"stale":false,"age_s":0,"windows":{"5h":%s,"7d":%s}},"codex":{"status":"unknown","reason":"token-expirado","stale":false,"age_s":null,"windows":{}}}}' \
+  "$(qw 15.0 "$R5")" "$(qw 34 "$R7")" > "$TMP/fq.json"
+t0=$(now_s); OUT="$(quota spawn 2>&1)"; RC=$?
+check "cota: rc 0 e nada na tela"                      [ "$RC" -eq 0 -a -z "$OUT" ]
+check "cota: 4 pontos do Claude (used_pct e reset_in_seconds × 5h e 7d), nenhum do Codex" \
+  [ "$(mp '.name | startswith("oute.quota.")' | grep -c .)" -eq 4 -a "$(mp '.res["oute.agent"] == "codex"' | grep -c .)" -eq 0 ]
+check "cota: used_pct em % (15 na 5h, 34 na 7d)"        jqe -s '(map(select(.unit == "%" and .attrs["oute.quota.window"] == "5h")) | map(.value) == [15])
+                                                                    and (map(select(.unit == "%" and .attrs["oute.quota.window"] == "7d")) | map(.value) == [34])' <<<"$(mp '.name == "oute.quota.used_pct"')"
+check "cota: reset_in_seconds em s, com folga do relógio (5h ≈ 3600, 7d ≈ 172800)" \
+  jqe -s '(map(select(.attrs["oute.quota.window"] == "5h" and .unit == "s")) | .[0].value | . >= 3590 and . <= 3600)
+          and (map(select(.attrs["oute.quota.window"] == "7d" and .unit == "s")) | .[0].value | . >= 172790 and . <= 172800)' <<<"$(mp '.name == "oute.quota.reset_in_seconds"')"
+check "cota: o ponto só leva o atributo da janela (a série não se parte)" jqe -s 'all(.[]; (.attrs | keys) == ["oute.quota.window"])' <<<"$(mp 'true')"
+check "cota: recurso = oute.agent, host.name, oute.instance, service.name e rota /v1/metrics" \
+  jqe -s 'all(.[]; .res["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["oute.instance"] == "oute-agent" and .res["service.name"] == "oute" and .path == "/v1/metrics")' <<<"$(mp 'true')"
+check "cota: hora do ponto = agora"                    jqe -s --argjson t "$t0" 'all(.[]; (.time | tonumber / 1e9) >= $t - 1 and (.time | tonumber / 1e9) <= $t + 10)' <<<"$(mp 'true')"
+e="$(ev '.name == "oute.quota.unknown"')"
+check "cota: Codex unknown vira um evento com o motivo e o momento" jqe '.attrs["oute.agent"] == "codex" and .attrs["oute.quota.reason"] == "token-expirado" and .attrs["oute.quota.moment"] == "spawn" and .res["oute.agent"] == "codex"' <<<"$e"
+check "cota: um evento só (o Claude ok não gera unknown)" [ "$(grep -c . <<<"$e")" -eq 1 ]
+
+# leitura de cache (stale): a hora do ponto é a da leitura, e o reset conta a partir dela
+rcv_stop; rcv_start "$TMP/r15b"
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":true,"age_s":600,"windows":{"5h":%s,"7d":%s}}}}' "$(qw 91 "$R5")" "$(qw 20 "$R7")" > "$TMP/fq.json"
+t0=$(now_s); quota close
+check "cota stale: ponto datado em agora − 600 s"      jqe -s --argjson t "$t0" 'all(.[]; (.time | tonumber / 1e9) >= $t - 601 and (.time | tonumber / 1e9) <= $t - 589)' <<<"$(mp 'true')"
+check "cota stale: hora do ponto + reset_in = hora do reset (5h)" \
+  jqe -s --arg r "$R5" '(map(select(.name == "oute.quota.reset_in_seconds" and .attrs["oute.quota.window"] == "5h")) | .[0] | (.time | tonumber / 1e9) + .value | floor) as $x
+                        | ($r | fromdate) as $y | ($x - $y | fabs) <= 1' <<<"$(mp 'true')"
+check "cota: sem unknown quando só há agente ok"       [ "$(n '.name == "oute.quota.unknown"')" -eq 0 ]
+
+# todos unknown (oute-quota sai 1, com JSON): dois eventos, nenhum ponto; motivo estranho vira "formato"
+rcv_stop; rcv_start "$TMP/r15c"
+printf '{"schema":1,"agents":{"claude":{"status":"unknown","reason":"http-429","windows":{}},"codex":{"status":"unknown","reason":"Rede <b>\\n","windows":{}}}}' > "$TMP/fq.json"
+quota open FQ_RC=1
+check "cota unknown (rc 1 do oute-quota): 2 eventos, nenhum ponto" [ "$(n '.name == "oute.quota.unknown"')" -eq 2 -a "$(mp 'true' | grep -c .)" -eq 0 ]
+check "cota unknown: motivo http-429 do Claude e 'formato' para texto fora do padrão" \
+  [ "$(n '.attrs["oute.agent"] == "claude" and .attrs["oute.quota.reason"] == "http-429" and .attrs["oute.quota.moment"] == "open"')" -eq 1 -a \
+    "$(n '.attrs["oute.agent"] == "codex" and .attrs["oute.quota.reason"] == "formato"')" -eq 1 ]
+check "cota unknown: oute.event.id de 32 hex, um por agente" \
+  jqe -s '[.[].attrs["oute.event.id"]] | all(test("^[0-9a-f]{32}$")) and (unique | length == 2)' <<<"$(ev '.name == "oute.quota.unknown"')"
+
+# janela com valor fora do contrato é pulada; a outra segue
+rcv_stop; rcv_start "$TMP/r15d"
+printf '{"schema":1,"agents":{"codex":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":{"used_pct":150,"resets_at":"%s"},"7d":%s}}}}' "$R5" "$(qw 12.5 "$R7")" > "$TMP/fq.json"
+quota spawn
+check "cota: used_pct 150 não vai; a 7d (12,5) vai"    [ "$(mp '.name == "oute.quota.used_pct"' | grep -c .)" -eq 1 -a "$(mp '.name == "oute.quota.used_pct" and .attrs["oute.quota.window"] == "7d" and .value == 12.5 and .res["oute.agent"] == "codex"' | grep -c .)" -eq 1 ]
+rcv_stop; rcv_start "$TMP/r15e"
+printf '{"schema":1,"agents":{"codex":{"status":"ok","windows":{"5h":{"used_pct":"alto","resets_at":"%s"},"7d":{"used_pct":10}}}}}' "$R5" > "$TMP/fq.json"
+quota spawn
+check "cota: used_pct de texto e janela sem resets_at: nada enviado" [ "$(posts)" -eq 0 ]
+
+# falhas da leitura: rc 0, nada na tela, nada enviado
+rcv_stop; rcv_start "$TMP/r15f"
+: > "$TMP/fq.json"; OUT="$(quota spawn 2>&1)"; RC=$?
+check "cota: oute-quota sem saída (uso, rc 2): nada enviado" [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+echo 'não é json' > "$TMP/fq.json"; OUT="$(quota spawn 2>&1)"; RC=$?
+check "cota: saída que não é JSON: nada enviado"       [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+echo '{"schema":1,"agents":[]}' > "$TMP/fq.json"; OUT="$(quota spawn 2>&1)"; RC=$?
+check "cota: JSON sem o mapa de agentes: nada enviado" [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+echo '{"schema":1,"agents":{"claude":{"status":"unknown","reason":"rede"}}}' > "$TMP/fq.json"
+t0=$(now_s); OUT="$(quota spawn FQ_SLEEP=20 OUTE_EMIT_QUOTA_TIMEOUT=1 2>&1)"; RC=$?; dt=$(( $(now_s) - t0 ))
+check "cota: oute-quota que não responde: teto, rc 0, nada enviado ($dt s)" [ "$RC" -eq 0 -a -z "$OUT" -a "$dt" -le 5 -a "$(posts)" -eq 0 ]
+OUT="$(quota semana 2>&1)"; RC=$?
+check "cota: momento inválido: nada enviado"           [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+OUT="$(env PATH="$QB:$PATH" oute-emit quota 2>&1; env PATH="$QB:$PATH" oute-emit quota spawn extra 2>&1)"; RC=$?
+check "cota: uso inválido (sem momento, argumento a mais): nada enviado" [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+PYDIR="$(dirname "$(command -v python3)")"; mkdir -p "$TMP/vazio"
+OUT="$(env PATH="$TMP/vazio:$PYDIR" "$ROOT/docker/oute-emit" quota spawn </dev/null 2>&1)"; RC=$?
+check "cota: sem oute-quota no PATH: nada enviado"     [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 ]
+
+# marca de sessão no ambiente não vai para o recurso do snapshot
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":%s}}}}' "$(qw 5 "$R5")" > "$TMP/fq.json"
+quota spawn OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent,oute.task.id=x-1,oute.swarm.round=r1,oute.swarm.session=s1"
+check "cota: recurso sem oute.task.* nem oute.swarm.*, com a origem" \
+  jqe -s 'length == 2 and all(.[]; (.res | keys | map(startswith("oute.task.") or startswith("oute.swarm.")) | any | not) and .res["host.name"] == "oute-mac")' <<<"$(mp 'true')"
+rcv_stop
+
+# coletor fora do ar: rc 0; o evento unknown vai para o spool, o ponto de métrica não (o próximo snapshot o substitui)
+QH="$TMP/qdown"; mkdir -p "$QH"
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":%s}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' "$(qw 5 "$R5")" > "$TMP/fq.json"
+OUT="$(quota spawn HOME="$QH" OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT%%:*}://127.0.0.1:$(closed_port)" 2>&1)"; RC=$?
+check "cota, coletor fora: rc 0 e nada na tela"        [ "$RC" -eq 0 -a -z "$OUT" ]
+check "cota, coletor fora: só o evento unknown no spool (1 arquivo, sem resourceMetrics)" \
+  bash -c '[ "$(ls "$1"/*.json | wc -l | tr -d " ")" -eq 1 ] && ! grep -q resourceMetrics "$1"/*.json' _ "$QH/.oute/emit/spool"
+# endpoint de logs fora do padrão /v1/logs: sem como derivar o de métricas; o evento segue
+rcv_start "$TMP/r15g"
+quota spawn OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT/custom/logs"
+check "cota, endpoint de logs fora do padrão: evento enviado, sem métrica" [ "$(n '.name == "oute.quota.unknown"')" -eq 1 -a "$(mp 'true' | grep -c .)" -eq 0 ]
+rcv_stop
+
 check_end
