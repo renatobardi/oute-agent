@@ -28,7 +28,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import alerts as alerts_mod, conversations as conv_mod, proposals as prop_mod, sessions as sess_mod
+from . import alert_text, conversations as conv_mod, proposals as prop_mod, sessions as sess_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -53,22 +53,7 @@ def _ts(ns):
     return datetime.fromtimestamp(ns // 1_000_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _br(text):
-    # 1,234.5 -> 1.234,5
-    return text.translate(str.maketrans(",.", ".,"))
-
-
-def _dur(ns):
-    if ns is None:
-        return "—"
-    s = ns / 1e9
-    if s < 1:
-        return f"{_br(f'{s * 1000:.0f}')} ms"
-    if s < 60:
-        return f"{_br(f'{s:.1f}')} s"
-    m, s = divmod(int(s), 60)
-    h, m = divmod(m, 60)
-    return f"{h} h {m:02d} min" if h else f"{m} min {s:02d} s"
+_br, _dur, _num = alert_text.br, alert_text.dur, alert_text.num
 
 
 def _ms(ms):
@@ -78,10 +63,6 @@ def _ms(ms):
 def _when(iso):
     # datetime do SurrealDB (`2026-09-29T07:43:00.5Z`) -> `2026-09-29 07:43:00`
     return iso[:19].replace("T", " ") if isinstance(iso, str) and iso else "—"
-
-
-def _num(n):
-    return "—" if n is None else _br(f"{n:,}")
 
 
 def _usd(v):
@@ -94,44 +75,11 @@ def _ago(iso):
     return "—" if age is None else _dur(age * 1_000_000_000)
 
 
-def _mib(n):
-    return f"{_br(f'{n / 2**20:,.1f}')} MiB"
-
-
-# ------------------------------------------------ alertas (#204): só o texto; quem decide é o `alerts.evaluate`
-ALERT_TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFUSING: "Destino recusando",
-                alerts_mod.NO_DATA: "Host sem dado", alerts_mod.SPOOL: "Spool do oute-emit",
-                alerts_mod.QUOTA: "Cota da assinatura"}
-
-
-def _alert_title(alert):
-    return ALERT_TITLES.get(alert["type"], alert["type"])
-
-
-def _alert_value(alert):
-    """Valor e limite do alerta por extenso, pela unidade do `/v1/alerts`. Unidade nova sai crua (`valor unidade`)."""
-    v, unit, limit, ev = alert["value"], alert["unit"], alert["limit"], alert["evidence"]
-    if v is None:
-        return ev.get("note") or "sem valor"
-    if unit == "ratio":
-        return f"{_br(f'{v * 100:.0f}')}% da fila (limite {_br(f'{limit * 100:.0f}')}%)"
-    if unit == "pct":
-        return f"{_br(f'{v:g}')}% (limite {_br(f'{limit:g}')}%)"
-    if unit == "bytes":
-        return f"{_mib(v)} (limite {_mib(limit)})"
-    if unit == "seconds":
-        return f"há {_dur(int(v * 1e9))} (limite {_dur(int(limit * 1e9))})"
-    if unit in ("failed_items", "dropped_events"):
-        what = "itens recusados" if unit == "failed_items" else "eventos descartados"
-        return f"{_num(round(v))} {what} nos últimos {_br(format(ev.get('window_minutes', 0), 'g'))} min"
-    return f"{v} {unit}"
-
-
 def _env():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
     env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd, ago=_ago,
-                       alert_title=_alert_title, alert_value=_alert_value, proposal_path=prop_mod.page_path)
+                       alert_title=alert_text.title, alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     return env
 
 
