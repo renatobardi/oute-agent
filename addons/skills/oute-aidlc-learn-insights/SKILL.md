@@ -42,7 +42,7 @@ Pronto quando: você sabe o que já foi descartado, que lições estão em vigor
 Um **insight** é um padrão com **pelo menos 2 ocorrências** (rodadas, fontes ou dias), sempre com evidência: linha da saída, número de issue ou PR, id da rodada, id do pedido. Exemplos de padrão:
 - a mesma causa em várias rodadas (sessões `idle`/`done_sem_pr`/`blocked`, muitos `tell`);
 - pedidos do canal com `rc≠0` repetidos para o mesmo alvo, ou recusados;
-- PRs parciais cujo `## Falta` nunca virou issue, issues paradas numa fase;
+- PRs parciais de verdade (coluna `parciais`, não `so_ship`, que só espera o pós-deploy) cujo `## Falta` nunca virou issue, issues órfãs (bloco `issues abertas com PR mergeado`, `pendente` = `nada`), issues paradas numa fase;
 - custo ou erro por host × agente fora da base (`ANOMALIA` do `observe.sh`, já conferida) e alerta do pipeline que se repete (`ALERTA`);
 - sessões muito longas ou handoffs esquecidos que se repetem no ai-memory;
 - trabalho feito fora do ciclo aberto;

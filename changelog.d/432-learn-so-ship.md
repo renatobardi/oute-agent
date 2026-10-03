@@ -1,0 +1,2 @@
+### Changed
+- **`collect.sh` da `learn-insights` separa PR "só falta `(ship)`" de parcial de verdade** (#432). Em `### PRs por repo`, `parciais_mergeados` vira `so_ship` e `parciais`; `### PRs parciais` ganha a coluna `tipo`; bloco novo `### issues abertas com PR mergeado na janela` lista issue, PR e `pendente` (`so_ship` ou `nada`, a órfã). Só a classificação sai, nunca texto de corpo. Não precisa de release (skill entra com `git pull` + `oute down/up`).
