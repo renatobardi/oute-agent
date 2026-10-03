@@ -282,6 +282,16 @@ Fatia 1 da remontagem (§7): bucket → ingestão. A fatia 2 (SurrealDB a partir
 - **Fora desta fatia:** restore automático do Archive; leitura direta do bucket pelo DuckDB (§ "Opções consideradas").
 - **Código:** `agent_studio/replay.py`, `studio_replay` no `scripts/oute`. Teste: `tests/agent-studio-replay.test.sh` (bucket falso por um `rclone` falso, `agent_studio.replay` real contra o serviço e o SurrealDB de verdade).
 
+### Remontar o SurrealDB a partir do DuckDB (#345)
+
+Volume do SurrealDB perdido com o DuckDB intacto: o estado derivado (§3) se refaz sem o bucket.
+
+- **`oute studio rebuild-state`** (`scripts/oute`, bash 3.2, sem argumentos): só no host com `OUTE_AGENT_STUDIO=1` (fora dele, erro claro) e com o SurrealDB de pé. **Para o agent-studio** (o DuckDB aceita um escritor só), roda um **one-off** (`docker compose run --rm --no-deps`, mesma imagem e mesmo ambiente do serviço, com `agent_studio.rebuild_state`) e **sobe o serviço de novo**, qualquer que seja o resultado; se ele não subir, o comando diz e sai 1. As credenciais vêm do compose: nunca em argv nem em log. Com o serviço parado, o collector segura a ingestão na fila em disco (§7) e entrega quando ele volta.
+- **`agent_studio/rebuild_state.py`:** abre o DuckDB **só para leitura**, lê `logs` e `spans` em blocos (padrão 2000 linhas) na ordem de chegada (`received_unix_nano`, `time_unix_nano`, `dedupe_key`) e aplica o `state.statements` de cada bloco, o mesmo código e o mesmo `UPSERT … MERGE` da ingestão: o estado sai igual ao que ela gerou (o teste compara o SurrealDB remontado com o da ingestão). Só acrescenta e atualiza, não apaga; rodar de novo não muda nada.
+- **Saída:** `antes:`, `lidas:` e `depois:`, com a contagem de rodadas, workers, sessões, pedidos e conversas do SurrealDB, para o ensaio no host. O stderr diz só o tipo do erro.
+- **Falhas:** DuckDB que não abre, ou SurrealDB que recusa = código 1 (o que já entrou fica; rodar de novo termina); sem URL ou senha do SurrealDB no ambiente = 2. O serviço volta em todos os casos.
+- **Código:** `agent_studio/rebuild_state.py`, `studio_rebuild_state` no `scripts/oute`. Teste: `tests/agent-studio-rebuild-state.test.sh`.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.
