@@ -10,7 +10,7 @@
 #        item "aws"         (Note, fields AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 #        item "github"      (Note, field GH_TOKEN)
 #
-# uso:  eval "$(oute-secrets export)"
+# uso:  eval "$(oute-secrets export)"       # sai com 4 se a pasta não existe no vault
 #       oute-secrets get GH_TOKEN
 #       BW_SESSION="$(oute-secrets session)"  # sessão para quem chama; quem chama faz `bw lock` depois
 #       oute-secrets lock                     # bw lock + apaga resto legado ($OUTE_HOME/bw_session)
@@ -71,7 +71,8 @@ export_all() {
   # sessão recebida pode ter estado de antes de um item novo (ex.: oci-storage criado agora)
   [[ "$OWN_SESSION" == 1 ]] || bw sync --session "$BW_SESSION" --quiet >/dev/null 2>&1 || true
   local fid; fid="$(folder_id)"
-  [[ -n "$fid" ]] || die "pasta '$FOLDER' não existe no vault"
+  # rc 4 = a pasta não existe (o `oute` distingue de falha de leitura: pasta oute-services na transição, #256)
+  [[ -n "$fid" ]] || { relock; printf "[oute-secrets] pasta '%s' não existe no vault\n" "$FOLDER" >&2; exit 4; }
   bw list items --folderid "$fid" --session "$BW_SESSION" | jq -r '
     .[] as $it
     | ($it.name | ascii_upcase | gsub("-"; "_")) as $base
