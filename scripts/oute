@@ -473,6 +473,137 @@ studio_rebuild_state() {
   return "$rc"
 }
 
+# --- oute memory-backup (#369): backup do volume oute-memory pelo próprio `ai-memory backup` (wiki + db + config), rodado
+# no container agent (o volume está em /data/ai-memory), gravado em /data/shared/backups/ai-memory/ (o bucket oute-shared,
+# pelo mount; sem mount cai no volume local) e conferido no bucket com o rclone do `oute storage`. Retenção por origem
+# (host + instância). O tarball tem conversa e o config do cliente: nunca passa por log nem por saída do comando; só tamanho,
+# contagem e o nome do arquivo. `--check` restaura num diretório temporário do container (nunca no volume) e abre o banco.
+# bash 3.2: sem mapfile, sem ${v,,}.
+MEMBK_DIR=backups/ai-memory
+MEMBK_CONTAINER=oute-agent
+# lê o tarball no stdin (nunca vai ao argv nem à saída); só imprime o resumo. O `ai-memory restore` recusa rodar com
+# outro ai-memory vivo no container (hooks, MCP) e o `ai-memory status` fala com o servidor, não com o diretório:
+# extrai com o tarfile e abre o SQLite do backup direto, só leitura. (função com heredoc, não $(cat <<…): o bash 3.2
+# do macOS erra o parse de heredoc dentro de $( ))
+memory_backup_check_py() {
+  cat <<'PY'
+import os, shutil, sqlite3, sys, tarfile, tempfile
+d = tempfile.mkdtemp(prefix="oute-memory-check.")
+def fail(msg):
+    print("falhou: " + msg)
+    sys.exit(1)
+try:
+    try:
+        with tarfile.open(fileobj=sys.stdin.buffer, mode="r|gz") as t:
+            t.extractall(d, filter="data")
+    except Exception as e:
+        fail("tarball ilegível (" + type(e).__name__ + ")")
+    db = os.path.join(d, "db", "memory.sqlite")
+    if not os.path.isfile(db):
+        fail("o tarball não tem db/memory.sqlite")
+    try:
+        c = sqlite3.connect("file:" + db + "?mode=ro", uri=True)
+        res = c.execute("PRAGMA integrity_check").fetchone()[0]
+        pages = c.execute("SELECT count(*) FROM pages").fetchone()[0]
+    except Exception as e:
+        fail("o banco não abre (" + type(e).__name__ + ")")
+    if res != "ok":
+        fail("o banco não está íntegro (integrity_check)")
+    if pages < 1:
+        fail("o banco abre, mas não tem nenhuma página")
+    wiki = sum(len(f) for _, _, f in os.walk(os.path.join(d, "wiki")))
+    print("ok: banco íntegro, %d páginas, %d arquivos no wiki" % (pages, wiki))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+PY
+}
+memory_backup_usage() { echo "uso: oute memory-backup | oute memory-backup --check <arquivo local ou nome no bucket>" >&2; }
+# nome;bytes de cada arquivo de backups/ai-memory no bucket; vazio se a pasta não existe (rclone rc 3)
+memory_backup_list() {
+  local bucket="${OUTE_BUCKET:-oute-shared}" rc=0
+  rclone lsf --files-only --format ps --separator ';' "oci:$bucket/$MEMBK_DIR" 2>/dev/null || rc=$?
+  [[ "$rc" == 0 || "$rc" == 3 ]]
+}
+memory_backup_container_up() {
+  docker ps -q -f name="^$MEMBK_CONTAINER\$" -f status=running | grep -q . \
+    || die "o container $MEMBK_CONTAINER não está de pé (oute up)"
+}
+memory_backup() {
+  local keep="${OUTE_MEMORY_BACKUP_KEEP:-8}" warn="${OUTE_MEMORY_WARN_MB:-500}" wait_s="${OUTE_MEMORY_BACKUP_WAIT:-60}"
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || { echo "oute: OUTE_MEMORY_BACKUP_KEEP precisa ser um inteiro >= 1 (veio '$keep')" >&2; exit 2; }
+  [[ "$warn" =~ ^[0-9]+$ ]] || { echo "oute: OUTE_MEMORY_WARN_MB precisa ser um inteiro >= 0 (veio '$warn')" >&2; exit 2; }
+  [[ "$wait_s" =~ ^[0-9]+$ ]] || { echo "oute: OUTE_MEMORY_BACKUP_WAIT precisa ser um inteiro >= 0 (veio '$wait_s')" >&2; exit 2; }
+  need docker; memory_backup_container_up
+  local name list cdir="/data/shared/$MEMBK_DIR" log bucket="${OUTE_BUCKET:-oute-shared}" rc=0 dbsize lsize tsize="" line="" waited=0
+  name="$OUTE_HOST-$OUTE_INSTANCE-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+  log="$(mktemp "${TMPDIR:-/tmp}/oute-memory-backup.XXXXXX")" || die "não criei o arquivo temporário"
+  # o log do ai-memory só aparece se o backup falhar (sem conteúdo de conversa, mas nada de saída à toa)
+  MEMBK_LOG="$log"; trap 'rm -f "${MEMBK_LOG:?}"' EXIT
+  echo "ai-memory backup no container $MEMBK_CONTAINER..."
+  docker exec "$MEMBK_CONTAINER" sh -c 'mkdir -p "$1" && { ai-memory backup --to "$2" || { rm -f "$2"; exit 1; }; }' _ "$cdir" "$cdir/$name" \
+    >"$log" 2>&1 || rc=$?
+  if [[ "$rc" != 0 ]]; then tail -n 5 "$log" >&2; die "ai-memory backup falhou (rc $rc); nada foi gravado"; fi
+  dbsize="$(docker exec "$MEMBK_CONTAINER" stat -c %s /data/ai-memory/db/memory.sqlite 2>/dev/null)" || dbsize=""
+  lsize="$(docker exec "$MEMBK_CONTAINER" stat -c %s "$cdir/$name" 2>/dev/null)" || lsize=""
+  [[ "$lsize" =~ ^[0-9]+$ && "$lsize" -gt 0 ]] || die "o backup não deixou arquivo no container ($MEMBK_DIR/$name)"
+  if ! command -v rclone >/dev/null || ! oci_remote_env; then
+    echo "oute: sem rclone ou sem credencial do bucket neste host: o backup ficou só local, em $cdir/$name (volume oute-shared do container), e não foi conferido no bucket" >&2
+    return 1
+  fi
+  # chegou ao bucket? o mount sobe o arquivo em segundo plano: espera até OUTE_MEMORY_BACKUP_WAIT s
+  while :; do
+    # a listagem vai para a variável antes do grep: com pipefail, o grep que sai cedo mataria o rclone com SIGPIPE
+    line=""; list="$(memory_backup_list)" && line="$(grep -F "$name;" <<<"$list" | head -n 1)" || line=""
+    tsize="${line##*;}"
+    [[ "$line" == "$name;"* && "$tsize" == "$lsize" ]] && break
+    (( waited >= wait_s )) && break
+    sleep 2; waited=$((waited + 2))
+  done
+  if [[ "$line" != "$name;"* || "$tsize" != "$lsize" ]]; then
+    echo "oute: o backup não chegou ao bucket $bucket em ${wait_s}s (rclone mount parado? sem mount?): ficou só local, em $cdir/$name" >&2
+    return 1
+  fi
+  echo "backup: oci:$bucket/$MEMBK_DIR/$name"
+  printf 'tarball: %d bytes (%d MiB)\n' "$tsize" "$((tsize / 1048576))"
+  if [[ "$dbsize" =~ ^[0-9]+$ ]]; then
+    printf 'banco:   %d bytes (%d MiB)\n' "$dbsize" "$((dbsize / 1048576))"
+    (( dbsize <= warn * 1048576 )) \
+      || echo "aviso: o banco passou de ${warn} MB (OUTE_MEMORY_WARN_MB): hora de olhar o que cresce (compact, retenção de observações)" >&2
+  else
+    echo "aviso: não consegui ler o tamanho do banco" >&2
+  fi
+  # retenção: os $keep mais recentes da MESMA origem (host + instância); nome de outra origem nunca entra
+  local re="^$OUTE_HOST-$OUTE_INSTANCE-[0-9]{8}T[0-9]{6}Z\\.tar\\.gz\$" all n f rrc=0
+  list="$(memory_backup_list)" || { echo "oute: não consegui listar $MEMBK_DIR para a retenção; nada apagado" >&2; return 1; }
+  all="$(printf '%s\n' "$list" | cut -d';' -f1 | while IFS= read -r f; do if [[ "$f" =~ $re ]]; then printf '%s\n' "$f"; fi; done | LC_ALL=C sort)"
+  n="$(printf '%s\n' "$all" | grep -c .)" || n=0
+  if (( n > keep )); then
+    for f in $(printf '%s\n' "$all" | head -n "$((n - keep))"); do
+      [[ "$f" != "$name" ]] || continue
+      if rclone deletefile "oci:$bucket/$MEMBK_DIR/$f" >/dev/null 2>&1; then echo "retenção: apagado $f"
+      else echo "oute: retenção: não consegui apagar $f" >&2; rrc=1; fi
+    done
+  fi
+  echo "retenção: $((n > keep ? keep : n)) de $keep backup(s) de $OUTE_HOST-$OUTE_INSTANCE no bucket"
+  return "$rrc"
+}
+# --check <arquivo>: arquivo local ou nome (ou backups/ai-memory/<nome>) no bucket. O tarball vai por stdin ao
+# python3 do container, que restaura num tmp do container, confere o banco (abre, íntegro, páginas > 0) e apaga o tmp.
+memory_backup_check() {
+  local src="$1" key list
+  need docker; memory_backup_container_up
+  if [[ -f "$src" ]]; then
+    cat "$src" | docker exec -i "$MEMBK_CONTAINER" python3 -c "$(memory_backup_check_py)"
+    return
+  fi
+  key="${src#"$MEMBK_DIR"/}"
+  [[ "$key" =~ ^[A-Za-z0-9._-]+$ ]] || die "arquivo não encontrado: $src (use um arquivo local ou o nome de um backup no bucket)"
+  need rclone; oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
+  list="$(memory_backup_list)" || die "não consegui listar $MEMBK_DIR no bucket"
+  grep -qF "$key;" <<<"$list" || die "backup não encontrado no bucket: $MEMBK_DIR/$key"
+  rclone cat "oci:${OUTE_BUCKET:-oute-shared}/$MEMBK_DIR/$key" | docker exec -i "$MEMBK_CONTAINER" python3 -c "$(memory_backup_check_py)"
+}
+
 # --- rede (#230): derivação e validação de OUTE_NET_IP_RANGE
 # derive_ip_range <subnet>: extrai a metade alta (/17) de uma subnet /16
 # Ex.: 172.19.0.0/16 -> 172.19.128.0/17
@@ -934,6 +1065,13 @@ case "${1:-}" in
                      studio_rebuild_state ;;
       *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state" >&2; exit 2 ;;
     esac ;;
+  memory-backup)  # #369: backup do volume oute-memory no bucket oute-shared; --check <arquivo> restaura num tmp e confere
+    case "${2:-}" in
+      "") memory_backup ;;
+      --check) [[ $# == 3 && -n "$3" ]] || { memory_backup_usage; exit 2; }
+               memory_backup_check "$3" ;;
+      *) memory_backup_usage; exit 2 ;;
+    esac ;;
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   secrets)   # #21: relê o vault (pede a master password), regrava agent.env e services.env (#256) e tranca a sessão
     [[ "${2:-}" == refresh ]] || { echo "uso: oute secrets refresh" >&2; exit 2; }
@@ -977,6 +1115,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]  só no oute-server: reenvia o bucket de telemetria ao agent-studio (ADR-08 §7)
   studio rebuild-state  só no oute-server: remonta o estado do SurrealDB a partir do DuckDB, com o agent-studio parado (ADR-08 §7)
+  memory-backup [--check <arquivo>]  backup do volume oute-memory (ai-memory backup) em backups/ai-memory/ do oute-shared, com retenção; --check restaura num tmp e confere
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas
   version      versão do repo e da imagem em execução

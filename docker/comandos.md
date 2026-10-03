@@ -50,6 +50,16 @@ Dois lugares, dois conjuntos de comandos:
                        só no oute-server (OUTE_AGENT_STUDIO=1): remonta o estado do SurrealDB (pedidos, rodadas,
                        sessões) a partir do DuckDB, sem ler o bucket. Para o agent-studio, roda o one-off e sobe
                        de novo (a ingestão espera na fila do collector). Imprime a contagem antes e depois (ADR-08 §7)
+  oute memory-backup   backup do volume oute-memory: roda `ai-memory backup` no container agent e grava
+                       backups/ai-memory/<host>-<instância>-<AAAAMMDDTHHMMSSZ, UTC>.tar.gz no oute-shared (o tarball
+                       tem conversa e o config do cliente: fica só no bucket privado, nunca em log nem em saída).
+                       Imprime o tamanho do tarball e do banco, avisa se o banco passa de OUTE_MEMORY_WARN_MB (500) e
+                       mantém os OUTE_MEMORY_BACKUP_KEEP (8) mais recentes da mesma origem, sem tocar em outra.
+                       rc ≠ 0 se o backup falhar ou o arquivo não chegar ao bucket (sem mount/credencial: "ficou só local")
+  oute memory-backup --check <arquivo local | nome no bucket>
+                       restaura num diretório temporário do container (nunca no volume) e confere que o banco abre,
+                       está íntegro e tem páginas (> 0); rc ≠ 0 se não. Restaurar de verdade (com a stack parada, o
+                       `ai-memory restore` recusa rodar com outro ai-memory vivo): ver README, "Backup da memória"
   oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
 
