@@ -6,7 +6,7 @@
 #
 # Uso: collect.sh [all|ciclo|github|rodadas|canal|telemetria] [--desde DATA] [--content-hours N]
 #   --desde DATA       início da janela (padrão: fechamento da última issue de ciclo; sem ciclo, 7 dias)
-#   --content-hours N  repassado ao observe.sh (padrão 0 = só agregados do Langfuse e listagem do bucket)
+#   --content-hours N  repassado ao observe.sh (padrão 0 = só agregados do agent-studio e listagem do bucket)
 # Ambiente: OUTE_CYCLE_REPO (padrão renatobardi/oute-agent), OUTE_WORKSPACE (/workspace),
 #   OUTE_SWARM_DIR (~/.oute/swarm), OUTE_INBOX (~/inbox), OUTE_OBSERVE (observe.sh da ops-observe).
 # Saída: seções em TSV; "LACUNA<TAB>fonte<TAB>motivo" = o que a janela não cobre. Código != 0 só quando
@@ -61,7 +61,6 @@ janela() {
   echo "## janela"
   printf 'de\t%s\nate\t%s\norigem\t%s\nhoras\t%s\nhost_local\t%s\n' "$W_FROM" "$W_TO" "$ORIGEM" "$HOURS" "$HOST"
   [[ -n "$CYCLES" || -n "$DESDE" ]] || printf 'LACUNA\tciclos\tissues de ciclo ilegíveis (gh): a janela pode não começar no fim do último ciclo\n'
-  [[ "$HOURS" -le 720 ]] || printf 'LACUNA\tlangfuse\tjanela de %s h passa dos 30 dias que o Langfuse guarda; o bucket cobre\n' "$HOURS"
 }
 
 ciclo() {

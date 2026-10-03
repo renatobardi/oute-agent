@@ -46,6 +46,9 @@ services:
       OUTE_HOST: ${OUTE_HOST:-oute}
       OUTE_INSTANCE: ${OUTE_INSTANCE:-oute-agent}
       OTEL_RESOURCE_ATTRIBUTES: host.name=${OUTE_HOST:-oute},oute.instance=${OUTE_INSTANCE:-oute-agent},deployment.environment=${OUTE_HOST:-oute}
+      # agent-studio (#259): onde a ops-observe lê (GET /v1/usage e /v1/alerts), com a credencial de leitura que vem
+      # no agent_env. O `oute up` escolhe por host: rede docker no oute-server, vhost da tailnet no Mac
+      AGENT_STUDIO_URL: ${AGENT_STUDIO_URL:-http://agent-studio:8430}
     # #6: sem acesso ao Vaultwarden (nem DNS do vault): só os valores da pasta oute-agent, resolvidos no host.
     # #256: segredo de serviço (pasta oute-services: ingestão do agent-studio, root do SurrealDB) nunca entra aqui,
     # nem no arquivo nem no environment acima; do agent-studio o agent só tem a credencial de leitura.
