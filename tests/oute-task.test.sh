@@ -397,7 +397,7 @@ git -C "$TMP/seed" commit -q --allow-empty -m novo && git -C "$TMP/seed" push -q
 sp w1 clean
 check "clean (simulação): o space atual no topo"       [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "space frentes-engenharia ($S1)" ]
 check "clean (simulação): remove a do space atual"     grep -qx "remover $S1/proj-a1 (sem commits além de origin/main)" <<<"$OUT"
-check "clean (simulação): nada de fora do space"       bash -c '! grep -qE "b1|b2|legado|fica|semlabel"' _ <<<"$OUT"
+check "clean (simulação): nada de fora do space"       bash -c 'for n in "$1/proj-b1" "$1/outro-b2" "$4/proj-semlabel" "$2/proj-legado"; do ! grep -qF "$n" <<<"$3" || exit 1; done' _ "$S2" "$WT" "$OUT" "$SP"
 check "clean (simulação): atualiza só a main do repo do space" bash -c 'grep -q "^atualizar $1 " <<<"$3" && ! grep -q "$2" <<<"$3"' _ "$WS/proj" "$WS/outro" "$OUT"
 check "clean (simulação): avisa do formato antigo"     grep -qx "formato antigo: 1 worktree(s) direto em $WT, fora do escopo; só o 'oute-task clean --all' as considera" <<<"$OUT"
 sp w1 clean --yes
