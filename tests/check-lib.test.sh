@@ -2,7 +2,8 @@
 # Testes do tests/lib/check.sh (#240): a contagem que todo tests/*.test.sh usa, pelo lado em que um caso falha.
 # Cada cenário roda num bash à parte (run), com a lib carregada, e confere a saída e o código de saída: caso que
 # falha conta e deixa o teste vermelho, CHECK_OUT mostra a saída, die sai com 1, e os casos de um trecho em Python
-# entram na soma (linha que não é caso = falha). Mais o pycheck.py, que imprime no formato que a lib soma.
+# entram na soma (linha que não é caso = falha). Mais o pycheck.py, que imprime no formato que a lib soma,
+# e o check-lint.py (#285), que reprova `check` com condição fora dele (`check "…" [ … ] && …`) em tests/*.test.sh.
 # Uso: tests/check-lib.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -77,5 +78,45 @@ check "check_py_lines: traceback deixa o teste vermelho" bash -c '[[ "$1" -ne 0 
 : > "$TMP/vazio.out"
 run "check_py '$TMP/vazio.out'; check_py_lines '$TMP/vazio.out'; echo \"n=\$n_ok/\$n_fail\"; check_end"
 check "saída vazia do Python: nada somado, sem erro"   bash -c '[[ "$1" -eq 0 ]] && grep -qxF "n=0/0" <<<"$2" && grep -qxF "0 ok, 0 falha(s)" <<<"$2"' _ "$RC" "$OUT"
+
+# ---------------------------------------------------------------- 5. check com condição fora dele (#285)
+# check-lint.py: em `check "…" [ … ] && grep …` o grep fica fora do check e a falha dele é ignorada
+cat > "$TMP/ruim.sh" <<'SH'
+check "colchete e grep" [ 1 = 1 ] && grep -q x f
+check "ou" true || false
+check "pipe" true | cat
+check "continuação" [ x ] \
+  && true
+for a in 1; do
+  check "no laço" true && true
+done
+x=1; check "depois de ;" grep -q a f && ! grep -q b f
+SH
+cat > "$TMP/bom.sh" <<'SH'
+check "bash -c" bash -c '[ 1 = 1 ] && grep -q x "$1"' _ f
+check "dentro de \$()" test "$(a && b)" = x
+check "a && b na descrição" true
+check "dentro de aspas duplas" test "x && y" = z
+check "awk" awk 'BEGIN { exit !(1 && 1) }'
+check "redirecionamento" grep -q x <<<"$OUT" 2>&1
+check "um só" true; x && y
+run 'check "dentro de um trecho" true && true'
+# check "num comentário" true && true
+checkx "outra função" true && true
+cat <<'EOF'
+check "num heredoc" true && true
+EOF
+check "depois do heredoc" true
+SH
+lint() { OUT="$(python3 "$ROOT/tests/lib/check-lint.py" "$@")"; RC=$?; }
+lint "$TMP/ruim.sh"
+check "check-lint: código != 0 com o padrão"           test "$RC" -ne 0
+check "check-lint: aponta cada ocorrência, com a linha" test "$OUT" = "$(printf '%s\n' "$TMP/ruim.sh:1: check com && fora dele" \
+  "$TMP/ruim.sh:2: check com || fora dele" "$TMP/ruim.sh:3: check com | fora dele" "$TMP/ruim.sh:4: check com && fora dele" \
+  "$TMP/ruim.sh:7: check com && fora dele" "$TMP/ruim.sh:9: check com && fora dele")"
+lint "$TMP/bom.sh"
+check "check-lint: condição dentro do check passa"     test "$RC$OUT" = 0
+lint "$ROOT"/tests/*.test.sh
+check "tests/*.test.sh: nenhum check com condição fora dele" test "$RC$OUT" = 0
 
 check_end
