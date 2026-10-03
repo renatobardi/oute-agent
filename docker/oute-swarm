@@ -152,13 +152,14 @@ cmd_spawn() {
     die "limite da rodada atingido ($count/$max abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
   fi
   # seletor (ADR-02, #219): o --agent (do spawn ou da rodada) e o --model são a escolha explícita; o resto vem da issue
-  # (label kaizen/docs, depois aidlc:<fase>, senão Sonnet). Resolvido aqui, uma vez, e entregue ao oute-task em
+  # (label kaizen/docs, depois aidlc:<fase>; sem label de fase, o Jev classifica a instrução, que vai pelo stdin, #257;
+  # senão Sonnet). Resolvido aqui, uma vez, e entregue ao oute-task em
   # <slug>.select: o agente gravado no spawned é o que de fato abre. Sem oute-select, ou com ele falhando, a sessão
   # abre como antes (o agente pedido, ou claude, com o modelo dele); só argumento inválido (código 2) recusa o spawn
   if command -v oute-select >/dev/null 2>&1; then
     [[ -z "$agent" ]] || sargs+=(--agent "$agent")
     [[ -z "$model" ]] || sargs+=(--model "$model")
-    sel="$(oute-select --json --repo "$main" --issue "$n" ${sargs[@]+"${sargs[@]}"} </dev/null)" || src=$?
+    sel="$(printf '%s' "$instr" | oute-select --json --repo "$main" --issue "$n" --text-file - ${sargs[@]+"${sargs[@]}"})" || src=$?
     (( src != 2 )) || die "seletor recusou a sessão $slug (acima)"
     IFS='|' read -r s_agent s_model s_effort s_phase s_origin < <(jq -r '[.agent, .model, .effort, .phase, .origin] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
     if (( src != 0 )) || [[ ! "${s_agent:-}" =~ ^(claude|codex)$ ]]; then

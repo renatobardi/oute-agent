@@ -64,6 +64,8 @@ unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKE
       OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC \
       HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
+# Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 10k sobe a falsa
+. "$ROOT/tests/lib/typesafe.sh"; ts_off
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
        TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" \
        GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
@@ -585,6 +587,57 @@ oute-emit task opened human repo=a slug=b origin=chute model=m
 check "oute-emit task: origem inválida não emite"      [ "$(total)" -eq "$before" ]
 oute-emit task removed human repo=a slug=b reason=merged phase=build origin=label model=m effort=high
 check "oute-emit task: removed sem a escolha"          jqe '.name == "oute.task.removed" and (.attrs | has("oute.task.phase") or has("oute.task.origin") or has("oute.task.model") or has("oute.task.effort") | not)' <<<"$(last)"
+oute-emit task opened human repo=a slug=b origin=jev phase=spec model=m confidence=0.87
+check "oute-emit task: origem jev com a confiança, como número" jqe '.name == "oute.task.opened" and .attrs["oute.task.origin"] == "jev" and .attrs["oute.task.confidence"] == 0.87' <<<"$(last)"
+before="$(total)"
+for c in 1.2 abc -0.5 0,8; do oute-emit task opened human repo=a slug=b origin=jev confidence="$c"; done
+check "oute-emit task: confiança inválida não emite"   [ "$(total)" -eq "$before" ]
+oute-emit task removed human repo=a slug=b reason=merged origin=jev confidence=0.87
+check "oute-emit task: removed sem a confiança"        jqe '.name == "oute.task.removed" and (.attrs | has("oute.task.confidence") or has("oute.task.origin") | not)' <<<"$(last)"
+
+# 10k. Jev (#257): sem label de fase e com o texto da tarefa (o prompt), a TypeSafe falsa classifica a fase
+ts_start "$TMP/ts"
+cf() { jq -r '.attrs["oute.task.confidence"] // ""' <<<"$(last)"; }   # confiança no último evento de sessão
+ts_set ok arch 0.91
+FAKE_RC=5 t avulsa-jev claude "desenhe a arquitetura do serviço de filas"
+check "jev: sessão avulsa abre no Opus, com o código do agente" [ "$RC" -eq 5 -a "$(args claude)" == "--model claude-opus-5-5 desenhe a arquitetura do serviço de filas" ]
+check "jev: sem aviso"                                 [ -z "$SELW" ]
+check "jev: opened com a fase, a origem jev e o modelo" sel_ev arch jev claude claude-opus-5-5 ""
+check "jev: opened com a confiança"                    [ "$(jq -r .name <<<"$(last)") $(cf)" == "oute.task.opened 0.91" ]
+check "jev: marca com o modelo (vale no restore)"      [ "$(smark "$SP/proj-avulsa-jev")" == "claude|claude-opus-5-5|" ]
+check "jev: só o prompt vai à TypeSafe"                jqe '.body.state == "desenhe a arquitetura do serviço de filas" and (.body | keys == ["model", "questions", "state"])' <<<"$(ts_last)"
+check "jev: a chave não chega aos argumentos do agente nem ao evento" bash -c '! grep -qF "$1" "$2" && ! grep -qF "$1" <<<"$3"' _ "$TS_KEY" "$FAKE/claude.args" "$(last)"
+ts_set ok ops 0.75
+t 43-jev claude "veja por que o custo subiu ontem"
+check "jev: issue sem label de fase abre no Haiku"     [ "$(args claude)" == "--model claude-haiku-4-5-20251001 veja por que o custo subiu ontem" ]
+check "jev: confiança no evento da issue sem label"    bash -c '[ "$1" == 0.75 ]' _ "$(cf)"
+check "jev: atributos da escolha (issue sem label)"    sel_ev ops jev claude claude-haiku-4-5-20251001 ""
+ts_set ok arch 0.4
+t avulsa-baixa claude "faça alguma coisa aí"
+check "jev com confiança baixa: Sonnet"                [ "$(args claude)" == "--model claude-sonnet-5-5 faça alguma coisa aí" ]
+check "jev com confiança baixa: origem padrao, com a confiança" bash -c '[ "$1" == 0.4 ]' _ "$(cf)"
+check "jev com confiança baixa: atributos"             sel_ev "" padrao claude claude-sonnet-5-5 ""
+check "jev com confiança baixa: aviso"                 grep -qF 'o Jev ficou com confiança baixa (0,40 em arch' <<<"$SELW"
+ts_set 5xx
+FAKE_RC=9 t avulsa-5xx claude "desenhe a arquitetura do serviço de filas"
+check "jev fora (5xx): a sessão abre no Sonnet, com o código do agente" [ "$RC" -eq 9 -a "$(args claude)" == "--model claude-sonnet-5-5 desenhe a arquitetura do serviço de filas" ]
+check "jev fora (5xx): origem padrao, sem confiança"   bash -c '[ -z "$1" ]' _ "$(cf)"
+check "jev fora (5xx): atributos"                      sel_ev "" padrao claude claude-sonnet-5-5 ""
+ts_reset; ts_set ok arch 0.91
+t avulsa-mao
+check "sem texto (aberta na mão): Sonnet, sem chamar o Jev" [ "$(args claude)" == "--model claude-sonnet-5-5" -a "$(ts_calls)" -eq 0 ]
+t avulsa-resume claude --resume abc123
+check "valor de opção não é texto da tarefa"           [ "$(args claude)" == "--resume abc123 --model claude-sonnet-5-5" -o "$(args claude)" == "--model claude-sonnet-5-5 --resume abc123" ]
+t avulsa-palavra claude continue
+check "prompt de uma palavra só: sem Jev"              [ "$(ts_calls)" -eq 0 ]
+t 40-comlabel claude "desenhe a arquitetura do serviço de filas"
+check "label de fase: vale o label, sem Jev"           [ "$(args claude)" == "--model claude-sonnet-5-5 desenhe a arquitetura do serviço de filas" -a "$(ts_calls)" -eq 0 ]
+t avulsa-shell shell
+check "shell: sem Jev"                                 [ "$(ts_calls)" -eq 0 ]
+(cd "$WS/proj" && OUTE_TYPESAFE_API_KEY="" "$TASK" avulsa-semchave claude "desenhe a arquitetura do serviço de filas" >/dev/null 2>"$TMP/err" </dev/null)
+check "sem chave: abre no Sonnet, com aviso, sem chamar o Jev" bash -c '[ "$1" == "--model claude-sonnet-5-5 desenhe a arquitetura do serviço de filas" ] && grep -qF "sem a chave da TypeSafe" "$2" && [ "$3" -eq 0 ]' _ "$(args claude)" "$TMP/err" "$(ts_calls)"
+check "sem chave: origem padrao, sem confiança"        bash -c '[ -z "$1" ]' _ "$(cf)"
+ts_stop; ts_off
 check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
 rcv_stop
 

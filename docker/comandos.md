@@ -62,11 +62,14 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task --agent claude|codex --model <id> <slug> …
                                     escolha explícita do agente e/ou do modelo (antes do slug)
   Modelo da sessão (ADR-02): sai da issue do slug (<n>-…), pela tabela config/select/models.toml:
-  --agent/--model (ou `codex` depois do slug) > label kaizen/docs > label aidlc:<fase> > Sonnet.
-  Sem label ou com o gh fora do ar: Sonnet, com aviso; nunca bloqueia. O restore do herdr reabre no mesmo modelo.
+  --agent/--model (ou `codex` depois do slug) > label kaizen/docs > label aidlc:<fase> > Jev > Sonnet.
+  Sem label de fase e com prompt: o Jev (TypeSafe) classifica a fase pelo texto; confiança baixa, falha ou sem a
+  chave: Sonnet, com aviso. Sem prompt ou com o gh fora do ar: Sonnet. Nunca bloqueia. O restore do herdr reabre
+  no mesmo modelo.
   oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--model <id>]
-                                    diz fase, origem (manual/label/padrao), agente, modelo, esforço e motivo,
-                                    sem abrir sessão
+              [--text-file <arquivo>|-]
+                                    diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
+                                    confiança do Jev, sem abrir sessão; --text-file: o texto da tarefa para o Jev
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
   oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal
                                     dos repos com worktree nele (sem --yes: só mostra)

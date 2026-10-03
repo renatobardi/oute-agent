@@ -1,6 +1,6 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257)
 
 ## Decisão
 O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
@@ -11,7 +11,7 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
    - `kaizen` → Haiku (issue de lição, de qualquer origem; hoje elas carregam `aidlc:spec` e cairiam no Opus);
    - `docs` → Haiku (doc que não é ADR: README, `AGENTS.md`, `CONTEXT.md`, guias). ADR segue a fase dele (`arch`).
 3. **Fase**, pelo label `aidlc:<fase>` da issue (tabela abaixo).
-4. **Jev**, só quando não há label de fase: sessão avulsa sem issue, ou issue sem `aidlc:<fase>`. O Jev classifica a fase pelo texto da tarefa e a tabela dá o modelo. Confiança < 0,6 ou falha do Jev → Sonnet.
+4. **Jev**, só quando não há label de fase e há texto da tarefa: sessão avulsa sem issue, ou issue sem `aidlc:<fase>`. O Jev classifica a fase pelo texto da tarefa e a tabela dá o modelo. Confiança < 0,6 ou falha do Jev (erro, tempo esgotado) → Sonnet.
 5. **Padrão Sonnet** quando nada acima decide: sem label e sem texto da tarefa (sessão aberta na mão), sem a chave da TypeSafe, ou `gh` fora do ar. O seletor avisa e nunca bloqueia a abertura.
 
 ### Tabela fase → modelo
@@ -46,7 +46,7 @@ O `claude-fable-5-1` (um nível acima do Opus, 2,5× o preço dele na API) não 
 ### Jev direto na TypeSafe
 - O Jev (`jev-1.13.0`) é chamado **direto na API da TypeSafe** (`POST https://api.typesafe.ai/v1/systemone`, primitivo `choice` → opção + confiança), sem intermediário. US$ 0,042/M tokens de entrada, saída grátis.
 - Só o texto da tarefa vai ao Jev. Nenhum token de assinatura passa por proxy.
-- Chave da TypeSafe no vault (pasta `oute-agent`) → `agent_env`.
+- Chave da TypeSafe no vault (pasta `oute-agent`, item `typesafe`, campo `OUTE_TYPESAFE_API_KEY`) → `agent_env`. É opcional: o `oute up` não a exige, e sem ela o seletor não chama o Jev (gate de `spec`, 2026-10-02).
 - Skill da TypeSafe (`typesafe-ai/skills`): nada de `claude plugin install`/`npx skills add` (nada do marketplace). Fork revisado e pinado em `addons/skills/`, ou só referência no build.
 
 ### Plugin herdr não chama LLM (#218, gate de `spec` do Bardi, 2026-10-02)
@@ -67,6 +67,17 @@ Cada escolha vai como atributos do `oute.task.opened` (sem evento novo): fase, o
 - **Fase fixa do dispatcher:** `plan`, com origem `padrao` (nenhum label decidiu).
 - **Nunca bloqueia:** `gh` fora do ar, issue sem label de fase, fase fora da tabela ou sessão sem issue dão o padrão (Sonnet), com aviso. Tabela ausente ou inválida, ou `oute-select` falhando: a sessão abre sem `--model`, no modelo padrão do agente, com aviso. Só argumento inválido (`--agent`/`--model`) recusa a abertura.
 - **Abertura:** `claude --model <id>` ou `codex -m <id> -c model_reasoning_effort=<e>`. A marca da sessão guarda agente, modelo e esforço, e o shim os repõe quando a conversa é retomada (restore do herdr, `--resume`, `codex resume`) sem modelo na linha de comando.
+
+### Como o Jev é chamado (fatia 2, #257)
+- **Quem chama:** só o `oute-select`, em processo (sem `curl`, sem intermediário), e só quando se sabe que não há label de fase: sessão sem issue, ou issue lida pelo `gh` sem `aidlc:<fase>` da tabela. Com o `gh` fora do ar, com a fase fixa do dispatcher, com exceção por label ou com `--model`, o Jev não é chamado. `--agent codex` sem `--model` chama: a fase escolhe a linha do Codex, e a origem segue `manual`.
+- **Texto da tarefa:** o prompt com que a sessão abre. No `oute-task`, o último argumento do agente, se não é opção e tem mais de uma palavra; no `oute-swarm spawn`, a instrução, sem as regras do worker. Vai ao `oute-select` pelo stdin (`--text-file -`), cortado em 16 000 caracteres. Sessão aberta na mão (sem prompt) não tem texto: Sonnet, sem chamada.
+- **Pedido:** `POST` ao `/v1/systemone` com `state` = o texto, `model` = `jev-1.13.0` (id exato, como os da tabela) e uma pergunta `choice` cujas opções são as fases da tabela, cada uma com uma linha do que a fase faz. Nada do repo, da issue ou do ambiente entra no pedido.
+- **Resposta:** a fase (`choice`) e a confiança (`confidence`, 0 a 1). Confiança ≥ 0,6: origem `jev` e a linha da fase. Abaixo disso: padrão Sonnet, origem `padrao`, com a confiança registrada.
+- **Teto de 3 s** para a chamada inteira (DNS, conexão e resposta). Tempo esgotado, erro HTTP (inclusive 401 e 429), redirecionamento (não seguido: levaria a chave a outro endereço), resposta fora do formato ou fase que não está na tabela: padrão Sonnet, com aviso, sem nova tentativa. A abertura nunca espera mais que isso nem é bloqueada.
+- **Chave:** `OUTE_TYPESAFE_API_KEY` no ambiente (o prefixo `OUTE_` é o que a leva aos logins, pela allowlist do `entrypoint.sh`). Vai só no cabeçalho `Authorization` da chamada: nunca em argumento de processo, aviso, log ou evento. Sem ela: padrão Sonnet, com aviso, sem chamada.
+- **Saída do `oute-select`:** o campo novo `confidence` (a do Jev sempre que ele respondeu; senão vazio) e a origem `jev`. O motivo diz a fase e a confiança.
+- **Skill da TypeSafe:** não foi usada. O seletor fala HTTP direto, com o formato lido da documentação da API (`docs.typesafe.ai/api.md`, `primitives/choice.md`, 2026-10-03); nada entrou em `addons/skills/`.
+- **Limite conhecido:** a triagem do dispatcher (`oute-select --issue <n>`, sem texto) mostra `padrao` para uma issue sem label de fase que o `spawn`, com a instrução, pode abrir pela fase do Jev. Reabrir na mão (sem prompt) uma sessão que o Jev classificou resolve de novo, sem texto, e a marca passa ao padrão; o restore do herdr não é afetado (usa a marca).
 
 Implementação, em fatias (adendo 2026-10-02):
 1. #219: tabela em `config/`, label de tipo e de fase, `oute-select`, padrão Sonnet;
