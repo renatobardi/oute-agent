@@ -9,6 +9,7 @@ from . import alerts as alerts_mod
 TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFUSING: "Destino recusando",
           alerts_mod.NO_DATA: "Host sem dado", alerts_mod.SPOOL: "Spool do oute-emit",
           alerts_mod.QUOTA: "Cota da assinatura",
+          alerts_mod.ROUND_STALLED: "Rodada parada", alerts_mod.ROUND_OLD: "Rodada antiga sem fechamento",
           # preços (#339): critérios em `price_alerts.py`
           "price_changed": "Preço trocado", "price_sources_diverge": "Fontes de preço divergem",
           "price_source_down": "Fonte de preço fora do ar", "price_model_unpriced": "Modelo em uso sem preço",
@@ -56,6 +57,14 @@ def text(alert):
         return f"{br(f'{v:g}')}% (limite {br(f'{limit:g}')}%)"
     if unit == "bytes":
         return f"{mib(v)} (limite {mib(limit)})"
+    if alert["type"] in (alerts_mod.ROUND_STALLED, alerts_mod.ROUND_OLD):  # rodada do swarm (#364)
+        n, ago = len(ev["sessions"]), f"último evento há {dur(int(v * 1e9))}"
+        if alert["type"] == alerts_mod.ROUND_OLD:
+            return f"rodada {ev['round']} aberta e sem fechamento; {ago}"
+        if not n:
+            return f"rodada {ev['round']} sem sessão aberta, triagem sem resposta; {ago} (limite {dur(int(limit * 1e9))})"
+        return (f"rodada {ev['round']} com {n} {'sessão aberta' if n == 1 else 'sessões abertas'} "
+                f"({', '.join(ev['sessions'])}); {ago} (limite {dur(int(limit * 1e9))})")
     if unit == "seconds":
         return f"há {dur(int(v * 1e9))} (limite {dur(int(limit * 1e9))})"
     if unit == "usd_per_mtok":  # preço trocado (#339): o campo, o valor antigo e o novo

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Testes do `GET /v1/alerts` do agent-studio (#204, ADR-08 §8): fila > 50%, destino recusando, host sem dado e spool
 # perto de 50 MB, cada um ligando e desligando; o Mac parado não alerta; a linha "Dropping data" não conta; a cota
-# (#347): corte por janela, exceção do reset próximo (só a 5h), ponto velho e ponto sem o par do reset. O DuckDB de exemplo nasce pela ingestão de verdade (POST /v1/metrics e /v1/logs), com
+# (#347): corte por janela, exceção do reset próximo (só a 5h), ponto velho e ponto sem o par do reset; a rodada
+# parada do swarm (#364): ativa, parada com sessão, parada na triagem, fechada, antiga e o evento que volta. O DuckDB de exemplo nasce pela ingestão de verdade (POST /v1/metrics e /v1/logs), com
 # uma linha do tempo em volta de AT; a consulta roda com `at=` em vários pontos dela. Sem Docker.
 # Uso: tests/agent-studio-alerts.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
@@ -113,7 +114,37 @@ def rl(host, service, recs):
 drop = {"timeUnixNano": ns(AT - 60 * M), "severityNumber": 17, "severityText": "ERROR",
         "body": {"stringValue": "Exporting failed. Dropping data."},
         "attributes": kv({"otelcol.component.id": "otlp_http/studio_logs", "dropped_items": 500})}
+# rodada do swarm (#364): eventos oute.swarm.* do oute-server, pela hora do fato (limite: round_stalled_minutes = 30)
+#   r-ativa    aberta AT-20m, sessão a-1 em AT-15m, tell em AT-5m   -> último evento há 5 min: sem alerta
+#   r-sess     aberta AT-100m, sessões a-1 e b-2 em AT-90m, b-2 fechada em AT-80m -> parada com a-1 aberta (80 min)
+#   r-triagem  aberta AT-45m, sem sessão                            -> parada na triagem (45 min)
+#   r-fechada  aberta AT-3h, sessão e rodada fechadas em AT-2h      -> sem alerta
+#   r-volta    aberta AT-60m, sessão v-1 em AT-50m; tell em AT+10m  -> parada em AT, volta em AT+10m, para de novo depois
+#   r-antiga   aberta AT-30h, sessão o-1 em AT-26h                  -> mais de 24 h sem evento: "antiga sem fechamento"
+#   r-velha    aberta AT-60h, sem mais nada                         -> mais de 48 h: nem como antiga
+#   r-sem-open só session.spawned em AT-100m (a abertura nunca chegou) -> sem alerta
+n2 = 0
+def sw(t, name, rnd, slug=None):
+    global n2; n2 += 1
+    a = {"oute.event.id": f"sw-{n2}", "event.name": name, "oute.swarm.round": rnd}
+    if slug: a["oute.swarm.session"] = slug
+    return {"timeUnixNano": ns(t), "severityNumber": 9, "eventName": name, "body": {"stringValue": name},
+            "attributes": kv(a)}
+O, SP, CL = "oute.swarm.round.opened", "oute.swarm.session.spawned", "oute.swarm.session.closed"
+swarm = [
+    sw(AT - 20 * M, O, "r-ativa"), sw(AT - 15 * M, SP, "r-ativa", "a-1"), sw(AT - 5 * M, "oute.swarm.tell", "r-ativa", "a-1"),
+    sw(AT - 100 * M, O, "r-sess"), sw(AT - 90 * M, SP, "r-sess", "a-1"), sw(AT - 90 * M, SP, "r-sess", "b-2"),
+    sw(AT - 80 * M, CL, "r-sess", "b-2"),
+    sw(AT - 45 * M, O, "r-triagem"),
+    sw(AT - 180 * M, O, "r-fechada"), sw(AT - 150 * M, SP, "r-fechada", "f-1"), sw(AT - 120 * M, CL, "r-fechada", "f-1"),
+    sw(AT - 120 * M, "oute.swarm.round.closed", "r-fechada"),
+    sw(AT - 60 * M, O, "r-volta"), sw(AT - 50 * M, SP, "r-volta", "v-1"), sw(AT + 10 * M, "oute.swarm.tell", "r-volta", "v-1"),
+    sw(AT - 30 * 60 * M, O, "r-antiga"), sw(AT - 26 * 60 * M, SP, "r-antiga", "o-1"),
+    sw(AT - 60 * 60 * M, O, "r-velha"),
+    sw(AT - 100 * M, SP, "r-sem-open", "x-1"),
+]
 logs = {"resourceLogs": [
+    rl("oute-server", "oute", swarm),
     rl("oute-server", "oute", [ev(AT - 30 * M, "oute.canal.proposed", 1 * MiB, 4),
                                ev(AT - 20 * M, "oute.canal.proposed", 45 * MiB, 4),
                                ev(AT - 10 * M, "oute.canal.decided", 46 * MiB, 4),
@@ -257,12 +288,76 @@ q = [a for a in r["alerts"] if a["type"] == "quota"]
 out("cota ligada: Claude 95% alerta, Codex 50% não", any(a["evidence"]["agent"] == "claude" and a["value"] == 95 for a in q) and not any(a["evidence"]["agent"] == "codex" for a in q) and r["checks"]["quota"])
 r = alerts.evaluate(con, at, dataclasses.replace(C(), quota_enabled=False))
 out("cota desligada: sem alerta de cota e checks.quota falso", not any(a["type"] == "quota" for a in r["alerts"]) and r["checks"]["quota"] is False)
-out("evaluate: tipos na ordem fixa", [a["type"] for a in r["alerts"]] == ["queue", "destination_refusing", "spool"])
+no_round = lambda r: [a["type"] for a in r["alerts"] if not a["type"].startswith("round_")]
+out("evaluate: tipos na ordem fixa", no_round(r) == ["queue", "destination_refusing", "spool"])
 r = alerts.evaluate(con, at, C())
-out("evaluate: cota por último (padrão ligado)", [a["type"] for a in r["alerts"]][:3] == ["queue", "destination_refusing", "spool"] and r["alerts"][-1]["type"] == "quota")
+out("evaluate: cota depois dos outros, rodada parada por último (padrão ligado)", no_round(r)[:3] == ["queue", "destination_refusing", "spool"] and no_round(r)[-1] == "quota" and [a["type"] for a in r["alerts"]][-4:] == ["round_stalled"] * 3 + ["round_old"])
 out("evaluate: host sem host_name nunca quebra (hosts só com nome)", all(h["host"] for h in r["hosts"]))
 PY
 check_py_lines "$TMP/py.out"
+
+# ---------------------------------------------------------------- 12. rodada parada (#364)
+studio_start "$TMP/r" AGENT_STUDIO_CONFIG="$TMP/config.toml" || { echo "FAIL agent-studio não subiu"; exit 1; }
+post metrics "$TMP/metrics.json" >/dev/null
+post logs "$TMP/logs.json" >/dev/null
+# rs <rodada>: os alertas de rodada (parada ou antiga) daquela rodada
+rs() { printf '[.alerts[] | select((.type == "round_stalled" or .type == "round_old") and .evidence.round == "%s")]' "$1"; }
+R="$(at 0)"
+check "rodada: checks lista os dois tipos"             jqe '.checks.round_stalled and .checks.round_old' <<<"$R"
+check "rodada ativa (último evento há 5 min): sem alerta" jqe "$(rs r-ativa) | length == 0" <<<"$R"
+check "rodada parada com sessão: a-1 aberta (b-2 fechada), há 80 min, desde o último evento" jqe --arg s "$(T -80)" "$(rs r-sess)"' | length == 1 and (.[0] | .type == "round_stalled" and .host == "oute-server" and .value == 4800 and .unit == "seconds" and .limit == 1800 and .since == $s and .evidence.kind == "sessions" and .evidence.sessions == ["a-1"] and .evidence.last_event == $s)' <<<"$R"
+check "rodada parada na triagem: sem sessão, 45 min"   jqe --arg s "$(T -45)" "$(rs r-triagem)"' | length == 1 and (.[0] | .type == "round_stalled" and .value == 2700 and .since == $s and .evidence.kind == "triage" and .evidence.sessions == [])' <<<"$R"
+check "rodada fechada: sem alerta"                     jqe "$(rs r-fechada) | length == 0" <<<"$R"
+check "rodada antiga (26 h sem evento): round_old, uma entrada" jqe --arg s "$(T -1560)" "$(rs r-antiga)"' | length == 1 and (.[0] | .type == "round_old" and .evidence.kind == "old" and .value == 93600 and .since == $s)' <<<"$R"
+check "rodada com mais de 48 h: nem como antiga"       jqe "$(rs r-velha) | length == 0" <<<"$R"
+check "rodada sem a abertura: sem alerta"              jqe "$(rs r-sem-open) | length == 0" <<<"$R"
+check "rodada ativa 20 min depois do último evento: sem alerta" jqe "$(rs r-ativa) | length == 0" <<<"$(at 15)"
+check "rodada ativa 31 min depois do último evento: alerta com a-1" jqe "$(rs r-ativa)"' | length == 1 and .[0].evidence.sessions == ["a-1"]' <<<"$(at 26)"
+check "rodada parada: evidência traz a abertura"       jqe --arg o "$(T -100)" "$(rs r-sess)"' | .[0].evidence.opened_at == $o' <<<"$R"
+# o evento que volta: parada em AT (50 min), tell em AT+10m zera, alerta de novo 30 min depois do tell
+check "evento que volta: r-volta parada em AT"         jqe --arg s "$(T -50)" "$(rs r-volta)"' | length == 1 and .[0].since == $s and .[0].evidence.sessions == ["v-1"]' <<<"$R"
+check "evento que volta: tell em AT+10m, alerta some"  jqe "$(rs r-volta) | length == 0" <<<"$(at 11)"
+check "evento que volta: ainda sem alerta aos 29 min do tell" jqe "$(rs r-volta) | length == 0" <<<"$(at 39)"
+check "evento que volta: para de novo, desde o tell"   jqe --arg s "$(T 10)" "$(rs r-volta)"' | length == 1 and .[0].since == $s' <<<"$(at 41)"
+studio_stop
+
+PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/r/db.duckdb" "$AT" "$ROOT/config/agent-studio/config.toml" > "$TMP/py2.out" 2>&1 <<'PY'
+import sys, logging, duckdb
+from agent_studio import alert_text, alerts, config, tray
+from pycheck import check as out
+db, at, repo_cfg = sys.argv[1], int(sys.argv[2]) * 10**9, sys.argv[3]
+C = alerts.AlertConfig
+con = duckdb.connect(db, read_only=True)
+rnd = lambda r: [a for a in r["alerts"] if a["type"].startswith("round_")]
+cfg, errs = C.parse({"round_stalled_minutes": 0})
+out("round_stalled_minutes: padrão 30; zero cai no padrão com erro; 90 vale", C().round_stalled_minutes == 30 and cfg == C() and len(errs) == 1
+    and C.parse({"round_stalled_minutes": 90})[0].round_stalled_minutes == 90)
+out("config do repo: round_stalled_minutes = 30 sem erro", config.load(repo_cfg).alerts.round_stalled_minutes == 30 and not config.load(repo_cfg).errors)
+out("limite de 90 min: r-sess (80 min) e r-triagem (45) não alertam", [a["evidence"]["round"] for a in rnd(alerts.evaluate(con, at, C(round_stalled_minutes=90)))] == ["r-antiga"])
+r = alerts.evaluate(con, at, C())
+out("ordem: round_stalled antes de round_old, por rodada", [(a["type"], a["evidence"]["round"]) for a in rnd(r)] == [("round_stalled", "r-sess"), ("round_stalled", "r-triagem"), ("round_stalled", "r-volta"), ("round_old", "r-antiga")])
+t = {a["evidence"]["round"]: a for a in rnd(r)}
+out("título e texto: parada com sessão", alert_text.title(t["r-sess"]) == "Rodada parada" and alert_text.text(t["r-sess"]) == "rodada r-sess com 1 sessão aberta (a-1); último evento há 1 h 20 min (limite 30 min 00 s)")
+out("texto: triagem", alert_text.text(t["r-triagem"]) == "rodada r-triagem sem sessão aberta, triagem sem resposta; último evento há 45 min 00 s (limite 30 min 00 s)")
+out("título e texto: rodada antiga", alert_text.title(t["r-antiga"]) == "Rodada antiga sem fechamento" and alert_text.text(t["r-antiga"]) == "rodada r-antiga aberta e sem fechamento; último evento há 26 h 00 min")
+out("texto: duas sessões abertas no plural", "2 sessões abertas (a, b)" in alert_text.text({**t["r-sess"], "evidence": {**t["r-sess"]["evidence"], "sessions": ["a", "b"]}}))
+snap = tray.snapshot(con, at, config.load(repo_cfg).prices, C())
+out("tray: os alertas de rodada saem com title e text", [(a["title"], bool(a["text"])) for a in snap["alerts"] if a["type"].startswith("round_")] == [("Rodada parada", True)] * 3 + [("Rodada antiga sem fechamento", True)])
+out("rodada antiga some depois de 48 h sem evento", [a for a in alerts._rounds(con, at + 30 * 3600 * 10**9, C()) if a["evidence"]["round"] == "r-antiga"] == [])
+out("23 h sem evento ainda é parada, não antiga", [a["type"] for a in alerts._rounds(con, at - 3 * 3600 * 10**9, C()) if a["evidence"]["round"] == "r-antiga"] == ["round_stalled"])
+class Boom:  # a consulta das rodadas falha; as outras seguem
+    def execute(self, sql, params=None):
+        if "oute_swarm_round" in sql:
+            raise RuntimeError("falha injetada")
+        return con.execute(sql, params) if params is not None else con.execute(sql)
+class Cap(logging.Handler):
+    seen = []
+    def emit(self, rec): Cap.seen.append(rec.getMessage())
+logging.getLogger("agent_studio.alerts").addHandler(Cap())
+rb = alerts.evaluate(Boom(), at, C())
+out("falha do cálculo da rodada: os outros alertas seguem e a falha vai ao log", [a["type"] for a in rb["alerts"] if a["type"] != "quota"] == ["queue", "destination_refusing", "spool"] and not rnd(rb) and any("rodada parada falhou" in m for m in Cap.seen))
+PY
+check_py_lines "$TMP/py2.out"
 
 # ---------------------------------------------------------------- 11. sem config e leitura que falha
 studio_start "$TMP/n" AGENT_STUDIO_CONFIG="$TMP/nao-existe.toml" || { echo "FAIL agent-studio não subiu sem config"; exit 1; }
