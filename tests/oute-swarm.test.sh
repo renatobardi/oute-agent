@@ -824,6 +824,12 @@ check "dispatcher: oute-task com --phase plan"           [ "$RC" -eq 0 -a "$(hea
 check "dispatcher: abre no claude"                       [ "$(sed -n '5,6p' "$FAKE/oute-task.args" | tr '\n' ' ')" == "$(nova) claude " ]
 check "triagem: oute-select por issue, no repo da rodada" grep -qF "\`oute-select --json --repo $REPO --issue <n>\`" "$FAKE/oute-task.last"
 check "triagem: tabela com fase e modelo"                grep -qF 'agente da sessão, fase, modelo (com a origem' "$FAKE/oute-task.last"
+check "triagem: regra comum sozinha ou primeiro elo (#255)" grep -qF -- '- **Regra comum:** issue que muda uma **regra que todo PR segue** entra **sozinha** na rodada ou como **primeiro elo**' "$FAKE/oute-task.last"
+check "triagem: o que conta como regra comum"            grep -qF 'a seção "Regras" ou "Validar antes do PR" do `AGENTS.md`; o fluxo do changelog' "$FAKE/oute-task.last"
+check "triagem: registro compartilhado não é regra comum" grep -qF 'Registro compartilhado continua fora da sobreposição' "$FAKE/oute-task.last"
+check "triagem: tabela com ordem de abertura e marca"    grep -qF 'ordem de abertura, precisa de ação no host (s/n), risco. A ordem de abertura é `1` para as que abrem logo depois do ok; a issue de regra comum leva a marca **regra comum**' "$FAKE/oute-task.last"
+check "triagem: outras abrem juntas até o limite"        grep -qF 'depois do merge as outras abrem juntas, até 2;' "$FAKE/oute-task.last"
+check "abertura: ordem só com o merge da regra comum"    grep -qF -- '- **Ordem de abertura:** issue com `depois do merge da #<n>` na tabela da triagem só abre com o PR da #<n> mergeado' "$FAKE/oute-task.last"
 check "triagem: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 CASE=seletor-abre-cx; round "$CASE"
 opn --max 2 --agent codex
