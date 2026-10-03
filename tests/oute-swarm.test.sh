@@ -632,7 +632,7 @@ echo 'echo "{\"result\":{\"agents\":[{\"pane_id\":\"w1:p2\",\"agent\":\"claude\"
 FAKE_TELLWAIT=1 sw tell 8-bar "ok do Bardi" --wait
 check "wait: ocupada → parada, código 0 e enviado"       bash -c '[ "$1" -eq 0 ] && grep -q "pane send-keys w1:p2 enter" "$2"' _ "$RC" "$FAKE/herdr.log"
 check "wait: esperou de verdade (≥ 2 sleeps antes do envio)" [ "$(cat "$FAKE/tsleeps")" -ge 2 ]
-check "wait: uma única linha no log, ok (--wait, Ns)"    [ "$(( $(tells) - t0 ))" -eq 1 ] && grep -qE " tell 8-bar ok \(--wait, [0-9]+s\)"$'\t'"ok do Bardi\$" "$STATE/log"
+check "wait: uma única linha no log, ok (--wait, Ns)"    bash -c '[ "$1" -eq 1 ] && grep -qE " tell 8-bar ok \(--wait, [0-9]+s\)${2}ok do Bardi\$" "$3"' _ "$(( $(tells) - t0 ))" $'\t' "$STATE/log"
 check "wait: oute-emit lê ok (--wait, …): result=ok, forced=false" [ "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.tell.result"] == "ok" and .attrs["oute.swarm.tell.forced"] == false and .body == "ok do Bardi"')" -eq 1 ]
 t0="$(tells)"; agst idle
 FAKE_TELLWAIT=1 sw tell 8-bar "já parada" --wait
@@ -640,7 +640,7 @@ check "wait: sessão já parada envia na hora"             bash -c '[ "$1" -eq 0
 t0="$(tells)"; agst working; : > "$FAKE/herdr.log"
 FAKE_TELLWAIT=1 sw tell 8-bar "nunca" --wait --timeout 1
 check "wait: timeout → código 3, nada enviado"           bash -c '[ "$1" -eq 3 ] && ! grep -qE "send-(text|keys)" "$2"' _ "$RC" "$FAKE/herdr.log"
-check "wait: timeout → uma linha, recusa final"          [ "$(( $(tells) - t0 ))" -eq 1 ] && grep -qE " tell 8-bar recusado: sessão #8 bar ocupada \(working\) depois de [0-9]+ s de espera"$'\t'"nunca\$" "$STATE/log"
+check "wait: timeout → uma linha, recusa final"          bash -c '[ "$1" -eq 1 ] && grep -qE " tell 8-bar recusado: sessão #8 bar ocupada \(working\) depois de [0-9]+ s de espera${2}nunca\$" "$3"' _ "$(( $(tells) - t0 ))" $'\t' "$STATE/log"
 check "wait: timeout → mensagem em stderr"               grep -qE 'depois de [0-9]+ s de espera; nada enviado' <<<"$ERR"
 t0="$(tells)"; rm -f "$FAKE/tsleeps" "$FAKE/on-tsleep-"*
 echo 'echo "{\"result\":{\"panes\":[]}}" > "$FAKE/panes.json"' > "$FAKE/on-tsleep-1"
