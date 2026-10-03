@@ -9,6 +9,8 @@
 # a pasta oute-services), vão para o services.env e chegam só ao compose; o vault é um scripts/oute-secrets.sh falso
 # no checkout de mentira, e o `docker compose up` falso grava o ambiente que recebeu.
 # Sessão do vault (#297, caso 17): erro no meio, Ctrl+C e kill deixam a sessão trancada e nada de sessão em disco.
+# rclone no macOS (#114, casos 18): `uname` e `rclone` falsos (F_UNAME, F_TAGS, F_FUSE); sem a tag cmount ou sem FUSE o `rclone mount`
+# não roda e o `sync-shared` (que é o mount_shared do `up`) termina com rc 0.
 # Uso: tests/oute-up.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -91,9 +93,10 @@ oute_env() {
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
     -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
     -u OUTE_AGENT_STUDIO_URL -u OUTE_VAULT_FOLDER -u OUTE_VAULT_SERVICES_FOLDER -u GH_TOKEN -u GHCR_TOKEN \
-    -u BW_SESSION -u BW_PASSWORD -u BW_CLIENTID -u BW_CLIENTSECRET \
+    -u BW_SESSION -u BW_PASSWORD -u BW_CLIENTID -u BW_CLIENTSECRET -u OUTE_FUSE_PATHS \
+    ${F_FUSE:+OUTE_FUSE_PATHS="$F_FUSE"} ${F_OCI:+OCI_S3_ACCESS_KEY="$F_OCI" OCI_S3_SECRET_KEY="$F_OCI" OCI_S3_ENDPOINT="$F_OCI" OCI_S3_REGION="$F_OCI"} \
     ${F_AMBIENT:+AGENT_STUDIO_INGEST_TOKEN="$F_AMBIENT" AGENT_STUDIO_SURREAL_PASS="$F_AMBIENT"} ${F_SESSION:+BW_SESSION="$F_SESSION"} \
-    PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
+    PATH="${F_PATHX:+$F_PATHX:}$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/id_ed25519.pub" \
     "$@"
 }
@@ -467,5 +470,58 @@ check "oci-bootstrap em dry-run: trancada, sem releitura" test "$RC $(cut -d' ' 
 sig TERM grupo oute-services oci-bootstrap
 check "TERM no oci-bootstrap: sai com 143, trancada"   rc_lock 143
 check "TERM no oci-bootstrap: nada de sessão em disco" nofile
+
+# ---------------------------------------------------------------- 18. rclone no macOS (#114)
+FK="$TMP/fk"; mkdir -p "$FK" "$TMP/fuse"
+cat > "$FK/uname" <<'SH'
+#!/usr/bin/env bash
+[[ $# -eq 0 && -n "${F_UNAME:-}" ]] && { echo "$F_UNAME"; exit 0; }
+exec /usr/bin/uname "$@"
+SH
+cat > "$FK/rclone" <<'SH'
+#!/usr/bin/env bash
+echo "$1" >> "$F_RCLONE_LOG"
+[[ "$1" == version ]] && printf 'rclone v1.70.0\n- os/type: darwin\n- go/tags: %s\n' "$F_TAGS"
+exit 0
+SH
+chmod +x "$FK"/*
+export F_RCLONE_LOG="$TMP/rclone.log" F_PATHX="$FK"
+FUSE_OK="$TMP/fuse/fuse-t"; : > "$FUSE_OK"; FUSE_NO="$TMP/fuse/ausente"
+HB="o rclone do Homebrew não faz 'mount' no macOS"; NF="FUSE-T (ou macFUSE) não está instalado"
+KEY="k$RANDOM$RANDOM$RANDOM"   # credencial de mentira, só para passar de oci_remote_env
+mac() { : > "$F_RCLONE_LOG"; F_UNAME=Darwin F_TAGS="$1" F_FUSE="$2" F_OCI="$KEY" oute sync-shared; }
+nomount() { ! grep -qx mount "$F_RCLONE_LOG"; }
+
+mac none "$FUSE_OK"
+check "Homebrew: rc 0"                                 [ "$RC" -eq 0 ]
+check "Homebrew: diz que não faz mount"                has "$HB"
+check "Homebrew: diz a correção"   has "brew uninstall rclone"
+check "Homebrew: com FUSE, não reclama do FUSE"        hasnt "$NF"
+check "Homebrew: rclone mount não é chamado"           nomount
+check "Homebrew: termina em /data/shared fica local"   bash -c 'tail -1 <<<"$1" | grep -q "/data/shared fica local$"' _ "$OUT"
+
+mac cmount "$FUSE_NO:$TMP/fuse/outro"
+check "oficial sem FUSE: rc 0"                         [ "$RC" -eq 0 ]
+check "oficial sem FUSE: diz o que falta e a correção" has "$NF"
+check "oficial sem FUSE: instalar o FUSE-T"            has 'instalar o FUSE-T'
+check "oficial sem FUSE: não acusa o Homebrew"         hasnt "$HB"
+check "oficial sem FUSE: rclone mount não é chamado"   nomount
+check "oficial sem FUSE: termina em fica local"        bash -c 'tail -1 <<<"$1" | grep -q "/data/shared fica local$"' _ "$OUT"
+
+mac none "$FUSE_NO"
+check "as duas faltas: rc 0"                           [ "$RC" -eq 0 ]
+check "as duas faltas: as duas mensagens"              bash -c 'grep -qF "$1" <<<"$3" && grep -qF "$2" <<<"$3"' _ "$HB" "$NF" "$OUT"
+check "as duas faltas: rclone mount não é chamado"     nomount
+check "as duas faltas: termina em fica local"          bash -c 'tail -1 <<<"$1" | grep -q "/data/shared fica local$"' _ "$OUT"
+
+mac cmount "$FUSE_NO:$FUSE_OK"
+check "oficial com FUSE (segundo caminho): rc 0"       [ "$RC" -eq 0 ]
+check "oficial com FUSE: chega ao rclone mount"        grep -qx mount "$F_RCLONE_LOG"
+check "oficial com FUSE: sem mensagem nova"            bash -c '! grep -qF -e "$1" -e "$2" <<<"$3"' _ "$HB" "$NF" "$OUT"
+
+: > "$F_RCLONE_LOG"; F_UNAME=Linux F_TAGS=none F_FUSE="$FUSE_NO" oute sync-shared
+check "Linux: sem mensagem nova"                       bash -c '! grep -qF -e "$1" -e "$2" <<<"$3"' _ "$HB" "$NF" "$OUT"
+check "Linux: nenhuma chamada ao rclone"               test ! -s "$F_RCLONE_LOG"
+unset F_PATHX
 
 check_end
