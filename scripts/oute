@@ -91,6 +91,27 @@ env_file_drop() {
   ( umask 077; { grep -vE "$pat" "$f" || true; } > "$f.tmp" && mv "$f.tmp" "$f" )
 }
 
+# --- sessão do vault aberta por este processo (#297): trancada na saída, qualquer que seja o caminho (fim normal,
+# erro no meio, Ctrl+C, kill). VAULT_OWN=1 = há sessão nossa para trancar; sessão recebida de quem chama não é nossa.
+VAULT_OWN=0
+vault_lock() {
+  (( VAULT_OWN )) || return 0
+  VAULT_OWN=0
+  bw lock >/dev/null 2>&1 || true
+  unset BW_SESSION
+}
+# abre a sessão (master password) só no ambiente deste processo. Os traps entram antes de abrir: abertura que falha
+# ou é interrompida depois do desbloqueio também tranca. Sinal: tranca e sai com 128+n.
+vault_open() {
+  trap vault_lock EXIT
+  trap 'vault_lock; exit 129' HUP
+  trap 'vault_lock; exit 130' INT
+  trap 'vault_lock; exit 143' TERM
+  VAULT_OWN=1
+  BW_SESSION="$("$ROOT/scripts/oute-secrets.sh" session)" || die "não consegui abrir o vault"
+  export BW_SESSION
+}
+
 # 1 leitura do vault (pastas oute-agent e oute-services, uma senha só) -> agent.env e services.env. A sessão é
 # aberta aqui e trancada ao fim; com BW_SESSION já aberta pelo chamador (oci-bootstrap), usa essa e não tranca.
 vault_to_agent_env() {
@@ -98,15 +119,13 @@ vault_to_agent_env() {
   [[ -f "$OUTE_HOME/bw_client.env" ]] || die "crie $OUTE_HOME/bw_client.env com BW_CLIENTID/BW_CLIENTSECRET (chmod 600)"
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
   local own=0 envs="" svc="" rc=0 src=0 n names=()
-  if [[ -z "${BW_SESSION:-}" ]]; then
-    BW_SESSION="$("$ROOT/scripts/oute-secrets.sh" session)" || die "não consegui abrir o vault"
-    export BW_SESSION; own=1
-  fi
+  if [[ -z "${BW_SESSION:-}" ]]; then vault_open; own=1; fi
   echo "lendo o Vaultwarden (pastas ${OUTE_VAULT_FOLDER:-oute-agent} e $SERVICES_FOLDER)…" >&2
   envs="$("$ROOT/scripts/oute-secrets.sh" export)" || rc=$?
   # pasta de serviço: rc 4 = a pasta não existe (transição); outro erro não vira "sem pasta"
   [[ $rc -ne 0 ]] || svc="$(OUTE_VAULT_FOLDER="$SERVICES_FOLDER" "$ROOT/scripts/oute-secrets.sh" export)" || src=$?
-  if (( own )); then bw lock >/dev/null 2>&1 || true; unset BW_SESSION; fi
+  # leitura feita (ou falha): tranca já, sem esperar a saída; o trap cobre o que sair antes daqui
+  (( ! own )) || vault_lock
   [[ $rc -eq 0 ]] || die "não consegui ler o vault"
   case "$src" in
     0) ;;
@@ -455,9 +474,7 @@ oci_bootstrap() {
   need jq
   export BW_CLIENT_FILE="$OUTE_HOME/bw_client.env"
   # #21: sessão aberta agora (master password), só no env deste processo e do container; trancada ao sair
-  BW_SESSION="$("$ROOT/scripts/oute-secrets.sh" session)" || die "não consegui abrir o vault"
-  export BW_SESSION
-  trap 'bw lock >/dev/null 2>&1 || true' EXIT
+  vault_open
   docker run --rm -i --add-host "vault.oute.pro:${OUTE_VAULT_HOST_IP:-100.66.254.24}" \
     --user "$(id -u):$(id -g)" -e HOME=/tmp -e BITWARDENCLI_APPDATA_DIR=/bwcli \
     -e BW_SESSION -e DRY_RUN -e OUTE_OCI_BUDGET_EMAIL -e OUTE_OCI_SVC_EMAIL -e OUTE_BUCKET \

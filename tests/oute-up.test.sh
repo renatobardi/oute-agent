@@ -8,6 +8,7 @@
 # Segredos de serviço (#256, casos 9 a 15): os nomes de serviço saem do arquivo do agent (cache antigo ou vault sem
 # a pasta oute-services), vão para o services.env e chegam só ao compose; o vault é um scripts/oute-secrets.sh falso
 # no checkout de mentira, e o `docker compose up` falso grava o ambiente que recebeu.
+# Sessão do vault (#297, caso 17): erro no meio, Ctrl+C e kill deixam a sessão trancada e nada de sessão em disco.
 # Uso: tests/oute-up.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -34,7 +35,7 @@ case "$1" in
            esac ;;
   image)   exit 0 ;;
   volume)  exit 1 ;;
-  run)     echo "10485760 0" ;;
+  run)     [[ "${F_RUN_FAIL:-}" == 1 && "$*" == *oci-bootstrap.sh* ]] && exit 1; echo "10485760 0" ;;
   ps)      case "$*" in *'oute-jev[-]router'*) [[ -e "$F_LEGACY" ]] && echo abc123 ;; esac; exit 0 ;;
   rm)      [[ "${F_RM_FAIL:-}" == 1 ]] && exit 1; rm -f "$F_LEGACY" ;;
   *) exit 9 ;;
@@ -87,8 +88,8 @@ gerados() { mkdir -p "$REPO/$OLDDIR"; for f in router.yaml config.yaml candidate
 # ambiente: com eles (e rclone no host) o `up` montaria o bucket de verdade dentro de $TMP. Sem as credenciais do
 # agent-studio nem do vault de quem roda o teste; F_AMBIENT=<valor> põe uma credencial de ingestão no ambiente e
 # F_SESSION=<valor> uma sessão do vault já aberta por quem chama (#256)
-oute() {
-  OUT="$(env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
+oute_env() {
+  env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
     -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
     -u OUTE_AGENT_STUDIO_URL -u OUTE_VAULT_FOLDER -u OUTE_VAULT_SERVICES_FOLDER -u GH_TOKEN -u GHCR_TOKEN \
@@ -96,8 +97,9 @@ oute() {
     ${F_AMBIENT:+AGENT_STUDIO_INGEST_TOKEN="$F_AMBIENT" AGENT_STUDIO_SURREAL_PASS="$F_AMBIENT"} ${F_SESSION:+BW_SESSION="$F_SESSION"} \
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/id_ed25519.pub" \
-    "$REPO/scripts/oute" "$@" 2>&1)"; RC=$?
+    "$@"
 }
+oute() { OUT="$(oute_env "$REPO/scripts/oute" "$@" 2>&1)"; RC=$?; }
 ncron() { grep -c . "$F_CRON_LOG" || true; }
 
 check "sintaxe (bash -n)" bash -n "$REPO/scripts/oute"
@@ -228,12 +230,19 @@ cenv() { sed -n "s/^$1=//p" "$F_ENV"; }
 # nenhum valor de segredo na saída do `oute`
 quiet() { local v; for v in "$T_OLD" "$S_OLD" "$T_ING" "$T_READ" "$S_NEW" "$T_GH" "$T_FOO"; do ! grep -qF -- "$v" <<<"$OUT" || return 1; done; }
 # vault falso: uma pasta = um arquivo em $F_VAULT com as linhas do `oute-secrets export`; pasta sem arquivo = rc 4
-# (como o scripts/oute-secrets.sh de verdade); <pasta>.rc = falha de leitura com esse código. Chamadas em $F_VAULT_LOG
+# (como o scripts/oute-secrets.sh de verdade); <pasta>.rc = falha de leitura com esse código. Chamadas em $F_VAULT_LOG.
+# <pasta>.hang (ou session.hang) = a chamada avisa em $F_VAULT/hanging e fica parada até existir $F_VAULT/release (#297)
 export F_VAULT="$TMP/vault" F_VAULT_LOG="$TMP/vault.log"; mkdir -p "$F_VAULT"; : > "$F_VAULT_LOG"
 cat > "$REPO/scripts/oute-secrets.sh" <<'SH'
 #!/usr/bin/env bash
 folder="${OUTE_VAULT_FOLDER:-oute-agent}"
 echo "$1 $folder sessao=${BW_SESSION:-nenhuma}" >> "$F_VAULT_LOG"
+hang() {
+  [[ -e "$F_VAULT/$1.hang" ]] || return 0
+  local i=0; : > "$F_VAULT/hanging"
+  until [[ -e "$F_VAULT/release" || $i -ge 100 ]]; do sleep 0.1; i=$((i + 1)); done
+}
+case "$1" in session) hang session ;; export) hang "$folder" ;; esac
 case "$1" in
   session) [[ ! -e "$F_VAULT/session.rc" ]] || exit 1; echo sessao-de-teste ;;
   export)  [[ ! -e "$F_VAULT/$folder.rc" ]] || exit "$(cat "$F_VAULT/$folder.rc")"
@@ -350,6 +359,7 @@ check "pasta do agent ilegível: arquivos intactos"     bash -c 'cmp -s "$0" "$1
 rm -f "$F_VAULT/oute-agent.rc"; : > "$F_VAULT/session.rc"; : > "$F_VAULT_LOG"
 oute up --refresh-secrets
 check "vault não abre: rc != 0, nenhuma pasta lida"    bash -c '[ "$0" -ne 0 ] && grep -q "não consegui abrir o vault" <<<"$1" && ! grep -q "^export " "$F_VAULT_LOG"' "$RC" "$OUT"
+check "vault não abre: tranca mesmo assim (#297)"       grep -qx 'bw lock' "$F_VAULT_LOG"
 check "vault não abre: arquivos intactos"              bash -c 'cmp -s "$0" "$1" && cmp -s "$2" "$3"' "$AENV" "$TMP/aenv.2" "$SENV" "$TMP/senv.2"
 rm -f "$F_VAULT/session.rc"; : > "$F_VAULT_LOG"
 # sessão já aberta por quem chama (oci-bootstrap): usa essa e não tranca (quem abriu é quem tranca)
@@ -388,5 +398,76 @@ check "oute-secrets: pasta ausente = rc 4"             [ "$RC" -eq 4 ]
 check "oute-secrets: diz a pasta"                      has "pasta 'oute-services' não existe no vault"
 secrets oute-agent
 check "oute-secrets: pasta existente = rc 0 e as linhas" test "$RC|$OUT" = "0|export GH_TOKEN='$T_GH'"
+
+# ---------------------------------------------------------------- 17. sessão do vault trancada em qualquer saída (#297)
+printf "export GH_TOKEN='%s'\n" "$T_GH" > "$F_VAULT/oute-agent"; printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\n" "$T_ING" > "$F_VAULT/oute-services"
+oute secrets refresh
+cp "$AENV" "$TMP/aenv.3"; cp "$SENV" "$TMP/senv.3"
+vlog() { tr '\n' ';' < "$F_VAULT_LOG"; }
+intact() { cmp -s "$AENV" "$TMP/aenv.3" && cmp -s "$SENV" "$TMP/senv.3"; }
+# nada de sessão em disco: nem o arquivo das versões antigas nem o valor da sessão em arquivo do host
+nofile() { [[ ! -e "$TMP/oute/bw_session" ]] && ! grep -rqF sessao-de-teste "$TMP/oute" "$TMP/home"; }
+safe() { intact && nofile; }
+# rc_lock <código>: o `oute` saiu com esse código e o vault foi trancado uma vez só, por último
+rc_lock() { [[ "$RC" -eq "$1" && "$(grep -cx 'bw lock' "$F_VAULT_LOG")" == 1 && "$(tail -1 "$F_VAULT_LOG")" == 'bw lock' ]]; }
+# sig <sinal> <grupo|pid> <chamada que para> <oute …>: roda o `oute` em sessão própria (SIGINT no padrão: comando em
+# segundo plano de script nasce com ele ignorado), espera o vault falso parar na chamada e manda o sinal ao grupo
+# inteiro (Ctrl+C no terminal) ou só ao `oute` (kill <pid>; a chamada é solta depois). Saída em $OUT, código em $RC
+sig() {
+  local s="$1" alvo="$2" onde="$3" pid i=0; shift 3
+  rm -f "$F_VAULT"/*.hang "$F_VAULT/hanging" "$F_VAULT/release" "$TMP/sig.pid"; : > "$F_VAULT/$onde.hang"; : > "$F_VAULT_LOG"
+  oute_env python3 -c 'import os, signal, sys
+os.setsid(); signal.signal(signal.SIGINT, signal.SIG_DFL)
+open(sys.argv[1], "w").write(str(os.getpid()))
+os.execv(sys.argv[2], sys.argv[2:])' "$TMP/sig.pid" "$REPO/scripts/oute" "$@" > "$TMP/sig.out" 2>&1 &
+  until [[ -e "$F_VAULT/hanging" || $i -ge 100 ]]; do sleep 0.1; i=$((i + 1)); done
+  pid="$(cat "$TMP/sig.pid")"
+  if [[ "$alvo" == grupo ]]; then kill "-$s" -- "-$pid"; else kill "-$s" "$pid"; sleep 0.3; : > "$F_VAULT/release"; fi
+  wait $!; RC=$?; OUT="$(cat "$TMP/sig.out")"
+  rm -f "$F_VAULT"/*.hang "$F_VAULT/hanging" "$F_VAULT/release"
+}
+sig INT grupo oute-services secrets refresh
+check "Ctrl+C na leitura: sai com 130"                 [ "$RC" -eq 130 ]
+check "Ctrl+C na leitura: sessão trancada, uma vez"    test "$(vlog)" = "session oute-agent sessao=nenhuma;export oute-agent sessao=sessao-de-teste;export oute-services sessao=sessao-de-teste;bw lock;"
+check "Ctrl+C na leitura: arquivos intactos"           intact
+check "Ctrl+C na leitura: nada de sessão em disco"     nofile
+: > "$F_LOG"
+sig TERM grupo oute-agent up --refresh-secrets
+check "TERM na leitura: sai com 143, trancada"         test "$RC $(vlog)" = "143 session oute-agent sessao=nenhuma;export oute-agent sessao=sessao-de-teste;bw lock;"
+check "TERM na leitura: intactos, sem sessão em disco" safe
+check "TERM na leitura: compose up não roda"           bash -c '! grep -q -- " up -d" "$F_LOG"'
+sig TERM pid oute-agent secrets refresh
+check "kill só no oute: sai com 143, trancada"         rc_lock 143
+check "kill só no oute: intactos, sem sessão em disco" safe
+sig HUP grupo oute-agent secrets refresh
+check "terminal fechado (HUP): sai com 129, trancada"  rc_lock 129
+check "terminal fechado: intactos, sem sessão em disco" safe
+sig INT grupo session secrets refresh
+check "Ctrl+C ao abrir o vault: sai com 130, trancada" test "$RC $(vlog)" = "130 session oute-agent sessao=nenhuma;bw lock;"
+check "Ctrl+C ao abrir: intactos, sem sessão em disco" safe
+# erro no meio fora dos ramos que já trancam: a gravação do agent.env falha depois da leitura
+: > "$F_VAULT_LOG"; rm -f "$AENV.tmp"; mkdir "$AENV.tmp"
+oute secrets refresh
+rmdir "$AENV.tmp"
+check "gravação falha depois da leitura: rc 1, trancada" rc_lock 1
+check "gravação falha: nada de sessão em disco"        nofile
+# resto das versões antigas (sessão em arquivo): some no primeiro comando que passa pelos segredos
+echo sessao-de-teste > "$TMP/oute/bw_session"; : > "$F_VAULT_LOG"
+oute secrets refresh
+check "arquivo de sessão antigo: vault trancado"       rc_lock 0
+check "arquivo de sessão antigo: apagado"              nofile
+# oci-bootstrap: o outro caminho que abre o vault. Uma sessão para o provisionamento e para a releitura, trancada na saída
+: > "$F_VAULT_LOG"
+oute oci-bootstrap
+check "oci-bootstrap: uma sessão, trancada só no fim"  test "$RC $(cut -d' ' -f1-2 "$F_VAULT_LOG" | tr '\n' ';')" = "0 session oute-agent;export oute-agent;export oute-services;bw lock;"
+: > "$F_VAULT_LOG"
+F_RUN_FAIL=1 oute oci-bootstrap
+check "oci-bootstrap que falha: rc != 0, trancada"     test "$(( RC != 0 )) $(cut -d' ' -f1-2 "$F_VAULT_LOG" | tr '\n' ';')" = "1 session oute-agent;bw lock;"
+: > "$F_VAULT_LOG"
+DRY_RUN=1 oute oci-bootstrap
+check "oci-bootstrap em dry-run: trancada, sem releitura" test "$RC $(cut -d' ' -f1-2 "$F_VAULT_LOG" | tr '\n' ';')" = "0 session oute-agent;bw lock;"
+sig TERM grupo oute-services oci-bootstrap
+check "TERM no oci-bootstrap: sai com 143, trancada"   rc_lock 143
+check "TERM no oci-bootstrap: nada de sessão em disco" nofile
 
 check_end
