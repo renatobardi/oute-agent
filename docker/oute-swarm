@@ -522,7 +522,7 @@ w_snapshot() {
     fi
   done < <(awk -v m="$main" '{print ($6 == "" ? m : $6)}' "$state/spawned" 2>/dev/null | sort -u)
   if (( gh_ok )); then
-    w_keep "oldhead|"; w_keep "oldci|"
+    w_keep "oldhead|"; w_keep "oldci|"; w_keep "merged|"
     while IFS=$'\t' read -r kind num n st mg url oid; do
       case "$kind" in
         pr)
@@ -650,15 +650,15 @@ w_diff() {
 }
 
 w_check_merged_issues() {
-  local k pr_num issue_num ts_merged now_ts elapsed
+  local k pr_num issue_num ts_merged now_ts elapsed delay="${OUTE_WATCH_ISSUE_DELAY:-120}"
   for k in "${!W_CUR[@]}"; do
     [[ "$k" == "merged|"* ]] || continue
     pr_num="${k#merged|}"
     IFS='|' read -r issue_num ts_merged <<<"${W_CUR[$k]}"
     now_ts="$(date +%s)"
     elapsed=$(( now_ts - ts_merged ))
-    # Se passaram 2 minutos (120 segundos) ou mais, confira se a issue continua aberta
-    if (( elapsed >= 120 )); then
+    # Se passaram $delay segundos ou mais, confira se a issue continua aberta
+    if (( elapsed >= delay )); then
       if gh issue view "$issue_num" --json state --jq '.state' 2>/dev/null | grep -q "^OPEN$"; then
         w_ev issue "$(w_ref "$issue_num") aberta depois do merge do PR $(w_ref "$pr_num")"
       fi
