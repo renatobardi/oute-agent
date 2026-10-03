@@ -24,10 +24,12 @@ case "$1 ${2:-}" in
 esac
 GH
 chmod +x "$BIN/gh"
+# `claude`/`codex` falsos (tests/lib/fake-agent.sh, #258): a checagem da reserva não pode depender do claude de quem roda o teste
+cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"; cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/codex"
 # PATH sem gh nenhum: só o que o oute-select precisa para rodar
 for c in env python3; do ln -s "$(command -v "$c")" "$NOGH/$c"; done
 export PATH="$BIN:$PATH" FAKE TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$TABLE"
-unset OUTE_SELECT_GH_TIMEOUT FAKE_GH_HANG
+unset OUTE_SELECT_GH_TIMEOUT FAKE_GH_HANG FAKE_CLAUDE_AUTH_RC FAKE_CODEX_LOGIN_RC FAKE_AUTH_HANG OUTE_SELECT_AGENT_TIMEOUT
 ts_off   # seções 1 a 9: sem chave, o Jev nunca é chamado
 
 # sel <args…>: oute-select --json no repo de teste; JSON em $OUT, stderr em $ERR, código em $RC
@@ -43,7 +45,7 @@ SONNET=claude-sonnet-5-5; OPUS=claude-opus-5-5; HAIKU=claude-haiku-4-5-20251001
 labels 10 aidlc:build agentes ready
 sel --issue 10
 check "label: aidlc:build abre no Sonnet, origem label" is build label claude "$SONNET" ""
-check "label: os sete campos, e só eles"                jqe 'keys == ["agent", "confidence", "effort", "model", "origin", "phase", "reason"]' <<<"$OUT"
+check "label: os oito campos, e só eles"                jqe 'keys == ["agent", "confidence", "effort", "model", "origin", "phase", "reason", "reserve"]' <<<"$OUT"
 check "label: sem confiança (o Jev não foi chamado)"    jqe '.confidence == ""' <<<"$OUT"
 check "label: motivo diz o label e a issue"             jqe '.reason == "label aidlc:build da issue #10"' <<<"$OUT"
 check "label: sem aviso"                                [ -z "$ERR" ]
@@ -359,5 +361,82 @@ ts_stop
 # 11i. a chave é opcional no host e chega ao login pela allowlist do entrypoint (prefixo OUTE_)
 check "host e compose não exigem nem citam a chave (o oute up sobe sem ela)" bash -c '! grep -q "TYPESAFE" "$1/scripts/oute" "$1/docker/compose.yaml" "$1/docker/entrypoint.sh"' _ "$ROOT"
 check "entrypoint: variável OUTE_* vai ao ambiente do login" bash -c 'grep -E "^ +declare -px \| grep -E .*\(GH_\|OUTE_\|" "$1" >/dev/null' _ "$ROOT/docker/entrypoint.sh"
+
+# ---------------------------------------------------------------- 12. reserva no Codex: gatilho `indisponivel` (#258)
+GPT=gpt-6.1-sol; ASTRA=gpt-6-astra; LUNA=gpt-6-luna
+rs() { jqe --arg r "$1" '.reserve == $r' <<<"$OUT"; }   # o campo reserve do JSON
+labels 40 aidlc:build; labels 41 aidlc:spec; labels 42 aidlc:ops
+: > "$FAKE/auth.log"
+sel --issue 40
+check "claude ok: sem reserva, no Claude"               bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
+check "claude ok: só o auth status do claude foi chamado, sem aviso" bash -c '[ "$(cat "$1")" == "claude auth status" ] && [ -z "$2" ]' _ "$FAKE/auth.log" "$ERR"
+
+export FAKE_CLAUDE_AUTH_RC=1
+sel --issue 40
+check "indisponível: Codex da linha build (gpt-6.1-sol, high)" is build label codex "$GPT" high
+check "indisponível: reserve = indisponivel"            rs indisponivel
+check "indisponível: origem e motivo seguem os da fase" jqe '.reason == "label aidlc:build da issue #40"' <<<"$OUT"
+check "indisponível: aviso diz que abre no Codex"       bash -c 'grep -qF "abrindo no Codex (reserva)" <<<"$1"' _ "$ERR"
+sel --issue 41
+check "indisponível: spec abre no gpt-6-astra"          is spec label codex "$ASTRA" high
+sel --issue 42
+check "indisponível: ops abre no gpt-6-luna (medium)"   is ops label codex "$LUNA" medium
+sel --task sem-issue
+check "indisponível: sessão sem issue, padrão no Codex" is "" padrao codex "$GPT" high
+check "indisponível: sem issue, reserve também"         rs indisponivel
+OUT="$("$SEL" --repo "$TMP/repo" --issue 40 2>/dev/null </dev/null)"
+check "indisponível: linha para ler mostra a reserva"   bash -c 'grep -qF "agente codex · modelo gpt-6.1-sol · esforço high · reserva indisponivel" <<<"$1"' _ "$OUT"
+
+# escolha explícita e fase fixa não caem na reserva: só avisam
+sel --issue 40 --agent claude
+check "--agent claude: fica no Claude, reserve vazio"   bash -c 'jq -e ".agent == \"claude\" and .reserve == \"\" and .origin == \"manual\"" <<<"$1" >/dev/null' _ "$OUT"
+check "--agent claude: aviso de escolha explícita"      bash -c 'grep -qF "indisponível" <<<"$1" && grep -qF "explícita" <<<"$1"' _ "$ERR"
+sel --issue 40 --model "$SONNET"
+check "--model do Claude: fica no Claude, reserve vazio" bash -c 'jq -e ".agent == \"claude\" and .model == \"$2\" and .reserve == \"\"" <<<"$1" >/dev/null' _ "$OUT" "$SONNET"
+check "--model do Claude: aviso de escolha explícita"   bash -c 'grep -qF "explícita" <<<"$1"' _ "$ERR"
+sel --phase plan
+check "--phase fixa: fica no Claude, reserve vazio"     bash -c 'jq -e ".agent == \"claude\" and .phase == \"plan\" and .reserve == \"\"" <<<"$1" >/dev/null' _ "$OUT"
+check "--phase fixa: aviso de escolha explícita"        bash -c 'grep -qF "explícita" <<<"$1"' _ "$ERR"
+: > "$FAKE/auth.log"
+sel --issue 40 --agent codex
+check "--agent codex: Codex, sem reserva e sem checar o claude" bash -c 'jq -e ".agent == \"codex\" and .reserve == \"\" and .origin == \"manual\"" <<<"$1" >/dev/null && [ ! -s "$2" ]' _ "$OUT" "$FAKE/auth.log"
+
+# os dois fora: aviso, abre no Claude, código 0
+export FAKE_CODEX_LOGIN_RC=1
+sel --issue 40
+check "os dois fora: Claude, reserve vazio, código 0"   bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .model == \"$3\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT" "$SONNET"
+check "os dois fora: aviso Claude e Codex indisponíveis" bash -c 'grep -qF "Claude e Codex indisponíveis" <<<"$1"' _ "$ERR"
+unset FAKE_CODEX_LOGIN_RC FAKE_CLAUDE_AUTH_RC
+
+# `claude` ausente do PATH = indisponível; `codex` ausente com o claude fora = os dois fora
+mkdir -p "$TMP/semclaude" "$TMP/semagentes"
+for c in env python3 bash cat grep sed; do ln -s "$(command -v "$c")" "$TMP/semclaude/$c"; ln -s "$(command -v "$c")" "$TMP/semagentes/$c"; done
+ln -s "$BIN/codex" "$TMP/semclaude/codex"; ln -s "$BIN/gh" "$TMP/semclaude/gh"
+ln -s "$BIN/gh" "$TMP/semagentes/gh"
+OUT="$(PATH="$TMP/semclaude" "$SEL" --json --repo "$TMP/repo" --issue 40 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "claude ausente: Codex da linha, reserve indisponivel" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"codex\" and .model == \"$3\" and .reserve == \"indisponivel\"" <<<"$2" >/dev/null' _ "$RC" "$OUT" "$GPT"
+OUT="$(PATH="$TMP/semagentes" "$SEL" --json --repo "$TMP/repo" --issue 40 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "claude e codex ausentes: Claude, aviso dos dois fora, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF "Claude e Codex indisponíveis" "$3"' _ "$RC" "$OUT" "$TMP/err"
+
+# tempo esgotado no auth status: não troca, aviso, abre no Claude (teto encurtado só para o teste)
+export FAKE_AUTH_HANG=claude OUTE_SELECT_AGENT_TIMEOUT=0.3
+sel --issue 40
+check "auth status lento: Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
+check "auth status lento: aviso de que não respondeu"   bash -c 'grep -qF "não respondeu" <<<"$1"' _ "$ERR"
+# o teto é de 5 s: valor maior que ele não alarga
+OUTE_SELECT_AGENT_TIMEOUT=60 timeout 20 "$SEL" --json --repo "$TMP/repo" --issue 40 >"$TMP/o" 2>"$TMP/err" </dev/null; RC=$?
+check "auth status lento: o teto de 5 s vale (60 s no ambiente não alarga)" bash -c '[ "$1" -eq 0 ] && grep -qF "em 5 s" "$2"' _ "$RC" "$TMP/err"
+unset FAKE_AUTH_HANG OUTE_SELECT_AGENT_TIMEOUT
+# codex lento com o claude fora: avisa e abre no Codex
+export FAKE_CLAUDE_AUTH_RC=1 FAKE_AUTH_HANG=codex OUTE_SELECT_AGENT_TIMEOUT=0.3
+sel --issue 40
+check "codex lento, claude fora: Codex, com aviso"      bash -c 'jq -e ".agent == \"codex\" and .reserve == \"indisponivel\"" <<<"$1" >/dev/null && grep -qF "codex login status" <<<"$2"' _ "$OUT" "$ERR"
+unset FAKE_AUTH_HANG OUTE_SELECT_AGENT_TIMEOUT FAKE_CLAUDE_AUTH_RC
+
+# a saída do auth status é descartada e o texto da tarefa não vai ao claude
+check "auth status: nenhuma saída do agente vaza"       bash -c '! grep -q "agente falso" <<<"$1$2"' _ "$OUT" "$ERR"
+# sem tabela: reserva sem modelo
+FAKE_CLAUDE_AUTH_RC=1 OUTE_SELECT_TABLE="$TMP/nao-existe.toml" sel --issue 40
+check "sem tabela: reserva no Codex sem modelo"         bash -c 'jq -e ".agent == \"codex\" and .model == \"\" and .reserve == \"indisponivel\"" <<<"$1" >/dev/null' _ "$OUT"
 
 check_end

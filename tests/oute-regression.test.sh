@@ -30,6 +30,7 @@ ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 cat > "$BIN/claude" <<'FAKE'
 #!/usr/bin/env bash
 [[ "${1:-}" != --version ]] || { echo "2.1.9 (Claude Code)"; exit 0; }
+[[ "${1:-} ${2:-}" != "auth status" ]] || exit 0   # o oute-select checa o login para a reserva (#258): não é uma chamada do modelo
 printf '%s\n' "$*" >> "$FAKE_LOG/claude.argv"
 printf 'cwd=%s\nora=%s\nmemory=%s\npropose=%s\nsudo=%s\n--\n' "$PWD" "${OTEL_RESOURCE_ATTRIBUTES:-}" \
   "$(tr '\n' ' ' < .ai-memory.toml 2>/dev/null)" "$(command -v oute-propose)" "$(command -v sudo)" >> "$FAKE_LOG/claude.env"

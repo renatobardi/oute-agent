@@ -22,14 +22,9 @@ TASK="$ROOT/docker/oute-task"
 BIN="$TMP/bin"; NOEMIT="$TMP/bin-noemit"; NOTASK="$TMP/bin-notask"; SHIMS="$TMP/shims"
 FAKE="$TMP/fake"; WS="$TMP/ws"; WT="$TMP/wt"
 mkdir -p "$BIN" "$NOEMIT" "$NOTASK" "$SHIMS" "$FAKE" "$WS" "$TMP/home"
-# agente falso: grava o ambiente, o diretório e os argumentos em $FAKE/<agente>.* e sai com $FAKE_RC
-cat > "$BIN/claude" <<'SH'
-#!/usr/bin/env bash
-n="$(basename "$0")"
-env > "$FAKE/$n.env"; pwd -P > "$FAKE/$n.pwd"; printf '%s\n' "$@" > "$FAKE/$n.args"
-echo "agente falso $n"
-exit "${FAKE_RC:-0}"
-SH
+# agente falso (tests/lib/fake-agent.sh): grava o ambiente, o diretório e os argumentos em $FAKE/<agente>.* e sai com
+# $FAKE_RC; `claude auth status`/`codex login status` respondem por $FAKE_CLAUDE_AUTH_RC/$FAKE_CODEX_LOGIN_RC (#258)
+cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"
 cp "$BIN/claude" "$BIN/codex"
 # gh: `pr list --head <branch> …` responde 1 se o branch está em $FAKE/merged
 cat > "$BIN/gh" <<'SH'
@@ -65,7 +60,7 @@ for a in claude codex; do ln -s "$ROOT/docker/shims/oute-agent-shim" "$SHIMS/$a"
 
 ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
-      OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC \
+      OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC FAKE_CLAUDE_AUTH_RC FAKE_CODEX_LOGIN_RC FAKE_AUTH_HANG \
       HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 10k sobe a falsa
@@ -670,6 +665,47 @@ check "shell: sem Jev"                                 [ "$(ts_calls)" -eq 0 ]
 check "sem chave: abre no Sonnet, com aviso, sem chamar o Jev" bash -c '[ "$1" == "--model claude-sonnet-5-5 desenhe a arquitetura do serviço de filas" ] && grep -qF "sem a chave da TypeSafe" "$2" && [ "$3" -eq 0 ]' _ "$(args claude)" "$TMP/err" "$(ts_calls)"
 check "sem chave: origem padrao, sem confiança"        bash -c '[ -z "$1" ]' _ "$(cf)"
 ts_stop; ts_off
+
+# 10l. reserva no Codex (#258): `claude auth status` ≠ 0 abre o Codex da linha da fase, grava o agente na marca e manda o motivo
+rmark() { jqe '.attrs | has("oute.task.reserve") | not' <<<"$(last)"; }   # o último evento sem o motivo da reserva
+t 40-normal claude "p"
+check "reserva: claude ok, sem reserve no evento"      rmark
+export FAKE_CLAUDE_AUTH_RC=1
+rm -f "$FAKE/codex.args" "$FAKE/codex.env" "$FAKE/claude.args"
+t 40-reserva claude "faça a 40"
+check "reserva: abre o codex da linha build, com -m e esforço" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6.1-sol -c model_reasoning_effort=high faça a 40" ]
+check "reserva: o claude não é executado (só o auth status)" [ ! -e "$FAKE/claude.args" ]
+check "reserva: opened com agente codex, modelo, esforço e reserve" bash -c 'jq -e ".name == \"oute.task.opened\" and .attrs[\"oute.task.agent\"] == \"codex\" and .attrs[\"oute.task.model\"] == \"gpt-6.1-sol\" and .attrs[\"oute.task.effort\"] == \"high\" and .attrs[\"oute.task.reserve\"] == \"indisponivel\" and .attrs[\"oute.task.origin\"] == \"label\"" <<<"$1" >/dev/null' _ "$(last)"
+check "reserva: marca guarda o codex (o restore reabre nele)" [ "$(smark "$SP/proj-40-reserva")" == "codex|gpt-6.1-sol|high" ]
+check "reserva: o aviso do seletor sai"                grep -qF "abrindo no Codex (reserva)" <<<"$SELW"
+FAKE_RC=0 t 40-reserva claude "faça a 40"
+check "reserva, reabertura: reopened com agente codex e reserve" bash -c 'jq -e ".name == \"oute.task.reopened\" and .attrs[\"oute.task.agent\"] == \"codex\" and .attrs[\"oute.task.reserve\"] == \"indisponivel\"" <<<"$1" >/dev/null' _ "$(last)"
+# escolha explícita não cai na reserva
+rm -f "$FAKE/claude.args"
+t --agent claude 40-explicito claude "p"
+check "explícito (--agent claude): abre o claude com o modelo da fase" [ "$RC" -eq 0 -a "$(args claude)" == "--model claude-sonnet-5-5 p" ]
+check "explícito (--agent claude): sem reserve, com aviso" bash -c 'grep -qF "explícita" <<<"$1"' _ "$SELW"
+check "explícito (--agent claude): evento sem reserve"  rmark
+t 40-modelo claude --model claude-opus-5-5 "p"
+check "explícito (--model nos argumentos): abre o claude, sem reserve" bash -c '[ "$1" == "--model claude-opus-5-5 p" ]' _ "$(args claude)"
+check "explícito (--model nos argumentos): evento sem reserve" rmark
+rm -f "$FAKE/claude.args"
+t --phase plan 40-fixa claude "p"
+check "fase fixa: abre o claude, sem reserve, com aviso" bash -c '[ "$1" == "--model claude-sonnet-5-5 p" ] && grep -qF "explícita" <<<"$2"' _ "$(args claude)" "$SELW"
+# os dois fora: abre no Claude, aviso, código 0
+export FAKE_CODEX_LOGIN_RC=1
+t 40-doisfora claude "p"
+check "os dois fora: abre o claude, código 0, aviso"   bash -c '[ "$1" -eq 0 ] && [ "$2" == "agente falso claude" ] && grep -qF "Claude e Codex indisponíveis" <<<"$3"' _ "$RC" "$OUT" "$SELW"
+unset FAKE_CODEX_LOGIN_RC FAKE_CLAUDE_AUTH_RC
+check "os dois fora: evento com agente claude, sem reserve" bash -c 'jq -e ".attrs[\"oute.task.agent\"] == \"claude\" and (.attrs | has(\"oute.task.reserve\") | not)" <<<"$1" >/dev/null' _ "$(last)"
+# oute-emit task: reserve só indisponivel|cota, e só no opened/reopened
+before="$(total)"
+oute-emit task opened human repo=a slug=b reserve=chute
+check "oute-emit task: reserve inválido não emite"     [ "$(total)" -eq "$before" ]
+oute-emit task opened human repo=a slug=b agent=codex reserve=cota
+check "oute-emit task: reserve=cota vale"              jqe '.attrs["oute.task.reserve"] == "cota"' <<<"$(last)"
+oute-emit task removed human repo=a slug=b reason=merged reserve=indisponivel
+check "oute-emit task: removed sem o reserve"          jqe '.name == "oute.task.removed" and (.attrs | has("oute.task.reserve") | not)' <<<"$(last)"
 check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
 rcv_stop
 

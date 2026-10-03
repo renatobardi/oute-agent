@@ -3,7 +3,7 @@
 # em /opt/oute/select. Mudança entra com `git pull` + `oute down/up`, sem release.
 #
 # Ids exatos, sem alias (`opus`, `sonnet`): trocar de versão é uma mudança visível aqui. Todo id precisa existir no
-# CLI instalado (#220). A coluna do Codex só abre com `--agent codex` (a reserva automática é a #258).
+# CLI instalado (#220). A coluna do Codex abre com `--agent codex` e na reserva (#258): sem `--agent`/`--model`/`--phase`, com o Claude indisponível (`claude auth status` ≠ 0), a sessão abre no Codex da mesma linha.
 #
 # Precedência: --agent/--model > exceção por label > label aidlc:<fase> > [default].
 

@@ -71,10 +71,13 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Sem label de fase e com prompt: o Jev (TypeSafe) classifica a fase pelo texto; confiança baixa, falha ou sem a
   chave: Sonnet, com aviso. Sem prompt ou com o gh fora do ar: Sonnet. Nunca bloqueia. O restore do herdr reabre
   no mesmo modelo.
+  Reserva (#258): com o Claude indisponível (`claude auth status` ≠ 0 ou claude ausente), a sessão abre no Codex da
+  mesma linha (`codex -m <id> -c model_reasoning_effort=<e>`), e o evento leva oute.task.reserve=indisponivel.
+  --agent/--model explícitos e --phase fixa não caem na reserva (só avisam); os dois fora: aviso e abre no Claude.
   oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--model <id>]
               [--text-file <arquivo>|-]
                                     diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
-                                    confiança do Jev, sem abrir sessão; --text-file: o texto da tarefa para o Jev
+                                    confiança do Jev e reserva (reserve), sem abrir sessão; --text-file: o texto da tarefa para o Jev
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
   oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal; pula as em uso (#374; --force-in-use só a pedido do Bardi)
                                     dos repos com worktree nele (sem --yes: só mostra)
