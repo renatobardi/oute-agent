@@ -175,6 +175,11 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
                                     (~/.oute/emit/since) com a hora original; resumo no stderr;
                                     rodar de novo não emite nada (retoma se falhou no meio)
+  oute-emit backfill --from <ISO> [--to <ISO>] [--dry-run]
+                                    a janela [from, to) pela hora do fato (ex.: 2026-09-30T00:00:00Z),
+                                    sem olhar o corte nem o backfill.done; reenvia tudo da janela (o
+                                    agent-studio deduplica pelo oute.event.id); retoma por janela;
+                                    --dry-run só mostra o resumo por tipo, sem enviar (#261)
   oute-emit flush                   reenvia o spool (~/.oute/emit/spool/: o que falhou com o
                                     coletor fora; toda chamada e a subida já reenviam sozinhas)
   oute-emit reconcile               decided de todo ~/inbox/*.out ainda não enviado (ex.: aprovado
