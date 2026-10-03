@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
+. "$ROOT/tests/lib/compose-config.sh"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 
@@ -109,9 +110,7 @@ check "compose: rede studio interna"                    bash -c 'sed -n "/^  stu
 check "compose: surrealdb sem porta publicada"          bash -c '! grep -qE "^    ports:" <<<"$0"' "$SURREAL"
 # compose resolvido, quando o host tem `docker compose` (o CI de PR não tem a garantia; sem ele, só o texto acima)
 if docker compose version >/dev/null 2>&1; then
-  CFG="$(cd "$TMP" && env -u COMPOSE_PROFILES OUTE_SSH_AUTHORIZED_KEYS=/dev/null OUTE_AGENT_ENV_FILE=/dev/null \
-    AGENT_STUDIO_INGEST_TOKEN=i AGENT_STUDIO_READ_TOKEN=r AGENT_STUDIO_SURREAL_PASS=s \
-    docker compose --project-directory "$ROOT" -f "$COMPOSE" --profile agent-studio config --format json 2>"$TMP/cfg.err")" || CFG=""
+  CFG="$(compose_config agent-studio 2>"$TMP/cfg.err")" || CFG=""
   check "compose config: resolve"                       test -n "$CFG"
   check "compose config: surrealdb só na rede studio"   jqe '.services.surrealdb.networks | keys == ["studio"]' <<<"$CFG"
   check "compose config: agent só na rede oute"         jqe '.services.agent.networks | keys == ["oute"]' <<<"$CFG"
