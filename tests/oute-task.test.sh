@@ -49,6 +49,10 @@ ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"; ln -s "$ROOT/docker/oute-se
 # herdr: `workspace get <id>` responde o label da linha "<id> <label>" de $FAKE/spaces; id desconhecido sai com erro
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
+if [[ "$1 ${2:-}" == "tab list" ]]; then   # abas vivas: $FAKE/tabs (JSON do herdr); sem o arquivo, o herdr "falha" (#374)
+  [[ -f "$FAKE/tabs" ]] || { echo "herdr fora do ar" >&2; exit 1; }
+  cat "$FAKE/tabs"; exit 0
+fi
 [[ "$1 ${2:-}" == "workspace get" ]] || { echo "herdr falso: sem suporte a '$*'" >&2; exit 1; }
 l="$(awk -v id="${3:-}" '$1 == id {sub(/^[^ ]* /, ""); print; exit}' "$FAKE/spaces" 2>/dev/null)"
 [[ -n "$l" ]] || { echo "workspace not found" >&2; exit 1; }
@@ -668,5 +672,59 @@ check "sem chave: origem padrao, sem confiança"        bash -c '[ -z "$1" ]' _ 
 ts_stop; ts_off
 check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
 rcv_stop
+
+# ---------------------------------------------------------------- 11. clean: sessão em uso (#374)
+# Duas rodadas no mesmo space: a swarm-0303-1000 fecha e roda o clean; a swarm-0303-1001 segue aberta, com um worker
+# sem commit (aba viva), outro com a aba morta, um fechado (closed) e o dispatcher dela. Tudo "sem commits": antes
+# da #374 o clean listava e removia todas.
+SW="$HOME/.oute/swarm"; SP11="$WT/_sem-space"
+for r in swarm-0303-1000 swarm-0303-1001; do mkdir -p "$SW/$r"; echo "repo=$WS/proj" > "$SW/$r/meta"; done
+mark_tab() { jq -cn --argjson ids "$(printf '%s\n' "$@" | jq -R . | jq -cs .)" '{result: {tabs: [$ids[] | {tab_id: .}]}}'; }
+OUTE_SWARM_ID=swarm-0303-1001 OUTE_SWARM_ROUND=swarm-0303-1001 t 501-vivo claude    # worker com aba viva
+OUTE_SWARM_ID=swarm-0303-1001 OUTE_SWARM_ROUND=swarm-0303-1001 t 502-morto claude   # aba sumiu do herdr
+OUTE_SWARM_ID=swarm-0303-1001 OUTE_SWARM_ROUND=swarm-0303-1001 t 503-fechado claude # oute-swarm close já passou
+OUTE_SWARM_ROUND=swarm-0303-1000 t 401-propria claude                               # da rodada que fecha
+for p in 501-vivo 502-morto 503-fechado; do
+  mark_f="$(gitdir "$SP11/proj-$p")/oute-task"; printf 'id=x-%s\nrepo=proj\nslug=%s\nround=swarm-0303-1001\nsession=%s\n' "$p" "$p" "$p" > "$mark_f"
+done
+mark_f="$(gitdir "$SP11/proj-401-propria")/oute-task"; printf 'id=x-401\nrepo=proj\nslug=401-propria\nround=swarm-0303-1000\nsession=401-propria\n' > "$mark_f"
+git -C "$WS/proj" worktree add -q -b sessao/swarm-0303-1001 "$SP11/proj-swarm-0303-1001" origin/main   # dispatcher da outra
+git -C "$WS/proj" worktree add -q -b sessao/swarm-0303-1000 "$SP11/proj-swarm-0303-1000" origin/main   # dispatcher que fecha
+printf '501-vivo w1:p1 claude 2026-10-03T10:00:00Z w1:t501 %s -\n502-morto w1:p2 claude 2026-10-03T10:00:00Z w1:t502 %s -\n503-fechado w1:p3 claude 2026-10-03T10:00:00Z w1:t503 %s -\n' "$WS/proj" "$WS/proj" "$WS/proj" > "$SW/swarm-0303-1001/spawned"
+printf '401-propria w1:p4 claude 2026-10-03T10:00:00Z w1:t401 %s -\n' "$WS/proj" > "$SW/swarm-0303-1000/spawned"
+echo 503-fechado > "$SW/swarm-0303-1001/closed"; : > "$SW/swarm-0303-1000/closed"
+echo 401-propria >> "$SW/swarm-0303-1000/closed"; date -u +%FT%TZ > "$SW/swarm-0303-1000/fechada"   # rodada que fecha: já fechada
+mark_tab w1:t501 w1:t503 > "$FAKE/tabs"
+t clean
+check "em uso: worker com aba viva fica, com a rodada"      grep -qx "em uso  $SP11/proj-501-vivo (rodada swarm-0303-1001)" <<<"$OUT"
+check "em uso: dispatcher de rodada aberta fica"            grep -qx "em uso  $SP11/proj-swarm-0303-1001 (dispatcher da rodada swarm-0303-1001)" <<<"$OUT"
+check "em uso: aba morta não protege (a sessão acabou)"     grep -qx "remover $SP11/proj-502-morto (sem commits além de origin/main)" <<<"$OUT"
+check "em uso: sessão em closed não protege"                grep -qx "remover $SP11/proj-503-fechado (sem commits além de origin/main)" <<<"$OUT"
+check "em uso: worker da rodada fechada não protege"        grep -qx "remover $SP11/proj-401-propria (sem commits além de origin/main)" <<<"$OUT"
+check "em uso: dispatcher de rodada fechada não protege"    grep -qx "remover $SP11/proj-swarm-0303-1000 (sem commits além de origin/main)" <<<"$OUT"
+t clean --yes
+check "clean --yes: o worker e o dispatcher da outra rodada ficam" [ -d "$SP11/proj-501-vivo" -a -d "$SP11/proj-swarm-0303-1001" ]
+check "clean --yes: o que não está em uso sai"              [ ! -d "$SP11/proj-502-morto" -a ! -d "$SP11/proj-503-fechado" -a ! -d "$SP11/proj-401-propria" -a ! -d "$SP11/proj-swarm-0303-1000" ]
+# herdr fora do ar: vale o spawned (a sessão não fechada fica); sem herdr e sem estado de rodada, o comportamento de antes
+rm -f "$FAKE/tabs"
+t clean
+check "herdr fora do ar: sessão não fechada do spawned fica" grep -qx "em uso  $SP11/proj-501-vivo (rodada swarm-0303-1001)" <<<"$OUT"
+# a worktree de quem chama o clean nunca é removida
+t 504-propria claude
+OUT="$(cd "$SP11/proj-504-propria" && "$TASK" clean --yes 2>&1 </dev/null)"
+check "do próprio processo: a worktree onde o clean roda fica" bash -c '[ -d "$1" ] && grep -qx "em uso  $2 (esta sessão)" <<<"$3"' _ "$SP11/proj-504-propria" "$SP11/proj-504-propria" "$OUT"
+# agente rodando com o cwd na worktree
+t 505-agente claude
+cp "$(command -v sleep)" "$TMP/claude"   # processo de nome "claude" (comm), como o agente
+( cd "$SP11/proj-505-agente" && exec "$TMP/claude" 30 ) >/dev/null 2>&1 & agpid=$!
+sleep 0.3
+t clean
+check "agente rodando no cwd: fica, com o pid"              grep -qxE "em uso  $SP11/proj-505-agente \(agente rodando \(pid [0-9]+\)\)" <<<"$OUT"
+# --force-in-use remove mesmo assim; sem ele nunca
+t clean --yes --force-in-use
+check "--force-in-use: remove as em uso"                    [ ! -d "$SP11/proj-501-vivo" -a ! -d "$SP11/proj-swarm-0303-1001" -a ! -d "$SP11/proj-505-agente" ]
+kill "$agpid" 2>/dev/null; wait "$agpid" 2>/dev/null
+t clean --force-in-use --bogus
+check "opção desconhecida: erro com o uso novo"             [ "$RC" -ne 0 ] && grep -qF -- '[--force-in-use]' <<<"$ERR"
 
 check_end
