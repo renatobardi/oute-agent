@@ -20,6 +20,26 @@ Check with the user that these seams match their expectations.
 
 3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
 
+## Acceptance criteria: post-deploy goes in its own item
+
+Whenever the spec lists acceptance criteria (the "Critérios de aceite" section of the `aidlc` issue template, or criteria inside the spec below), check each one for **when** it can be verified:
+
+- **build**: verifiable in the PR, before merge (tests, CI, a local or fake receiver, reading the diff).
+- **post-deploy**: only verifiable after the release and the deploy on the hosts (something that must show up in the real bucket, on the oute-server or on the Mac).
+
+A post-deploy criterion gets **its own item**, marked `(ship)`. Never put it on the same line as a build criterion. A criterion with both parts is split in two. Otherwise the build session ticks the whole line after checking only the local half, and the post-deploy half never reaches the `## Falta` of the PR.
+
+<acceptance-criteria-example>
+Mixed (wrong):
+
+- [ ] Codex conferido: marca presente no bucket, ou lacuna registrada no ADR-04 com issue
+
+Split (right):
+
+- [ ] Codex conferido num receptor OTLP local: a marca chega no evento, ou a lacuna fica registrada no ADR-04 com issue
+- [ ] (ship) depois da release e do deploy, a marca do Codex aparece no bucket
+</acceptance-criteria-example>
+
 <spec-template>
 
 ## Problem Statement
