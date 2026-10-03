@@ -18,7 +18,13 @@ Reserva (#258): quando a sessão abriria no Claude e ele está indisponível (`c
 teto de 5 s), abre no Codex, na linha da mesma fase, e `reserve` vale `indisponivel` (senão ""). Não troca de agente
 com --agent/--model ou --phase explícitos (só avisa), nem quando o `auth status` não responde a tempo (aviso, abre no
 Claude). Com o Codex também fora (`codex login status` ≠ 0 ou ausente): aviso "Claude e Codex indisponíveis" e abre no
-Claude. O gatilho de cota é a #355.
+Claude.
+
+Reserva por cota (#355): com o Claude disponível e sem escolha explícita, lê `oute-quota --json` (teto de 3 s). Qualquer
+janela do Claude >= `max_pct` (90) -> abre no Codex, `reserve` = `cota`, com a janela e a hora do reset no aviso.
+Exceção: só a janela de 5 h passou do corte, está abaixo de 100% e reseta em menos de `reset_grace_s` (20 min) -> só
+aviso, abre no Claude. Cota do Claude `unknown` ou leitura que falha -> só aviso, abre no Claude. Claude e Codex >= corte:
+aviso, abre no Claude. Codex `unknown`: troca, com aviso. Nunca bloqueia.
 Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/select/ do checkout, só leitura).
 
 Jev (#257): só sem label de fase (sessão sem issue, ou issue sem `aidlc:<fase>`), com texto da tarefa e sem --model.
@@ -31,8 +37,10 @@ Nunca bloqueia a abertura: `gh` fora do ar, issue sem label, Jev fora do ar ou t
 em stderr e código 0 (sem tabela, `model` sai vazio e o agente abre com o modelo dele). Código 2 só para argumento
 inválido.
 """
+import datetime
 import json
 import os
+import signal
 import re
 import subprocess
 import sys
@@ -61,6 +69,10 @@ JEV_TEXT_MAX = 16000         # caracteres do texto da tarefa que vão ao Jev (li
 JEV_REPLY_MAX = 1 << 20
 # Reserva (#258): checagem de disponibilidade dos agentes. $OUTE_SELECT_AGENT_TIMEOUT só encurta (testes), nunca passa de 5 s.
 AUTH_TIMEOUT = 5.0
+# Reserva por cota (#355): `oute-quota --json`, teto de 3 s ($OUTE_SELECT_QUOTA_TIMEOUT só encurta, nos testes)
+QUOTA_TIMEOUT = 3.0
+QUOTA_MAX_PCT = 90.0
+QUOTA_GRACE_S = 1200.0
 JEV_INSTRUCTIONS = "Em que fase do ciclo de entrega de software esta tarefa está?"
 # o que cada fase do ADR-07 faz, para o Jev escolher; fase da tabela sem descrição aqui vai só com o nome
 PHASE_HINTS = {
@@ -288,6 +300,91 @@ def agent_state(cmd):
     return "ok" if r.returncode == 0 else "down"
 
 
+def quota_read():
+    """o JSON do `oute-quota --json`, ou None (ausente, sem resposta no teto, saída inválida); a saída de erro é descartada"""
+    try:
+        limit = float(os.environ.get("OUTE_SELECT_QUOTA_TIMEOUT", ""))
+        limit = limit if 0 < limit <= QUOTA_TIMEOUT else QUOTA_TIMEOUT
+    except ValueError:
+        limit = QUOTA_TIMEOUT
+    try:
+        p = subprocess.Popen(["oute-quota", "--json"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        return None
+    try:
+        raw, _ = p.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)   # o oute-quota e os curls dele
+        except OSError:
+            pass
+        p.kill()
+        p.wait()
+        return None
+    try:
+        q = json.loads(raw)
+        return q if isinstance(q, dict) and isinstance(q.get("agents"), dict) else None
+    except ValueError:
+        return None
+
+
+def num(v, default):
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else default
+
+
+def quota_windows(q, agent):
+    """(status, {janela: (used_pct, resets_in_s, resets_at)}) de um agente; formato inesperado = ("unknown", {})"""
+    a = q["agents"].get(agent)
+    if not isinstance(a, dict) or a.get("status") != "ok" or not isinstance(a.get("windows"), dict):
+        return "unknown", {}
+    out = {}
+    for name, w in a["windows"].items():
+        if isinstance(w, dict) and isinstance(w.get("used_pct"), (int, float)) and not isinstance(w["used_pct"], bool):
+            out[name] = (float(w["used_pct"]), num(w.get("resets_in_s"), None), w.get("resets_at"))
+    return ("ok", out) if out else ("unknown", {})
+
+
+def reset_text(at):
+    """hora do reset para o aviso, no fuso local; fora do formato, o texto como veio (ou "sem hora de reset")"""
+    try:
+        return datetime.datetime.fromisoformat(at).astimezone().strftime("%d/%m %H:%M %Z")
+    except (ValueError, TypeError):
+        return str(at)[:40] if isinstance(at, str) and at else "sem hora de reset"
+
+
+def quota_over(wins, cut):
+    return {n: w for n, w in wins.items() if w[0] >= cut}
+
+
+def quota_trigger():
+    """("claude"|"codex", aviso ou None) pela cota: "codex" só com o Claude em/acima do corte e sem exceção"""
+    q = quota_read()
+    if q is None:
+        return "claude", "não li a cota (`oute-quota --json` falhou ou não respondeu em tempo); abrindo no Claude"
+    cut, grace = num(q.get("max_pct"), QUOTA_MAX_PCT), num(q.get("reset_grace_s"), QUOTA_GRACE_S)
+    cst, cw = quota_windows(q, "claude")
+    if cst != "ok":
+        return "claude", "a cota do Claude está desconhecida (unknown); abrindo no Claude"
+    over = quota_over(cw, cut)
+    if not over:
+        return "claude", None
+    desc = ", ".join(f"{n} em {w[0]:g}% (reseta {reset_text(w[2])})" for n, w in sorted(over.items()))
+    five = over.get("5h")
+    if list(over) == ["5h"] and five[0] < 100 and five[1] is not None and five[1] < grace:
+        return "claude", f"Claude com a janela de 5h em {five[0]:g}%, mas reseta em menos de {grace / 60:g} min " \
+                         f"({reset_text(five[2])}); abrindo no Claude"
+    xst, xw = quota_windows(q, "codex")
+    if xst == "ok":
+        xover = quota_over(xw, cut)
+        if xover:
+            xd = ", ".join(f"{n} em {w[0]:g}% (reseta {reset_text(w[2])})" for n, w in sorted(xover.items()))
+            return "claude", f"cota do Claude esgotada ({desc}) e a do Codex também ({xd}); abrindo no Claude"
+        return "codex", f"cota do Claude esgotada ({desc}); abrindo no Codex (reserva por cota)"
+    return "codex", f"cota do Claude esgotada ({desc}) e a do Codex está desconhecida (unknown); " \
+                    "abrindo no Codex mesmo assim (reserva por cota)"
+
+
 def main(argv):
     opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "text-file": ""}
     it = iter(argv)
@@ -362,6 +459,12 @@ def main(argv):
                     warn(f"o `codex login status` não respondeu em {auth_timeout():g} s; abrindo no Codex mesmo assim")
                 agent, reserve = "codex", "indisponivel"
                 warn("o Claude está indisponível (`claude auth status` falhou); abrindo no Codex (reserva)")
+        if cs != "down" and not explicit:   # gatilho de cota (#355): só com o Claude disponível e sem escolha explícita
+            who, note = quota_trigger()
+            if note:
+                warn(note)
+            if who == "codex":
+                agent, reserve = "codex", "cota"
     # o aviso só interessa quando o padrão escolheu o modelo; sem tabela, o aviso dela já saiu
     if warning and not model and default:
         warn(f"{warning}; abrindo no padrão ({ln[agent]})" if ln is default else warning)
