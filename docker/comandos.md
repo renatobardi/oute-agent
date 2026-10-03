@@ -81,7 +81,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task --agent claude|codex --model <id> <slug> …
                                     escolha explícita do agente e/ou do modelo (antes do slug)
   Modelo da sessão (ADR-02): sai da issue do slug (<n>-…), pela tabela config/select/models.toml:
-  --agent/--model (ou `codex` depois do slug) > label kaizen/docs > label aidlc:<fase> > Jev > Sonnet.
+  --agent/--model (ou `codex` depois do slug) > label spike/kaizen/docs (kaizen não vale com aidlc de código, #409) > label aidlc:<fase> > Jev > Sonnet.
   Sem label de fase e com prompt: o Jev (TypeSafe) classifica a fase pelo texto; confiança baixa, falha ou sem a
   chave: Sonnet, com aviso. Sem prompt ou com o gh fora do ar: Sonnet. Nunca bloqueia. O restore do herdr reabre
   no mesmo modelo.
