@@ -1,0 +1,2 @@
+### Fixed
+- **`oute-swarm spawn` com workspace de id alfabético** (#276). O pane e a aba novos passam a ser lidos do JSON do `herdr tab create` (`.result.root_pane.pane_id`, `.result.tab.tab_id`), e não mais por regex `w<dígitos>`: o spawn funciona também em workspace `wA`. Se a saída não trouxer o pane, o spawn fecha a aba recém-criada (pelo id da saída ou, sem ele, pelo label) antes de sair com erro, e não deixa mais aba órfã fora do `list`, `close` e `watch`. **Precisa de release** (o `docker/oute-swarm` vai na imagem).

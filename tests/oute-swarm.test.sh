@@ -16,7 +16,8 @@ command -v jq >/dev/null || { echo "FAIL precisa de jq"; exit 1; }
 
 # ---------------------------------------------------------------- fakes
 BIN="$TMP/bin"; mkdir -p "$BIN"
-# herdr: listas lidas de $FAKE/*.json; ações anotadas em $FAKE/herdr.log. O campo de entrada do pane é
+# herdr: listas lidas de $FAKE/*.json; ações anotadas em $FAKE/herdr.log. `tab create` devolve o JSON do herdr
+# com ids no workspace pedido, ou $FAKE/tab-create.out, se existir (saída quebrada, #276). O campo de entrada do pane é
 # $FAKE/field (send-text escreve, pane read mostra entre réguas como o Claude Code, ctrl+c limpa).
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
@@ -24,7 +25,9 @@ echo "$*" >> "$FAKE/herdr.log"
 case "$1 ${2:-}" in
   "tab list") cat "$FAKE/tabs.json" ;;
   "tab create") n=$(( $(cat "$FAKE/tabs.n" 2>/dev/null || echo 1) + 1 )); echo "$n" > "$FAKE/tabs.n"
-                echo "{\"result\":{\"tab\":{\"tab_id\":\"w1:t$n\"},\"pane\":{\"pane_id\":\"w1:p$n\"}}}" ;;
+                [[ ! -e "$FAKE/tab-create.out" ]] || { cat "$FAKE/tab-create.out"; exit 0; }
+                w="$4"   # --workspace <id>: o formato real do herdr 0.9 (root_pane e tab no result, #276)
+                echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$w:p$n\",\"tab_id\":\"$w:t$n\"},\"tab\":{\"tab_id\":\"$w:t$n\",\"label\":\"x\"}}}" ;;
   "tab close") ;;
   "pane list") cat "$FAKE/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane run") ;;
@@ -87,7 +90,7 @@ round() {
 gitrepo() { mkdir -p "$1" && git -C "$1" init -q 2>/dev/null; }
 # sw <args>: roda o oute-swarm como o dispatcher da rodada (dentro do herdr); stdout em $OUT, stderr em $ERR
 sw() {
-  OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+  OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID="${WS:-w1}" \
          OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX="${MAX:-3}" \
          "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
@@ -190,6 +193,39 @@ check "cadeia: aba fechada libera a vaga"                [ "$RC" -eq 0 ]
 MAX=1 sw spawn 9-elo "instrução"
 check "cadeia: elo novo aberto volta a contar"           [ "$RC" -ne 0 ]
 check "cadeia: spawned segue com o histórico"            [ "$(wc -l < "$STATE/spawned")" -eq 2 ]
+
+# ---------------------------------------------------------------- #276: ids do JSON do `herdr tab create`
+# 5c. workspace com id alfabético (wA) e numérico (w9): pane e aba lidos do JSON, sem supor w<dígitos>
+CASE=ws-ids; round "$CASE"
+for ws in wA w9; do
+  WS=$ws sw spawn "8-${ws,,}" "instrução" --force
+  check "workspace $ws: código 0"                        [ "$RC" -eq 0 ]
+  check "workspace $ws: agente iniciado no pane da aba nova" grep -q -- "pane run $ws:p[0-9]* OUTE_SWARM_WORKER=1 .* 8-${ws,,} claude" "$FAKE/herdr.log"
+  check "workspace $ws: spawned grava pane e aba"        grep -qE "^8-${ws,,} $ws:p[0-9]+ claude [^ ]+ $ws:t[0-9]+ " "$STATE/spawned"
+done
+check "workspace: nenhuma aba fechada"                   [ "$(grep -c 'tab close' "$FAKE/herdr.log")" -eq 0 ]
+
+# 5d. saída sem pane: fecha a aba recém-criada (pelo id da saída; sem id, pelo label) e nada entra no spawned
+CASE=parse; round "$CASE"
+before="$(cat "$STATE/spawned")"
+echo '{"id":"cli:tab:create","result":{"tab":{"tab_id":"wA:t5"}}}' > "$FAKE/tab-create.out"
+sw spawn 8-sem-pane "instrução"
+check "sem pane: falha"                                  [ "$RC" -ne 0 ]
+check "sem pane: fecha a aba pelo id da saída"           grep -qx 'tab close wA:t5' "$FAKE/herdr.log"
+check "sem pane: mensagem diz que fechou"                grep -q 'não achei o pane da aba nova na saída do herdr (aba wA:t5 fechada)' <<<"$ERR"
+check "sem pane: agente não iniciado nem registrado"     [ "$(cat "$STATE/spawned")" == "$before" ] && ! grep -q 'pane run' "$FAKE/herdr.log"
+echo 'herdr: resposta inesperada' > "$FAKE/tab-create.out"
+FAKE="$FAKE" "$BIN/fake-tabs" working '#8 sem-pane=idle'
+sw spawn 8-sem-pane "instrução"
+check "não JSON: falha"                                  [ "$RC" -ne 0 ]
+check "não JSON: fecha a aba achada pelo label"          grep -qx 'tab close w1:t2' "$FAKE/herdr.log"
+check "não JSON: nada registrado"                        [ "$(cat "$STATE/spawned")" == "$before" ]
+FAKE="$FAKE" "$BIN/fake-tabs" working
+sw spawn 8-sem-pane "instrução"
+check "aba não achada: falha"                            [ "$RC" -ne 0 ]
+check "aba não achada: pede para fechar à mão"           grep -q 'não consegui fechar a aba "#8 sem-pane" (feche à mão)' <<<"$ERR"
+check "aba não achada: não fecha outra aba"              [ "$(grep -c 'tab close' "$FAKE/herdr.log")" -eq 2 ]
+check "parse: nada registrado em nenhuma das falhas"     [ "$(cat "$STATE/spawned")" == "$before" ] && ! grep -q 'pane run' "$FAKE/herdr.log"
 
 # 6. watch multi-repo: mesma issue #7 e mesmo PR #12 em dois repos, sem colisão
 CASE=multi; round "$CASE"; LAB="$TMP/$CASE/lab"; gitrepo "$LAB"
