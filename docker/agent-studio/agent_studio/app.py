@@ -202,7 +202,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         at_ns = time.time_ns()
         try:
             result = await run_in_threadpool(store.read, lambda con: prices_mod.view(con, config.fixed, at_ns))
-        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+        except Exception as e:  # leitura que falhou: 500, a causa só no stderr
             tel.warn("prices-failed", "consulta de preços falhou, respondi 500: %s", type(e).__name__,
                      level=logging.ERROR)
             detail.exception("consulta de preços falhou")

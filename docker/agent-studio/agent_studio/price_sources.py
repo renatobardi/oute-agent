@@ -94,6 +94,44 @@ def https_only(url):
     return url
 
 
+def _tls_context():
+    """Contexto TLS com a verificação do certificado e do nome do servidor ligada, explícita."""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+def _opener():
+    """Cliente que só conhece https, sem proxy do ambiente, sem cookie e sem seguir redirecionamento."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (urllib.request.HTTPSHandler(context=_tls_context()), _NoRedirect(),
+                    urllib.request.HTTPDefaultErrorHandler(), urllib.request.HTTPErrorProcessor()):
+        opener.add_handler(handler)
+    return opener
+
+
+def _read_body(resp, max_bytes, end):
+    """Corpo da resposta, lido em blocos até `max_bytes` e até a hora `end` (`time.monotonic`)."""
+    if resp.status != 200:
+        raise SourceError(E_HTTP)
+    declared = resp.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        raise SourceError(E_SIZE)
+    chunks, size = [], 0
+    while True:
+        chunk = resp.read(min(65536, max_bytes + 1 - size))
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > max_bytes:
+            raise SourceError(E_SIZE)
+        if time.monotonic() > end:
+            raise SourceError(E_TIMEOUT)
+        chunks.append(chunk)
+
+
 def fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT_S, deadline=DEADLINE_S):
     """Corpo da resposta (bytes) de `GET url`. Só https, sem credencial, cookie ou redirecionamento; sem proxy do
     ambiente. Falha = `SourceError` com o código (url, rede, tempo, http, redirecionamento, tamanho)."""
@@ -101,33 +139,12 @@ def fetch(url, max_bytes=MAX_BYTES, timeout=TIMEOUT_S, deadline=DEADLINE_S):
         https_only(url)
     except ValueError:
         raise SourceError(E_URL) from None
-    # o opener só conhece https: URL de outro esquema não tem handler (e `https_only` já recusou antes)
-    opener = urllib.request.OpenerDirector()
-    for handler in (urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirect(),
-                    urllib.request.HTTPDefaultErrorHandler(), urllib.request.HTTPErrorProcessor()):
-        opener.add_handler(handler)
     req = urllib.request.Request(url, method="GET", headers={
         "User-Agent": "oute-agent-studio/price-check", "Accept": "application/json", "Accept-Encoding": "identity"})
     end = time.monotonic() + deadline
     try:
-        with opener.open(req, timeout=timeout) as resp:
-            if resp.status != 200:
-                raise SourceError(E_HTTP)
-            declared = resp.headers.get("Content-Length")
-            if declared and declared.isdigit() and int(declared) > max_bytes:
-                raise SourceError(E_SIZE)
-            chunks, size = [], 0
-            while True:
-                chunk = resp.read(min(65536, max_bytes + 1 - size))
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_bytes:
-                    raise SourceError(E_SIZE)
-                if time.monotonic() > end:
-                    raise SourceError(E_TIMEOUT)
-                chunks.append(chunk)
-            return b"".join(chunks)
+        with _opener().open(req, timeout=timeout) as resp:
+            return _read_body(resp, max_bytes, end)
     except SourceError:
         raise
     except urllib.error.HTTPError:
@@ -149,7 +166,7 @@ def load_json(body):
     """JSON do corpo; qualquer defeito (UTF-8, sintaxe, NaN, aninhamento fundo demais) = `SourceError(E_JSON)`."""
     try:
         return json.loads(body.decode("utf-8"), parse_constant=_reject_constant)
-    except (UnicodeDecodeError, ValueError, RecursionError):
+    except (ValueError, RecursionError):  # inclui UnicodeDecodeError
         raise SourceError(E_JSON) from None
 
 
@@ -191,6 +208,15 @@ def _partial(raw, names, per_token):
     return out if "input" in out and "output" in out else None
 
 
+def _provider_models(data, provider):
+    """`data[provedor]["models"]` (objeto); senão o formato mudou."""
+    entry = data.get(provider)
+    models = entry.get("models") if isinstance(entry, dict) else None
+    if not isinstance(models, dict):
+        raise SourceError(E_FORMAT)
+    return models
+
+
 def parse_models_dev(data):
     """`{(provedor, id): preço parcial}` do JSON do models.dev (`{provedor: {models: {id: {cost: {...}}}}}`).
     Os provedores das `FAMILIES` precisam existir com `models` (senão o formato mudou: `SourceError(E_FORMAT)`).
@@ -200,10 +226,7 @@ def parse_models_dev(data):
         raise SourceError(E_FORMAT)
     out = {}
     for _, provider in FAMILIES:
-        models = (data.get(provider) or {}).get("models") if isinstance(data.get(provider), dict) else None
-        if not isinstance(models, dict):
-            raise SourceError(E_FORMAT)
-        for model_id, entry in models.items():
+        for model_id, entry in _provider_models(data, provider).items():
             price = _partial(entry.get("cost") if isinstance(entry, dict) else None,
                              ("input", "output", "cache_read", "cache_write"), per_token=False)
             if price is not None:

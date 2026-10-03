@@ -71,7 +71,9 @@ class Telemetry(Noop):
 
     def price_run(self, changes, failures):
         """Uma conferência de preço: `failures` = {fonte: código} (`rotina` = falha interna)."""
-        result = "ok" if not failures else "falha" if len(failures) >= 2 or "rotina" in failures else "parcial"
+        result = "ok"
+        if failures:
+            result = "falha" if len(failures) >= 2 or "rotina" in failures else "parcial"
         self.c_price_checks.add(1, {"result": result})
         if changes:
             self.c_price_changes.add(changes)

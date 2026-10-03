@@ -37,18 +37,32 @@ def load(path=None):
     raw = data.get("prices", {})
     if not isinstance(raw, dict):
         return Config(alerts=alerts, errors=["[prices] não é tabela", *errors])
+    prices, fixed = _prices(raw, errors)
+    return Config(prices=PriceTable(prices), seed={str(m).lower(): p for m, p in prices.items()},
+                  fixed=frozenset(fixed), alerts=alerts, errors=errors)
+
+
+def _fixed(fields):
+    """(campos de preço sem a marca, está fixo?) de uma entrada `[prices."x"]`; `fixed` que não é booleano = ValueError."""
+    if not isinstance(fields, dict) or "fixed" not in fields:
+        return fields, False
+    fields = dict(fields)
+    marked = fields.pop("fixed")
+    if not isinstance(marked, bool):
+        raise ValueError("fixed precisa ser true ou false")
+    return fields, marked
+
+
+def _prices(raw, errors):
+    """({modelo: ModelPrice}, {modelos fixos}) do `[prices]`; entrada inválida vai em `errors` e fica de fora."""
     prices, fixed = {}, set()
     for model, fields in raw.items():
         try:
-            if isinstance(fields, dict) and "fixed" in fields:
-                fields = dict(fields)
-                if not isinstance(fields.pop("fixed"), bool):
-                    raise ValueError("fixed precisa ser true ou false")
-                if raw[model]["fixed"]:
-                    fixed.add(str(model).lower())
+            fields, marked = _fixed(fields)
             prices[model] = ModelPrice.parse(fields)
         except ValueError as e:
-            fixed.discard(str(model).lower())
             errors.append(f"preço inválido para {model}: {e}")
-    return Config(prices=PriceTable(prices), seed={str(m).lower(): p for m, p in prices.items()},
-                  fixed=frozenset(fixed), alerts=alerts, errors=errors)
+            continue
+        if marked:
+            fixed.add(str(model).lower())
+    return prices, fixed

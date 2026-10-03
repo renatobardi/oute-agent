@@ -16,6 +16,7 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; ps_stop; rm -rf "$TMP"' EXIT
 studio_init
 ps_off
+NAO_SOBE="agent-studio não subiu"
 ps_start "$TMP/ps" || die "as fontes de preço falsas não subiram"
 
 # ================================================================ parte 1: Python direto (relógio fixado)
@@ -163,17 +164,17 @@ check("concordância: input diferente = diverge em input", P.agree(P4, {**P4, "i
 check("concordância: cache só numa fonte vale o dela (a outra não contradiz)", P.agree({"input": 2.0, "output": 9.0}, {"input": 2.0, "output": 9.0, "cache_read": 0.5})[0] == C.ModelPrice(2.0, 9.0, 0.5, 2.0))
 check("concordância: sem cache em nenhuma = preço de input", P.agree({"input": 3.0, "output": 9.0}, {"input": 3.0, "output": 9.0})[0] == C.ModelPrice(3.0, 9.0, 3.0, 3.0))
 check("concordância: dois campos divergentes são listados", P.agree(P4, {**P4, "output": 21.0, "cache_read": 0.3})[1] == ["output", "cache_read"])
-st_, info, new = P.decide("m", cur, False, {D[0]: dict(P4), D[1]: {**P4, "input": 5.0, "output": 25.0}})
+st_, info, new = P.decide(cur, False, {D[0]: dict(P4), D[1]: {**P4, "input": 5.0, "output": 25.0}})
 check("decide: fontes divergem = diverge, sem preço novo", st_ == P.DIVERGE and new is None and set(info["fields"]) == {"input", "output"})
-st_, info, new = P.decide("m", cur, False, {D[0]: {**P4, "input": 5.0}, D[1]: {**P4, "input": 5.0}})
+st_, info, new = P.decide(cur, False, {D[0]: {**P4, "input": 5.0}, D[1]: {**P4, "input": 5.0}})
 check("decide: duas fontes concordam em valor novo = trocado", st_ == P.CHANGED and new.input == 5.0 and info["old"]["input"] == 4.0)
-check("decide: duas fontes concordam no vigente = igual", P.decide("m", cur, False, {D[0]: dict(P4), D[1]: dict(P4)}) == (P.EQUAL, {}, None))
-st_, info, new = P.decide("m", cur, True, {D[0]: {**P4, "input": 5.0}, D[1]: {**P4, "input": 5.0}})
+check("decide: duas fontes concordam no vigente = igual", P.decide(cur, False, {D[0]: dict(P4), D[1]: dict(P4)}) == (P.EQUAL, {}, None))
+st_, info, new = P.decide(cur, True, {D[0]: {**P4, "input": 5.0}, D[1]: {**P4, "input": 5.0}})
 check("decide: modelo fixo nunca troca (fixo_difere, com os dois valores)", st_ == P.FIXED_DIFFERS and new is None and info["fixed"]["input"] == 4.0 and info["sources"]["input"] == 5.0)
-check("decide: fonte fora do ar = fonte_fora, preço fica", P.decide("m", cur, False, {D[0]: dict(P4), D[1]: "http"})[::2] == (P.SOURCE_DOWN, None))
-check("decide: uma fonte sem o modelo = sem_fonte, preço fica", P.decide("m", cur, False, {D[0]: dict(P4), D[1]: None})[::2] == (P.NO_SOURCE, None))
-check("decide: modelo sem preço e fontes concordam = novo", P.decide("m", None, False, {D[0]: dict(P4), D[1]: dict(P4)})[0] == P.NEW)
-check("decide: modelo sem preço e fontes divergem = diverge, continua sem preço", P.decide("m", None, False, {D[0]: dict(P4), D[1]: {**P4, "input": 9.0}})[::2] == (P.DIVERGE, None))
+check("decide: fonte fora do ar = fonte_fora, preço fica", P.decide(cur, False, {D[0]: dict(P4), D[1]: "http"})[::2] == (P.SOURCE_DOWN, None))
+check("decide: uma fonte sem o modelo = sem_fonte, preço fica", P.decide(cur, False, {D[0]: dict(P4), D[1]: None})[::2] == (P.NO_SOURCE, None))
+check("decide: modelo sem preço e fontes concordam = novo", P.decide(None, False, {D[0]: dict(P4), D[1]: dict(P4)})[0] == P.NEW)
+check("decide: modelo sem preço e fontes divergem = diverge, continua sem preço", P.decide(None, False, {D[0]: dict(P4), D[1]: {**P4, "input": 9.0}})[::2] == (P.DIVERGE, None))
 
 # ---------------------------------------------------------------- tabela de preços por hora
 tbl = C.PriceTable({"m": [(100, C.ModelPrice(1, 1, 1, 1)), (200, C.ModelPrice(2, 2, 2, 2))], "solto": C.ModelPrice(5, 5, 5, 5)})
@@ -497,9 +498,9 @@ ps_body models.dev "$TMP/md.json"; ps_body openrouter "$TMP/or.json"
 # 1ª subida, sem conferência: só a ingestão e a semente (ninguém vai à rede sem AGENT_STUDIO_PRICE_CHECK=1)
 SENV=(AGENT_STUDIO_CONFIG="$TMP/config.toml" AGENT_STUDIO_SELECT_TABLE="$TMP/select.toml")
 ps_reset
-studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "$NAO_SOBE"; }
 check "ingestão: traces = 200" test "$(post traces "$TMP/traces.json")" = 200
-get() { curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL$1"; }
+get() { local path="$1"; curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL$path"; return $?; }
 check "sem AGENT_STUDIO_PRICE_CHECK a subida não chama fonte nenhuma" test "$(ps_requests)" = 0
 OUT="$(get /v1/prices)"
 check "GET /v1/prices: a semente do config.toml (3 modelos, origem config)" jqe '(.models | length) == 3 and all(.models[]; .current.origin == "config" and (.history | length) == 1)' <<<"$OUT"
@@ -511,7 +512,7 @@ studio_stop
 
 # 2ª subida, com a conferência ligada: uma conferência na subida
 ps_reset
-studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 || { cat "$TMP/s/stderr"; die "$NAO_SOBE"; }
 for _ in $(seq 1 100); do [[ "$(ps_requests)" -ge 2 ]] && break; sleep 0.1; done
 for _ in $(seq 1 100); do get /v1/prices | jq -e '.sources[0].last_run != null' >/dev/null 2>&1 && break; sleep 0.1; done
 check "conferência na subida: uma busca em cada fonte, GET, sem credencial nem cookie" bash -c 'test "$(jq -s "length" "$1")" = 2 && jq -se "all(.[]; .method == \"GET\" and .auth == \"\" and .cookie == \"\")" "$1" >/dev/null && jq -se "map(.source) | sort == [\"models.dev\", \"openrouter\"]" "$1" >/dev/null' _ "$(ps_log)"
@@ -537,7 +538,7 @@ check "só https: nenhuma busca saiu por outro esquema e todas foram a GET (log 
 
 # fontes fora do ar na subida: a ingestão e a API seguem de pé, o preço vigente fica
 ps_mode models.dev 500; ps_mode openrouter lixo
-studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 || { cat "$TMP/s/stderr"; die "$NAO_SOBE"; }
 for _ in $(seq 1 100); do get /v1/prices | jq -e '.sources[] | select(.source == "openrouter") | .ok == false' >/dev/null 2>&1 && break; sleep 0.1; done
 OUT="$(get /v1/prices)"
 check "fontes fora do ar: motivo por fonte (http e json) e o último sucesso guardado" jqe '(.sources[] | select(.source == "models.dev") | .ok == false and .reason == "http" and .last_ok != null) and (.sources[] | select(.source == "openrouter") | .reason == "json")' <<<"$OUT"
@@ -548,7 +549,7 @@ check "fontes fora do ar: o log diz a fonte e o código" bash -c 'grep -q "a fon
 studio_stop
 
 # falha interna da conferência: a ingestão e a API seguem
-studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 STUDIO_FAIL_PRICE_CHECK=1 || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_PRICE_CHECK=1 AGENT_STUDIO_PRICE_INTERVAL=3600 STUDIO_FAIL_PRICE_CHECK=1 || { cat "$TMP/s/stderr"; die "$NAO_SOBE"; }
 sleep 0.5
 check "falha interna da conferência: a ingestão segue (200)" test "$(post traces "$TMP/traces.json")" = 200
 check "falha interna da conferência: GET /v1/prices segue (200)" test "$(code -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/prices")" = 200
@@ -556,7 +557,7 @@ check "falha interna da conferência: a causa só no stderr (não na API)" bash 
 studio_stop
 
 # leitura que falha = 500, sem a causa
-studio_start "$TMP/s2" "${SENV[@]}" STUDIO_FAIL_PRICES=1 || { cat "$TMP/s2/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s2" "${SENV[@]}" STUDIO_FAIL_PRICES=1 || { cat "$TMP/s2/stderr"; die "$NAO_SOBE"; }
 OUT="$(get /v1/prices)"
 check "GET /v1/prices: leitura que falha = 500 sem a causa" bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $2" "$1/v1/prices")" = 500' _ "$STUDIO_URL" "$STUDIO_TOKEN"
 check "GET /v1/prices: a causa não chega à resposta" hasnt_str "falha injetada"
@@ -565,7 +566,7 @@ studio_stop
 
 # duas credenciais: leitura lê, ingestão não
 READ_TOKEN="leitura-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
-studio_start "$TMP/s3" "${SENV[@]}" AGENT_STUDIO_READ_TOKEN="$READ_TOKEN" || { cat "$TMP/s3/stderr"; die "agent-studio não subiu"; }
+studio_start "$TMP/s3" "${SENV[@]}" AGENT_STUDIO_READ_TOKEN="$READ_TOKEN" || { cat "$TMP/s3/stderr"; die "$NAO_SOBE"; }
 check "GET /v1/prices: a credencial de leitura lê (200)" test "$(code -H "Authorization: Bearer $READ_TOKEN" "$STUDIO_URL/v1/prices")" = 200
 check "GET /v1/prices: a credencial de ingestão não lê (401)" test "$(code -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/prices")" = 401
 studio_stop

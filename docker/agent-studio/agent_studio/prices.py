@@ -118,9 +118,8 @@ def sync(store, config, now_ns=None):
         now = time.time_ns() if now_ns is None else now_ns
         store.transact(lambda con: seed(con, config.seed, config.fixed, now))
         config.prices.replace(store.read(load_table))
-    except Exception as e:  # noqa: BLE001 — o histórico de preços nunca derruba a subida
-        log.error("preços: semente do histórico falhou, valem os preços do config.toml: %s", type(e).__name__)
-        detail_log.exception("preços: semente do histórico falhou")
+    except Exception:  # noqa: BLE001 — o histórico de preços nunca derruba a subida; a causa só no stderr
+        detail_log.exception("preços: semente do histórico falhou, valem os preços do config.toml")
 
 
 # ---------------------------------------------------------------- o que conferir
@@ -187,7 +186,7 @@ def _price_dict(p):
     return dict(zip(src.FIELDS, astuple(p)))
 
 
-def decide(model, current, fixed, reads):
+def decide(current, fixed, reads):
     """Resultado de um modelo: `(status, detalhe, preço novo ou None)`.
 
     `current` = `ModelPrice` vigente (ou `None`); `fixed` = trava do `config.toml`; `reads` = {fonte: parcial | None
@@ -217,7 +216,11 @@ def reads_for(model, results):
     ids = src.source_ids(model)
     out = {}
     for source, (state, payload) in results.items():
-        out[source] = payload if state == "err" else (payload.get(ids.get(source)) if ids.get(source) else None)
+        if state == "err":
+            out[source] = payload
+        else:
+            source_id = ids.get(source)
+            out[source] = payload.get(source_id) if source_id else None
     return out
 
 
@@ -232,7 +235,7 @@ def apply(con, now_ns, wanted, results, fixed):
     out = []
     for model, needs_price in sorted(wanted.items()):
         current = table.lookup(model) if model in table.models() else None
-        status, info, new = decide(model, current, model in fixed, reads_for(model, results))
+        status, info, new = decide(current, model in fixed, reads_for(model, results))
         if new is not None:
             _insert(con, model, new, ORIGIN_SOURCES, now_ns)
             current = new

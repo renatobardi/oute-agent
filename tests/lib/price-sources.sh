@@ -16,10 +16,10 @@ ps_start() {
   local scheme=https base; base="$scheme://127.0.0.1:$(cat "$PS_DIR/port")"
   export AGENT_STUDIO_PRICE_URL_MODELS_DEV="$base/models.dev/api.json" AGENT_STUDIO_PRICE_URL_OPENROUTER="$base/openrouter/api/v1/models"
 }
-ps_stop() { [[ -z "${PS_PID:-}" ]] || { kill "$PS_PID" 2>/dev/null; wait "$PS_PID" 2>/dev/null; PS_PID=""; }; }
-ps_body() { cp "$2" "$PS_DIR/$1.body"; rm -f "$PS_DIR/$1.mode"; }
-ps_mode() { printf '%s' "$2" > "$PS_DIR/$1.mode"; }
-ps_log() { printf '%s' "$PS_DIR/requests.jsonl"; }
-ps_requests() { cat "$PS_DIR/requests.jsonl" 2>/dev/null | grep -c . || true; }
-ps_reset() { rm -f "$PS_DIR/requests.jsonl"; }
-ps_off() { unset AGENT_STUDIO_PRICE_URL_MODELS_DEV AGENT_STUDIO_PRICE_URL_OPENROUTER AGENT_STUDIO_PRICE_CHECK SSL_CERT_FILE; }
+ps_stop() { [[ -z "${PS_PID:-}" ]] || { kill "$PS_PID" 2>/dev/null; wait "$PS_PID" 2>/dev/null; PS_PID=""; }; return 0; }
+ps_body() { local source="$1" file="$2"; cp "$file" "$PS_DIR/$source.body"; rm -f "$PS_DIR/$source.mode"; return 0; }
+ps_mode() { local source="$1" mode="$2"; printf '%s' "$mode" > "$PS_DIR/$source.mode"; return 0; }
+ps_log() { printf '%s' "$PS_DIR/requests.jsonl"; return 0; }
+ps_requests() { local n; n="$(grep -c . "$PS_DIR/requests.jsonl" 2>/dev/null)" || n=0; printf '%s\n' "$n"; return 0; }
+ps_reset() { rm -f "$PS_DIR/requests.jsonl"; return 0; }
+ps_off() { unset AGENT_STUDIO_PRICE_URL_MODELS_DEV AGENT_STUDIO_PRICE_URL_OPENROUTER AGENT_STUDIO_PRICE_CHECK SSL_CERT_FILE; return 0; }
