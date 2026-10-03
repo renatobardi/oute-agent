@@ -22,6 +22,7 @@ studio_init
 #   r-fechada  pergunta há 40 min, rodada fechada há 35 min                 -> não pendente
 #   r-so-resp  aberta há 100 min, resposta há 30 min, sem pergunta          -> não pendente
 #   r-outro    pergunta há 8 min no oute-mac                                -> pendente, host oute-mac
+#   r-mesmo    pergunta há 30 min; resposta e pergunta nova na MESMA hora (há 13 min) -> pendente, texto novo
 NOW="$(date +%s)"
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import json, sys
@@ -44,6 +45,8 @@ evs = [
     sw("oute-server", 100, O, "r-fechada"), sw("oute-server", 40, A, "r-fechada", "antes de fechar"), sw("oute-server", 35, C, "r-fechada"),
     sw("oute-server", 100, O, "r-so-resp"), sw("oute-server", 25, W, "r-so-resp"),
     sw("oute-mac", 8, A, "r-outro", "merge do #99?"),
+    sw("oute-server", 100, O, "r-mesmo"), sw("oute-server", 30, A, "r-mesmo", "antes"), sw("oute-server", 13, W, "r-mesmo"),
+    sw("oute-server", 13, A, "r-mesmo", "depois, no mesmo segundo da resposta"),
     # sinal recente do host, para o oute-server não ficar "parado" (alerta de rodada só vale com host ativo)
     sw("oute-server", 1, "oute.swarm.tell", "r-nova"),
 ]
@@ -63,7 +66,7 @@ R="$(tray)"
 
 # ---------------------------------------------------------------- 1. /v1/tray
 check "tray: decisions com total e pending"            jqe '.decisions | keys == ["pending", "total"] and .total == (.pending | length)' <<<"$R"
-check "tray: pendentes = r-nova, r-outro, r-pend e r-velha, nada mais" jqe '[.decisions.pending[].round] | sort == ["r-nova", "r-outro", "r-pend", "r-velha"]' <<<"$R"
+check "tray: pendentes = r-mesmo, r-nova, r-outro, r-pend e r-velha, nada mais" jqe '[.decisions.pending[].round] | sort == ["r-mesmo", "r-nova", "r-outro", "r-pend", "r-velha"]' <<<"$R"
 check "tray: campos de cada decisão"                   jqe '.decisions.pending | all(keys == ["age_seconds", "asked_at", "host", "instance", "question", "round"])' <<<"$R"
 check "tray: pergunta pendente com o texto e a idade (~10 min)" jqe "$(dec r-pend)"' | length == 1 and (.[0] | .question == "1. aprovar a triagem  2. cortar a #387" and .host == "oute-server" and .instance == "oute-agent" and .age_seconds >= 600 and .age_seconds < 720)' <<<"$R"
 check "tray: asked_at é a hora do fato (UTC)"          jqe --argjson now "$NOW" "$(dec r-pend)"' | .[0].asked_at | fromdate | (. - $now) as $d | $d <= -590 and $d > -720' <<<"$R"
@@ -73,7 +76,8 @@ check "tray: rodada fechada não aparece"               jqe "$(dec r-fechada) | 
 check "tray: resposta sem pergunta não aparece"        jqe "$(dec r-so-resp) | length == 0" <<<"$R"
 check "tray: pergunta velha (2 h) segue pendente, com a idade" jqe "$(dec r-velha)"' | length == 1 and .[0].age_seconds >= 7200 and .[0].age_seconds < 7320' <<<"$R"
 check "tray: outro host, com o host dele"              jqe "$(dec r-outro)"' | length == 1 and .[0].host == "oute-mac" and .[0].question == "merge do #99?"' <<<"$R"
-check "tray: do mais novo para o mais antigo"          jqe '[.decisions.pending[].round] == ["r-nova", "r-outro", "r-pend", "r-velha"]' <<<"$R"
+check "tray: do mais novo para o mais antigo"          jqe '[.decisions.pending[].round] == ["r-nova", "r-outro", "r-pend", "r-mesmo", "r-velha"]' <<<"$R"
+check "tray: resposta e pergunta no mesmo instante: a pergunta vale (pendente, texto novo)" jqe "$(dec r-mesmo)"' | length == 1 and .[0].question == "depois, no mesmo segundo da resposta"' <<<"$R"
 check "tray: a barra segue com os dois contadores"     jqe '.bar | keys == ["alerts", "pending"]' <<<"$R"
 
 # ---------------------------------------------------------------- 2. rodada parada (#364) × pergunta recente
@@ -88,7 +92,7 @@ check "tray: round_stalled só de r-velha, junto da decisão" jqe '[.alerts[] | 
 
 # ---------------------------------------------------------------- 3. topo das telas
 PAGE="$(curl -s "${A[@]}" "$STUDIO_URL/conversas")"
-check "tela: bloco de decisões no topo, com 4 pendentes" bash -c 'grep -qF "id=\"decisoes\" data-decisoes=\"4\"" <<<"$1"' _ "$PAGE"
+check "tela: bloco de decisões no topo, com 5 pendentes" bash -c 'grep -qF "id=\"decisoes\" data-decisoes=\"5\"" <<<"$1"' _ "$PAGE"
 check "tela: r-pend com a pergunta e o host"           bash -c 'grep -A1 -F "data-decisao=\"r-pend\" data-host=\"oute-server\"" <<<"$1" | grep -qF "1. aprovar a triagem  2. cortar a #387"' _ "$PAGE"
 check "tela: respondida e fechada fora do bloco"       bash -c '! grep -qF "data-decisao=\"r-resp\"" <<<"$1" && ! grep -qF "data-decisao=\"r-fechada\"" <<<"$1"' _ "$PAGE"
 check "tela: texto 'Decisão pendente na rodada'"       bash -c 'grep -qF "Decisão pendente na rodada r-velha" <<<"$1"' _ "$PAGE"
@@ -99,7 +103,7 @@ studio_stop
 
 # ---------------------------------------------------------------- 4. a lógica direto: hora da consulta, limite e script de quem lê o banco
 PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" "$NOW" > "$TMP/py.out" 2>&1 <<'PY'
-import sys, duckdb
+import sys, logging, duckdb
 from agent_studio import alerts, decisions
 from pycheck import check as out
 db, now = sys.argv[1], int(sys.argv[2])
@@ -109,19 +113,29 @@ M = 60 * 10**9
 at = now * 10**9
 rounds = lambda r: [d["round"] for d in r["pending"]]
 r = decisions.pending(con, at, C())
-out("agora: 4 pendentes, total 4", r["total"] == 4 and rounds(r) == ["r-nova", "r-outro", "r-pend", "r-velha"])
+out("agora: 5 pendentes, total 5", r["total"] == 5 and rounds(r) == ["r-nova", "r-outro", "r-pend", "r-mesmo", "r-velha"])
 r = decisions.pending(con, at - 12 * M, C())
-out("12 min atrás: a pergunta de r-pend (há 10) ainda não existia e r-resp já tinha resposta (há 15)",
-    rounds(r) == ["r-velha"])
+out("12 min atrás: a pergunta de r-pend (há 10) ainda não existia, r-resp já tinha resposta (há 15) e r-mesmo já voltou a perguntar (há 13)",
+    rounds(r) == ["r-mesmo", "r-velha"])
 r = decisions.pending(con, at - 18 * M, C())
-out("18 min atrás: r-resp pendente (resposta só há 15), r-nova já respondida (resposta há 45)",
-    set(rounds(r)) == {"r-resp", "r-velha"} and r["total"] == 2)
+out("18 min atrás: r-resp pendente (resposta só há 15), r-mesmo também (resposta há 13), r-nova já respondida (resposta há 45)",
+    set(rounds(r)) == {"r-resp", "r-velha", "r-mesmo"} and r["total"] == 3)
 r = decisions.pending(con, at - 60 * M, C())
 out("1 h atrás: só r-velha (pergunta há 120); r-fechada, r-nova e r-outro ainda não perguntaram", rounds(r) == ["r-velha"])
 r = decisions.pending(con, at, C(), limit=2)
-out("limite: o total diz quantas há, a lista só as mais novas", r["total"] == 4 and rounds(r) == ["r-nova", "r-outro"])
+out("limite: o total diz quantas há, a lista só as mais novas", r["total"] == 5 and rounds(r) == ["r-nova", "r-outro"])
 r = decisions.pending(con, at, C(lookback_hours=0.5))
-out("lookback_hours = 0,5: pergunta mais velha que 1 h fica de fora (r-velha, há 2 h)", "r-velha" not in rounds(r) and r["total"] == 3)
+out("lookback_hours = 0,5: pergunta mais velha que 1 h fica de fora (r-velha, há 2 h)", "r-velha" not in rounds(r) and r["total"] == 4)
+# tray: falha do cálculo das decisões não derruba o menu (cai em NO_DECISIONS)
+from agent_studio import config, tray
+real = decisions.pending
+def boom(*a, **k): raise RuntimeError("falha injetada")
+decisions.pending = boom
+logging.disable(logging.CRITICAL)
+snap = tray.snapshot(con, at, config.load("/nonexistent").prices, C())
+logging.disable(logging.NOTSET)
+decisions.pending = real
+out("tray: decisions falhando = NO_DECISIONS e o resto do menu segue", snap["decisions"] == {"total": 0, "pending": []} and "machines" in snap and "alerts" in snap)
 out("sem dado no banco da hora: lista vazia", decisions.pending(con, at - 24 * 3600 * 10**9, C()) == {"total": 0, "pending": []})
 PY
 check_py_lines "$TMP/py.out"

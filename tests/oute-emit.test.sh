@@ -813,7 +813,11 @@ check "decisão: asked com a pergunta no corpo"          [ "$(n '.name == "oute.
                                                               and .body == "1. aprovar a triagem (#386, #387) 2. cortar a #387" and (.time | tonumber / 1e9 | todate) == "2026-10-03T12:20:00Z"')" -eq 1 ]
 check "decisão: answered sem corpo, na hora da linha"   [ "$(n '.name == "oute.swarm.round.answered" and .body == null and (.time | tonumber / 1e9 | todate) == "2026-10-03T12:35:00Z"')" -eq 1 ]
 check "decisão: pergunta sem texto não vira evento"     [ "$(n 'true')" -eq 2 ]
-LIVE_IDS="$(ids "$RCV_DIR" true)"
+# duas perguntas no mesmo segundo, textos diferentes: dois eventos, ids diferentes (a chave inclui o texto)
+for ln in '2026-10-03T12:40:00Z pergunta primeira' '2026-10-03T12:40:00Z pergunta segunda'; do HOME="$QH" oute-emit swarm swarm-1003-1211 "$ln"; done
+check "decisão: duas perguntas no mesmo segundo levam oute.event.id diferentes" [ "$(n '.name == "oute.swarm.round.asked" and (.body == "primeira" or .body == "segunda")')" -eq 2 -a \
+                                                          "$(ev '.name == "oute.swarm.round.asked" and (.body == "primeira" or .body == "segunda")' | jq -r '.attrs["oute.event.id"]' | sort -u | wc -l | tr -d ' ')" -eq 2 ]
+LIVE_IDS="$(ids "$RCV_DIR" '.body != "primeira" and .body != "segunda"')"
 rcv_stop
 rcv_start "$TMP/r16b"
 HOME="$QH" oute-emit backfill --from 2026-10-03T00:00:00Z >"$TMP/bf.out" 2>"$TMP/bf.err"; RC=$?

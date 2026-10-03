@@ -412,7 +412,7 @@ cmd_tell() {
 ask_dir() {
   local d
   if d="$(round_id)"; then d="$STATE_ROOT/$d"
-  else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; d="${d%/}"; fi
+  else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1 || true)"; d="${d%/}"; fi
   [[ -n "$d" && -f "$d/meta" ]] || die "nenhuma rodada (${d:-$STATE_ROOT})"
   printf '%s' "$d"
 }
@@ -424,6 +424,9 @@ cmd_ask() {
   local text state
   [[ $# -eq 1 ]] || die 'uso: oute-swarm ask "<pergunta curta>"'
   text="$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | tr -s ' ')"; text="${text# }"; text="${text% }"
+  # marcas de direção e separadores Unicode (U+200B-200F, U+2028-202E, U+2060-2069, U+FEFF) também saem: não somem
+  # na tela mas trocam a ordem ou quebram a linha de quem lê o log e o agent-studio
+  text="$(printf '%s' "$text" | LC_ALL=C sed -e 's/\xe2\x80[\x8b-\x8f\xa8-\xae]//g' -e 's/\xe2\x81[\xa0-\xa9]//g' -e 's/\xef\xbb\xbf//g')"
   [[ -n "$text" ]] || die "pergunta vazia"
   (( ${#text} <= ASK_MAX )) || text="${text:0:ASK_MAX-1}…"
   state="$(ask_dir)"

@@ -1201,6 +1201,14 @@ check "ask sem OUTE_SWARM_ID: usa a rodada mais recente"  bash -c '[ "$1" -eq 0 
 EMPTYH="$TMP/$CASE/vazio"; mkdir -p "$EMPTYH"
 OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID PATH="$BIN:$PATH" HOME="$EMPTYH" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" "$SWARM" ask "x" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 check "ask sem nenhuma rodada: erro, nada gravado"        bash -c '[ "$1" -eq 1 ] && grep -qF "nenhuma rodada" <<<"$2"' _ "$RC" "$ERR"
+NOMETA="$TMP/$CASE/semmeta"; mkdir -p "$NOMETA/.oute/swarm/swarm-0101-0000"
+OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID PATH="$BIN:$PATH" HOME="$NOMETA" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" "$SWARM" ask "x" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+check "ask com pasta de rodada sem meta: erro com mensagem, nada gravado" bash -c '[ "$1" -eq 1 ] && grep -qF "nenhuma rodada" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$ERR" "$NOMETA/.oute/swarm/swarm-0101-0000/log"
+t0="$(wc -l < "$STATE/log")"
+sw ask "$(printf 'aprovar \xe2\x80\xaeodnum\xe2\x80\xac a\xe2\x80\xa8b\xe2\x80\xa9c\xe2\x80\x8bd\xe2\x81\xa6e\xef\xbb\xbff ação')"
+check "ask: marcas de direção e separadores Unicode saem (U+202E, U+2028/9, U+200B, U+2066, U+FEFF), o acento fica" bash -c '[ "$1" -eq 0 ] && tail -1 "$2" | grep -qE " pergunta aprovar odnum abcdef ação\$"' _ "$RC" "$STATE/log"
+sw ask "$(printf '\xe2\x80\xae\xe2\x80\xa8')"
+check "ask só de marcas Unicode: vira vazio, erro e nada gravado" bash -c '[ "$1" -eq 1 ] && grep -qF "pergunta vazia" <<<"$2" && [ "$(wc -l < "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$STATE/log" "$(( t0 + 1 ))"
 rcv_stop
 # prompt do dispatcher, ajuda e comandos
 opn --max 2

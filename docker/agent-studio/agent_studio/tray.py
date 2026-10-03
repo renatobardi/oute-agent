@@ -18,8 +18,11 @@
 SurrealDB fora não derruba a resposta: `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por
 palpite).
 """
+import logging
+
 from . import alert_text, alerts as alerts_mod, decisions as decisions_mod, proposals as prop_mod, usage as usage_mod
 
+log = logging.getLogger(__name__)
 HOUR_NS = 3_600_000_000_000
 PENDING_LIMIT = 50  # pedidos pendentes na resposta (os mais novos); `proposals.total` diz quantos há
 
@@ -36,6 +39,15 @@ def _cost(group):
 
 def _name(v):
     return (v is None, v or "")
+
+
+def _decisions(con, at_ns, cfg):
+    """Decisões pendentes (#386). A falha do cálculo não derruba o menu: cai em `NO_DECISIONS`, a causa no stderr."""
+    try:
+        return decisions_mod.pending(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — bloco acessório do tray
+        log.exception("tray: decisões pendentes falhou, respondi sem elas")
+        return NO_DECISIONS
 
 
 def snapshot(con, at_ns, prices, cfg):
@@ -66,7 +78,7 @@ def snapshot(con, at_ns, prices, cfg):
         "errors_last_hour": {"from": alerts_mod.iso(hour[0]), "to": alerts_mod.iso(at_ns),
                              "total": sum(e["total"] for e in errors), "rows": errors},
         "alerts": alert_text.with_text(alerts_mod.evaluate(con, at_ns, cfg)["alerts"]),
-        "decisions": decisions_mod.pending(con, at_ns, cfg),
+        "decisions": _decisions(con, at_ns, cfg),
     }
 
 
