@@ -1145,4 +1145,16 @@ check "dispatcher: regra nunca digite no pane com exceção do esc (#373)" grep 
 check "dispatcher: retrospectiva lista blocked com causa (#373)" grep -qF -- '- **Sessões `blocked`:** liste-as com a causa de cada uma' "$D"
 check "dispatcher: sem placeholder no prompt"            [ -z "$(grep -o '{{[A-Z_]*}}' "$D")" ]
 
+# 11j. regra de check-lib quando altera testes (#401): rodar check-lib e dizer no corpo do PR
+CASE=check-lib; round "$CASE"
+sw spawn 401-checklib "instrução"
+P="$STATE/401-checklib.prompt"
+check "worker check-lib: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker check-lib: regra sobre check-lib (#401)"     grep -qF -- '**Quando o PR altera `tests/*.test.sh` ou `tests/lib/`**' "$P"
+check "worker check-lib: roda check-lib nos dois ambientes (#401)" grep -qF 'rode também `bash tests/check-lib.test.sh` (no ambiente da sessão e no limpo)' "$P"
+check "worker check-lib: diz no corpo do PR (#401)"        grep -qF 'Diga no corpo do PR que rodou' "$P"
+check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'Falha ali é falha do PR' "$P"
+check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
+check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
 check_end
