@@ -5,6 +5,8 @@
 #   install-hooks --agent codex         -> [hooks.state."…"] com trusted_hash em ~/.codex/config.toml e ~/.codex/hooks.json
 #   install-mcp   --client claude-code  -> mcpServers em ~/.claude.json
 #   install-hooks --agent claude-code   -> hooks em ~/.claude/settings.json (jq, sem apagar o resto)
+#   run <agente> [opções] --executable <bin> -- <args…> (#367) -> como o real: AI_MEMORY_RUN_ID no ambiente e exec do <bin>
+#       com <args…>, no mesmo cwd; a linha do log leva as opções (--no-autowire, --yolo…) para o teste conferir
 # Idempotente como o real: o que já está lá não é escrito de novo; se o arquivo já existia e muda, deixa um
 # <arquivo>.bak-<n> (o real deixa .bak-<ts> a cada --apply); FAKE_AI_MEMORY_BAK=0 não deixa .bak. Cada chamada vai, em uma linha, em $FAKE_AI_MEMORY_LOG.
 fake_ai_memory_install() {
@@ -14,6 +16,14 @@ fake_ai_memory_install() {
 set -euo pipefail
 cmd="${1:-}"; shift || true
 echo "$cmd $*" >> "${FAKE_AI_MEMORY_LOG:-/dev/null}"
+if [[ "$cmd" == run ]]; then
+  exe=""
+  while [[ $# -gt 0 && "$1" != -- ]]; do [[ "$1" != --executable ]] || exe="$2"; shift; done
+  shift || true
+  [[ -n "$exe" ]] || { echo "ai-memory falso: run sem --executable" >&2; exit 2; }
+  export AI_MEMORY_RUN_ID=fake-run
+  exec "$exe" "$@"
+fi
 agent=""; apply=0
 while [[ $# -gt 0 ]]; do
   case "$1" in

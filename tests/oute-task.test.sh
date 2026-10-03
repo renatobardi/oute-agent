@@ -62,7 +62,7 @@ ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
       OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC FAKE_CLAUDE_AUTH_RC FAKE_CODEX_LOGIN_RC FAKE_AUTH_HANG \
       HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
-unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
+unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT OUTE_MEMORY_RUN AI_MEMORY_RUN_ID FAKE_AI_MEMORY_LOG
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 10k sobe a falsa
 . "$ROOT/tests/lib/typesafe.sh"; ts_off
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
@@ -800,5 +800,78 @@ kill "$agpid" 2>/dev/null; wait "$agpid" 2>/dev/null
 t clean --force-in-use --bogus
 check "opção desconhecida: código diferente de 0"           [ "$RC" -ne 0 ]
 check "opção desconhecida: o uso cita --force-in-use"       grep -qF -- '[--force-in-use]' <<<"$ERR"
+
+# ---------------------------------------------------------------- 12. shim: sessão interativa sob `ai-memory run` (opt-in, #367)
+# ai-memory falso (tests/lib/fake-ai-memory.sh): `run` grava a linha no log e executa o --executable com AI_MEMORY_RUN_ID.
+# Precisa de terminal (o shim só age com tty): script(1), como a seção 3.
+if ! has_pty; then
+  echo "skip memory run: sem script(1) do util-linux"
+else
+  . "$ROOT/tests/lib/fake-ai-memory.sh"
+  AMEM="$TMP/amem"; fake_ai_memory_install "$AMEM"
+  export FAKE_AI_MEMORY_LOG="$TMP/amem.log"
+  amlog() { cat "$FAKE_AI_MEMORY_LOG" 2>/dev/null; }
+  amreset() { rm -f "${FAKE_AI_MEMORY_LOG:?}" "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*; }
+  # pty <dir> <comando…>: roda com terminal (stdin do script = $PTY_IN); saída sem CR em $OUT, código em $RC
+  pty() {
+    local d="$1"; shift
+    printf '%s' "${PTY_IN:-}" | script -qec "cd '$d' && $*" /dev/null > "$TMP/pty.out" 2>&1; RC=$?
+    OUT="$(tr -d '\r' < "$TMP/pty.out")"
+  }
+  MPATH="$SHIMS:$AMEM:$PATH"
+  t mr0 claude
+  W="$SP/proj-mr0"; mid="$(mark "$W" id)"
+  MARK="$ORIGIN,oute.task.id=$mid,oute.task.repo=proj,oute.task.slug=mr0"
+  : > "$FAKE_AI_MEMORY_LOG"
+
+  # desligado (vazio, 0, ausente): nenhuma chamada ao ai-memory; argumentos e ambiente como hoje
+  for v in unset "" 0; do
+    amreset
+    if [[ "$v" == unset ]]; then PATH="$MPATH" pty "$W" "$SHIMS/claude oi"; else OUTE_MEMORY_RUN="$v" PATH="$MPATH" pty "$W" "$SHIMS/claude oi"; fi
+    check "run desligado (${v:-vazio}): nenhuma chamada ao ai-memory" [ -z "$(amlog)" ]
+    check "run desligado (${v:-vazio}): argumentos e marca como hoje, sem AI_MEMORY_RUN_ID" bash -c '[ "$(cat "$1/claude.args")" == oi ] && [ "$(sed -n "s/^OTEL_RESOURCE_ATTRIBUTES=//p" "$1/claude.env")" == "$2" ] && ! grep -q "^AI_MEMORY_RUN_ID=" "$1/claude.env"' _ "$FAKE" "$MARK"
+  done
+
+  # ligado: exec ai-memory run <agente> --no-autowire --executable <binário real> -- <args>, sem --yolo
+  amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" pty "$W" "$SHIMS/claude oi"
+  check "run ligado (claude): a linha do ai-memory é a esperada, sem --yolo" [ "$(amlog)" == "run claude --no-autowire --executable $BIN/claude -- oi" ]
+  check "run ligado (claude): o agente roda na worktree, com os argumentos e AI_MEMORY_RUN_ID" bash -c '[ "$(cat "$1/claude.args")" == oi ] && [ "$(cat "$1/claude.pwd")" == "$2" ] && grep -qx "AI_MEMORY_RUN_ID=fake-run" "$1/claude.env"' _ "$FAKE" "$(cd "$W" && pwd -P)"
+  check "run ligado (claude): OTEL_RESOURCE_ATTRIBUTES chega ao agente" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$MARK" ]
+  amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" pty "$W" "$SHIMS/codex oi"
+  check "run ligado (codex): run codex ..., sem --yolo" [ "$(amlog)" == "run codex --no-autowire --executable $BIN/codex -- oi" ]
+  check "run ligado (codex): marca e AI_MEMORY_RUN_ID chegam" [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$MARK" -a "$(aenv codex AI_MEMORY_RUN_ID)" == fake-run ]
+  amreset; OUTE_MEMORY_RUN=yes PATH="$MPATH" pty "$W" "$SHIMS/claude oi"
+  check "run ligado com qualquer valor diferente de vazio e 0" [ -n "$(amlog)" ]
+
+  # passa direto, sem chamar o ai-memory
+  gw="$(gitdir "$W")"
+  no_run() {   # <descrição> <dir> <comando…>
+    local d="$1" w="$2" ag="$4"
+    amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" pty "$w" "$3"
+    check "run ligado, $d: passa direto, sem ai-memory run" bash -c '[ -z "$(cat "$2" 2>/dev/null)" ] && [ -f "$1/$3.args" ]' _ "$FAKE" "$FAKE_AI_MEMORY_LOG" "$ag"
+  }
+  no_run "headless (-p)"       "$W" "$SHIMS/claude -p oi" claude
+  no_run "--resume"            "$W" "$SHIMS/claude --resume conv-x" claude
+  no_run "--continue"          "$W" "$SHIMS/claude -c" claude
+  no_run "codex exec"          "$W" "$SHIMS/codex exec oi" codex
+  no_run "codex resume"        "$W" "$SHIMS/codex resume conv-x" codex
+  no_run "codex mcp (subcomando)" "$W" "$SHIMS/codex mcp list" codex
+  no_run "já sob run (AI_MEMORY_RUN_ID)" "$W" "AI_MEMORY_RUN_ID=outro $SHIMS/claude oi" claude
+  touch "$gw/oute-swarm-worker"; no_run "worker do swarm" "$W" "$SHIMS/claude oi" claude; rm -f "$gw/oute-swarm-worker"
+  amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" OUT="$(cd "$W" && "$SHIMS/claude" oi 2>&1 </dev/null)"
+  check "run ligado, sem terminal: passa direto" [ -z "$(amlog)" -a -f "$FAKE/claude.args" ]
+  no_run "fora de repo"        "$TMP" "$SHIMS/claude oi" claude
+
+  # ai-memory ausente: passa direto, com aviso em stderr
+  amreset; OUTE_MEMORY_RUN=1 PATH="$SHIMS:$NOTASK:/usr/bin:/bin" pty "$W" "$SHIMS/claude oi"
+  check "ai-memory ausente: avisa e abre o agente igual" bash -c 'grep -qF "ai-memory não está no PATH" <<<"$1" && [ "$(cat "$2/claude.args")" == oi ]' _ "$OUT" "$FAKE"
+
+  # checkout principal: o oute-task vem antes, e a sessão da worktree nasce sob run, com a marca e o modelo
+  amreset; PTY_IN=$'mr1\n' OUTE_MEMORY_RUN=1 PATH="$MPATH" pty "$WS/proj" "$SHIMS/claude 'faça x'"
+  check "checkout principal: oute-task abre a worktree e a sessão roda sob run" bash -c '[ "$(cat "$1/claude.pwd")" == "$2" ] && [ "$(sed -n "1p" "$3")" == "run claude --no-autowire --executable $4/claude -- --model claude-sonnet-5-5 faça x" ]' _ "$FAKE" "$(cd "$SP/proj-mr1" && pwd -P)" "$FAKE_AI_MEMORY_LOG" "$BIN"
+  check "checkout principal: um só run; marca e argumentos de modelo chegam" bash -c '[ "$(grep -c . "$1")" -eq 1 ] && [ "$(cat "$2/claude.args")" == "$(printf -- "--model\nclaude-sonnet-5-5\nfaça x")" ] && grep -q "^OTEL_RESOURCE_ATTRIBUTES=.*oute.task.slug=mr1" "$2/claude.env"' _ "$FAKE_AI_MEMORY_LOG" "$FAKE"
+  amreset; PTY_IN=$'mr2\n' PATH="$MPATH" pty "$WS/proj" "$SHIMS/claude 'faça y'"
+  check "checkout principal, desligado: sem ai-memory, mesma worktree e modelo" [ -z "$(amlog)" -a -d "$SP/proj-mr2" -a "$(sed -n 1p "$FAKE/claude.args")" == --model ]
+fi
 
 check_end
