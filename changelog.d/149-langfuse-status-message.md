@@ -1,0 +1,2 @@
+### Security
+- **Langfuse sem o texto de erro do span** (#149). O `config/otel/langfuse.yaml` esvazia o `status.message` de todo span antes de mandar ao Langfuse: o texto do erro das ferramentas (com caminhos locais) chegava lá como `statusMessage`, por fora da allowlist de atributos. O `status.code` fica, e o `level=ERROR` continua aparecendo. Bucket e agent-studio recebem o span inteiro, como antes. A skill `oute-aidlc-ops-observe` deixa de mandar ler o `statusMessage`. Teste novo: `tests/otelcol-langfuse.test.sh`. Sem release: `git pull` + `oute down/up`.

@@ -147,7 +147,7 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 ## Fase 1 (concluída)
 - `otel-collector`: `otel/opentelemetry-collector-contrib:0.161.0` (`OUTE_OTELCOL_VERSION`), sem porta publicada. `config/otel/collector.yaml` (bucket) + `langfuse.yaml` ou `none.yaml` (2º `--config`). Config montada do repo: mudança no pipeline = `git pull` + `oute down/up`, sem release.
 - Bucket: exporter `awss3` no endpoint S3-compat da OCI. Partição `host=/instance=/year=/month=/day=/hour=` UTC, `otlp_json` + gzip, lote 5 min. **Exige `AWS_REQUEST_CHECKSUM_CALCULATION=when_required` e `AWS_RESPONSE_CHECKSUM_VALIDATION=when_required`** (senão a OCI responde 501 e o lote é descartado).
-- *(substituído: ADR-08)* Langfuse: `otlphttp` → `${LANGFUSE_HOST}/api/public/otel`, Basic auth, `x-langfuse-ingestion-version: 4`. Filter: span events fora (exceto Codex). Transform: **allowlist** (`keep_matching_keys`).
+- *(substituído: ADR-08)* Langfuse: `otlphttp` → `${LANGFUSE_HOST}/api/public/otel`, Basic auth, `x-langfuse-ingestion-version: 4`. Filter: span events fora (exceto Codex). Transform: **allowlist** (`keep_matching_keys`). O `status.message` do span sai vazio e o `status.code` fica (#149, 2026-10-02): o Langfuse lê dele o `statusMessage` (texto do erro da ferramenta, com caminhos locais), por fora da allowlist de atributos; o `level=ERROR` vem do código. O texto continua no bucket e no agent-studio. Teste: `tests/otelcol-langfuse.test.sh`.
 
 ## Fase 2
 Era o custo real do roteador de modelos; saiu com ele (#218). Ver **Histórico: roteador de modelos**.
@@ -158,7 +158,7 @@ Era o custo real do roteador de modelos; saiu com ele (#218). Ver **Histórico: 
 | Claude Code (`claude-code`) | ✓ | ✓ | ✓ | ✓ |
 | Codex (`codex_exec`, `codex_cli_rs`) | ✓ | — | ✓ | ✓ (hooks reaprovados na 0.5.8) |
 
-- **Privacidade conferida:** Input/Output vazios no Langfuse; `user.email`, `organization.id`, `user.account_uuid` do Claude barrados pela allowlist.
+- **Privacidade conferida:** Input/Output vazios no Langfuse; `user.email`, `organization.id`, `user.account_uuid` do Claude barrados pela allowlist; `statusMessage` vazio (#149).
 - **Uso/tokens** mapeados para `gen_ai.usage.*` (Claude: `input/output/cache_read/cache_creation_tokens`; Codex: `codex.turn.token_usage.*`); `session.id` → `langfuse.session.id`.
 - **Custo exibido para Claude/Codex = preço de lista da API**, não gasto real (os dois rodam por assinatura).
 - **Ruído do Codex:** o Langfuse recebe só uma allowlist de spans do Codex; tudo continua no bucket.
