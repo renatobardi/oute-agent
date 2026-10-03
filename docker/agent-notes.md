@@ -26,6 +26,7 @@ Nas ferramentas de memória do ai-memory (`memory_query`, `memory_recent`, `memo
 - sem esse arquivo: `workspace = "default"` e `project` = nome do repositório principal (`basename` de `git rev-parse --path-format=absolute --git-common-dir` sem o `/.git`);
 - fora de um repositório, pergunte ao usuário antes de gravar.
 Motivo: sem escopo, o servidor usa o "projeto ativo" compartilhado, que pode ser o de outra sessão em outro repo.
+Com o opt-in `OUTE_MEMORY_RUN=1` (desligado por padrão; vale só com ele), a sessão interativa da worktree roda sob `ai-memory run`. Cota estourou: saia do claude e rode `ai-memory run codex` na mesma worktree; ele recebe o contexto da conversa. A regra de `workspace`/`project` explícitos continua valendo.
 
 
 ## Git: uma sessão = uma worktree + um branch

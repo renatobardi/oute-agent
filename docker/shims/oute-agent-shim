@@ -3,6 +3,7 @@
 # repo git cria uma worktree própria (oute-task) e abre a sessão lá. Vale para shell, herdr (new/restore) etc.
 # Passa direto: worktree, fora de repo, headless (-p/--print/exec…), resume/continue (num resume com id, entra antes na
 # worktree da sessão), subcomandos, sem terminal, OUTE_NO_WORKTREE=1.
+# Opt-in OUTE_MEMORY_RUN=1 (#367): sessão interativa em worktree roda sob `ai-memory run` (ver memory_run).
 set -uo pipefail
 a="$(basename "$0")"
 # `pi` segue como shim só para avisar (o binário antigo pode continuar em ~/.local/bin, no volume oute-home)
@@ -103,16 +104,39 @@ MODEL_ARGS=()
 model_env "$@"
 [[ ${#MODEL_ARGS[@]} -eq 0 ]] || set -- "$@" "${MODEL_ARGS[@]}"
 
-[[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
-[[ -t 0 && -t 1 ]] || pass "$@"
-for x in "$@"; do
-  case "$x" in
-    -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue) pass "$@" ;;
+# Sessão nova e interativa: terminal, sem headless/ajuda/versão/resume/continue e sem subcomando.
+fresh_interactive() {
+  local x
+  [[ -t 0 && -t 1 ]] || return 1
+  for x in "$@"; do
+    case "$x" in
+      -p|--print|-h|--help|-v|--version|-r|--resume|--resume=*|-c|--continue) return 1 ;;
+    esac
+  done
+  case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)
+    exec|e|resume|login|logout|mcp|config|doctor|update|install|plugin|completion|apply|app-server|sandbox|debug|setup-token|migrate-installer) return 1 ;;
   esac
-done
-case "${1:-}" in   # subcomandos (não abrem sessão de trabalho)
-  exec|e|resume|login|logout|mcp|config|doctor|update|install|plugin|completion|apply|app-server|sandbox|debug|setup-token|migrate-installer) pass "$@" ;;
-esac
+}
+# Opt-in OUTE_MEMORY_RUN=1 (#367): sessão interativa DENTRO de uma worktree de tarefa roda sob `ai-memory run`, para o
+# outro agente (ai-memory run codex, na mesma worktree) receber o contexto da conversa quando a cota estoura. Vem antes
+# do OUTE_NO_WORKTREE porque o oute-task abre o agente com ele. Sem --yolo (a config do entrypoint decide) e com
+# --no-autowire (o entrypoint já instala hooks e MCP). No checkout principal não age: o fluxo do oute-task vem antes.
+# Worker do swarm fica fora. Devolve (sem exec) quando não se aplica.
+memory_run() {
+  local gd cd_
+  [[ -n "${OUTE_MEMORY_RUN:-}" && "${OUTE_MEMORY_RUN:-}" != 0 ]] || return 0
+  fresh_interactive "$@" || return 0
+  [[ -z "${AI_MEMORY_RUN_ID:-}" ]] || return 0   # já está sob run: sem recursão
+  gd="$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 0
+  cd_="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  [[ "$gd" != "$cd_" && ! -f "$gd/oute-swarm-worker" ]] || return 0
+  command -v ai-memory >/dev/null 2>&1 || { echo "oute: OUTE_MEMORY_RUN=1, mas o ai-memory não está no PATH; abrindo $a sem ai-memory run." >&2; return 0; }
+  exec ai-memory run "$a" --no-autowire --executable "$real" -- "$@"
+}
+memory_run "$@"
+
+[[ -n "${OUTE_NO_WORKTREE:-}" ]] && pass "$@"
+fresh_interactive "$@" || pass "$@"
 gd="$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" || pass "$@"
 cd_="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || pass "$@"
 [[ "$gd" == "$cd_" ]] || pass "$@"     # já é uma worktree

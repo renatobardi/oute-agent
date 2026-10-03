@@ -199,6 +199,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Única memória dos agentes (auto memory do Claude desligada). Projeto = repo principal
   (worktrees e subpastas caem no mesmo). Handoff automático por diretório (cada worktree
   tem o seu, consumido uma vez). Órfãos: peça ao agente memory_handoff_list / _cancel.
+  Opt-in OUTE_MEMORY_RUN=1 (#367, desligado por padrão): a sessão interativa de worktree abre sob
+  `ai-memory run` (sem --yolo; headless, subcomando e resume passam direto). Só com ele:
+  cota estourou → saia do claude e rode `ai-memory run codex` na mesma worktree.
 
 ## herdr (básico)
   prefix+c nova aba · prefix+v split direita · prefix+- split abaixo · prefix+q detach
