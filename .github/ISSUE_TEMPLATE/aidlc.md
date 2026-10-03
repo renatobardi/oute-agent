@@ -12,7 +12,7 @@ labels: ["aidlc:intent", "needs-triage"]
 <!-- causa raiz, arquivos/serviços tocados, ADRs e regras que se aplicam, o que já existe para reusar. -->
 
 ## Critérios de aceite
-<!-- fase spec: um por linha, verificáveis. `Closes #n` no PR só com todos atendidos; o critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta e vai no `## Falta` do PR com a marca `(ship)`. -->
+<!-- fase spec: um por linha, verificáveis. `Closes #n` no PR só com todos atendidos; o critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts) não conta e vai no `## Falta` do PR com a marca `(ship)`. Esse critério fica em item próprio, marcado `(ship)`, nunca na mesma linha de um critério de `build`: critério com as duas partes vira dois itens. -->
 - [ ] 
 
 ## Fora de escopo

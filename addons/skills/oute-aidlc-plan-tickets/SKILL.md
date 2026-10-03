@@ -104,6 +104,8 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 
 </issue-template>
 
+In either form, an acceptance criterion that can only be verified after the release and the deploy on the hosts (real bucket, oute-server, Mac) gets **its own item**, marked `(ship)` — never on the same line as a criterion the build can verify in the PR. A criterion with both parts is split in two (example in `/oute-aidlc-spec-issue`).
+
 In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
 
 Work the frontier one ticket at a time with `/oute-aidlc-build-implement`, clearing context between tickets.

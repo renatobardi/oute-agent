@@ -845,12 +845,26 @@ check "dispatcher: oute-task com --phase plan"           [ "$RC" -eq 0 -a "$(hea
 check "dispatcher: abre no claude"                       [ "$(sed -n '5,6p' "$FAKE/oute-task.args" | tr '\n' ' ')" == "$(nova) claude " ]
 check "triagem: oute-select por issue, no repo da rodada" grep -qF "\`oute-select --json --repo $REPO --issue <n>\`" "$FAKE/oute-task.last"
 check "triagem: tabela com fase e modelo"                grep -qF 'agente da sessão, fase, modelo (com a origem' "$FAKE/oute-task.last"
+check "triagem: as quatro origens do seletor (#312)"     grep -qF '`origin` (`manual`, `label`, `jev` ou `padrao`)' "$FAKE/oute-task.last"
+check "triagem: sem label de fase é jev?, não padrao (#312)" grep -qF 'escreva o modelo com `jev?` no lugar de `padrao` (ex.: `claude-sonnet-5-5 (jev?)`)' "$FAKE/oute-task.last"
+check "triagem: tabela com jev? para issue sem label (#312)" grep -qF 'issue sem label de fase leva `jev?`, nunca `padrao`), ordem de abertura' "$FAKE/oute-task.last"
+check "abertura: modelo diferente por jev não é divergência (#312)" grep -qF 'issue sem label de fase (`jev?` na triagem) pode abrir com modelo diferente do mostrado na triagem, com origem `jev` (o Jev classificou a fase pela instrução) ou `padrao` (ele não decidiu, Sonnet). Isso não é divergência a reportar.' "$FAKE/oute-task.last"
 check "triagem: regra comum sozinha ou primeiro elo (#255)" grep -qF -- '- **Regra comum:** issue que muda uma **regra que todo PR segue** entra **sozinha** na rodada ou como **primeiro elo**' "$FAKE/oute-task.last"
 check "triagem: o que conta como regra comum"            grep -qF 'a seção "Regras" ou "Validar antes do PR" do `AGENTS.md`; o fluxo do changelog' "$FAKE/oute-task.last"
 check "triagem: registro compartilhado não é regra comum" grep -qF 'Registro compartilhado continua fora da sobreposição' "$FAKE/oute-task.last"
 check "triagem: tabela com ordem de abertura e marca"    grep -qF 'ordem de abertura, precisa de ação no host (s/n), risco. A ordem de abertura é `1` para as que abrem logo depois do ok; a issue de regra comum leva a marca **regra comum**' "$FAKE/oute-task.last"
 check "triagem: outras abrem juntas até o limite"        grep -qF 'depois do merge as outras abrem juntas, até 2;' "$FAKE/oute-task.last"
 check "abertura: ordem só com o merge da regra comum"    grep -qF -- '- **Ordem de abertura:** issue com `depois do merge da #<n>` na tabela da triagem só abre com o PR da #<n> mergeado' "$FAKE/oute-task.last"
+# merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
+check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.last"
+check "merges em série: fica no §3, antes do §4"         [ "$(grep -n -e '^## 3\. ' -e 'Merges em série\*\*' -e '^## 4\. ' "$FAKE/oute-task.last" | cut -d: -f2 | cut -c1-6 | tr '\n' '|')" == '## 3. |  - **|## 4. |' ]
+check "merges em série: por quê (nenhum check na main)"  grep -qF 'Por quê: nenhum check roda na `main` (o CI só dispara em `pull_request`)' "$FAKE/oute-task.last"
+check "merges em série: worktree descartável, sem push"  grep -qF "Faça numa worktree descartável, sem push, no repo do PR ($REPO, ou o da sessão kaizen):" "$FAKE/oute-task.last"
+check "merges em série: merge de teste pelo sha do head" grep -qF 'git -C "$d/wt" merge --no-ff --no-edit <headRefOid do PR <n>>' "$FAKE/oute-task.last"
+check "merges em série: o que rodar (arquivos em comum)" grep -qF 'os testes que cobrem os arquivos que o próximo PR tem em comum com os PRs já mergeados nesta opção' "$FAKE/oute-task.last"
+check "merges em série: no mínimo os gates do AGENTS.md" grep -qF 'No mínimo, os gates das regras e da seção "Validar antes do PR" do `AGENTS.md` da base que tocam esses arquivos' "$FAKE/oute-task.last"
+check "merges em série: falha não mergeia e refaz a pergunta" grep -qF '**Falha** (o merge de teste conflita ou um gate falha): não mergeie esse PR nem os seguintes da opção. Refaça a pergunta ao Bardi, com opções numeradas e o que você achou' "$FAKE/oute-task.last"
+check "merges em série: worktree removida no fim"        grep -qF '**No fim, passando ou falhando,** remova a worktree: `git worktree remove --force "$d/wt"` e `rm -rf "$d"`. Nada é empurrado' "$FAKE/oute-task.last"
 check "triagem: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 CASE=seletor-abre-cx; round "$CASE"
 opn --max 2 --agent codex
