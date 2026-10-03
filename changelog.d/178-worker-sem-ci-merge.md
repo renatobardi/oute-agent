@@ -1,0 +1,2 @@
+### Changed
+- **Worker do swarm não espera CI depois do merge** (#178). O `docker/swarm-worker.md` ganhou a regra: depois do `PRONTO` a sessão não acompanha o merge nem espera CI no SHA do merge (nada de polling); se perceber que o PR foi mergeado, termina sem esperar CI na base, a menos que o dispatcher ou o Bardi peça algo (ex.: aplicar no host). A regra aponta a linha "Quando o CI roda" (#122) do `AGENTS.md` como a fonte de quando o CI roda. **Precisa de release** (o `docker/swarm-worker.md` vai na imagem).
