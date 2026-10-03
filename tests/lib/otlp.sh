@@ -4,6 +4,7 @@
 # ev <jq-select>: registros recebidos pelo receptor atual que casam o filtro; n <jq-select>: quantos.
 # mpoints <dir>: um objeto por ponto de métrica (gauge) recebido: {name, unit, value, time, attrs{}, res{}, path}; mp <jq-select>: os do receptor atual.
 OTLP_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$OTLP_LIB/parallel.sh"   # free_port
 rcv_start() {
   RCV_DIR="$1"; mkdir -p "$RCV_DIR"; rm -f "$RCV_DIR/port"
   python3 "$OTLP_LIB/otlp-receiver.py" "$RCV_DIR" & RCV_PID=$!
@@ -31,4 +32,4 @@ mp() { mpoints "$RCV_DIR" | jq -c "select($1)"; }
 ev() { events "$RCV_DIR" | jq -c "select($1)"; }
 n() { ev "$1" | grep -c . || true; }
 # closed_port: porta local sem ninguém escutando (receptor fora do ar)
-closed_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
+closed_port() { free_port; }

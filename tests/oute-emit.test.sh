@@ -669,8 +669,14 @@ check "regression: versões, rodadas, resultado e custo" jqe '.attrs["oute.regre
 check "regression: verde/vermelho por tarefa"           jqe '.attrs["oute.regression.tasks"] == "root=verde,select=vermelho,root:codex=verde,studio=nao-verificado"' <<<"$e"
 check "regression: oute.agent de quem causou, sem corpo" jqe '.attrs["oute.agent"] == "claude" and .body == null and .res["oute.agent"] == "claude"' <<<"$e"
 check "regression: origem do ambiente"                  jqe '.res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e"
-reg run=regression-20261003-120000-abc image=0.9.9 result=vermelho
-check "regression: mesmo run = mesmo oute.event.id (dedupe)" [ "$(ev '.name == "oute.regression.run"' | jq -r '.attrs["oute.event.id"]' | sort -u | grep -c .)" -eq 1 ]
+# o id leva a hora do fato em segundos: dois envios só têm o mesmo id se caírem no mesmo segundo (sob carga, o segundo
+# vira entre eles). Repete o envio até dois eventos caírem no mesmo segundo e confere o id dentro de cada segundo.
+for _ in 1 2 3 4; do
+  reg run=regression-20261003-120000-abc image=0.9.9 result=vermelho
+  [ "$(ev '.name == "oute.regression.run"' | jq -s -r '[group_by(.time)[] | length] | max')" -ge 2 ] && break
+done
+check "regression: mesmo run no mesmo segundo = mesmo oute.event.id (dedupe)" bash -c \
+  '[ "$(jq -s "[group_by(.time)[] | select(length >= 2) | ([.[].attrs[\"oute.event.id\"]] | unique | length)] | (length > 0 and all(. == 1))" <<<"$1")" = true ]' _ "$(ev '.name == "oute.regression.run"')"
 sem="$(posts)"
 for bad in "run=Maiusculo result=verde" "run=regression-x result=talvez" "run=regression-x result=verde tasks=root=verde;rm" \
            "run=regression-x result=verde cost=abc" "run=regression-x result=verde claude=a;b" "run=regression-x result=verde extra=1" \
