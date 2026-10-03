@@ -27,4 +27,8 @@ check "guia: r = recusa"                  grep -qE '[(, ]r = recusa' <<<"$line"
 check "guia: N não recusa"                bash -c '! grep -qE "N[^,)]*= recusa" <<<"$1"' _ "$line"
 check "guia: não existe relê no approve"  bash -c '! grep -qi "rel[eê]" <<<"$1"' _ "$line"
 
+# ---------------------------------------------------------------- oute approve <id> (#158): guia e uso
+check "guia: oute approve <id>"           grep -qE '^  oute approve <id> +decide só aquele pedido' "$GUIDE"
+check "uso: approve <id>"                 grep -qE '^  approve <id> +decide só aquele pedido' "$OUTE"
+
 check_end

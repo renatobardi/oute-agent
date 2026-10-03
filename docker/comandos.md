@@ -24,6 +24,8 @@ Dois lugares, dois conjuntos de comandos:
   oute version         versão do repo, da imagem rodando e origem (host/instância)
   oute approve         revisa pedidos dos agentes (s = executa, N ou Enter = deixa pendente, r = recusa)
   oute approve --watch fica esperando pedidos novos
+  oute approve <id>    decide só aquele pedido (o id que o oute-propose imprime); id que não está
+                       pendente = aviso e rc 1, id fora do formato AAAAMMDD-HHMMSS-slug = rc 2
   oute watch [host]    = approve --watch; com host, abre a espera nele via ssh
   oute up | down | restart | status
   oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
