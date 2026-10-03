@@ -86,7 +86,7 @@ studio() {
             | . + {cost: ((.real // 0) + (.est // 0)), key: "\(.host)/\(.agent)"});
     ([$base[0].series[].day] | unique | length | if . == 0 then 1 else . end) as $bdays
     | ($hours / 24 | if . < 1 then 1 else . end) as $wdays
-    | ($base[0].rows | by_ha| map({key, value: .}) | from_entries) as $b
+    | ($base[0].rows | by_ha | map({key, value: .}) | from_entries) as $b
     | (.rows | by_ha) as $w
     | (["host","agente","chamadas","spans","erros_span","erros_log","custo_real_usd","custo_estimado_usd","sem_preço","tokens","p95_ms","base_custo_usd/dia"] | @tsv),
       ($w[] | [.host, .agent, .calls, .spans, .span_err, .log_err, (.real | usd), (.est | usd), .unpriced, .tok,
