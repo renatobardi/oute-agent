@@ -502,6 +502,10 @@ OUTE_SELECT_FILE="$TMP/sel.json" t 43-arquivo claude "p"
 check "OUTE_SELECT_FILE: abre o agente e o modelo do arquivo" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6-astra -c model_reasoning_effort=high p" ]
 check "OUTE_SELECT_FILE: evento com a escolha do arquivo" sel_ev arch label codex gpt-6-astra high
 check "OUTE_SELECT_FILE: o gh não é chamado"           [ ! -e "$FAKE/gh-issue.log" ]
+check "OUTE_SELECT_FILE: não chega ao ambiente do agente" bash -c '! grep -q "^OUTE_SELECT_FILE=" "$1"' _ "$FAKE/codex.env"
+# de dentro da sessão (com o que o agente recebeu no ambiente), outro oute-task resolve pela issue dele
+OUTE_SELECT_FILE="$(aenv codex OUTE_SELECT_FILE)" t 41-dedentro claude "p"
+check "oute-task de dentro da sessão: não herda a escolha do worker" [ "$RC" -eq 0 -a "$(args claude)" == "--model claude-opus-5-5 p" ]
 OUTE_SELECT_FILE="$TMP/nao-existe.json" t 40-semarq claude "p"
 check "OUTE_SELECT_FILE que não existe: o oute-task resolve" [ "$(args claude)" == "--model claude-sonnet-5-5 p" ]
 echo 'lixo' > "$TMP/sel.json"

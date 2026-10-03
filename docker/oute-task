@@ -168,7 +168,7 @@ cmd_mark() {
 }
 
 # ---------------------------------------------------------------- modelo da sessão (ADR-02, #219)
-S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; MARGS=()
+S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; MARGS=(); SEL_FILE=""
 # argumentos de modelo do agente, em MARGS: <agente> <modelo> <esforço>; sem modelo, nenhum
 model_args() {
   MARGS=()
@@ -189,13 +189,13 @@ args_model() {
   done
 }
 # escolha da sessão, em S_*: <repo principal> <slug> <agente explícito ou vazio> <modelo explícito ou vazio> <fase fixa>.
-# O `oute-swarm spawn` já resolveu e entrega o JSON em OUTE_SELECT_FILE; senão, o oute-select. Nunca interrompe a
+# O `oute-swarm spawn` já resolveu e entrega o JSON em OUTE_SELECT_FILE (aqui, já em SEL_FILE); senão, o oute-select. Nunca interrompe a
 # abertura: sem oute-select, nada muda; com ele falhando ou devolvendo algo inválido, aviso e o modelo padrão do
 # agente. Só argumento inválido (código 2 do oute-select, que já disse o motivo) sai com erro.
 select_model() {
   local js="" rc=0 args=() a m e p o
   S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""
-  if [[ -n "${OUTE_SELECT_FILE:-}" && -r "$OUTE_SELECT_FILE" ]]; then js="$(cat "$OUTE_SELECT_FILE" 2>/dev/null || true)"
+  if [[ -n "$SEL_FILE" && -r "$SEL_FILE" ]]; then js="$(cat "$SEL_FILE" 2>/dev/null || true)"
   elif command -v oute-select >/dev/null 2>&1; then
     [[ -z "$3" ]] || args+=(--agent "$3")
     [[ -z "$4" ]] || args+=(--model "$4")
@@ -300,6 +300,9 @@ cmd_open() {
   local agent="${1:-${O_AGENT:-claude}}" pos="${1:-}"; [[ $# -gt 0 ]] && shift
   local main name base="" wt br sp ev=reopened xagent="$O_AGENT" xmodel="$O_MODEL" amodel=""
   who_called || true
+  # a escolha do spawn vale só para esta abertura: sai do ambiente antes do exec, para um `oute-task <outro-slug>`
+  # rodado de dentro da sessão não herdar o agente e o modelo do worker
+  SEL_FILE="${OUTE_SELECT_FILE:-}"; unset OUTE_SELECT_FILE
   # antes de criar a worktree: agente fora do stack não deixa sessão vazia para trás
   case "$agent" in
     claude|codex|shell) ;;
