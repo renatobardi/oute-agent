@@ -11,8 +11,8 @@
 # O nome é o modelo do span (sem diferenciar maiúsculas; `openai/gpt-5` também acha `gpt-5`).
 # Modelo sem entrada = sem custo estimado (nunca zero): o `/v1/usage` lista esses modelos em `unpriced_models`;
 # é a deixa para acrescentar o preço aqui.
-# Fonte: preços de lista da OpenAI (API, tier padrão). A reserva do ADR-02 (`gpt-6-astra`, `gpt-6.1-sol`,
-# `gpt-6-luna`) fica sem preço até o Bardi dar a fonte (#157): aparece em `unpriced_models`, nunca como zero.
+# Fonte dos `gpt-5*`: preços de lista da OpenAI (API, tier padrão). A reserva do ADR-02 (`gpt-6-*`) vem logo depois
+# do bloco do Codex abaixo; o modelo que não estiver aqui continua em `unpriced_models`, nunca como zero.
 
 [prices."gpt-5"]
 input = 1.25
@@ -48,6 +48,26 @@ cache_read = 0.025
 input = 0.05
 output = 0.4
 cache_read = 0.005
+
+# Reserva gpt-6-* do ADR-02 (#157). Fonte: models.dev (https://models.dev/api.json), conferida em 2026-10-03 com o
+# OpenRouter e com o LiteLLM (as três concordam). Preço estimado: o Codex não manda custo real.
+[prices."gpt-6-astra"]
+input = 10.0
+output = 50.0
+cache_read = 1.0
+cache_creation = 12.5
+
+[prices."gpt-6.1-sol"]
+input = 2.0
+output = 10.0
+cache_read = 0.1
+cache_creation = 2.5
+
+[prices."gpt-6-luna"]
+input = 0.1
+output = 0.5
+cache_read = 0.01
+cache_creation = 0.125
 
 # Claude (#157): os modelos da tabela do ADR-02 e os que aparecem nas sessões. Só reserva (chamada sem o log
 # `api_request`). Fonte: preços de lista da Anthropic (API, conferidos em 2026-10-02); `cache_creation` = escrita de

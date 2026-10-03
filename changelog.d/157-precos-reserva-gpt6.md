@@ -1,0 +1,2 @@
+### Added
+- **Preços da reserva `gpt-6-*` no agent-studio** (#157). `gpt-6-astra`, `gpt-6.1-sol` e `gpt-6-luna` entram em `config/agent-studio/config.toml` (fonte: models.dev, conferida em 2026-10-03 com OpenRouter e LiteLLM), como custo estimado; deixam de aparecer em `unpriced_models`. O `tests/agent-studio-usage.test.sh` confere que nenhum modelo da tabela do ADR-02 fica sem preço. Sem release: entra com `git pull` + `oute down/up`.
