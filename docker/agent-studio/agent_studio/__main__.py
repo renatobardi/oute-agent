@@ -15,11 +15,18 @@ from . import telemetry
 def main():
     logging.basicConfig(level=os.environ.get("AGENT_STUDIO_LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
-    token = os.environ.get("AGENT_STUDIO_TOKEN", "")
+    # duas credenciais (#256, ADR-08 §6). AGENT_STUDIO_TOKEN = nome de antes da #256, aceito como a de ingestão
+    token = os.environ.get("AGENT_STUDIO_INGEST_TOKEN", "") or os.environ.get("AGENT_STUDIO_TOKEN", "")
     if not token:
         # sem o item agent-studio no vault o serviço não sobe (o `oute up` já avisa e não liga o profile)
-        print("agent-studio: AGENT_STUDIO_TOKEN vazio (item agent-studio do vault); não subo", file=sys.stderr)
+        print("agent-studio: AGENT_STUDIO_INGEST_TOKEN vazio (item agent-studio da pasta oute-services do vault); "
+              "não subo", file=sys.stderr)
         return 1
+    read_token = os.environ.get("AGENT_STUDIO_READ_TOKEN", "")
+    if not read_token or read_token == token:
+        read_token = ""
+        print("agent-studio: aviso: sem credencial de leitura própria (AGENT_STUDIO_READ_TOKEN vazio ou igual à de "
+              "ingestão); uma credencial só para ingestão e leitura (transição da #256)", file=sys.stderr)
     # SurrealDB (#187): o compose sempre passa a URL; sem ela (só nos testes de ingestão), grava só no DuckDB
     surreal = None
     surreal_url = os.environ.get("AGENT_STUDIO_SURREAL_URL", "")
@@ -38,7 +45,7 @@ def main():
     config = config_mod.load()
     for err in config.errors:
         print(f"agent-studio: {err}", file=sys.stderr)
-    app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config)
+    app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config, read_token=read_token)
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)
