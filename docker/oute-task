@@ -190,11 +190,18 @@ args_model() {
     prev="$x"
   done
 }
-# texto da tarefa (#257): o prompt nos argumentos do agente = o último, se não é opção e tem mais de uma palavra (valor
-# de opção, como o id do --resume, não tem espaço). Sessão aberta na mão não tem: o Jev não é chamado. <args…>
+# texto da tarefa (#257): o prompt nos argumentos do agente = o último, se é posicional, não é opção e tem mais de uma
+# palavra. Posicional (#313) = o anterior é o `--` que fecha as opções, ou nenhum argumento antes dele é opção sem `=`
+# (`-x`/`--x`): uma opção assim pode ser a dona de um ou de vários valores (`--append-system-prompt "…"`,
+# `--add-dir /a "/b c"`, `--mcp-config a.json '{…}'`), e valor de opção nunca vai ao Jev. Sem saber quantos valores a
+# opção leva, o texto não sai (`--verbose "prompt"`, `--resume <id> "prompt"`): use `--` antes do prompt, ou
+# `--opção=valor`. Sessão aberta na mão não tem texto: o Jev não é chamado. <args…>
 task_text() {
   [[ $# -gt 0 ]] || return 0
-  local x="${!#}"
+  local x="${!#}" a
+  if [[ $# -lt 2 || "${@:$#-1:1}" != -- ]]; then
+    for a in "${@:1:$#-1}"; do [[ "$a" != -* || "$a" == --*=* ]] || return 0; done
+  fi
   [[ "$x" == -* || ! "$x" =~ [^[:space:]][[:space:]]+[^[:space:]] ]] || printf '%s' "$x"
 }
 # escolha da sessão, em S_*: <repo principal> <slug> <agente explícito ou vazio> <modelo explícito ou vazio> <fase fixa>

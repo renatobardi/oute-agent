@@ -628,6 +628,34 @@ t avulsa-mao
 check "sem texto (aberta na mão): Sonnet, sem chamar o Jev" [ "$(args claude)" == "--model claude-sonnet-5-5" -a "$(ts_calls)" -eq 0 ]
 t avulsa-resume claude --resume abc123
 check "valor de opção não é texto da tarefa"           [ "$(args claude)" == "--resume abc123 --model claude-sonnet-5-5" -o "$(args claude)" == "--model claude-sonnet-5-5 --resume abc123" ]
+# #313: valor de opção com espaço, no fim da linha, não é texto da tarefa (só o argumento posicional vai ao Jev)
+t avulsa-opcao claude --append-system-prompt "responda sempre em português claro"
+check "valor de opção com espaço no fim: sem Jev, Sonnet" [ "$(ts_calls)" -eq 0 -a "$(args claude)" == "--model claude-sonnet-5-5 --append-system-prompt responda sempre em português claro" ]
+check "valor de opção com espaço no fim: origem padrao" sel_ev "" padrao claude claude-sonnet-5-5 ""
+t avulsa-opcao-c codex -c "model_instructions=fale pouco e bem"
+check "valor de opção curta com espaço no fim: sem Jev" [ "$(ts_calls)" -eq 0 ]
+t avulsa-flag claude --verbose "desenhe a arquitetura do serviço de filas"
+check "depois de opção sem valor não dá para saber: sem Jev" [ "$(ts_calls)" -eq 0 ]
+# opção de mais de um valor: o último valor tem um valor antes dele, e mesmo assim não é texto da tarefa
+t avulsa-adddir claude --add-dir /tmp/a "/tmp/dir com espaço"
+check "segundo valor de --add-dir, com espaço: sem Jev" [ "$(ts_calls)" -eq 0 -a "$(args claude)" == "--model claude-sonnet-5-5 --add-dir /tmp/a /tmp/dir com espaço" ]
+MCP="{\"mcpServers\": {\"x\": {\"env\": {\"TOKEN\": \"$TS_KEY\"}}}}"
+t avulsa-mcp claude --mcp-config a.json "$MCP"
+check "segundo valor de --mcp-config (JSON com token): sem Jev" [ "$(ts_calls)" -eq 0 ]
+check "segundo valor de --mcp-config: origem padrao"   sel_ev "" padrao claude claude-sonnet-5-5 ""
+t avulsa-tools claude --verbose --allowedTools "Bash(git log)" "Edit arquivo x"
+check "segundo valor de --allowedTools: sem Jev"       [ "$(ts_calls)" -eq 0 ]
+t avulsa-posicional claude --append-system-prompt "responda sempre em português claro" "desenhe a arquitetura do serviço de filas"
+check "prompt depois de opção com valor: não dá para saber, sem Jev" [ "$(ts_calls)" -eq 0 ]
+t avulsa-fim-valores claude --add-dir /tmp/a "/tmp/dir com espaço" -- "desenhe a arquitetura do serviço de filas"
+check "opção de vários valores e -- antes do prompt: só o prompt vai ao Jev" bash -c '[ "$1" -eq 1 ] && jq -e ".body.state == \"desenhe a arquitetura do serviço de filas\" and (.body | tostring | contains(\"dir com\") | not)" <<<"$2" >/dev/null' _ "$(ts_calls)" "$(ts_last)"
+ts_reset
+t avulsa-igual claude --effort=high "desenhe a arquitetura do serviço de filas"
+check "depois de --opção=valor: o prompt vai ao Jev"    bash -c '[ "$1" -eq 1 ] && jq -e ".body.state == \"desenhe a arquitetura do serviço de filas\"" <<<"$2" >/dev/null' _ "$(ts_calls)" "$(ts_last)"
+ts_reset
+t avulsa-fim claude --verbose -- "desenhe a arquitetura do serviço de filas"
+check "depois do -- que fecha as opções: o prompt vai ao Jev" bash -c '[ "$1" -eq 1 ] && jq -e ".body.state == \"desenhe a arquitetura do serviço de filas\"" <<<"$2" >/dev/null' _ "$(ts_calls)" "$(ts_last)"
+ts_reset
 t avulsa-palavra claude continue
 check "prompt de uma palavra só: sem Jev"              [ "$(ts_calls)" -eq 0 ]
 t 40-comlabel claude "desenhe a arquitetura do serviço de filas"

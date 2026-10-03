@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Testes do seletor de modelo por sessão (#219 e #257, ADR-02, fatias 1 e 2): o `oute-select` com a tabela do repo
 # (config/select/models.toml), um `gh` falso (tests/lib/fake-gh-issue.sh) e uma TypeSafe falsa (tests/lib/typesafe.sh)
-# no lugar do Jev. Bash puro + python3/jq, sem rede: a chave e o endereço da TypeSafe de verdade saem do ambiente.
+# (com TLS: o seletor só fala https, #313) no lugar do Jev. Bash puro + python3/jq/openssl, sem rede: a chave e o endereço da TypeSafe de verdade saem do ambiente.
 # Só comportamento externo: o JSON no stdout, o aviso no stderr e o código de saída.
 # O que o oute-task e o oute-swarm fazem com a escolha está em tests/oute-task.test.sh e tests/oute-swarm.test.sh.
 # Uso: tests/oute-select.test.sh   (sai != 0 se algo falhar)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'ts_stop; rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'ts_stop; kill "${CLARO_PID:-}" 2>/dev/null; rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/typesafe.sh"
-command -v jq >/dev/null && command -v python3 >/dev/null || die "precisa de jq e python3"
+command -v jq >/dev/null && command -v python3 >/dev/null && command -v openssl >/dev/null || die "precisa de jq, python3 e openssl"
 SEL="$ROOT/docker/oute-select"; TABLE="$ROOT/config/select/models.toml"
 [[ -x "$SEL" ]] || die "oute-select ausente ou sem +x: $SEL"
 
@@ -275,11 +275,38 @@ ts_reset; ts_set redirect; printf '/outro' > "$TS_DIR/redirect-to"
 jsel "$TXT"
 check "redirecionamento: não segue (a chave não vai a outro endereço)" bash -c '[ "$1" -eq 1 ] && grep -qF "o Jev falhou (HTTP 302)" <<<"$2"' _ "$(ts_calls)" "$ERR"
 check "redirecionamento: Sonnet, origem padrao"         is "" padrao claude "$SONNET" ""
-scheme=http; real="$OUTE_SELECT_JEV_URL"
-OUTE_SELECT_JEV_URL="$scheme://127.0.0.1:$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')/v1/systemone" jsel "$TXT"
+OUTE_SELECT_JEV_URL="https://127.0.0.1:$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')/v1/systemone" jsel "$TXT"
 check "TypeSafe fora do ar: Sonnet, com aviso"          bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "o Jev falhou (falha de rede" <<<"$3"' _ "$RC" "$OUT" "$ERR"
-OUTE_SELECT_JEV_URL="nada://x" jsel "$TXT"
-check "endereço inválido: Sonnet, com aviso, código 0"  bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "o Jev falhou" <<<"$3"' _ "$RC" "$OUT" "$ERR"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 -keyout "$TMP/outro.key" -out "$TMP/outro.pem" >/dev/null 2>&1
+before="$(ts_calls)"; SSL_CERT_FILE="$TMP/outro.pem" jsel "$TXT"
+check "certificado que não confere: o pedido não chega" bash -c '[ -s "$1" ] && [ "$2" -eq "$3" ]' _ "$TMP/outro.pem" "$before" "$(ts_calls)"
+check "certificado que não confere: Sonnet, com aviso"  bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "o Jev falhou (falha de rede" <<<"$3"' _ "$RC" "$OUT" "$ERR"
+
+# 11d2. endereço que não é https:// (#313): o Jev não é chamado (o texto e a chave iriam em claro), Sonnet com aviso
+# uma segunda falsa, sem certificado (fala sem TLS): se o seletor mandasse o pedido, ele chegaria e ficaria gravado
+ts_reset; ts_set ok arch 0.91; scheme=http; mkdir -p "$TMP/claro"
+python3 "$TESTLIB/fake-typesafe.py" "$TMP/claro" & CLARO_PID=$!
+for _ in $(seq 1 50); do [[ -s "$TMP/claro/port" ]] && break; sleep 0.1; done; PORT="$(cat "$TMP/claro/port")"
+NOTLS="oute-select: aviso: sessão sem issue, e o endereço do Jev (\$OUTE_SELECT_JEV_URL) não é https://: o Jev não é chamado; abrindo no padrão ($SONNET)"
+OUTE_SELECT_JEV_URL="$scheme://127.0.0.1:$PORT/v1/systemone" jsel "$TXT"
+check "sem TLS: Sonnet, origem padrao, código 0"        is "" padrao claude "$SONNET" ""
+check "sem TLS: aviso, sem o endereço"                  [ "$ERR" == "$NOTLS" ]
+check "sem TLS: sem confiança"                          bash -c '[ "$1" == "" ]' _ "$(conf)"
+OUTE_SELECT_JEV_URL="$scheme://127.0.0.1:$PORT/v1/systemone" jsel "$TXT" --issue 30
+check "sem TLS em issue sem label: Sonnet, com aviso"   bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\" and .phase == \"\" and .model == \"$3\"" <<<"$2" >/dev/null && grep -qF "issue #30 sem label aidlc:<fase>, e o endereço do Jev" <<<"$4"' _ "$RC" "$OUT" "$SONNET" "$ERR"
+OUTE_SELECT_JEV_URL="$scheme://127.0.0.1:$PORT/v1/systemone" jsel "$TXT" --agent codex
+check "sem TLS + --agent codex: padrão do Codex"        is "" manual codex gpt-6.1-sol high
+# o que não é exatamente https://<host>[:porta][/caminho] também não passa: outro esquema, maiúsculas, usuário, espaço, vazio
+for u in "nada://x" "HTTPS://127.0.0.1:$PORT/v1/systemone" "https://u:p@127.0.0.1:$PORT/v1/systemone" \
+         " https://127.0.0.1:$PORT/v1/systemone" "https://127.0.0.1:$PORT/v1/system one" "https://" "127.0.0.1:$PORT" ""; do
+  OUTE_SELECT_JEV_URL="$u" jsel "$TXT"
+  check "endereço recusado ($u): Sonnet, com o aviso do https" bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && [ "$3" == "$4" ]' _ "$RC" "$OUT" "$ERR" "$NOTLS"
+done
+check "endereço recusado: nenhuma chamada, nem à falsa sem TLS" [ "$(ts_calls)" -eq 0 -a ! -e "$TMP/claro/requests.jsonl" ]
+kill "$CLARO_PID" 2>/dev/null; wait "$CLARO_PID" 2>/dev/null
+check "endereço recusado: o valor não aparece no aviso" bash -c '! grep -qF "u:p@" "$1"' _ "$ALL"
+OUT="$(env -u OUTE_SELECT_JEV_URL -u OUTE_TYPESAFE_API_KEY "$SEL" --json --repo "$TMP/repo" --text-file "$TMP/texto" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "endereço padrão (sem a variável): passa pelo https e para na chave" grep -qF 'sem a chave da TypeSafe' <<<"$ERR"
 
 # 11e. sem a chave: não chama o Jev, Sonnet com aviso
 ts_reset; ts_set ok arch 0.91
@@ -300,6 +327,11 @@ jsel $'  \n\t ' --issue 30
 check "texto só com espaço: o aviso da fatia 1"         [ "$ERR" == "oute-select: aviso: issue #30 sem label aidlc:<fase>; abrindo no padrão ($SONNET)" ]
 sel --issue 30 --text-file "$TMP/nao-existe"
 check "arquivo de texto ilegível: Sonnet, com aviso"    bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "não li o texto da tarefa" <<<"$3"' _ "$RC" "$OUT" "$ERR"
+# #313: o texto só vem do --text-file; valor de outra opção, mesmo com espaço e no fim da linha, nunca vira texto
+mkdir -p "$TMP/repo com espaço no nome"
+OUT="$("$SEL" --json --task sessao-1003-0902 --repo "$TMP/repo com espaço no nome" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+check "valor de opção com espaço no fim da linha: não é texto, Sonnet" is "" padrao claude "$SONNET" ""
+check "valor de opção com espaço no fim da linha: o aviso de sessão sem texto" [ "$ERR" == "oute-select: aviso: sessão sem issue; abrindo no padrão ($SONNET)" ]
 check "sem texto: nenhuma chamada à TypeSafe"           [ "$(ts_calls)" -eq 0 ]
 
 # 11g. quando outra coisa decide, o Jev não é chamado, mesmo com texto e chave
