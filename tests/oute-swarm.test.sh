@@ -1115,4 +1115,25 @@ SH
   fi
 done
 
+# 11i. sessão sem ação manual do Bardi (#373): diálogo de pergunta, esc do dispatcher, blocked na retrospectiva
+CASE=sem-acao-manual; round "$CASE"
+sw spawn 373-semacao "instrução"
+P="$STATE/373-semacao.prompt"
+check "worker sem ação manual: código 0, com o prompt"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF 'Não use o diálogo interativo de pergunta do harness' "$P"
+check "worker sem ação manual: dúvida em texto PERGUNTA (#373)" grep -qF 'termina o turno com texto: `PERGUNTA #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
+check "worker sem ação manual: lista de comandos com prompt (#373)" grep -qF '**Comandos que abrem prompt de permissão mesmo com as permissões liberadas**' "$P"
+check "worker sem ação manual: rm com variável é o primeiro item (#373)" grep -qF '`rm` com variável sem proteção' "$P"
+check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+opn --max 2
+D="$FAKE/oute-task.last"
+check "dispatcher: lê a tela da sessão blocked (#373)"   grep -qF '`herdr agent read <pane> --source visible`' "$D"
+check "dispatcher: gatilho tell recusado (#373)"         grep -qF 'ou um `tell` recusado com `o campo de entrada não contém exatamente a mensagem`, leia a tela da sessão' "$D"
+check "dispatcher: exceção do esc (#373)"                grep -qF '`herdr agent send-keys <pane> esc`' "$D"
+check "dispatcher: esc nunca escolhe nem aprova (#373)"  grep -qF 'Nunca escolha opção, nunca aprove permissão, nunca digite resposta no diálogo' "$D"
+check "dispatcher: pergunta do Bardi segue a ele (#373)" grep -qF 'o `esc` não substitui a decisão' "$D"
+check "dispatcher: regra nunca digite no pane com exceção do esc (#373)" grep -qF 'nunca digite no pane por outro meio (a única exceção é o `esc` acima)' "$D"
+check "dispatcher: retrospectiva lista blocked com causa (#373)" grep -qF -- '- **Sessões `blocked`:** liste-as com a causa de cada uma' "$D"
+check "dispatcher: sem placeholder no prompt"            [ -z "$(grep -o '{{[A-Z_]*}}' "$D")" ]
+
 check_end
