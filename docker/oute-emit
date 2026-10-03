@@ -5,7 +5,8 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector); nada ao Langfuse.
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
-                                     sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session
+                                     sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session;
+                                     escolha do seletor (#219): phase, origin, model, effort
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
   oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
@@ -600,8 +601,13 @@ def cmd_swarm(rnd, line):
 # ---------------------------------------------------------------- sessões do oute-task (#128)
 TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.slug", "agent": "oute.task.agent",
              "base": "oute.task.base", "reason": "oute.task.reason", "legacy": "oute.task.legacy",
-             "round": "oute.swarm.round", "session": "oute.swarm.session"}
+             "round": "oute.swarm.round", "session": "oute.swarm.session",
+             # escolha do seletor (ADR-02, #219), só no opened e no reopened
+             "phase": "oute.task.phase", "origin": "oute.task.origin", "model": "oute.task.model",
+             "effort": "oute.task.effort"}
 TASK_REASONS = ("merged", "empty", "detached")
+TASK_ORIGINS = ("manual", "label", "padrao")
+SELECT_KEYS = ("phase", "origin", "model", "effort")
 
 
 def cmd_task(kind, caller, pairs):
@@ -622,8 +628,12 @@ def cmd_task(kind, caller, pairs):
     if kind == "removed":
         if f.get("reason") not in TASK_REASONS:
             raise Skip(f"motivo de remoção inválido: {f.get('reason')}")
+        for k in SELECT_KEYS:
+            f.pop(k, None)
     else:
         f.pop("reason", None)
+        if "origin" in f and f["origin"] not in TASK_ORIGINS:
+            raise Skip(f"origem da escolha inválida: {f['origin']}")
     if "legacy" in f:
         if f["legacy"] != "true":
             raise Skip(f"legacy inválido: {f['legacy']}")

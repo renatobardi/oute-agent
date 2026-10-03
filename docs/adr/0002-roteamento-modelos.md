@@ -59,6 +59,15 @@ Cada escolha vai como atributos do `oute.task.opened` (sem evento novo): fase, o
 - **Revisão cruzada** (auditoria de um PR pelo outro provedor): descartada.
 - Mudar o comportamento do ai-memory: ele usa provedor próprio (`AI_MEMORY_LLM_PROVIDER`) e não depende do router.
 
+### Como o seletor decide (fatia 1, #219)
+- **Tabela:** `config/select/models.toml`, montada só leitura no `agent` em `/opt/oute/select`. Uma linha por grupo de fases, as exceções por label e o padrão.
+- **`oute-select`** é o resolvedor único: `oute-select --json` devolve `phase`, `origin`, `agent`, `model`, `effort` e `reason` sem abrir sessão. O `oute-task` e o `oute-swarm spawn` chamam o mesmo comando, e a triagem do dispatcher também.
+- **Issue da sessão:** o número no começo do slug (`<n>-…`), lido com `gh issue view <n> --json labels` no repo da sessão. Slug sem número é sessão sem issue.
+- **Escolha explícita (`manual`):** `--agent`/`--model` no `oute-task` e no `spawn`, o agente da rodada, o `codex` posicional e o `--model`/`-m` nos argumentos do agente. O que a escolha explícita não disse vem da linha que a issue daria: `--agent codex` abre o modelo e o esforço do Codex da fase; `--model` sem `--agent` abre no agente da coluna em que o id está (fora da tabela, pelo prefixo do id).
+- **Fase fixa do dispatcher:** `plan`, com origem `padrao` (nenhum label decidiu).
+- **Nunca bloqueia:** `gh` fora do ar, issue sem label de fase, fase fora da tabela ou sessão sem issue dão o padrão (Sonnet), com aviso. Tabela ausente ou inválida, ou `oute-select` falhando: a sessão abre sem `--model`, no modelo padrão do agente, com aviso. Só argumento inválido (`--agent`/`--model`) recusa a abertura.
+- **Abertura:** `claude --model <id>` ou `codex -m <id> -c model_reasoning_effort=<e>`. A marca da sessão guarda agente, modelo e esforço, e o shim os repõe quando a conversa é retomada (restore do herdr, `--resume`, `codex resume`) sem modelo na linha de comando.
+
 Implementação, em fatias (adendo 2026-10-02):
 1. #219: tabela em `config/`, label de tipo e de fase, `oute-select`, padrão Sonnet;
 2. #257: Jev direto na TypeSafe;

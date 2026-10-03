@@ -5,8 +5,9 @@
 #              [--agent claude|codex]               --agent: agente das sessões da rodada (sem ele: claude)
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
 #              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --agent: sobrepõe o da
-#              [--repo <repo>] [--kaizen]           rodada. --repo: outro repo (padrão: o da rodada); --kaizen:
-#                                                   sessão kaizen, fora do --max
+#              [--model <id>] [--repo <repo>]       rodada. --model: modelo da sessão (sem ele: o da fase da issue,
+#              [--kaizen]                           pelo oute-select). --repo: outro repo (padrão: o da rodada);
+#                                                   --kaizen: sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
@@ -93,25 +94,28 @@ cmd_start() {
   id="swarm-$(date +%m%d-%H%M)"
   mkdir -p "$STATE_ROOT/$id"
   # agent = o do dispatcher (oute.agent dos eventos da rodada); workers = o das sessões, só com --agent (#212): sem ele,
-  # a rodada não tem padrão e o spawn decide (hoje claude; depois o seletor, #219)
+  # a rodada não tem padrão e o seletor decide em cada spawn (#219)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" \
     "${workers:+workers=$workers$'\n'}" > "$STATE_ROOT/$id/meta"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   if [[ -n "$workers" ]]; then wtext="\`$workers\` (escolhido pelo Bardi na abertura, \`--agent $workers\`)"
-  else wtext="seletor (a rodada abriu sem \`--agent\`; até o seletor existir, #219, o \`spawn\` usa \`claude\`)"; fi
+  else wtext="seletor (a rodada abriu sem \`--agent\`: \`claude\`, com o modelo da fase de cada issue)"; fi
   prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
-                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" "$LIB/swarm.md")"
+                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
+                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" "$LIB/swarm.md")"
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
   echo "dispatcher $id · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
-    exec oute-task -r "$main" "$id" claude "$prompt"
+    exec oute-task --phase plan -r "$main" "$id" claude "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
 }
 
 cmd_spawn() {
   local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
+  local model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
+      --model) model="${2:?}"; shift 2 ;;
       --force) force=1; shift ;;
       --repo) repo="${2:?}"; shift 2 ;;
       --kaizen) kaizen=1; shift ;;
@@ -119,7 +123,7 @@ cmd_spawn() {
       *) if [[ -z "$task" ]]; then task="$1"; elif [[ -z "$instr" ]]; then instr="$1"; else die "argumento a mais: $1"; fi; shift ;;
     esac
   done
-  [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex]'
+  [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex] [--model <id>]'
   [[ -z "$agent" ]] || check_agent "$agent"
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
@@ -132,12 +136,11 @@ cmd_spawn() {
     [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "meta da rodada $round sem max válido ($STATE_ROOT/$round/meta); rode com OUTE_SWARM_ID=$round OUTE_SWARM_MAX=<n>"
   fi
   # sem --agent: o agente da rodada (workers= do meta, lido do arquivo também com OUTE_SWARM_ID, #212); rodada sem ele
-  # ou spawn avulso: claude (depois, o seletor, #219)
+  # ou spawn avulso: o seletor decide (#219, abaixo)
   if [[ -z "$agent" && "$round" != avulso ]]; then
     agent="$(sed -n 's/^workers=//p' "$STATE_ROOT/$round/meta" 2>/dev/null | head -1)"
     [[ -z "$agent" ]] || check_agent "$agent" "workers= do meta da rodada $round"
   fi
-  agent="${agent:-claude}"
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
   else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
@@ -148,7 +151,24 @@ cmd_spawn() {
   if (( ! force && ! kaizen )) && [[ -n "$max" ]] && (( count >= max )); then
     die "limite da rodada atingido ($count/$max abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
   fi
+  # seletor (ADR-02, #219): o --agent (do spawn ou da rodada) e o --model são a escolha explícita; o resto vem da issue
+  # (label kaizen/docs, depois aidlc:<fase>, senão Sonnet). Resolvido aqui, uma vez, e entregue ao oute-task em
+  # <slug>.select: o agente gravado no spawned é o que de fato abre. Sem oute-select, ou com ele falhando, a sessão
+  # abre como antes (o agente pedido, ou claude, com o modelo dele); só argumento inválido (código 2) recusa o spawn
+  if command -v oute-select >/dev/null 2>&1; then
+    [[ -z "$agent" ]] || sargs+=(--agent "$agent")
+    [[ -z "$model" ]] || sargs+=(--model "$model")
+    sel="$(oute-select --json --repo "$main" --issue "$n" ${sargs[@]+"${sargs[@]}"} </dev/null)" || src=$?
+    (( src != 2 )) || die "seletor recusou a sessão $slug (acima)"
+    IFS='|' read -r s_agent s_model s_effort s_phase s_origin < <(jq -r '[.agent, .model, .effort, .phase, .origin] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
+    if (( src != 0 )) || [[ ! "${s_agent:-}" =~ ^(claude|codex)$ ]]; then
+      echo "oute-swarm: aviso: o seletor de modelo não respondeu; $slug abre com o modelo padrão do agente" >&2; sel=""
+    else agent="$s_agent"; fi
+  elif [[ -n "$model" ]]; then die "--model precisa do oute-select, que não está no PATH"
+  fi
+  agent="${agent:-claude}"
   pfile="$state/$slug.prompt"
+  [[ -z "$sel" ]] || { sfile="$state/$slug.select"; printf '%s\n' "$sel" > "$sfile"; }
   {
     printf '%s\n\n' "$instr"
     sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
@@ -189,14 +209,15 @@ cmd_spawn() {
   fi
   # OUTE_SWARM_ROUND: a rodada na sessão do worker (oute.swarm.round dos eventos oute.task.* e das conversas, #128);
   # spawn fora de rodada abre sessão avulsa
-  printf -v cmd 'OUTE_SWARM_WORKER=1 %soute-task -r %q %q %q "$(cat %q)"' \
-    "$([[ "$round" == avulso ]] || printf 'OUTE_SWARM_ROUND=%q ' "$round")" "$main" "$slug" "$agent" "$pfile"
+  printf -v cmd 'OUTE_SWARM_WORKER=1 %s%soute-task -r %q %q %q "$(cat %q)"' \
+    "$([[ "$round" == avulso ]] || printf 'OUTE_SWARM_ROUND=%q ' "$round")" \
+    "$([[ -z "$sfile" ]] || printf 'OUTE_SELECT_FILE=%q ' "$sfile")" "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
   # slug pane agente início aba repo tipo (linhas antigas param na aba: repo = o da rodada)
   printf '%s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \
     "$( (( kaizen )) && echo kaizen || echo -)" >> "$state/spawned"
   slog "$state" "$(date -u +%FT%TZ) spawn $slug $agent$( (( kaizen )) && echo ' kaizen')"
-  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
+  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
 # id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)
@@ -651,7 +672,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;

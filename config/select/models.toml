@@ -1,0 +1,46 @@
+# Tabela de fase do seletor de modelo (ADR-02, #219): fase do AI-DLC → modelo Claude e modelo/esforço do Codex.
+# Lida pelo `oute-select` a cada abertura de sessão (`oute-task`, `oute-swarm spawn`); montada só leitura no `agent`
+# em /opt/oute/select. Mudança entra com `git pull` + `oute down/up`, sem release.
+#
+# Ids exatos, sem alias (`opus`, `sonnet`): trocar de versão é uma mudança visível aqui. Todo id precisa existir no
+# CLI instalado (#220). A coluna do Codex só abre com `--agent codex` (a reserva automática é a #258).
+#
+# Precedência: --agent/--model > exceção por label > label aidlc:<fase> > [default].
+
+# Nada decidiu (sem issue, issue sem label de fase, `gh` fora do ar): Sonnet, com aviso.
+[default]
+claude = "claude-sonnet-5-5"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+# Uma linha por grupo de fases. Só fases do ADR-07 (e a faixa `ctx`) são chave.
+[[line]]
+phases = ["strat", "intent", "arch", "spec"]
+claude = "claude-opus-5-5"
+codex = "gpt-6-astra"
+effort = "high"
+
+[[line]]
+phases = ["build", "qa", "design", "plan", "ship", "iter"]
+claude = "claude-sonnet-5-5"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+[[line]]
+phases = ["ops", "ctx", "learn"]
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"
+
+# Exceções por label de tipo, antes da fase, na ordem em que aparecem aqui.
+[[exception]]
+label = "kaizen"
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"
+
+[[exception]]
+label = "docs"
+claude = "claude-haiku-4-5-20251001"
+codex = "gpt-6-luna"
+effort = "medium"

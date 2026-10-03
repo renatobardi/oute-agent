@@ -59,6 +59,14 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     cria/reabre /workspace/.worktrees/<space>/<repo>-<slug>, branch sessao/<slug>
                                     (<space> = label do space do herdr em nome de pasta; fora do herdr: _sem-space)
   oute-task -r <repo> <slug> …      idem, de fora do repo
+  oute-task --agent claude|codex --model <id> <slug> …
+                                    escolha explícita do agente e/ou do modelo (antes do slug)
+  Modelo da sessão (ADR-02): sai da issue do slug (<n>-…), pela tabela config/select/models.toml:
+  --agent/--model (ou `codex` depois do slug) > label kaizen/docs > label aidlc:<fase> > Sonnet.
+  Sem label ou com o gh fora do ar: Sonnet, com aviso; nunca bloqueia. O restore do herdr reabre no mesmo modelo.
+  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--model <id>]
+                                    diz fase, origem (manual/label/padrao), agente, modelo, esforço e motivo,
+                                    sem abrir sessão
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
   oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal
                                     dos repos com worktree nele (sem --yes: só mostra)
@@ -82,10 +90,12 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
       --agent = agente de todas as sessões da rodada, kaizen inclusive (sem ele: claude).
+      O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
       Merge só quando você pedir.
-  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--force] [--repo R] [--kaizen]
+  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --agent: sobrepõe o agente da rodada (sem ele: o da rodada; spawn avulso: claude)
+      --model: modelo da sessão (sem ele: o da fase da issue, pelo oute-select)
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (o dispatcher usa quando você decide).
