@@ -1129,6 +1129,7 @@ check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF
 check "worker sem ação manual: dúvida em texto BLOQUEADO (#373)" grep -qF 'termina o turno com texto: `BLOQUEADO #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
 check "worker sem ação manual: lista de comandos com prompt (#373)" grep -qF '**Comandos que abrem prompt de permissão mesmo com as permissões liberadas**' "$P"
 check "worker sem ação manual: rm com variável é o primeiro item (#373)" grep -qF '`rm` com variável sem proteção' "$P"
+check "worker spike: escopo de teste em serviço compartilhado (#378)" grep -qF 'use um escopo de teste fixo, com `workspace` e `project` próprios e `oute.task.slug` identificável' "$P"
 check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 opn --max 2
 D="$FAKE/oute-task.last"

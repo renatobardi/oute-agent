@@ -1,0 +1,2 @@
+### Changed
+- **Spike que roda agente ou escreve em serviço compartilhado usa escopo de teste** (#378). O prompt do worker (`docker/swarm-worker.md`, bloco `spike`) manda usar `workspace`/`project` próprios e `oute.task.slug` identificável no ai-memory, na telemetria e no bucket, listar no relatório o que ficou e como limpar, e limpar o que o escopo de teste permitir. **Precisa de release** (arquivo copiado para a imagem).
