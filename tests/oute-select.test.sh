@@ -277,7 +277,9 @@ check "redirecionamento: não segue (a chave não vai a outro endereço)" bash -
 check "redirecionamento: Sonnet, origem padrao"         is "" padrao claude "$SONNET" ""
 OUTE_SELECT_JEV_URL="https://127.0.0.1:$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')/v1/systemone" jsel "$TXT"
 check "TypeSafe fora do ar: Sonnet, com aviso"          bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "o Jev falhou (falha de rede" <<<"$3"' _ "$RC" "$OUT" "$ERR"
-SSL_CERT_FILE="$TMP/outro.pem" jsel "$TXT"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 -keyout "$TMP/outro.key" -out "$TMP/outro.pem" >/dev/null 2>&1
+before="$(ts_calls)"; SSL_CERT_FILE="$TMP/outro.pem" jsel "$TXT"
+check "certificado que não confere: o pedido não chega" bash -c '[ -s "$1" ] && [ "$2" -eq "$3" ]' _ "$TMP/outro.pem" "$before" "$(ts_calls)"
 check "certificado que não confere: Sonnet, com aviso"  bash -c '[ "$1" -eq 0 ] && jq -e ".origin == \"padrao\"" <<<"$2" >/dev/null && grep -qF "o Jev falhou (falha de rede" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 
 # 11d2. endereço que não é https:// (#313): o Jev não é chamado (o texto e a chave iriam em claro), Sonnet com aviso
