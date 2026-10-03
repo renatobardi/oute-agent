@@ -137,7 +137,7 @@ fi
 # ---------------------------------------------------------------- 4. backfill
 BH="$TMP/bf"; R="$BH/.oute/swarm/swarm-0926-1012"; mkdir -p "$R" "$BH/outbox/done" "$BH/outbox/rejected" "$BH/inbox" "$BH/.oute/emit"
 echo 2026-09-27T12:00:00Z > "$BH/.oute/emit/since"
-printf 'repo=/workspace/lab\nmax=2\nlabel=bug\nstarted=2026-09-26T13:12:00Z\n' > "$R/meta"
+printf 'repo=/workspace/lab\nmax=2\nlabel=bug\nstarted=2026-09-26T13:12:00Z\nworkers=codex\n' > "$R/meta"
 printf '7-foo w1:p1 codex 2026-09-26T13:20:00Z w1:t1\n8-bar w1:p2 claude 2026-09-26T13:21:00Z w1:t2 /workspace/oute-agent kaizen\n' > "$R/spawned"
 printf 'prompt do 7\n' > "$R/7-foo.prompt"
 cat > "$R/log" <<'L'
@@ -169,7 +169,7 @@ check "backfill: resumo com emitidos e pulados"        grep -q '14 de 14 evento(
 check "backfill: todos com oute.backfill=true"         [ "$(n '.attrs["oute.backfill"] == true')" -eq 14 -a "$(n 'true')" -eq 14 ]
 check "backfill: rodada aberta na hora original"       [ "$(n '.name == "oute.swarm.round.opened" and (.time | tonumber / 1e9 | todate) == "2026-09-26T13:12:00Z"
                                                               and .attrs["oute.swarm.repo"] == "lab" and (.attrs["oute.swarm.max"] | tonumber) == 2 and .attrs["oute.swarm.label"] == "bug"
-                                                              and .attrs["oute.agent"] == "claude"')" -eq 1 ]
+                                                              and .attrs["oute.agent"] == "claude" and .attrs["oute.swarm.round.agent"] == "codex"')" -eq 1 ]
 check "backfill: spawn com agente, repo, kaizen e prompt" [ "$(n '.name == "oute.swarm.session.spawned" and .attrs["oute.swarm.session"] == "7-foo" and .attrs["oute.swarm.session.agent"] == "codex"
                                                               and (.attrs["oute.swarm.issue"] | tonumber) == 7 and .attrs["oute.swarm.repo"] == "lab" and .attrs["oute.swarm.kaizen"] == false
                                                               and .body == "prompt do 7\n"')" -eq 1 -a \

@@ -547,7 +547,9 @@ def swarm_event(rnd, line, nth=1):
         return event("oute.swarm.round.opened", agent, ts, {
             **base, "oute.swarm.repo": os.path.basename(repo) if repo else None,
             "oute.swarm.max": int(m["max"]) if m.get("max", "").isdigit() else None,
-            "oute.swarm.label": m.get("label")}, **fact)
+            "oute.swarm.label": m.get("label"),
+            # agente das sessões da rodada (#212): só com --agent na abertura (workers= no meta)
+            "oute.swarm.round.agent": m.get("workers")}, **fact)
     if kind == "spawn":
         slug = rest.split(" ", 1)[0]
         p = spawned(rdir, slug)

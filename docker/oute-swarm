@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # oute-swarm — várias sessões de agente em paralelo, uma por issue, coordenadas por uma sessão do Claude.
 #
-#   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão
+#   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão.
+#              [--agent claude|codex]               --agent: agente das sessões da rodada (sem ele: claude)
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
-#              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --repo: outro repo
-#              [--repo <repo>] [--kaizen]           (padrão: o da rodada); --kaizen: sessão kaizen, fora do --max
+#              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --agent: sobrepõe o da
+#              [--repo <repo>] [--kaizen]           rodada. --repo: outro repo (padrão: o da rodada); --kaizen:
+#                                                   sessão kaizen, fora do --max
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
@@ -54,6 +56,15 @@ round_id() {
   printf '%s' "$r"
 }
 
+# agente de sessão aceito pelo spawn e pela abertura (--agent); $2 = de onde veio, para a mensagem
+check_agent() {
+  case "$1" in
+    claude|codex) ;;
+    pi) die "Pi saiu do stack (#217), use claude ou codex${2:+ ($2)}" ;;
+    *) die "agente inválido: $1${2:+ ($2)}; use claude ou codex" ;;
+  esac
+}
+
 resolve_repo() {
   local r="$1"
   [[ "$r" == */* ]] || r="/workspace/$r"
@@ -62,36 +73,42 @@ resolve_repo() {
 }
 
 cmd_start() {
-  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L]"
-  local repo max=3 label="" main name id prompt
+  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex]"
+  local repo max=3 label="" workers="" main name id prompt wtext
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max) max="${2:?}"; shift 2 ;;
       --label) label="${2:?}"; shift 2 ;;
+      --agent) workers="${2:?}"; shift 2 ;;
       *) die "opção desconhecida: $1" ;;
     esac
   done
   [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "--max inválido: $max"
   (( max <= 5 )) || die "--max acima de 5 não é permitido (quota e revisão humana)"
+  [[ -z "$workers" ]] || check_agent "$workers"
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (o dispatcher abre abas nele)"
   command -v gh >/dev/null || die "gh não encontrado"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="swarm-$(date +%m%d-%H%M)"
   mkdir -p "$STATE_ROOT/$id"
-  # agent = o do dispatcher (oute.agent dos eventos da rodada)
-  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n' "$main" "$max" "$label" "$(date -u +%FT%TZ)" > "$STATE_ROOT/$id/meta"
+  # agent = o do dispatcher (oute.agent dos eventos da rodada); workers = o das sessões, só com --agent (#212): sem ele,
+  # a rodada não tem padrão e o spawn decide (hoje claude; depois o seletor, #219)
+  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" \
+    "${workers:+workers=$workers$'\n'}" > "$STATE_ROOT/$id/meta"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
+  if [[ -n "$workers" ]]; then wtext="\`$workers\` (escolhido pelo Bardi na abertura, \`--agent $workers\`)"
+  else wtext="seletor (a rodada abriu sem \`--agent\`; até o seletor existir, #219, o \`spawn\` usa \`claude\`)"; fi
   prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
-                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" "$LIB/swarm.md")"
-  slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label})"
-  echo "dispatcher $id · repo $name · max $max${label:+ · label $label}" >&2
+                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" "$LIB/swarm.md")"
+  slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
+  echo "dispatcher $id · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
     exec oute-task -r "$main" "$id" claude "$prompt"
 }
 
 cmd_spawn() {
-  local agent=claude force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo
+  local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -103,11 +120,7 @@ cmd_spawn() {
     esac
   done
   [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex]'
-  case "$agent" in
-    claude|codex) ;;
-    pi) die "Pi saiu do stack (#217), use claude ou codex" ;;
-    *) die "agente inválido: $agent" ;;
-  esac
+  [[ -z "$agent" ]] || check_agent "$agent"
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
   slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
   n="${slug%%-*}"
@@ -118,6 +131,13 @@ cmd_spawn() {
     max="$(sed -n 's/^max=//p' "$STATE_ROOT/$round/meta" | head -1)"; rrepo="$(sed -n 's/^repo=//p' "$STATE_ROOT/$round/meta" | head -1)"
     [[ "$max" =~ ^[1-9][0-9]?$ ]] || die "meta da rodada $round sem max válido ($STATE_ROOT/$round/meta); rode com OUTE_SWARM_ID=$round OUTE_SWARM_MAX=<n>"
   fi
+  # sem --agent: o agente da rodada (workers= do meta, lido do arquivo também com OUTE_SWARM_ID, #212); rodada sem ele
+  # ou spawn avulso: claude (depois, o seletor, #219)
+  if [[ -z "$agent" && "$round" != avulso ]]; then
+    agent="$(sed -n 's/^workers=//p' "$STATE_ROOT/$round/meta" 2>/dev/null | head -1)"
+    [[ -z "$agent" ]] || check_agent "$agent" "workers= do meta da rodada $round"
+  fi
+  agent="${agent:-claude}"
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
   else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
@@ -606,7 +626,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   close) shift; cmd_close "$@" ;;
