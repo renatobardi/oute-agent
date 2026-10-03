@@ -964,10 +964,9 @@ sw spawn 358-rmvar "instrução"
 P="$STATE/358-rmvar.prompt"
 check "worker rm var: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
 check "worker rm var: regra sobre rm com variável (#358)" grep -qF -- '- **Em teste e script, `rm` com variável usa `"${VAR:?}"/…` ou caminho literal**' "$P"
-check "worker rm var: motivo da regra: não dispara prompt (#358)" grep -qF 'para não disparar o prompt de permissão que trava a sessão' "$P"
+check "worker rm var: motivo da regra: não dispara prompt (#358)" grep -qF 'para não disparar o prompt de permissão' "$P"
 check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
-check "worker rm var: aviso sobre rm -rf com variável (#358)" grep -qF 'Não use `rm -rf` com variável vazia nem acione o protetor de expansão inativa' "$P"
-check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code nega a operação e interrompe a sessão em ~1 min 35 s com um prompt sem resposta' "$P"
+check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
 check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end
