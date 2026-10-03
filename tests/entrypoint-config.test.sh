@@ -14,7 +14,19 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/fake-ai-memory.sh"
 for c in jq python3 ssh-keygen; do command -v "$c" >/dev/null || die "precisa de $c"; done
-python3 -c 'import tomlkit' 2>/dev/null || die "precisa do módulo tomlkit do python3"
+# o codex_config.py precisa do tomlkit (na imagem, python3-tomlkit); sem ele no python3 do ambiente, venv em cache com
+# a mesma versão (tests/lib/tomlkit-requirements.txt, só com hash)
+TOML_PY=python3
+if ! python3 -c 'import tomlkit' 2>/dev/null; then
+  req="$ROOT/tests/lib/tomlkit-requirements.txt"
+  d="${XDG_CACHE_HOME:-$HOME/.cache}/oute-tests/tomlkit-$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:12])' "$req")"
+  if ! "$d/bin/python" -c 'import tomlkit' 2>/dev/null; then
+    rm -rf "$d"; mkdir -p "$(dirname "$d")"
+    { python3 -m venv "$d" && "$d/bin/pip" install -q --only-binary :all: --require-hashes -r "$req"; } >/dev/null 2>&1 \
+      || die "sem tomlkit no python3 e não montei o venv (tests/lib/tomlkit-requirements.txt)"
+  fi
+  TOML_PY="$d/bin/python"
+fi
 
 ENTRYPOINT_SRC="${ENTRYPOINT_SRC:-$ROOT/docker/entrypoint.sh}"
 LIB_DIR="${OUTE_LIB_DIR:-$ROOT/docker}"   # onde ficam codex_config.py, addons-link e agent-notes.md (na imagem: /usr/local/lib/oute)
@@ -28,7 +40,7 @@ FN="$TMP/fn.sh"
 {
   grep '^log() ' "$ENTRYPOINT_SRC"
   echo 'sudo() { :; }'
-  sed -n '/^setup_agents() {/,/^}/p;/^setup_ssh() {/,/^}/p' "$ENTRYPOINT_SRC" | sed "s#/usr/local/lib/oute/#$LIB_DIR/#g"
+  sed -n '/^setup_agents() {/,/^}/p;/^setup_ssh() {/,/^}/p' "$ENTRYPOINT_SRC" | sed "s#python3 /usr/local/lib/oute/codex_config.py#$TOML_PY $LIB_DIR/codex_config.py#;s#/usr/local/lib/oute/#$LIB_DIR/#g"
 } > "$FN"
 check "entrypoint: setup_agents e setup_ssh extraídas"   bash -c 'grep -q "^setup_agents() {" "$1" && grep -q "^setup_ssh() {" "$1"' _ "$FN"
 
