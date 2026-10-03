@@ -117,7 +117,7 @@ cp "$TMP/sp/db.duckdb" "$TMP/copy.duckdb"
 PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/copy.duckdb" "$TMP/cfg-sp.toml" "$T1" > "$TMP/py.out" 2>&1 <<'PY'
 import logging, sys, duckdb
 logging.disable(logging.CRITICAL)
-from agent_studio import config, tray, tz, usage
+from agent_studio import config, tray, tz, usage, web
 from pycheck import check as out
 db, cfg_path, T1 = sys.argv[1], sys.argv[2], int(sys.argv[3])
 cfg = config.load(cfg_path)
@@ -151,6 +151,9 @@ for bad in ("Marte/Olimpo", "", "../etc/passwd", "America/", "/etc/passwd", None
         ok = True
     out(f"tz.parse recusa {bad!r}", ok)
 con.close()
+when, ts = web._when_in(SP), web._ts_in(SP)
+out("tela: hora do SurrealDB com fração e Z convertida (07:43Z = 04:43 em São Paulo)", when("2026-09-29T07:43:00.5Z") == "2026-09-29 04:43:00")
+out("tela: valor que não é hora segue como veio (sem quebrar) e vazio vira traço", when("lixo") == "lixo" and when(None) == "—" and when("") == "—" and ts(None) == "—")
 PY
 check_py_lines "$TMP/py.out"
 
