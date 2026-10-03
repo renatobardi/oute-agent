@@ -20,6 +20,10 @@
       "idle_seconds": 5
     }
   ],
+  "decisions": {
+    "total": 0,
+    "pending": []
+  },
   "proposals": {
     "available": false,
     "total": null,

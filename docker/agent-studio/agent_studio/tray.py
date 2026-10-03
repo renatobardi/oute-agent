@@ -10,14 +10,19 @@
 - **Erros na última hora** (`errors_last_hour`): os erros do mesmo `usage.aggregate`, por host × agente.
 - **Alertas** (`alerts`): os do `alerts.evaluate` (#204), como no `GET /v1/alerts`, mais `title` e `text` prontos
   (`alert_text`, o mesmo texto da tela; #344).
-- **Barra** (`bar`): nº de pedidos pendentes e nº de alertas.
+- **Decisões pendentes** (`decisions`, #386): rodada do swarm parada esperando uma resposta do Bardi
+  (`decisions.pending`), com a pergunta e a idade; do DuckDB, junto dos pedidos.
+- **Barra** (`bar`): nº de pedidos pendentes e nº de alertas (as decisões pendentes têm o `decisions.total`).
 
 `snapshot` lê o DuckDB (uma passada, sob a trava do `store`); `pending` lê o SurrealDB; `response` junta os dois.
 SurrealDB fora não derruba a resposta: `proposals.available` = `false` e `bar.pending` = `null` (nunca zero por
 palpite).
 """
-from . import alert_text, alerts as alerts_mod, proposals as prop_mod, usage as usage_mod
+import logging
 
+from . import alert_text, alerts as alerts_mod, decisions as decisions_mod, proposals as prop_mod, usage as usage_mod
+
+log = logging.getLogger(__name__)
 HOUR_NS = 3_600_000_000_000
 PENDING_LIMIT = 50  # pedidos pendentes na resposta (os mais novos); `proposals.total` diz quantos há
 
@@ -34,6 +39,15 @@ def _cost(group):
 
 def _name(v):
     return (v is None, v or "")
+
+
+def _decisions(con, at_ns, cfg):
+    """Decisões pendentes (#386). A falha do cálculo não derruba o menu: cai em `NO_DECISIONS`, a causa no stderr."""
+    try:
+        return decisions_mod.pending(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — bloco acessório do tray
+        log.exception("tray: decisões pendentes falhou, respondi sem elas")
+        return NO_DECISIONS
 
 
 def snapshot(con, at_ns, prices, cfg):
@@ -64,6 +78,7 @@ def snapshot(con, at_ns, prices, cfg):
         "errors_last_hour": {"from": alerts_mod.iso(hour[0]), "to": alerts_mod.iso(at_ns),
                              "total": sum(e["total"] for e in errors), "rows": errors},
         "alerts": alert_text.with_text(alerts_mod.evaluate(con, at_ns, cfg)["alerts"]),
+        "decisions": _decisions(con, at_ns, cfg),
     }
 
 
@@ -80,6 +95,7 @@ def pending(surreal, at_ns, limit=PENDING_LIMIT):
     return {"available": True, "total": found["pending_total"], "pending": rows}
 
 
+NO_DECISIONS = {"total": 0, "pending": []}
 UNAVAILABLE = {"available": False, "total": None, "pending": []}
 
 
@@ -88,6 +104,6 @@ def response(at_ns, snap, proposals, config_errors):
     proposals = proposals or UNAVAILABLE
     return {"at": alerts_mod.iso(at_ns),
             "bar": {"pending": proposals["total"], "alerts": len(snap["alerts"])},
-            "machines": snap["machines"], "proposals": proposals, "cost_today": snap["cost_today"],
+            "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS, "cost_today": snap["cost_today"],
             "errors_last_hour": snap["errors_last_hour"], "alerts": snap["alerts"],
             "config": {"errors": config_errors}}

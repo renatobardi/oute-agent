@@ -8,7 +8,7 @@ import threading
 
 import duckdb
 
-from . import (alerts as alerts_mod, conversations as conv_mod, prices as prices_mod, proposals as prop_mod,
+from . import (alerts as alerts_mod, conversations as conv_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
                sessions as sess_mod, tray as tray_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
@@ -181,6 +181,11 @@ class Store:
         """Leitura do `/v1/tray` (#205), sob a mesma trava: os blocos do DuckDB numa passada só."""
         with self.lock:
             return tray_mod.snapshot(self.con, at_ns, prices, cfg)
+
+    def decisions(self, at_ns, cfg):
+        """Decisões pendentes do Bardi (#386), sob a mesma trava: o bloco do tray e o topo das telas."""
+        with self.lock:
+            return decisions_mod.pending(self.con, at_ns, cfg)
 
     # leituras da tela (#206), sob a mesma trava
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None):
