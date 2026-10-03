@@ -210,6 +210,30 @@ check "CSP: script e estilo só deste servidor"         bash -c 'grep -q "defaul
 check "páginas não vão para cache"                     test "$(hdr cache-control "${C[@]}" "$STUDIO_URL$U1")" = no-store
 check "até aqui, nenhuma falha no stderr"              bash -c '! grep -q "respondi 500\|falhou\|Traceback" "$1"' _ "$TMP/s/stderr"
 
+# ---------------------------------------------------------------- 7b. título com "palavra: texto" (#337)
+# o `/rpc` do SurrealDB lia a variável "ship: verificar deploy…" como record id e guardava só `ship:verificar`
+T337='ship: verificar deploy v0.7.33 no oute-server'; P337=20261003-134722-ship-verificar-deploy-v0-7-33-no-oute-se
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" "$P337" "$T337" <<'PY'
+import json, sys
+from otlp_json import canal_proposed as proposed, kv, rl
+tmp, now, pid, title = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+res = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": "claude"}
+ev = lambda i, t: rl(res, [proposed(now - 30, pid + i, "ev-337" + i, t, "user", "true\n")])
+json.dump({"resourceLogs": [ev("", title), ev("-b", "12:30 reunião: é só texto"), ev("-c", "2026-10-03T10:00:00Z")]}, open(f"{tmp}/t337.json", "w"))
+PY
+check "título com dois-pontos: ingestão 200"           test "$(post logs "$TMP/t337.json")" = 200
+check "título com dois-pontos: SurrealDB guarda string, inteiro" jqe --arg t "$T337" '.[0].title == $t and .[0].ty == "string"' <<<"$(surreal_q "SELECT title, type::of(title) AS ty FROM type::record('pedido', '$P337')")"
+check "título com data ou hora no começo: segue string" jqe '[.[] | select(.id | test("-[bc]`?$"))] | length == 2 and all(.ty == "string") and (map(.title) | sort == ["12:30 reunião: é só texto", "2026-10-03T10:00:00Z"])' <<<"$(surreal_q "SELECT record::id(id) AS id, title, type::of(title) AS ty FROM pedido WHERE record::id(id) IN ['$P337-b', '$P337-c']")"
+page "/pedido?id=$P337" > "$TMP/p337.html"
+check "/pedido: título inteiro na tela e no <title>"   bash -c 'grep -qF "<dd>$2</dd>" "$1" && grep -qF "<title>$2 · agent-studio</title>" "$1"' _ "$TMP/p337.html" "$T337"
+check "/pedidos: título inteiro no link"               bash -c 'grep -qF "\">$2</a> <span class=\"sub\">$3</span>" "$1"' _ <(page /pedidos) "$T337" "$P337"
+check "/v1/tray: título inteiro"                       jqe --arg t "$T337" --arg id "$P337" '.proposals.pending | map(select(.id == $id)) | length == 1 and .[0].title == $t' <<<"$(page /v1/tray)"
+post logs "$TMP/t337.json" >/dev/null
+check "reenvio do mesmo evento: título segue inteiro"  jqe --arg t "$T337" --arg id "$P337" '.proposals.pending | map(select(.id == $id)) | length == 1 and .[0].title == $t' <<<"$(page /v1/tray)"
+
+# os três pedidos saem do SurrealDB: as seções seguintes contam os pedidos do exemplo
+surreal_q "DELETE pedido WHERE record::id(id) IN ['$P337', '$P337-b', '$P337-c']" >/dev/null
+
 # ---------------------------------------------------------------- 8. SurrealDB fora
 surreal_stop
 page /pedidos > "$TMP/down.html"
