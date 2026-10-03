@@ -108,7 +108,7 @@ cmd_start() {
 }
 
 cmd_spawn() {
-  local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo
+  local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -154,6 +154,8 @@ cmd_spawn() {
     sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
   } > "$pfile"
   label="#$n ${slug#*-}"
+  # abas que já têm esse label (issue reaberta, rodada antiga com aba aberta): o spawn não fecha nenhuma delas (#289)
+  old_ok=1; old="$(tabs_by_label "$label")" || old_ok=0
   # só o stdout é o JSON; o stderr do herdr vai direto para o stderr do spawn
   out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "$label" --no-focus)" \
     || die "herdr tab create falhou: $out"
@@ -161,13 +163,29 @@ cmd_spawn() {
   pane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$out" 2>/dev/null || true)"
   tab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$out" 2>/dev/null || true)"
   if [[ -z "$pane" ]]; then
-    # sem o pane o agente não abre e a linha não entra no spawned: fecha a aba para não ficar órfã
-    # (pelo id da saída; sem ele, pelo label)
-    [[ -n "$tab" ]] || tab="$(tab_by_label "$label" || true)"
-    if [[ -n "$tab" ]] && herdr tab close "$tab" >/dev/null 2>&1; then
-      die "não achei o pane da aba nova na saída do herdr (aba $tab fechada): $out"
+    # sem o pane o agente não abre e a linha não entra no spawned: fecha a aba para não ficar órfã. Pelo id da
+    # saída; sem ele, só a aba desse label que não existia antes do `tab create`. Com nenhuma candidata, mais de
+    # uma ou sem as listas, não fecha nada: o spawn nunca fecha aba que não criou (#289)
+    why=""
+    if [[ -z "$tab" ]]; then
+      if (( old_ok )) && now="$(tabs_by_label "$label")"; then
+        new=(); while IFS= read -r t; do
+          [[ -z "$t" ]] || grep -qxF -- "$t" <<<"$old" || new+=("$t")
+        done <<<"$now"
+        case ${#new[@]} in
+          1) tab="${new[0]}" ;;
+          0) why="nenhuma aba nova com esse label" ;;
+          *) why="${#new[@]} abas novas com esse label" ;;
+        esac
+      else why="herdr tab list falhou"; fi
     fi
-    die "não achei o pane da aba nova na saída do herdr e não consegui fechar a aba \"$label\" (feche à mão): $out"
+    if [[ -n "$tab" ]]; then
+      if herdr tab close "$tab" >/dev/null 2>&1; then
+        die "não achei o pane da aba nova na saída do herdr (aba $tab fechada): $out"
+      fi
+      why="herdr tab close falhou em $tab"
+    fi
+    die "não achei o pane da aba nova na saída do herdr e não fechei a aba \"$label\" ($why; feche à mão): $out"
   fi
   # OUTE_SWARM_ROUND: a rodada na sessão do worker (oute.swarm.round dos eventos oute.task.* e das conversas, #128);
   # spawn fora de rodada abre sessão avulsa
@@ -184,6 +202,13 @@ cmd_spawn() {
 # id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)
 tab_by_label() {
   herdr tab list 2>/dev/null | jq -r --arg l "$1" '.. | objects | select((.label? // .name? // "") == $l) | (.tab_id? // .id? // empty)' 2>/dev/null | head -1
+}
+
+# ids de todas as abas com o label, um por linha; falha se o `herdr tab list` falhar ou não vier em JSON
+tabs_by_label() {
+  local tabs
+  tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs" || return 1
+  jq -r --arg l "$1" '[.. | objects | select((.label? // .name? // "") == $l) | (.tab_id? // .id? // empty)] | unique[]' <<<"$tabs" 2>/dev/null
 }
 
 # o id (ex.: o gravado no spawn) ainda existe em `herdr tab list`?
