@@ -15,7 +15,7 @@ Runtime em container para agentes de código (herdr + Claude Code, o principal, 
   - OTLP: `otlp.sh` + `otlp-receiver.py` (receptor OTLP falso e leitura do que chegou), `otlp-send.py` (envio de lotes), `otlp-pb-decode.py` e `otlp-pb-metrics.py` (leitura do protobuf recebido), `otlp_json.py` (peças para montar lotes de exemplo);
   - collector: `otelcol.sh` (binário fixado do `otelcol-contrib`) e `fakes3.py` (S3 falso);
   - agent-studio: `agent-studio.sh` (venv, sobe e derruba o app, `post`/`code`/`hdr`/`data`/`enc`/`usd`, preços de exemplo, bloco de um serviço do compose) + `agent-studio-run.py` (app com falha injetada), `surreal.sh` (SurrealDB fixado), `html-data.py` (HTML → JSON dos `data-*`) e `studio_asgi.py` (chama o app pelo ASGI; store e SurrealDB de mentira).
-- `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag.
+- `scripts/oute`: CLI do **host** (up/down/pull/approve/watch…). `scripts/release`: bump de versão + tag. `scripts/models-check`: confere os ids e esforços da tabela do seletor contra os CLIs instalados, sem chamar modelo (#220; roda no container, item do passo 6 da `oute-aidlc-ship-release`).
 - `config/otel/`: pipelines do collector (`collector.yaml` = bucket; `agent-studio.yaml` = agent-studio; `langfuse.yaml` = Langfuse, até a #160; `none.yaml` = pipeline extra desligado). `config/agent-studio/`: preços e alertas do agent-studio. `config/select/models.toml`: tabela fase → modelo do seletor (ADR-02), montada read-only em `/opt/oute/select`; entra com `git pull` + `oute down/up`.
 - `.github/ISSUE_TEMPLATE/aidlc.md`: template de issue (AI-DLC).
 - `VERSION`, `CHANGELOG.md` (Keep a Changelog, seção `[Unreleased]`), `README.md`.

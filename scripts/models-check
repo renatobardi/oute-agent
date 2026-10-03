@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""models-check — confere a tabela do seletor (config/select/models.toml, ADR-02) contra os CLIs instalados (#220).
+
+  scripts/models-check [--table <arquivo>]
+
+Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo `gh`).
+  - Claude: o id tem que estar no binário instalado (o `claude` do PATH, sem o shim, ou a reserva da imagem;
+    $OUTE_MODELS_CLAUDE_BIN aponta outro arquivo).
+  - Codex: `slug` e esforço em ${CODEX_HOME:-~/.codex}/models_cache.json (`supported_reasoning_levels`). Cache
+    ausente, ilegível ou com mais de 7 dias = `desconhecido`, com aviso (o Codex o renova ao abrir).
+  - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, e toda exceção usa um label que
+    existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
+
+Uma linha por conferência, no stdout: `ok <o quê> (<onde>)`, `FALTA <o quê> (<onde>)` ou `desconhecido …`.
+Avisos em stderr. Código de saída: 0 tudo ok; 1 algum FALTA; 3 nenhum FALTA, mas algo `desconhecido` (não foi
+conferido); 2 argumento inválido ou tabela ilegível.
+"""
+import datetime
+import json
+import mmap
+import os
+import re
+import subprocess
+import sys
+import tomllib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+PHASES = ("strat", "intent", "spec", "arch", "design", "plan", "build", "qa", "ship", "ops", "learn", "iter", "ctx")
+CACHE_MAX_DAYS = 7
+ID_CHARS = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+SHIM = "oute-agent-shim"
+USAGE = "uso: models-check [--table <arquivo>]"
+
+status = {"FALTA": 0, "desconhecido": 0}
+
+
+def die(msg):
+    print(f"models-check: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def warn(msg):
+    print(f"models-check: aviso: {msg}", file=sys.stderr)
+
+
+def report(state, what, where):
+    if state in status:
+        status[state] += 1
+    print(f"{state} {what} ({where})")
+
+
+def load_table(path):
+    """linhas da tabela, na ordem: [(nome, linha)] do padrão, das fases e das exceções"""
+    try:
+        with open(path, "rb") as f:
+            t = tomllib.load(f)
+    except (OSError, ValueError) as e:   # tomllib.TOMLDecodeError é ValueError
+        die(f"tabela ilegível ({path}: {e})")
+    lines, exceptions = t.get("line", []), t.get("exception", [])
+    if not isinstance(t.get("default"), dict) or not isinstance(lines, list) or not isinstance(exceptions, list):
+        die(f"tabela sem [default], ou com [[line]]/[[exception]] fora do formato ({path})")
+    rows = [("[default]", t["default"])]
+    rows += [(f"[[line]] {i}", ln) for i, ln in enumerate(lines, 1)]
+    rows += [(f"[[exception]] {i}", ex) for i, ex in enumerate(exceptions, 1)]
+    for name, row in rows:
+        if not isinstance(row, dict) or not all(isinstance(row.get(k), str) and row[k]
+                                                for k in ("claude", "codex", "effort")):
+            die(f"{name} sem claude, codex ou effort ({path})")
+    for i, ln in enumerate(lines, 1):
+        if not isinstance(ln.get("phases"), list) or not all(isinstance(p, str) for p in ln["phases"]):
+            die(f"[[line]] {i} sem phases ({path})")
+    for i, ex in enumerate(exceptions, 1):
+        if not isinstance(ex.get("label"), str) or not ex["label"]:
+            die(f"[[exception]] {i} sem label ({path})")
+    return rows, lines, exceptions
+
+
+def claude_bin():
+    """binário instalado do claude: o do PATH que não é o shim, senão a reserva da imagem; None se não há"""
+    explicit = os.environ.get("OUTE_MODELS_CLAUDE_BIN")
+    if explicit:
+        return explicit if os.path.isfile(explicit) else None
+    dirs = os.environ.get("PATH", "").split(os.pathsep)
+    dirs.append(os.environ.get("OUTE_AGENTS_FALLBACK", "/opt/oute/agents/bin"))
+    for d in dirs:
+        p = os.path.realpath(os.path.join(d or ".", "claude"))
+        if os.path.isfile(p) and os.path.basename(p) != SHIM:
+            return p
+    return None
+
+
+def in_binary(mm, model):
+    """o id aparece inteiro no binário (não como parte de um id mais longo)"""
+    needle, at = model.encode(), 0
+    while (at := mm.find(needle, at)) != -1:
+        end = at + len(needle)
+        if (at == 0 or mm[at - 1] not in ID_CHARS) and (end == len(mm) or mm[end] not in ID_CHARS):
+            return True
+        at += 1
+    return False
+
+
+def check_claude(models):
+    path = claude_bin()
+    try:
+        if path is None:
+            raise OSError("binário do claude não encontrado")
+        with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            for m in models:
+                report("ok" if in_binary(mm, m.removesuffix("[1m]")) else "FALTA", m, "claude")
+    except (OSError, ValueError) as e:   # ValueError: arquivo vazio não mapeia
+        warn(f"Claude não conferido ({path or 'claude'}: {e})")
+        for m in models:
+            report("desconhecido", m, "claude")
+
+
+def codex_cache():
+    """{slug: [esforços]} do cache de modelos do Codex; None (com aviso) se ausente, ilegível ou velho"""
+    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "models_cache.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cache = json.load(f)
+        try:
+            fetched = datetime.datetime.fromisoformat(re.sub(r"(\.\d{6})\d*", r"\1", cache["fetched_at"]))
+        except (KeyError, TypeError, ValueError):   # sem a data no arquivo, vale a do próprio arquivo
+            fetched = datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc)
+        if fetched.tzinfo is None:
+            fetched = fetched.replace(tzinfo=datetime.timezone.utc)
+        age = (datetime.datetime.now(datetime.timezone.utc) - fetched).days
+        if age > CACHE_MAX_DAYS:
+            warn(f"cache de modelos do Codex com {age} dias, mais de {CACHE_MAX_DAYS} ({path}); "
+                 "o Codex o renova ao abrir")
+            return None
+        return {m["slug"]: [lv["effort"] for lv in m.get("supported_reasoning_levels", [])] for m in cache["models"]}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        warn(f"cache de modelos do Codex ausente ou ilegível ({path}: {e}); o Codex o cria ao abrir")
+        return None
+
+
+def check_codex(pairs):
+    cache = codex_cache()
+    for model in dict.fromkeys(m for m, _ in pairs):
+        if cache is None:
+            report("desconhecido", model, "codex")
+        else:
+            report("ok" if model in cache else "FALTA", model, "codex")
+    for model, effort in pairs:
+        if cache is None:
+            report("desconhecido", f"{model} esforço {effort}", "codex")
+        elif model in cache:   # id que falta já saiu acima
+            report("ok" if effort in cache[model] else "FALTA", f"{model} esforço {effort}", "codex")
+
+
+def repo_labels():
+    """labels do repo pelo `gh`; None (com aviso) se o gh não respondeu"""
+    try:
+        r = subprocess.run(["gh", "label", "list", "--limit", "1000", "--json", "name"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            raise ValueError(f"código {r.returncode}")
+        return {x["name"] for x in json.loads(r.stdout)}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as e:
+        warn(f"o gh não listou os labels do repo ({e}); exceções não conferidas")
+        return None
+
+
+def check_structure(lines, exceptions):
+    keys = [p for ln in lines for p in ln["phases"]]
+    for p in PHASES:
+        report("ok" if p in keys else "FALTA", f"linha da fase {p}", "tabela")
+    for p in dict.fromkeys(keys):
+        if p not in PHASES:
+            report("FALTA", f"fase {p}", "ADR-07")
+    if exceptions:
+        labels = repo_labels()
+        for ex in exceptions:
+            state = "desconhecido" if labels is None else "ok" if ex["label"] in labels else "FALTA"
+            report(state, f"label {ex['label']}", "repo")
+
+
+def main(argv):
+    table = os.path.join(ROOT, "config", "select", "models.toml")
+    it = iter(argv)
+    for a in it:
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return 0
+        if a != "--table":
+            die(f"opção desconhecida: {a}\n{USAGE}")
+        table = next(it, None)
+        if table is None:
+            die(f"--table sem valor\n{USAGE}")
+    rows, lines, exceptions = load_table(table)
+    check_claude(list(dict.fromkeys(r["claude"] for _, r in rows)))
+    check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows)))
+    check_structure(lines, exceptions)
+    if status["FALTA"]:
+        return 1
+    return 3 if status["desconhecido"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
