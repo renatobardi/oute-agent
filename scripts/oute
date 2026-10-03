@@ -364,6 +364,26 @@ mount_shared() {
       echo "storage: se o container já estava de pé, ele segue com o mount antigo; rode 'oute restart'" >&2 ;;
   esac
   is_mounted "$dir" && { export OUTE_SHARED_DIR="$dir"; echo "storage: $dir já montado"; return 0; }
+  # macOS (#114): o rclone do Homebrew sai sem a tag cmount (não faz `mount`) e sem FUSE-T/macFUSE o mount não
+  # tem onde se apoiar. Avisa as duas faltas de uma vez, antes das credenciais, e segue com o volume local.
+  if [[ "$(uname)" == Darwin ]]; then
+    local falta=0 p fuse=0 oldifs="$IFS"
+    # IFS só para esta quebra (OUTE_FUSE_PATHS separado por ':'; os padrões têm espaço)
+    IFS=:; for p in ${OUTE_FUSE_PATHS-/Library/Application Support/fuse-t:/usr/local/lib/libfuse-t.dylib:/Library/Filesystems/macfuse.fs}; do
+      [[ -e "$p" ]] && fuse=1
+    done; IFS="$oldifs"
+    if ! rclone version 2>/dev/null | grep -Eq 'go/tags:.*cmount'; then
+      echo "storage: o rclone do Homebrew não faz 'mount' no macOS (sem a tag cmount)." >&2
+      echo "  correção: brew uninstall rclone e instalar o binário oficial de https://rclone.org/downloads/" >&2
+      falta=1
+    fi
+    if [[ "$fuse" -eq 0 ]]; then
+      echo "storage: FUSE-T (ou macFUSE) não está instalado; sem ele o rclone não monta." >&2
+      echo "  correção: instalar o FUSE-T (https://github.com/macos-fuse-t/fuse-t/releases)" >&2
+      falta=1
+    fi
+    [[ "$falta" -eq 0 ]] || { echo "/data/shared fica local" >&2; return 0; }
+  fi
   oci_remote_env || { echo "OCI_S3_* ausente em $AGENT_ENV_FILE (item oci-storage: oute oci-bootstrap; depois oute secrets refresh); /data/shared fica local"; return 0; }
   local extra=()
   if [[ "$(uname)" == Linux ]]; then

@@ -233,15 +233,18 @@ done
 
 # --- 5. mount_shared (oute up) não deixa o daemon do rclone com o stdio de quem chamou
 # rclone falso: deixa um "daemon" com os descritores herdados, como o fd 7 do rclone mount --daemon real.
-# uname falso = Darwin: pula o /etc/fuse.conf do Linux (o que se testa é o stdio, igual nos dois)
+# uname falso = Darwin: pula o /etc/fuse.conf do Linux (o que se testa é o stdio, igual nos dois); OUTE_FUSE_PATHS
+# aponta para um caminho que existe, como se o FUSE-T estivesse instalado (#114)
 cat > "$BIN/rclone" <<'SH'
 #!/usr/bin/env bash
+# o mount_shared confere a tag cmount no macOS (#114)
+[[ "$1" == version ]] && { echo "- go/tags: cmount"; exit 0; }
 sleep 30 & echo $! >> "$F_DAEMONS"
 exit 0
 SH
 printf '#!/bin/sh\necho Darwin\n' > "$BIN/uname"; chmod +x "$BIN/rclone" "$BIN/uname"
 i=0
-HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OCI_S3_ACCESS_KEY=k OCI_S3_SECRET_KEY=s OCI_S3_ENDPOINT=e OCI_S3_REGION=r \
+HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_FUSE_PATHS="$TMP" OCI_S3_ACCESS_KEY=k OCI_S3_SECRET_KEY=s OCI_S3_ENDPOINT=e OCI_S3_REGION=r \
   "$OUTE" sync-shared 2>&1 | cat > "$TMP/mount.log" & pid=$!
 while kill -0 "$pid" 2>/dev/null && (( i < 100 )); do sleep 0.1; i=$((i + 1)); done
 OUT="$(cat "$TMP/mount.log")"

@@ -125,6 +125,7 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 
 `/data/shared` (container) ← `~/.oute/shared` (host) ← `rclone mount oci:oute-shared` (`oute up` monta, `oute down` desmonta). Remote `oci` só por env (item `oci-storage`), sem `rclone.conf` com segredo.
 No mount, dono = usuário do container (10001) e grupo = usuário do host (os dois gravam). Sem mount (sem rclone/FUSE/credencial), `/data/shared` vira o volume docker `oute-shared` — o container nunca recebe um diretório comum da home do host (lab#181).
+No Mac, `oute up` confere antes de montar: se o rclone não tem a tag `cmount` (o do Homebrew) ou não há FUSE-T/macFUSE, imprime `o rclone do Homebrew não faz 'mount' no macOS` e/ou `FUSE-T (ou macFUSE) não está instalado` com a correção, não chama `rclone mount`, termina em `/data/shared fica local` e segue com código 0. Os caminhos do FUSE conferidos vêm de `OUTE_FUSE_PATHS` (separados por `:`).
 Custo: Always Free (20 GB + 50 mil requests/mês); budget US$1/mês com alerta. Log: `~/.oute/rclone.log`.
 
 ## Memória
