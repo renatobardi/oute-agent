@@ -8,7 +8,7 @@ Resumo para agentes. **O canônico são os ADRs em `docs/adr/`**, mantidos pelo 
 | `agent` | Ubuntu 24.04 com herdr, sshd (`127.0.0.1:2222`), Claude Code (principal), Codex (reserva), CLIs (gh, oci, gcloud, aws, rclone, ai-memory). IP fixo `172.19.0.5`, uid/gid 10001 |
 | `ai-memory` | memória compartilhada entre agentes (hooks + MCP), dados no volume `oute-memory` |
 | `otel-collector` | telemetria → bucket OCI (tudo) + Langfuse (só metadados, até ser desligado; ADR-08), com fila em disco por destino |
-| `agent-studio` | só no oute-server (profile do compose): recebe OTLP/HTTP JSON do collector de cada host (credencial de ingestão), grava tudo no DuckDB e o estado no SurrealDB; API só leitura para tray, tela e `ops-observe` (credencial de leitura; ADR-08 §6); única chamada de saída: a conferência diária dos preços em models.dev e OpenRouter (#339) |
+| `agent-studio` | só no oute-server (profile do compose): recebe OTLP/HTTP JSON do collector de cada host (credencial de ingestão), grava tudo no DuckDB e o estado no SurrealDB; API só leitura para tray, tela e `ops-observe` (credencial de leitura; ADR-08 §6); única chamada à internet: a conferência diária dos preços em models.dev e OpenRouter (#339) |
 | `surrealdb` | só no oute-server: estado derivado (rodadas, sessões, pedidos, aprovações), sem porta publicada, na rede `studio` só com o `agent-studio` (o `agent` não alcança; ADR-08) |
 | `volume-init` | one-shot: dono 10001 nos volumes |
 
