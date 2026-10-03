@@ -1,2 +1,0 @@
-### Changed
-- **SonarCloud como gate do PR** (#192). O `AGENTS.md` ("Validar antes do PR") passa a exigir o check `SonarCloud Code Analysis` do head concluído com sucesso para o "CI verde" (pendente não é verde), lista o que costuma derrubar a nota de segurança, escreve a exceção do `http://` para serviço do compose na rede `oute` (declarar no PR, não corrigir; não vale para host externo) e deixa só com o Bardi dispensar o gate ou marcar achado no SonarCloud. Sem release (o `AGENTS.md` não vai na imagem).

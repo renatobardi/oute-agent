@@ -4,6 +4,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.32] - 2026-10-03
+
+### Changed
+- **SonarCloud como gate do PR** (#192). O `AGENTS.md` ("Validar antes do PR") passa a exigir o check `SonarCloud Code Analysis` do head concluído com sucesso para o "CI verde" (pendente não é verde), lista o que costuma derrubar a nota de segurança, escreve a exceção do `http://` para serviço do compose na rede `oute` (declarar no PR, não corrigir; não vale para host externo) e deixa só com o Bardi dispensar o gate ou marcar achado no SonarCloud. Sem release (o `AGENTS.md` não vai na imagem).
+- **Swarm: "coordenadora" passa a se chamar "dispatcher"** (#214). Todo texto visível troca o nome: prompts do swarm (`swarm.md`, `swarm-worker.md`), `oute-swarm --help` e mensagens (prefixo do `tell`, aviso de rodada assumida, abertura), `oute-task`, `oute help`, ADR-02, ADR-04, ADR-08, `CONTEXT.md` (glossário, com o nome antigo) e as skills `qa-pr-audit` e `ship-verify`. A limpeza de handoffs do §4.3 reconhece "dispatcher da rodada `<id>`" e o antigo "coordenadora da rodada `<id>`" (rodada aberta antes do deploy). Atributos, eventos, arquivos de estado e variáveis não mudam. **Precisa de release** (`swarm.md`, `swarm-worker.md`, `oute-swarm`, `oute-task` e `comandos.md` vão na imagem).
+- **ADR-02: adendo do gate de `spec` de 2026-10-02** (#219, ciclo #233). Precedência: `--agent`/`--model` da rodada (`oute-swarm <repo> --agent`, #212) conta como escolha explícita e não cai na reserva; o `claude` posicional do shim não conta; padrão Sonnet quando nada decide (origem `padrao`). Reserva da linha do Sonnet passa de `gpt-6-sol` para `gpt-6.1-sol`. O dispatcher do swarm abre na fase `plan`. A escolha vai como atributos do `oute.task.opened`. Seletor em fatias: #219 (tabela e label), #257 (Jev), #258 (reserva). `CONTEXT.md` acompanha. Só documentação: não precisa de release.
+- **Worktree por space do herdr** (#277). O `oute-task` cria a worktree em `/workspace/.worktrees/<space>/<repo>-<slug>`, com `<space>` = label do space atual do herdr em nome de pasta (fora do herdr: `_sem-space`), e o `oute-task clean` (simulação e `--yes`) age só nesse space: worktree de outro space não aparece nem é removida, e o fast-forward do checkout principal fica nos repos com worktree no space. `--space <nome>` limpa outro space; `--all` limpa todos, como antes. Worktrees no formato antigo (direto em `/workspace/.worktrees`) reabrem e aparecem no `list`, sem migração, e só o `clean --all` as considera. O `swarm.md` (§4.3) limpa só o space do dispatcher. **Precisa de release** (`oute-task`, `swarm.md`, `comandos.md` e `agent-notes.md` vão na imagem).
+
+### Fixed
+- **`oute up`/`oute down` tiram do checkout a pasta dos gerados do roteador** (#271). Depois da #218 os quatro gerados do antigo `router-sync` ficaram não rastreados em `config/` e sujavam a árvore (o `scripts/release` parava em "working tree sujo"). O `legacy_cleanup` remove a pasta inteira quando nada nela está no índice do git e avisa em uma linha; com arquivo rastreado, modificado ou staged, não remove nada e avisa. Host sem a pasta não muda. Sem release (`scripts/oute` entra com `git pull`).
+
 ## [0.7.31] - 2026-10-02
 
 ### Added

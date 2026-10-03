@@ -1,2 +1,0 @@
-### Fixed
-- **`oute up`/`oute down` tiram do checkout a pasta dos gerados do roteador** (#271). Depois da #218 os quatro gerados do antigo `router-sync` ficaram não rastreados em `config/` e sujavam a árvore (o `scripts/release` parava em "working tree sujo"). O `legacy_cleanup` remove a pasta inteira quando nada nela está no índice do git e avisa em uma linha; com arquivo rastreado, modificado ou staged, não remove nada e avisa. Host sem a pasta não muda. Sem release (`scripts/oute` entra com `git pull`).
