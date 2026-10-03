@@ -120,6 +120,15 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-inbox --wait <id> [s]                  espera o resultado (default 1800 s)
   Quem aprova é você, no host: oute watch. Nunca de dentro do herdr.
 
+## CONTAINER — SonarCloud (oute-sonar, #226)
+  oute-sonar [--json] pr <n>        quality gate, condições reprovadas, issues e hotspots do PR <n> (regra, arquivo,
+                                    linha, mensagem), o commit analisado e, para issue FALSE-POSITIVE/WONTFIX e
+                                    hotspot revisado, quem mudou o status e quando
+  oute-sonar [--json] main          o mesmo na branch principal
+  Só leitura: só GET em https://sonarcloud.io. Projeto: OUTE_SONAR_PROJECT ou <dono>_<repo> do remoto origin;
+  organização: OUTE_SONAR_ORG. Token: SONAR_TOKEN (item `sonar` do vault, pelo agent_env). Saída: 0 gate aprovado,
+  1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise.
+
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
   oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao

@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# oute-sonar — lê do SonarCloud o quality gate, as issues e os security hotspots de um PR ou da main (#226).
+# Só leitura: só `GET`, só em https://sonarcloud.io. Marcar hotspot, aceitar issue ou mudar o gate é do Bardi, na UI.
+#
+# uso:  oute-sonar [--json] pr <n>     o PR <n> do projeto
+#       oute-sonar [--json] main       a branch principal
+# ambiente: SONAR_TOKEN (obrigatório; vem do agent_env), OUTE_SONAR_PROJECT (padrão: <dono>_<repo> do remoto origin),
+#           OUTE_SONAR_ORG (opcional; organização)
+# saída: 0 gate aprovado | 1 gate reprovado | 2 uso | 3 sem SONAR_TOKEN | 4 falha de rede/API ou PR sem análise
+#
+# O token só vai ao curl por um arquivo de configuração lido do stdin (`-K -`): nunca no argv. O xtrace é desligado
+# antes de ler o token. O texto que vem do SonarCloud (mensagem, regra) é dado: sai sem caracteres de controle.
+{ set +x; } 2>/dev/null
+set -uo pipefail
+
+HOST="https://sonarcloud.io"
+JSON=0; MODE=""; PR=""
+
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+die2() { printf 'oute-sonar: %s\n' "$*" >&2; exit 2; }
+die4() { printf 'oute-sonar: %s\n' "$*" >&2; exit 4; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json) JSON=1 ;;
+    -h|--help) usage; exit 0 ;;
+    pr) [[ -z "$MODE" ]] || die2 "modo repetido"; MODE=pr; shift
+        [[ $# -gt 0 ]] || die2 "uso: oute-sonar pr <n>"; PR="$1" ;;
+    main) [[ -z "$MODE" ]] || die2 "modo repetido"; MODE=main ;;
+    *) die2 "argumento desconhecido: uso: oute-sonar [--json] pr <n> | main" ;;
+  esac
+  shift
+done
+[[ -n "$MODE" ]] || die2 "uso: oute-sonar [--json] pr <n> | main"
+if [[ "$MODE" = pr ]] && ! [[ "$PR" =~ ^[0-9]+$ ]]; then die2 "<n> só com dígitos"; fi
+
+# projeto: OUTE_SONAR_PROJECT, ou <dono>_<repo> do remoto origin
+PROJECT="${OUTE_SONAR_PROJECT:-}"
+if [[ -z "$PROJECT" ]]; then
+  url="$(git remote get-url origin 2>/dev/null)" || die2 "sem OUTE_SONAR_PROJECT e sem remoto origin"
+  url="${url%/}"; url="${url%.git}"
+  repo="${url##*/}"; rest="${url%/*}"; owner="${rest##*[/:]}"
+  [[ -n "$repo" && -n "$owner" && "$rest" != "$url" ]] || die2 "não deu para deduzir o projeto do remoto origin"
+  PROJECT="${owner}_${repo}"
+fi
+[[ "$PROJECT" =~ ^[A-Za-z0-9_.:-]+$ ]] || die2 "chave do projeto só com [A-Za-z0-9_.:-]"
+ORG="${OUTE_SONAR_ORG:-}"
+[[ -z "$ORG" || "$ORG" =~ ^[A-Za-z0-9_.:-]+$ ]] || die2 "organização só com [A-Za-z0-9_.:-]"
+
+TOKEN="${SONAR_TOKEN:-}"
+[[ -n "$TOKEN" ]] || { echo "oute-sonar: SONAR_TOKEN ausente (vem do item 'sonar' do vault pelo agent_env; oute secrets refresh e oute restart no host)" >&2; exit 3; }
+# vai numa linha de arquivo de configuração do curl, entre aspas: nada que a quebre
+[[ "$TOKEN" =~ ^[A-Za-z0-9_.:=+/-]+$ ]] || { echo "oute-sonar: SONAR_TOKEN com caracteres inesperados" >&2; exit 3; }
+
+TMP="$(mktemp -d)" || die4 "sem diretório temporário"
+trap 'rm -rf "$TMP"' EXIT
+
+# api <caminho> [query]: GET; corpo em $BODY. Falha de rede, HTTP != 200 ou corpo que não é JSON: saída 4,
+# com só o código (o corpo da resposta nunca vai ao erro).
+BODY=""
+api() {
+  local path="$1" query="${2:-}" code rc
+  code="$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+    | curl -sS -K - --proto '=https' --max-time 30 -o "$TMP/body" -w '%{http_code}' "$HOST/$path${query:+?$query}" 2>/dev/null)"
+  rc=$?
+  [[ $rc -eq 0 ]] || die4 "falha de rede em /$path (curl $rc)"
+  [[ "$code" = 200 ]] || die4 "/$path respondeu HTTP $code"
+  BODY="$(cat "$TMP/body")"
+  jq -e . >/dev/null 2>&1 <<<"$BODY" || die4 "/$path não devolveu JSON"
+}
+
+# paged <caminho> <query> <campo>: junta as páginas (500 por página, até 10) do campo; resultado em $BODY (array JSON)
+paged() {
+  local path="$1" query="$2" field="$3" p=1 acc='[]' total
+  while [[ $p -le 10 ]]; do
+    api "$path" "$query&ps=500&p=$p"
+    acc="$(jq -c --argjson a "$acc" --arg f "$field" '$a + (.[$f] // [])' <<<"$BODY")" || die4 "resposta inesperada de /$path"
+    total="$(jq -r '(.paging.total // .total // 0)' <<<"$BODY")"
+    [[ "$total" =~ ^[0-9]+$ ]] || die4 "resposta inesperada de /$path"
+    [[ $((p * 500)) -ge "$total" ]] && break
+    p=$((p + 1))
+  done
+  BODY="$acc"
+}
+
+if [[ "$MODE" = pr ]]; then SCOPE="pullRequest=$PR"; else SCOPE=""; fi
+PKEY="projectKey=$PROJECT${ORG:+&organization=$ORG}"
+
+# commit analisado (e data): lista de PRs ou de branches do projeto; PR sem análise não está na lista
+if [[ "$MODE" = pr ]]; then
+  api api/project_pull_requests/list "project=$PROJECT"
+  ANALYSIS="$(jq -c --arg k "$PR" '[.pullRequests[]? | select(.key == $k)][0] // empty' <<<"$BODY")"
+  [[ -n "$ANALYSIS" ]] || die4 "o PR $PR não tem análise no SonarCloud (projeto $PROJECT)"
+  COMMIT="$(jq -c '{sha: (.commit.sha // null), date: (.analysisDate // null)}' <<<"$ANALYSIS")"
+else
+  api api/project_branches/list "project=$PROJECT"
+  ANALYSIS="$(jq -c '[.branches[]? | select(.isMain == true)][0] // empty' <<<"$BODY")"
+  [[ -n "$ANALYSIS" ]] || die4 "a branch principal não tem análise no SonarCloud (projeto $PROJECT)"
+  COMMIT="$(jq -c '{sha: (.commit.sha // null), date: (.analysisDate // null)}' <<<"$ANALYSIS")"
+fi
+
+# quality gate
+api api/qualitygates/project_status "$PKEY${SCOPE:+&$SCOPE}"
+GATE="$(jq -c '{status: (.projectStatus.status // "NONE"),
+  failed: [.projectStatus.conditions[]? | select(.status == "ERROR")
+           | {metric: .metricKey, actual: (.actualValue // null), threshold: (.errorThreshold // null), comparator: (.comparator // null)}]}' <<<"$BODY")" \
+  || die4 "resposta inesperada do quality gate"
+GSTATUS="$(jq -r .status <<<"$GATE")"
+case "$GSTATUS" in OK|WARN|ERROR) ;; *) die4 "o projeto não tem quality gate calculado (status $GSTATUS)" ;; esac
+
+# transição feita por alguém: o último registro do histórico que mudou a resolução (issue) ou o status/resolução (hotspot)
+# who <caminho> <query> <campos>: {by, at} em $BODY; só chaves do SonarCloud no formato esperado entram na URL
+who() {
+  api "$1" "$2"
+  BODY="$(jq -c --argjson keys "$3" '[(.changelog // [])[] | select(any(.diffs[]?; .key as $k | $keys | index($k)))] | last
+      | {by: (.user // .userName // null), at: (.creationDate // null)}' <<<"$BODY")" || die4 "resposta inesperada de /$1"
+}
+
+# issues (resolvidas também): componente sem o prefixo da chave do projeto
+paged api/issues/search "componentKeys=$PROJECT${ORG:+&organization=$ORG}${SCOPE:+&$SCOPE}" issues
+RAW="$BODY"
+ISSUES='[]'
+while IFS= read -r row; do
+  [[ -n "$row" ]] || continue
+  key="$(jq -r .key <<<"$row")"; res="$(jq -r '.resolution // ""' <<<"$row")"
+  if [[ "$res" = FALSE-POSITIVE || "$res" = WONTFIX ]]; then
+    [[ "$key" =~ ^[A-Za-z0-9_-]+$ ]] || die4 "chave de issue inesperada"
+    who api/issues/changelog "issue=$key" '["resolution"]'
+    row="$(jq -c --argjson w "$BODY" '. + {transition: $w}' <<<"$row")"
+  fi
+  ISSUES="$(jq -c --argjson r "$row" '. + [$r]' <<<"$ISSUES")"
+done < <(jq -c --arg p "$PROJECT:" '.[] | {key, rule, severity, status, resolution: (.resolution // null),
+    file: ((.component // "") | ltrimstr($p)), line: (.line // null), message}' <<<"$RAW")
+
+# hotspots (revisados também)
+paged api/hotspots/search "$PKEY${SCOPE:+&$SCOPE}" hotspots
+RAW="$BODY"
+SPOTS='[]'
+while IFS= read -r row; do
+  [[ -n "$row" ]] || continue
+  key="$(jq -r .key <<<"$row")"
+  if [[ "$(jq -r .status <<<"$row")" = REVIEWED ]]; then
+    [[ "$key" =~ ^[A-Za-z0-9_-]+$ ]] || die4 "chave de hotspot inesperada"
+    who api/hotspots/show "hotspot=$key" '["status","resolution"]'
+    row="$(jq -c --argjson w "$BODY" '. + {transition: $w}' <<<"$row")"
+  fi
+  SPOTS="$(jq -c --argjson r "$row" '. + [$r]' <<<"$SPOTS")"
+done < <(jq -c --arg p "$PROJECT:" '.[] | {key, rule: .ruleKey, probability: (.vulnerabilityProbability // null), status,
+    resolution: (.resolution // null), file: ((.component // "") | ltrimstr($p)), line: (.line // null), message}' <<<"$RAW")
+
+TARGET="$([[ "$MODE" = pr ]] && echo "PR $PR" || echo main)"
+REPORT="$(jq -n --arg project "$PROJECT" --arg target "$TARGET" --argjson commit "$COMMIT" --argjson gate "$GATE" \
+  --argjson issues "$ISSUES" --argjson hotspots "$SPOTS" \
+  '{project: $project, target: $target, commit: $commit.sha, analyzed_at: $commit.date, gate: $gate, issues: $issues, hotspots: $hotspots}')"
+
+if [[ $JSON -eq 1 ]]; then
+  printf '%s\n' "$REPORT"
+else
+  # texto do SonarCloud é dado: sem caracteres de controle (escape de terminal, quebra de linha dentro do campo)
+  jq -r '
+    def c: if . == null then "?" else tostring | gsub("[\u0001-\u001f\u007f-\u009f]"; " ") end;
+    def tr: if .transition then " [\(.resolution // .status | c) por \(.transition.by | c) em \(.transition.at | c)]" else "" end;
+    "SonarCloud \(.project | c) — \(.target)  commit \(.commit | c) (analisado em \(.analyzed_at | c))",
+    "gate: \(.gate.status)",
+    (.gate.failed[] | "  reprovou: \(.metric | c)  atual=\(.actual | c) limite=\(.comparator | c) \(.threshold | c)"),
+    "issues (\(.issues | length)):",
+    (.issues[] | "  \(.rule | c) \(.severity | c) \(.file | c):\(.line | c)  \(.status | c)\(if .resolution then "/" + (.resolution | c) else "" end)\(tr)  \(.message | c)"),
+    "hotspots (\(.hotspots | length)):",
+    (.hotspots[] | "  \(.rule | c) \(.probability | c) \(.file | c):\(.line | c)  \(.status | c)\(if .resolution then "/" + (.resolution | c) else "" end)\(tr)  \(.message | c)")
+  ' <<<"$REPORT"
+fi
+
+[[ "$GSTATUS" != ERROR ]]
