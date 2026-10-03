@@ -15,9 +15,9 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
+trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
 
 
 # ---------------------------------------------------------------- DuckDB e SurrealDB de exemplo

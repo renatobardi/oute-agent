@@ -281,9 +281,9 @@ check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-pro
 
 # ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
 . "$ROOT/tests/lib/surreal.sh"
+trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
-trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 sq() { surreal_q "$1"; }
 
 # eventos de verdade: oute-emit lendo os artefatos (canal e rodada) -> receptor falso -> repostados ao agent-studio
