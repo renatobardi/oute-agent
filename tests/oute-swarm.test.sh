@@ -85,6 +85,8 @@ chmod +x "$BIN"/*
 ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
+# Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
+. "$ROOT/tests/lib/typesafe.sh"; ts_off
 
 # round(<caso>): HOME, rodada swarm-test (repo da rodada = pasta git "repo", início no passado) e $FAKE limpos;
 # issue #7 aberta na aba "#7 foo" (linha do spawned no formato antigo, sem repo). Globais: H, STATE, FAKE, REPO.
@@ -755,7 +757,7 @@ sw spawn 9-licao "instrução" --kaizen
 check "kaizen: Haiku pela exceção do label"              [ "$RC" -eq 0 -a "$(sel 9-licao model) $(sel 9-licao origin)" == "claude-haiku-4-5-20251001 label" ]
 sw spawn 10-semlabel "instrução"
 check "sem label: abre no Sonnet, código 0"              [ "$RC" -eq 0 -a "$(sel 10-semlabel model) $(sel 10-semlabel origin) $(sp_agent swarm-test 10-semlabel)" == "claude-sonnet-5-5 padrao claude" ]
-check "sem label: aviso"                                 [ "$ERR" == "oute-select: aviso: issue #10 sem label aidlc:<fase>; abrindo no padrão (claude-sonnet-5-5)" ]
+check "sem label: aviso (sem a chave, o Jev não é chamado)" [ "$ERR" == "oute-select: aviso: issue #10 sem label aidlc:<fase>, e sem a chave da TypeSafe (\$OUTE_TYPESAFE_API_KEY) o Jev não classifica; abrindo no padrão (claude-sonnet-5-5)" ]
 touch "$FAKE/gh.down"
 MAX=5 sw spawn 12-fora "instrução"
 check "gh fora: abre no Sonnet, código 0"                [ "$RC" -eq 0 -a "$(sel 12-fora model) $(sel 12-fora origin)" == "claude-sonnet-5-5 padrao" ]
@@ -789,6 +791,25 @@ check "rodada codex: Codex da linha da fase, origem manual" [ "$RC" -eq 0 -a "$(
 check "rodada codex: spawned e oute-task com codex"      bash -c '[ "$1" == codex ] && grep -qF -- "oute-task -r $2 8-rod codex " "$3"' _ "$(sp_agent swarm-test 8-rod)" "$REPO" "$FAKE/herdr.log"
 sw spawn 9-ovr "instrução" --agent claude
 check "spawn --agent claude sobrepõe a rodada: Haiku da fase ops" [ "$(sel 9-ovr agent) $(sel 9-ovr model) $(sel 9-ovr origin)" == "claude claude-haiku-4-5-20251001 manual" ]
+
+# 11e. Jev (#257): issue sem label de fase, a instrução do spawn é o texto da tarefa
+CASE=seletor-jev; round "$CASE"; ts_start "$TMP/$CASE/ts"
+labels 8 aidlc:build; labels 10 bug; labels 13 agentes
+ts_set ok spec 0.88
+MAX=5 sw spawn 10-jev "escreva a issue com os critérios de aceite"
+check "jev: código 0, sem aviso"                         [ "$RC" -eq 0 -a -z "$ERR" ]
+check "jev: Opus da fase classificada, origem jev, com a confiança" [ "$(sel 10-jev phase) $(sel 10-jev origin) $(sel 10-jev model) $(sel 10-jev confidence)" == "spec jev claude-opus-5-5 0.88" ]
+check "jev: saída com a fase e a origem"                 [ "$OUT" == "aberta: #10 → pane w1:p2 · worktree repo-10-jev · agente claude · modelo claude-opus-5-5 (fase spec, jev)" ]
+check "jev: só a instrução vai à TypeSafe (sem as regras do worker)" jqe '.body.state == "escreva a issue com os critérios de aceite"' <<<"$(ts_last)"
+check "jev: a chave não vai na linha de comando da sessão" bash -c '! grep -qF "$1" "$2"' _ "$TS_KEY" "$FAKE/herdr.log"
+ts_set ok spec 0.3
+MAX=5 sw spawn 13-baixa "escreva a issue com os critérios de aceite"
+check "jev com confiança baixa: Sonnet, origem padrao, confiança guardada" [ "$RC" -eq 0 -a "$(sel 13-baixa model) $(sel 13-baixa origin) $(sel 13-baixa confidence)" == "claude-sonnet-5-5 padrao 0.3" ]
+check "jev com confiança baixa: aviso"                   grep -qF 'o Jev ficou com confiança baixa (0,30 em spec' <<<"$ERR"
+ts_reset
+MAX=5 sw spawn 8-label "escreva a issue com os critérios de aceite"
+check "issue com label de fase: o Jev não é chamado"     [ "$(sel 8-label origin) $(ts_calls)" == "label 0" ]
+ts_stop; ts_off
 
 # 11d. seletor falhando ou ausente: o spawn abre como antes (o agente pedido, sem escolha), com aviso
 CASE=seletor-falha; round "$CASE"

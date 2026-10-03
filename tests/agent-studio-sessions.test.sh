@@ -95,7 +95,9 @@ task1 = {"oute.task.id": S1, "oute.task.repo": "oute-agent", "oute.task.slug": "
          "oute.swarm.round": RND, "oute.swarm.session": "207-tela",
          # escolha do seletor no opened (ADR-02, #219; catálogo do ADR-04)
          "oute.task.phase": "build", "oute.task.origin": "label", "oute.task.model": "claude-sonnet-5-5"}
-task2 = {"oute.task.id": S2, "oute.task.repo": "lab", "oute.task.slug": "ajuste", "oute.task.agent": "codex"}
+task2 = {"oute.task.id": S2, "oute.task.repo": "lab", "oute.task.slug": "ajuste", "oute.task.agent": "codex",
+         # sessão avulsa sem label: a fase veio do Jev, com a confiança (ADR-02, #257)
+         "oute.task.phase": "ops", "oute.task.origin": "jev", "oute.task.confidence": 0.87}
 logs = {"resourceLogs": [
   rl(oute, [
     ev(D1 - 3 * 86400, "oute.swarm.round.opened", "ev-r1", {"oute.swarm.round": RND, "oute.swarm.repo": "oute-agent",
@@ -229,6 +231,7 @@ check "sessão: a escolha do seletor aparece no oute.task.opened (#219)" jqe '.[
 check "sessão: evento com o oute.task.id aparece com os atributos" jqe '.[1].text | test("\"fase\": \"build\"") and test("\"origem\": \"label\"") and test("\"modelo\": \"claude-sonnet-5\"")' <<<"$G"
 check "sessão: conteúdo do evento escapado"            bash -c '! grep -q "<script>alert" "$1" && grep -q "&lt;script&gt;alert" "$1"' _ "$TMP/s1.html"
 S2H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
+check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"
 S4H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
 check "sessão sem conversa: aviso, com o evento de abertura" bash -c 'grep -q "Esta sessão não tem conversas" <<<"$1" && grep -q "oute.task.opened" <<<"$1"' _ "$S4H"

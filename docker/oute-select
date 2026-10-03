@@ -1,35 +1,71 @@
 #!/usr/bin/env python3
-"""oute-select — seletor de modelo por sessão (ADR-02, #219): diz com que agente e modelo uma sessão abre, sem abrir.
+"""oute-select — seletor de modelo por sessão (ADR-02, #219, #257): diz com que agente e modelo uma sessão abre, sem abrir.
 
   oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>]
-              [--agent claude|codex] [--model <id>]
+              [--agent claude|codex] [--model <id>] [--text-file <arquivo>|-]
 
   --issue <n>      issue da sessão; --task <n>-<slug> tira o número do slug (slug sem número = sessão sem issue)
   --repo <dir>     checkout em que o `gh` lê a issue (padrão: o diretório atual)
   --phase <fase>   fase fixa, sem ler a issue (o dispatcher do swarm abre em `plan`)
   --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase
-  --json           {"phase","origin","agent","model","effort","reason"}; sem ele, uma linha para ler
+  --text-file <f>  texto da tarefa (`-` = stdin), para o Jev classificar a fase quando nenhum label a dá
+  --json           {"phase","origin","agent","model","effort","reason","confidence"}; sem ele, uma linha para ler
 
-Precedência: --agent/--model > exceção por label (`kaizen`, `docs`) > label `aidlc:<fase>` > padrão (Sonnet).
-Origem: `manual`, `label` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
+Precedência: --agent/--model > exceção por label (`kaizen`, `docs`) > label `aidlc:<fase>` > Jev > padrão (Sonnet).
+Origem: `manual`, `label`, `jev` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
 Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/select/ do checkout, só leitura).
 
-Nunca bloqueia a abertura: `gh` fora do ar, issue sem label ou tabela ausente dão o padrão, com aviso em stderr e
-código 0 (sem tabela, `model` sai vazio e o agente abre com o modelo dele). Código 2 só para argumento inválido.
+Jev (#257): só sem label de fase (sessão sem issue, ou issue sem `aidlc:<fase>`), com texto da tarefa e sem --model.
+Chamado direto na TypeSafe (primitivo `choice`), com teto de 3 s; a chave vem de $OUTE_TYPESAFE_API_KEY e só o texto
+da tarefa sai da máquina. Confiança >= 0,6: origem `jev` e o modelo da fase classificada. Confiança menor, erro,
+tempo esgotado ou sem a chave: padrão, com aviso. `confidence` é a do Jev sempre que ele respondeu (senão, "").
+
+Nunca bloqueia a abertura: `gh` fora do ar, issue sem label, Jev fora do ar ou tabela ausente dão o padrão, com aviso
+em stderr e código 0 (sem tabela, `model` sai vazio e o agente abre com o modelo dele). Código 2 só para argumento
+inválido.
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import tomllib
+import urllib.error
+import urllib.request
 
 TABLE = os.environ.get("OUTE_SELECT_TABLE", "/opt/oute/select/models.toml")
 AGENTS = ("claude", "codex")
 MODEL_RE = re.compile(r"[A-Za-z0-9._-]+(\[1m\])?")
 PHASE_RE = re.compile(r"[a-z]+")
 USAGE = "uso: oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] " \
-        "[--agent claude|codex] [--model <id>]"
+        "[--agent claude|codex] [--model <id>] [--text-file <arquivo>|-]"
+
+# Jev direto na TypeSafe (ADR-02, #257). A URL só muda nos testes (TypeSafe falsa).
+JEV_URL = os.environ.get("OUTE_SELECT_JEV_URL", "https://api.typesafe.ai/v1/systemone")
+JEV_MODEL = "jev-1.13.0"     # id exato, como os da tabela
+JEV_KEY_ENV = "OUTE_TYPESAFE_API_KEY"
+JEV_TIMEOUT = 3.0            # teto da chamada inteira, em segundos
+JEV_MIN_CONFIDENCE = 0.6
+JEV_TEXT_MAX = 16000         # caracteres do texto da tarefa que vão ao Jev (limite dele: 32k tokens)
+JEV_REPLY_MAX = 1 << 20
+JEV_INSTRUCTIONS = "Em que fase do ciclo de entrega de software esta tarefa está?"
+# o que cada fase do ADR-07 faz, para o Jev escolher; fase da tabela sem descrição aqui vai só com o nome
+PHASE_HINTS = {
+    "strat": "estratégia: oportunidade, pesquisa, comparar caminhos antes de decidir o que fazer",
+    "intent": "intenção: entender e questionar o pedido, o problema e o resultado esperado",
+    "spec": "especificação: escrever a issue com critérios de aceite e o que fica fora",
+    "arch": "arquitetura: decisão estrutural, ADR, limites entre componentes",
+    "design": "design: interface de módulos, protótipo descartável, desenho da solução",
+    "plan": "planejamento: quebrar o trabalho em issues, triagem, dependências, riscos",
+    "build": "construção: escrever ou alterar código, testes e a documentação da mudança; corrigir bug",
+    "qa": "qualidade: revisar ou auditar um pull request, rodar gates e analisar o resultado",
+    "ship": "entrega: preparar a release, checklist, deploy e verificação depois do deploy",
+    "ops": "operação: ler telemetria, conferir saúde e custo, diagnosticar anomalia em produção",
+    "learn": "aprendizado: analisar uso, custo, incidentes e rodadas para tirar lições",
+    "iter": "iteração: sintetizar o aprendizado em roadmap e próximo ciclo, limpar o backlog",
+    "ctx": "contexto: manter glossário, regras, memória e documentação de contexto coerentes",
+}
 
 
 def die(msg):
@@ -87,28 +123,123 @@ def issue_labels(repo, issue):
         return None
 
 
+class JevError(Exception):
+    """falha do Jev, com um motivo curto que nunca leva a chave nem o corpo da resposta"""
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):   # redirecionamento levaria o Authorization a outro host
+        return None
+
+
+def jev_timeout():
+    """teto da chamada: $OUTE_SELECT_JEV_TIMEOUT só encurta (testes), nunca passa de 3 s"""
+    try:
+        t = float(os.environ.get("OUTE_SELECT_JEV_TIMEOUT", ""))
+    except ValueError:
+        return JEV_TIMEOUT
+    return t if 0 < t <= JEV_TIMEOUT else JEV_TIMEOUT
+
+
+def jev_phase(text, key, phases):
+    """(fase, confiança) do Jev para o texto da tarefa; JevError em qualquer falha. Vai só o texto e as fases."""
+    body = {"state": text, "model": JEV_MODEL,
+            "questions": {"fase": {"type": "choice", "instructions": JEV_INSTRUCTIONS,
+                                   "criteria": {p: PHASE_HINTS.get(p, p) for p in phases}}}}
+    limit, got = jev_timeout(), {}
+
+    def call():
+        try:
+            # a chave só existe aqui, no cabeçalho: nunca em argv, log, aviso ou evento
+            req = urllib.request.Request(JEV_URL, data=json.dumps(body, ensure_ascii=False).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+            with urllib.request.build_opener(NoRedirect).open(req, timeout=limit) as r:
+                got["raw"] = r.read(JEV_REPLY_MAX + 1)
+        except urllib.error.HTTPError as e:
+            got["err"] = f"HTTP {e.code}"
+        except (OSError, ValueError) as e:   # URLError é OSError; o motivo sai pelo tipo, sem a mensagem
+            slow = isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError)
+            got["err"] = f"sem resposta em {limit:g} s" if slow else f"falha de rede ({type(e).__name__})"
+
+    # o timeout do urllib vale por operação de socket (e não cobre o DNS): a thread limita a chamada inteira
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    t.join(limit)
+    if t.is_alive() or not got:
+        raise JevError(f"sem resposta em {limit:g} s")
+    if "err" in got:
+        raise JevError(got["err"])
+    raw = got["raw"]
+    try:
+        if len(raw) > JEV_REPLY_MAX:
+            raise ValueError
+        ans = json.loads(raw)["answers"]["fase"]
+        phase, conf = ans["choice"], ans["confidence"]
+        if phase not in phases or isinstance(conf, bool) or not isinstance(conf, (int, float)) or not 0 <= conf <= 1:
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise JevError("resposta inválida") from None
+    return phase, float(conf)
+
+
+def read_text(path):
+    """texto da tarefa de --text-file (`-` = stdin), sem espaço nas pontas e cortado; ilegível = sem texto"""
+    try:
+        if path == "-":
+            raw = sys.stdin.buffer.read(4 * JEV_TEXT_MAX)
+        else:
+            with open(path, "rb") as f:
+                raw = f.read(4 * JEV_TEXT_MAX)
+    except OSError as e:
+        warn(f"não li o texto da tarefa ({e.strerror or type(e).__name__}); sigo sem ele")
+        return ""
+    return raw.decode("utf-8", "replace").replace("\x00", "").strip()[:JEV_TEXT_MAX]
+
+
+def fmt_conf(c):
+    return f"{c:.2f}".replace(".", ",")
+
+
+def by_jev(text, phases, why):
+    """(linha ou None, fase, origem, motivo, aviso, confiança ou None) pelo Jev, quando a issue não deu a fase (`why`)"""
+    key = os.environ.get(JEV_KEY_ENV, "").strip()
+    if not key:
+        w = f"{why}, e sem a chave da TypeSafe (${JEV_KEY_ENV}) o Jev não classifica"
+        return None, "", "padrao", w, w, None
+    try:
+        phase, conf = jev_phase(text, key, phases)
+    except JevError as e:
+        w = f"{why}, e o Jev falhou ({e})"
+        return None, "", "padrao", w, w, None
+    if conf < JEV_MIN_CONFIDENCE:
+        w = f"{why}, e o Jev ficou com confiança baixa ({fmt_conf(conf)} em {phase}, mínimo {fmt_conf(JEV_MIN_CONFIDENCE)})"
+        return None, "", "padrao", w, w, conf
+    return phases[phase], phase, "jev", f"Jev: fase {phase}, confiança {fmt_conf(conf)} ({why})", None, conf
+
+
 def by_issue(repo, issue, phases, exceptions):
-    """(linha ou None, fase, origem, motivo, aviso) pela issue: exceção por label, depois a fase"""
+    """(linha ou None, fase, origem, motivo, aviso, cabe o Jev?) pela issue: exceção por label, depois a fase.
+    O Jev só cabe quando se sabe que não há label de fase: sessão sem issue, ou issue lida sem `aidlc:<fase>` da tabela"""
     if issue is None:
-        return None, "", "padrao", "sessão sem issue", "sessão sem issue"
+        return None, "", "padrao", "sessão sem issue", "sessão sem issue", True
     labels = issue_labels(repo, issue)
     if labels is None:
         why = f"o gh não respondeu para a issue #{issue}"
-        return None, "", "padrao", why, why
+        return None, "", "padrao", why, why, False
     found = [x[len("aidlc:"):] for x in labels if x.startswith("aidlc:")]
     known = [p for p in found if p in phases]
     phase = known[0] if known else ""
     for label, ln in exceptions:
         if label in labels:
-            return ln, phase, "label", f"label {label} da issue #{issue}", None
+            return ln, phase, "label", f"label {label} da issue #{issue}", None, False
     if known:
         extra = f"issue #{issue} com mais de um label de fase ({', '.join(found)}); vale {phase}" if len(found) > 1 else None
-        return phases[phase], phase, "label", f"label aidlc:{phase} da issue #{issue}", extra
+        return phases[phase], phase, "label", f"label aidlc:{phase} da issue #{issue}", extra, False
     if found:
         why = f"issue #{issue} com fase fora da tabela (aidlc:{found[0]})"
     else:
         why = f"issue #{issue} sem label aidlc:<fase>"
-    return None, "", "padrao", why, why
+    return None, "", "padrao", why, why, True
 
 
 def guess_agent(model, default, phases, exceptions):
@@ -123,7 +254,7 @@ def guess_agent(model, default, phases, exceptions):
 
 
 def main(argv):
-    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": ""}
+    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "text-file": ""}
     it = iter(argv)
     for a in it:
         if a in ("-h", "--help"):
@@ -132,7 +263,7 @@ def main(argv):
         if a == "--json":
             opt["json"] = True
             continue
-        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--model"):
+        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--model", "--text-file"):
             die(f"opção desconhecida: {a}\n{USAGE}")
         v = next(it, None)
         if v is None:
@@ -155,7 +286,7 @@ def main(argv):
         die(f"modelo inválido: {model}")
 
     default, phases, exceptions = load_table()
-    warning = None
+    warning, confidence = None, None
     if opt["phase"]:
         phase = opt["phase"]
         if phase in phases:
@@ -164,7 +295,12 @@ def main(argv):
             ln, origin, reason = None, "padrao", f"fase fixa fora da tabela ({phase})"
             phase, warning = "", reason
     else:
-        ln, phase, origin, reason, warning = by_issue(opt["repo"], opt["issue"], phases, exceptions)
+        ln, phase, origin, reason, warning, ask = by_issue(opt["repo"], opt["issue"], phases, exceptions)
+        # Jev: só sem label de fase, com texto, e quando a linha da fase ainda escolhe algo (sem --model)
+        if ask and phases and not model and opt["text-file"]:
+            text = read_text(opt["text-file"])
+            if text:
+                ln, phase, origin, reason, warning, confidence = by_jev(text, phases, reason)
     if ln is None:
         ln = default
     if agent or model:
@@ -178,12 +314,14 @@ def main(argv):
     if not model and ln:
         model = ln[agent]
     effort = ln["effort"] if ln and agent == "codex" else ""
-    out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason}
+    out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason,
+           "confidence": "" if confidence is None else round(confidence, 4)}
     if opt["json"]:
         print(json.dumps(out, ensure_ascii=False))
     else:
         print(f"fase {phase or '-'} · origem {origin} · agente {agent} · modelo {model or '-'}"
-              f"{' · esforço ' + effort if effort else ''} · motivo: {reason}")
+              f"{' · esforço ' + effort if effort else ''}"
+              f"{' · confiança ' + fmt_conf(confidence) if confidence is not None else ''} · motivo: {reason}")
     return 0
 
 

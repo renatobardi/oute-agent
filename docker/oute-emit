@@ -85,6 +85,8 @@ def anyvalue(v):
         return {"boolValue": v}
     if isinstance(v, int):
         return {"intValue": str(v)}
+    if isinstance(v, float):
+        return {"doubleValue": v}
     return {"stringValue": str(v)}
 
 
@@ -604,10 +606,12 @@ TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.
              "round": "oute.swarm.round", "session": "oute.swarm.session",
              # escolha do seletor (ADR-02, #219), só no opened e no reopened
              "phase": "oute.task.phase", "origin": "oute.task.origin", "model": "oute.task.model",
-             "effort": "oute.task.effort"}
+             "effort": "oute.task.effort",
+             # confiança do Jev (#257): presente quando ele respondeu, com origem jev ou padrao
+             "confidence": "oute.task.confidence"}
 TASK_REASONS = ("merged", "empty", "detached")
-TASK_ORIGINS = ("manual", "label", "padrao")
-SELECT_KEYS = ("phase", "origin", "model", "effort")
+TASK_ORIGINS = ("manual", "label", "jev", "padrao")
+SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence")
 
 
 def cmd_task(kind, caller, pairs):
@@ -634,6 +638,10 @@ def cmd_task(kind, caller, pairs):
         f.pop("reason", None)
         if "origin" in f and f["origin"] not in TASK_ORIGINS:
             raise Skip(f"origem da escolha inválida: {f['origin']}")
+        if "confidence" in f:
+            if not re.fullmatch(r"0(\.[0-9]+)?|1(\.0+)?", f["confidence"]):
+                raise Skip(f"confiança inválida: {f['confidence']}")
+            f["confidence"] = float(f["confidence"])
     if "legacy" in f:
         if f["legacy"] != "true":
             raise Skip(f"legacy inválido: {f['legacy']}")

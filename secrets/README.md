@@ -22,6 +22,7 @@ Pasta `oute-agent`:
 | langfuse    | Note | LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST (opcional; default `https://cloud.langfuse.com`) — liga o painel de metadados (#13) |
 | ai-memory   | Note | AI_MEMORY_AUTH_TOKEN (opcional)                                               |
 | anthropic   | Note | ANTHROPIC_API_KEY (só se quiser ai-memory consolidando com LLM)               |
+| typesafe    | Note | OUTE_TYPESAFE_API_KEY (opcional): chave da API da TypeSafe, com que o seletor chama o Jev para classificar a fase de sessão sem label (ADR-02, #257). Sem ela o `oute up` sobe igual e a sessão sem label abre no Sonnet, com aviso. Só o `oute-select` a usa, no cabeçalho da chamada: nunca em argumento, log ou evento. O prefixo `OUTE_` é o que a leva ao ambiente dos logins (allowlist do `entrypoint.sh`) |
 | agent-studio | Note | AGENT_STUDIO_READ_TOKEN: credencial **só de leitura** do agent-studio (`GET /v1/usage`, `/v1/alerts`, `/v1/tray` e a tela; na ingestão = 403). Valor próprio: igual à de ingestão, o `oute up` não entrega ao `agent` |
 
 Pasta **`oute-services`** (#256; nunca vai ao `agent`):
