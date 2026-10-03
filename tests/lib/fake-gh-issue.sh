@@ -5,17 +5,14 @@
 # código 1), gh-issue-<n>.json (JSON com {state: "OPEN|CLOSED", ...}), gh.down (o gh falha) e gh.hang (não responde).
 # Cada chamada fica em $FAKE/gh-issue.log, como "<pasta em que rodou> <n>".
 n="${3:-}"
-json_type="${5:-}"  # o que vem após --json
+jq_expr=""; for ((i = 1; i < $#; i++)); do [[ "${!i}" != --jq ]] || jq_expr="$((i + 1))"; done
+[[ -z "$jq_expr" ]] || jq_expr="${!jq_expr}"
 echo "$(basename "$PWD") $n" >> "$FAKE/gh-issue.log"
 [[ ! -e "$FAKE/gh.hang" ]] || exec sleep "${FAKE_GH_HANG:-5}"
 [[ ! -e "$FAKE/gh.down" ]] || { echo "gh falso: fora do ar" >&2; exit 1; }
 
-# Se há arquivo gh-issue-<n>.json, usa ele (novo, para watch #387)
-if [[ -f "$FAKE/gh-issue-$n.json" ]]; then
-  cat "$FAKE/gh-issue-$n.json"
-# Senão, procura labels (antigo, para seletor #219)
-elif [[ -f "$FAKE/labels-$n" ]]; then
-  jq -Rn '{labels: [inputs | select(. != "") | {name: .}]}' < "$FAKE/labels-$n"
-else
-  echo "gh falso: issue $n não encontrada" >&2; exit 1
-fi
+# gh-issue-<n>.json (watch, #387) ou labels-<n> (seletor, #219); com --jq <expr>, filtra como o gh (jq -r)
+if [[ -f "$FAKE/gh-issue-$n.json" ]]; then out="$(cat "$FAKE/gh-issue-$n.json")"
+elif [[ -f "$FAKE/labels-$n" ]]; then out="$(jq -Rn '{labels: [inputs | select(. != "") | {name: .}]}' < "$FAKE/labels-$n")"
+else echo "gh falso: issue $n não encontrada" >&2; exit 1; fi
+if [[ -n "$jq_expr" ]]; then jq -r "$jq_expr" <<<"$out"; else echo "$out"; fi

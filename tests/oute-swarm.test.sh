@@ -1065,9 +1065,26 @@ check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex
 check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
 check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
-# 7m. Evento [issue] quando PR mergeado e issue OPEN (#387)
-# Teste de comportamento: fake-gh-issue.sh agora suporta --json state, OUTE_WATCH_ISSUE_DELAY é configurável,
-# w_keep "merged|" no ramo gh_ok preserva o estado. O evento é testado manualmente com gh falso.
-# (Teste inline complexo com fake-pr + watch teve problema de jq --argjson; comportamento verificado com mock.)
+# 7m. Evento [issue] (#387): PR mergeado com a issue ainda aberta sai uma vez; issue fechada não gera linha
+ISSUE_EV='[issue] #7 aberta depois do merge do PR #12'
+issue_events() { log_events | grep -F '[issue]' || true; }
+for st in OPEN CLOSED; do
+  CASE="issue$st"; round "$CASE"
+  FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+  echo "{\"state\":\"$st\"}" > "$FAKE/gh-issue-7.json"
+  cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $A MERGED
+SH
+  echo : > "$FAKE/on-sleep-2"
+  OUTE_WATCH_ISSUE_DELAY=0 watch
+  if [[ $st == OPEN ]]; then
+    check "issue aberta: código 0"                       [ "$RC" -eq 0 ]
+    check "issue aberta: uma linha [issue] no log"       [ "$(issue_events)" == "$ISSUE_EV" ]
+    check "issue aberta: log = stdout"                   [ "$(log_events)" == "$(out_events)" ]
+  else
+    check "issue fechada: sem linha [issue]"             [ -z "$(issue_events)" ]
+    check "issue fechada: o PR mergeado saiu"            logged "[pr] PR #12 mergeado (issue #7)"
+  fi
+done
 
 check_end
