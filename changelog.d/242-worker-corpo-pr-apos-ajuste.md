@@ -1,2 +1,0 @@
-### Changed
-- **Worker do swarm: corpo do PR atualizado depois de push de ajuste** (#242). O `docker/swarm-worker.md` ganha a regra, junto da regra do corpo do PR: depois de cada push de ajuste no PR já aberto (pedido pelo dispatcher ou pelo Bardi), o worker atualiza o corpo com o que mudou, os números da validação como estão no head e, se for o caso, `Closes` × `Refs` e o `## Falta`. Lição da rodada `swarm-0930-2321`: o PR #238 foi mergeado dizendo "110 ok" (eram 125) e sem citar o ajuste mais sensível. **Precisa de release** (`docker/swarm-worker.md` vai na imagem).

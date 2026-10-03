@@ -1,2 +1,0 @@
-### Changed
-- **Worker do swarm: a prova de um critério falha contra a `main` antes do PR** (#286). O `docker/swarm-worker.md` pede que todo teste novo ou alterado apresentado como prova rode com o código da `main` (testes do branch na base, ou a correção desfeita) e falhe; o corpo do PR diz quais casos falharam assim, e critério cuja prova não falha sem a correção não leva `[x]`. A conferência continua na `oute-aidlc-qa-pr-audit` (passo 6), sem regra duplicada. **Precisa de release** (`docker/swarm-worker.md` vai na imagem).

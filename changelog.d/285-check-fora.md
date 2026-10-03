@@ -1,2 +1,0 @@
-### Fixed
-- **Testes: `check` com condição fora dele reprovado** (#285). Em `check "…" [ … ] && grep …` só o `[ … ]` contava; o resto rodava fora do `check` e a falha era ignorada. O `tests/check-lib.test.sh` passa a reprovar o padrão em `tests/*.test.sh` (pelo novo `tests/lib/check-lint.py`), e as 39 ocorrências em `oute-emit`, `oute-swarm` e `oute-task` viraram `check`s próprios. Um caso do `oute-task` (main do repo fora do space) conferia a ref errada e só passava por estar fora do `check`; agora compara com o remoto. Só testes e docs, sem release.

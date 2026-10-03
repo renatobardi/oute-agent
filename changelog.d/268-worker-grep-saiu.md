@@ -1,2 +1,0 @@
-### Changed
-- **Worker do swarm: `grep` antes de escrever que algo saiu** (#268). O `docker/swarm-worker.md` pede que, antes de afirmar em doc, ADR ou corpo de PR que um valor, comando, variável ou arquivo "saiu", "deixou de ser emitido" ou "não é mais usado", o worker confira com `git grep` no repo inteiro e cite no PR o comando e o resultado (saída vazia, ou o que sobrou e por quê). Lição do PR #262, que declarou fora de uso um valor que `docker/oute-emit` e `docker/oute-task` ainda gravavam. **Precisa de release** (`docker/swarm-worker.md` vai na imagem).
