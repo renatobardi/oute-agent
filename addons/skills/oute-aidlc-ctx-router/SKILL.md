@@ -26,7 +26,7 @@ Você não lembra de todas as skills; pergunte aqui. Cada fase termina num **gat
 | `ops` | algo quebrado, lento ou intermitente; saúde, custo e telemetria dos agentes | `oute-aidlc-ops-diagnose`; `oute-aidlc-ops-observe` (lê a telemetria do ADR-04) |
 | `learn` | relatos de problema, fim de rodada, fim de ciclo | `oute-aidlc-learn-feedback` (relato → issues), `oute-swarm` §4.1 (kaizen, uma rodada), `oute-aidlc-learn-insights` (fecha o ciclo: telemetria, issues, rodadas, canal e ai-memory → insights → lições e melhorias) |
 | `iter` | fim de ciclo, fim de sessão | `oute-aidlc-iter-roadmap` (abre o próximo ciclo: foco, issues numa task list, limpeza do backlog); fim de sessão: o que ficou pendente vira issue com `aidlc:<fase>` |
-| `ctx` | termos, regras, configuração do repo | `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
+| `ctx` | termos, regras, configuração do repo; ADR criado ou alterado | `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup`, `oute-aidlc-ctx-sync` (confere `CONTEXT.md`, `AGENTS.md` e notas contra os ADRs) |
 
 ## Fluxo principal: ideia → merge
 
