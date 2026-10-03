@@ -989,6 +989,49 @@ check "worker sem PR: não fecha a issue (#115)"          grep -qF 'Não feche a
 check "worker sem PR: o PRONTO com PR continua (#115)"   grep -qF 'termine com uma linha `PRONTO #115: <url do PR>`' "$P"
 check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 12. snapshot da cota (#347): spawn e close chamam `oute-emit quota` em segundo plano; a leitura nunca atrasa nem derruba
+CASE=cota; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
+QB="$TMP/$CASE/qbin"; mkdir -p "$QB"
+# oute-quota falso: o JSON e a espera vêm de arquivos (o sw só repassa o ambiente que ele escolhe); rc de $QB/rc
+cat > "$QB/oute-quota" <<'SH'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+[[ ! -f "$d/sleep" ]] || sleep "$(cat "$d/sleep")"
+[[ ! -f "$d/json" ]] || cat "$d/json"
+exit "$(cat "$d/rc" 2>/dev/null || echo 0)"
+SH
+chmod +x "$QB/oute-quota"
+R5="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":{"used_pct":15,"resets_at":"%s"}}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' "$R5" > "$QB/json"
+# espera (até 10 s) o que o segundo plano ainda vai entregar
+until_n() { local i; for i in $(seq 1 100); do [[ "$(eval "$1")" -ge "$2" ]] && return 0; sleep 0.1; done; return 1; }
+OLDPATH="$PATH"; export PATH="$QB:$PATH"
+FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#9 cota=idle"
+sw spawn 9-cota "faça a issue 9"
+check "cota, spawn: código 0 e nada de cota na tela"     bash -c '[ "$1" -eq 0 ] && ! grep -qi "quota" <<<"$2"' _ "$RC" "$OUT$ERR"
+check "cota, spawn: pontos da cota chegam (used_pct e reset_in_seconds do Claude)" until_n "mp '.name == \"oute.quota.used_pct\" and .res[\"oute.agent\"] == \"claude\" and .value == 15' | grep -c ." 1
+check "cota, spawn: evento unknown do Codex com momento spawn" until_n "n '.name == \"oute.quota.unknown\" and .attrs[\"oute.quota.moment\"] == \"spawn\" and .attrs[\"oute.agent\"] == \"codex\"'" 1
+sw close 9-cota --yes
+check "cota, close: fecha e emite o evento com momento close" bash -c '[ "$1" -eq 0 ]' _ "$RC"
+check "cota, close: unknown do Codex com momento close"  until_n "n '.name == \"oute.quota.unknown\" and .attrs[\"oute.quota.moment\"] == \"close\"'" 1
+# close sem nada fechado (já fechada): não lê a cota
+c0="$(n '.name == "oute.quota.unknown"')"; p0="$(ls "$RCV_DIR"/*.json | wc -l)"
+sw close 9-cota --yes
+sleep 1
+check "cota, close sem nada a fechar: sem snapshot novo" [ "$(ls "$RCV_DIR"/*.json | wc -l)" -eq "$p0" -a "$(n '.name == "oute.quota.unknown"')" -eq "$c0" ]
+# oute-quota lento (6 s): o spawn volta antes, com a mesma saída
+echo 6 > "$QB/sleep"
+FAKE="$FAKE" "$BIN/fake-tabs" "#10 lenta=idle"
+t0=$(date +%s); sw spawn 10-lenta "faça a issue 10"; dt=$(( $(date +%s) - t0 ))
+check "cota lenta: o spawn não espera a leitura ($dt s)" bash -c '[ "$1" -eq 0 ] && [ "$2" -le 4 ] && grep -q "aberta: #10" <<<"$3"' _ "$RC" "$dt" "$OUT"
+# oute-quota que falha (rc 2, sem saída) e que não existe: spawn igual
+rm -f "$QB/sleep"; echo 2 > "$QB/rc"; : > "$QB/json"
+FAKE="$FAKE" "$BIN/fake-tabs" "#11 falha=idle"
+sw spawn 11-falha "faça a issue 11"
+check "cota com falha na leitura: spawn abre normalmente" bash -c '[ "$1" -eq 0 ] && grep -q "aberta: #11" <<<"$2"' _ "$RC" "$OUT"
+export PATH="$OLDPATH"
+rcv_stop
+
 # 11g. sessão de spike (#100): o pronto é o relatório no comentário final da issue, sem código de produção
 CASE=spike; round "$CASE"
 sw spawn 100-spike "instrução"
