@@ -963,6 +963,9 @@ check "spike: instrução da sessão, sem proposta (#100)"  grep -qF 'a sessão 
 check "spike: conferência de que não entrou código de produção (#100)" grep -qF 'confira também que o relatório responde à pergunta da issue, com evidência, e que não entrou código de produção' "$FAKE/oute-task.last"
 check "spike: código de produção é divergência (#100)"   grep -qF 'Código de produção em spike é divergência: mostre ao Bardi.' "$FAKE/oute-task.last"
 check "spike: cada regra na sua seção, §1 a §3 (#100)"   [ "$(grep -n -e '^## [1-4]\. ' -e '^- \*\*Spike com `ready`:\*\*' -e '^- \*\*Spike (relatório):\*\*' "$FAKE/oute-task.last" | cut -d: -f2- | cut -c1-12 | tr '\n' '|')" == '## 1. Triage|- **Spike co|## 2. Abertu|- **Spike (r|## 3. Acompa|- **Spike (r|## 4. Fecham|' ]
+check "spike com critério: marca na triagem (#356)"       grep -qF 'critério pede abrir issues' "$FAKE/oute-task.last"
+check "spike com critério: opção numerada ao Bardi (#356)" grep -qF 'a sessão cria as issues do relatório' "$FAKE/oute-task.last"
+check "spike com critério: dispatcher oferece as issues (#356)" grep -qF 'o dispatcher as oferece numa opção numerada' "$FAKE/oute-task.last"
 check "merge: triagem oferece a autorização permanente (#243)" grep -qF -- '- **Autorização permanente de merge:** junto das opções de abertura, ofereça também, como opção numerada à parte' "$FAKE/oute-task.last"
 check "merge: condições da autorização permanente (#243)" grep -qF 'auditoria com ação `merge como está` (nenhum CRITICAL nem BLOCKING), CI verde no head auditado, com o SonarCloud concluído' "$FAKE/oute-task.last"
 check "merge: repasse da sessão de upstream cita a rodada (#243)" grep -qF 'quando a mensagem diz que é repasse da sessão de upstream, cita esta rodada (`'"$(nova)"'`) e traz as condições acima' "$FAKE/oute-task.last"
@@ -997,7 +1000,8 @@ check "worker spike: relatório no comentário final da issue (#100)" grep -qF '
 check "worker spike: PRONTO com o comentário do relatório (#100)" grep -qF 'Termine com `PRONTO #100: <url do comentário com o relatório> — sem PR`.' "$P"
 check "worker spike: sem proposta nem espera do ok (#100)" grep -qF 'Aqui não há proposta nem espera do ok (a regra acima): o relatório não aplica nada.' "$P"
 check "worker spike: PR de doc quando a instrução pede arquivo (#100)" grep -qF 'entregue por PR de doc (só o doc e o fragmento do changelog), com as regras de PR acima, e o comentário final na issue leva o resumo e o link do PR.' "$P"
-check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova: o que valer virar issue vai no relatório, como recomendação.' "$P"
+check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova, salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
+check "worker spike: exceção para spike com critério (opção 1) (#356)" grep -qF 'salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
 check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end
