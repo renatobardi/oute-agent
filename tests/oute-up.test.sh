@@ -361,6 +361,12 @@ printf 'export GH_TOKEN=%s\n' "$T_GH" > "$AENV"; : > "$SENV"
 F_AMBIENT="$T_FOO" oute up
 check "ambiente de quem chama: não vira credencial dos serviços" test "$RC|$(cenv ingest)|$(cenv pass)|$(cenv otel)" = "0|||none"
 check "ambiente de quem chama: arquivos não mudam"     bash -c '[ "$(cat "$0")" = "export GH_TOKEN=$2" ] && [ ! -s "$1" ]' "$AENV" "$SENV" "$T_GH"
+# Mac (sem OUTE_AGENT_STUDIO no .env) sem a credencial de ingestão: o collector fica sem o pipeline, mas o agent
+# ainda recebe o vhost da tailnet, por onde lê com a credencial de leitura (ops-observe, #259)
+mv "$REPO/.env" "$TMP/env.servidor"
+oute up
+check "Mac sem a ingestão: pipeline desligado, vhost para a leitura" test "$RC|$(cenv otel)|$(cenv url)" = "0|none|https://agent-studio.oute.pro"
+mv "$TMP/env.servidor" "$REPO/.env"
 
 # ---------------------------------------------------------------- 16. scripts/oute-secrets.sh: pasta ausente = rc 4
 # o script de verdade, com um bw falso (sessão já aberta, duas pastas no cofre, uma com item)
