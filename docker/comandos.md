@@ -14,7 +14,7 @@ Dois lugares, dois conjuntos de comandos:
   Nova tarefa com agente ...... claude  (no checkout principal)   (container; pergunta o nome e cria worktree)
   Tarefa com nome e prompt .... oute-task 185-alerta claude "…"   (container)
   Rodada paralela de issues ... oute-swarm lab --max 3            (container, dentro do herdr)
-  Limpar worktrees mergeadas .. oute-task clean → clean --yes     (container)
+  Limpar worktrees mergeadas .. oute-task clean → clean --yes     (container; só o space atual do herdr)
   Sair do herdr sem matar ..... prefix+q  (detach)
 
 ## HOST — `oute …`
@@ -52,10 +52,15 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   claude | codex                    no checkout principal: pergunta o nome da tarefa e abre na worktree
                                     (dentro de worktree, -p/exec, --resume: passa direto)
   oute-task <slug> [claude|codex|shell] ["prompt"]
-                                    cria/reabre /workspace/.worktrees/<repo>-<slug>, branch sessao/<slug>
+                                    cria/reabre /workspace/.worktrees/<space>/<repo>-<slug>, branch sessao/<slug>
+                                    (<space> = label do space do herdr em nome de pasta; fora do herdr: _sem-space)
   oute-task -r <repo> <slug> …      idem, de fora do repo
-  oute-task list                    worktrees de tarefa abertas
-  oute-task clean [--yes]           remove as mergeadas/vazias e avança (ff) o checkout principal (sem --yes: só mostra)
+  oute-task list                    worktrees de tarefa abertas (todos os spaces)
+  oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal
+                                    dos repos com worktree nele (sem --yes: só mostra)
+    --space <nome> | --all          limpa outro space | todos os spaces e o formato antigo
+  Formato antigo (/workspace/.worktrees/<repo>-<slug>, antes da #277): reabre e aparece no list, sem migração;
+  só o clean --all o remove.
   OUTE_NO_WORKTREE=1 claude         desliga a worktree automática (uso raro)
   Cada sessão tem um id (oute.task.id, gravado na worktree). Abrir, reabrir e remover (clean --yes) viram
   eventos oute.task.* no bucket e no agent-studio, e as conversas do agente saem marcadas com a sessão (ADR-04).

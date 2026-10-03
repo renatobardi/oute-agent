@@ -42,13 +42,23 @@ esac
 SH
 chmod +x "$BIN"/*
 cp "$BIN/claude" "$BIN/codex" "$BIN/gh" "$NOEMIT/"; cp "$BIN/claude" "$NOTASK/"
+# herdr: `workspace get <id>` responde o label da linha "<id> <label>" de $FAKE/spaces; id desconhecido sai com erro
+cat > "$BIN/herdr" <<'SH'
+#!/usr/bin/env bash
+[[ "$1 ${2:-}" == "workspace get" ]] || { echo "herdr falso: sem suporte a '$*'" >&2; exit 1; }
+l="$(awk -v id="${3:-}" '$1 == id {sub(/^[^ ]* /, ""); print; exit}' "$FAKE/spaces" 2>/dev/null)"
+[[ -n "$l" ]] || { echo "workspace not found" >&2; exit 1; }
+jq -cn --arg id "$3" --arg l "$l" '{id: "cli:workspace:get", result: {type: "workspace_info", workspace: {label: $l, workspace_id: $id}}}'
+SH
+chmod +x "$BIN/herdr"
 ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 ln -s "$TASK" "$BIN/oute-task"; ln -s "$TASK" "$NOEMIT/oute-task"   # o shim chama `oute-task --mark`
 for a in claude codex; do ln -s "$ROOT/docker/shims/oute-agent-shim" "$SHIMS/$a"; done
 
 ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
-      OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC
+      OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC \
+      HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
        GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 
@@ -68,13 +78,15 @@ task_ev() { ev "(.name | startswith(\"oute.task.\")) and ($1)"; }
 last() { task_ev true | tail -n1; }                                      # último evento de sessão recebido
 total() { n '.name | startswith("oute.task.")'; }
 
+SP="$WT/_sem-space"   # fora do herdr, as worktrees ficam em _sem-space (#277); seções 1 a 8
+
 # ---------------------------------------------------------------- 1. abertura e reabertura
 rcv_start "$TMP/r1"
 FAKE_RC=7 t s1 claude "faça x"
 check "abrir: exec do agente (saída e código dele)"    [ "$RC" -eq 7 -a "$OUT" == "agente falso claude" ]
-check "abrir: stderr só com a linha da worktree"       [ "$ERR" == "worktree $WT/proj-s1 · branch sessao/s1 (de origin/main)" ]
-check "abrir: agente na worktree, com o prompt"        [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$WT/proj-s1" && pwd -P)" -a "$(cat "$FAKE/claude.args")" == "faça x" ]
-id="$(mark "$WT/proj-s1" id)"
+check "abrir: stderr só com a linha da worktree"       [ "$ERR" == "worktree $SP/proj-s1 · branch sessao/s1 (de origin/main)" ]
+check "abrir: agente na worktree, com o prompt"        [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(cat "$FAKE/claude.args")" == "faça x" ]
+id="$(mark "$SP/proj-s1" id)"
 check "abrir: id <repo>-<slug>-<AAAAMMDDhhmmss> no git-dir da worktree" grep -qE '^proj-s1-[0-9]{14}$' <<<"$id"
 e="$(task_ev '.name == "oute.task.opened"')"
 check "abrir: um oute.task.opened"                     [ "$(grep -c . <<<"$e")" -eq 1 -a "$(total)" -eq 1 ]
@@ -89,11 +101,11 @@ check "marca: origem preservada + oute.task.*"         [ "$(aenv claude OTEL_RES
 check "abrir: o agente passa pelo shim sem nova worktree" [ "$(aenv claude OUTE_NO_WORKTREE)" == 1 ]
 
 t s1 codex
-check "reabrir: código 0, saída do agente"             [ "$RC" -eq 0 -a "$OUT" == "agente falso codex" -a "$ERR" == "reabrindo $WT/proj-s1 (sessao/s1)" ]
+check "reabrir: código 0, saída do agente"             [ "$RC" -eq 0 -a "$OUT" == "agente falso codex" -a "$ERR" == "reabrindo $SP/proj-s1 (sessao/s1)" ]
 e="$(task_ev '.name == "oute.task.reopened"')"
 check "reabrir: um oute.task.reopened, com o mesmo id" [ "$(grep -c . <<<"$e")" -eq 1 ] && jqe --arg id "$id" '.attrs["oute.task.id"] == $id' <<<"$e"
 check "reopened: agente da sessão codex, base, sem legacy" jqe '.attrs["oute.task.agent"] == "codex" and .attrs["oute.task.base"] == "main" and (.attrs | has("oute.task.legacy") | not)' <<<"$e"
-check "reabrir: id não muda na worktree"               [ "$(mark "$WT/proj-s1" id)" == "$id" ]
+check "reabrir: id não muda na worktree"               [ "$(mark "$SP/proj-s1" id)" == "$id" ]
 check "marca no Codex: a mesma"                        [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
 
 # marca de outra sessão no ambiente de quem chamou: a chave não se repete, vale a nova; o evento leva só a origem
@@ -110,20 +122,20 @@ check "shell: oute.task.agent=shell"                   jqe '.name == "oute.task.
 # ---------------------------------------------------------------- 2. sessão de rodada (oute.swarm.*)
 mkdir -p "$HOME/.oute/swarm/swarm-0101-0000"; printf 'repo=%s\nmax=3\nagent=codex\n' "$WS/proj" > "$HOME/.oute/swarm/swarm-0101-0000/meta"
 OUTE_SWARM_WORKER=1 OUTE_SWARM_ROUND=swarm-0101-0000 t 7-foo claude "instrução"
-wid="$(mark "$WT/proj-7-foo" id)"
+wid="$(mark "$SP/proj-7-foo" id)"
 e="$(last)"
 check "worker: opened com a rodada e a sessão"         jqe --arg id "$wid" '.name == "oute.task.opened" and .attrs["oute.task.id"] == $id
                                                          and .attrs["oute.swarm.round"] == "swarm-0101-0000" and .attrs["oute.swarm.session"] == "7-foo"' <<<"$e"
 check "worker: quem chamou = agente do dispatcher (meta)" jqe '.attrs["oute.agent"] == "codex" and .res["oute.agent"] == "codex"' <<<"$e"
 WMARK="$ORIGIN,oute.task.id=$wid,oute.task.repo=proj,oute.task.slug=7-foo,oute.swarm.round=swarm-0101-0000,oute.swarm.session=7-foo"
 check "worker: marca com oute.task.* e oute.swarm.*"   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" ]
-check "worker: sugestão de prompt continua desligada"  [ "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false -a -f "$(gitdir "$WT/proj-7-foo")/oute-swarm-worker" ]
+check "worker: sugestão de prompt continua desligada"  [ "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false -a -f "$(gitdir "$SP/proj-7-foo")/oute-swarm-worker" ]
 t 7-foo claude
 check "worker reaberto sem o ambiente: rodada vem da worktree" jqe --arg id "$wid" '.name == "oute.task.reopened" and .attrs["oute.task.id"] == $id
                                                          and .attrs["oute.swarm.round"] == "swarm-0101-0000" and .attrs["oute.swarm.session"] == "7-foo"' <<<"$(last)"
 check "worker reaberto: mesma marca"                   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" ]
 OUTE_SWARM_ID=swarm-0202-0000 OUTE_SWARM_MAX=3 OUTE_SWARM_REPO="$WS/proj" t swarm-0202-0000 claude
-cid="$(mark "$WT/proj-swarm-0202-0000" id)"
+cid="$(mark "$SP/proj-swarm-0202-0000" id)"
 check "dispatcher: rodada sem sessão; chamou = claude (rodada sem meta)" jqe '.name == "oute.task.opened" and .attrs["oute.swarm.round"] == "swarm-0202-0000"
                                                          and (.attrs | has("oute.swarm.session") | not) and .attrs["oute.agent"] == "claude"' <<<"$(last)"
 check "dispatcher: marca com a rodada"               [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$cid,oute.task.repo=proj,oute.task.slug=swarm-0202-0000,oute.swarm.round=swarm-0202-0000" ]
@@ -151,63 +163,63 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. worktree sem id (anterior à #128) e falha ao gravar
-t old claude; rm -f "$(gitdir "$WT/proj-old")/oute-task"
+t old claude; rm -f "$(gitdir "$SP/proj-old")/oute-task"
 t old claude
-oid="$(mark "$WT/proj-old" id)"
+oid="$(mark "$SP/proj-old" id)"
 check "sem id: a reabertura grava um id novo"          grep -qE '^proj-old-[0-9]{14}$' <<<"$oid"
 check "sem id: reopened com legacy=true e o id novo"   jqe --arg id "$oid" '.name == "oute.task.reopened" and .attrs["oute.task.id"] == $id and .attrs["oute.task.legacy"] == true' <<<"$(last)"
 check "sem id: a conversa já sai marcada"              [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$oid,oute.task.repo=proj,oute.task.slug=old" ]
 t old claude
 check "sem id: na reabertura seguinte, mesmo id e sem legacy" jqe --arg id "$oid" '.attrs["oute.task.id"] == $id and (.attrs | has("oute.task.legacy") | not)' <<<"$(last)"
-t nogravo claude; t fixa claude; fid="$(mark "$WT/proj-fixa" id)"
+t nogravo claude; t fixa claude; fid="$(mark "$SP/proj-fixa" id)"
 if [[ "$(id -u)" -eq 0 ]]; then
   echo "skip falha ao gravar o id: rodando como root (o chmod não barra a escrita)"
 else
-  gd="$(gitdir "$WT/proj-nogravo")"; rm -f "$gd/oute-task"; chmod a-w "$gd"
+  gd="$(gitdir "$SP/proj-nogravo")"; rm -f "$gd/oute-task"; chmod a-w "$gd"
   FAKE_RC=5 OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=de-outra" t nogravo claude "segue"
   chmod u+w "$gd"
   check "falha ao gravar o id: a sessão abre igual (exec e código)" [ "$RC" -eq 5 -a "$OUT" == "agente falso claude" -a "$(cat "$FAKE/claude.args")" == "segue" ]
-  check "falha ao gravar o id: só um aviso a mais no stderr" [ "$(grep -c . <<<"$ERR")" -eq 2 ] && grep -q "^reabrindo $WT/proj-nogravo " <<<"$ERR" && grep -q '^aviso: não consegui gravar o id da sessão' <<<"$ERR"
+  check "falha ao gravar o id: só um aviso a mais no stderr" [ "$(grep -c . <<<"$ERR")" -eq 2 ] && grep -q "^reabrindo $SP/proj-nogravo " <<<"$ERR" && grep -q '^aviso: não consegui gravar o id da sessão' <<<"$ERR"
   check "falha ao gravar o id: conversa sem marca (nem a de outra sessão)" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
   check "falha ao gravar o id: reopened sem id e sem legacy" jqe '.name == "oute.task.reopened" and .attrs["oute.task.slug"] == "nogravo" and (.attrs | has("oute.task.id") or has("oute.task.legacy") | not)' <<<"$(last)"
   # marca que já tem id e não aceita a rodada nova: o id fica, sem aviso; a rodada vale nesta abertura
-  chmod a-w "$(gitdir "$WT/proj-fixa")/oute-task"
+  chmod a-w "$(gitdir "$SP/proj-fixa")/oute-task"
   OUTE_SWARM_ID=swarm-0303-0000 t fixa claude
-  chmod u+w "$(gitdir "$WT/proj-fixa")/oute-task"
-  check "falha ao atualizar a marca: abre igual, sem aviso" [ "$RC" -eq 0 -a "$ERR" == "reabrindo $WT/proj-fixa (sessao/fixa)" ]
+  chmod u+w "$(gitdir "$SP/proj-fixa")/oute-task"
+  check "falha ao atualizar a marca: abre igual, sem aviso" [ "$RC" -eq 0 -a "$ERR" == "reabrindo $SP/proj-fixa (sessao/fixa)" ]
   check "falha ao atualizar a marca: o id fica, com a rodada do ambiente" jqe --arg id "$fid" '.attrs["oute.task.id"] == $id and .attrs["oute.swarm.round"] == "swarm-0303-0000"' <<<"$(last)" \
-    && [ "$(mark "$WT/proj-fixa" id)" == "$fid" -a -z "$(mark "$WT/proj-fixa" round)" ]
+    && [ "$(mark "$SP/proj-fixa" id)" == "$fid" -a -z "$(mark "$SP/proj-fixa" round)" ]
 fi
 
 # ---------------------------------------------------------------- 5. shim: restore do herdr e agente aberto na worktree
 before="$(total)"
 mkdir -p "$HOME/.claude/projects/p" "$HOME/.codex/sessions/2026"
-printf '{"type":"user","cwd":"%s"}\n' "$WT/proj-s1" > "$HOME/.claude/projects/p/conv-s1.jsonl"
-printf '{"type":"user","cwd":"%s"}\n' "$WT/proj-7-foo" > "$HOME/.claude/projects/p/conv-w.jsonl"
-printf '{"type":"user","cwd":"%s"}\n' "$WT/proj-s1" > "$HOME/.codex/sessions/2026/rollout-2026-conv-cx.jsonl"
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-s1" > "$HOME/.claude/projects/p/conv-s1.jsonl"
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-7-foo" > "$HOME/.claude/projects/p/conv-w.jsonl"
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-s1" > "$HOME/.codex/sessions/2026/rollout-2026-conv-cx.jsonl"
 shim claude "$WS/proj" --resume conv-s1
-check "restore: claude --resume entra na worktree"     [ "$RC" -eq 0 -a "$(cat "$FAKE/claude.pwd")" == "$(cd "$WT/proj-s1" && pwd -P)" ]
+check "restore: claude --resume entra na worktree"     [ "$RC" -eq 0 -a "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" ]
 check "restore: a mesma marca do oute-task"            [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
 shim claude "$WS/proj" --resume conv-w
 check "restore de worker: marca com oute.swarm.*"      [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" -a "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false ]
 shim codex "$WS/proj" resume conv-cx
-check "restore do Codex: codex resume <id> marcado"    [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$WT/proj-s1" && pwd -P)" -a "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
-shim claude "$WT/proj-s1" -p "oi"
+check "restore do Codex: codex resume <id> marcado"    [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+shim claude "$SP/proj-s1" -p "oi"
 check "agente aberto direto na worktree (-p): marcado" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '-p\noi')" ]
-t semid claude; rm -f "$(gitdir "$WT/proj-semid")/oute-task"; before=$((before + 1))
-printf '{"type":"user","cwd":"%s"}\n' "$WT/proj-semid" > "$HOME/.claude/projects/p/conv-semid.jsonl"
+t semid claude; rm -f "$(gitdir "$SP/proj-semid")/oute-task"; before=$((before + 1))
+printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-semid" > "$HOME/.claude/projects/p/conv-semid.jsonl"
 shim claude "$WS/proj" --resume conv-semid
-check "restore em worktree sem id: sem marca"          [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$WT/proj-semid" && pwd -P)" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+check "restore em worktree sem id: sem marca"          [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-semid" && pwd -P)" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
 shim claude "$WS/proj" -p "no checkout principal"
 check "checkout principal: sem marca"                  [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
 shim claude "$TMP" -p "fora de repo"
 check "fora de repo: sem marca"                        [ "$RC" -eq 0 -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
-OUT="$(cd "$WT/proj-s1" && PATH="$SHIMS:$NOTASK:/usr/bin:/bin" "$SHIMS/claude" -p "sem oute-task" 2>&1 </dev/null)"; RC=$?
+OUT="$(cd "$SP/proj-s1" && PATH="$SHIMS:$NOTASK:/usr/bin:/bin" "$SHIMS/claude" -p "sem oute-task" 2>&1 </dev/null)"; RC=$?
 check "shim sem oute-task no PATH: abre igual, sem marca" [ "$RC" -eq 0 -a "$OUT" == "agente falso claude" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
 check "shim: não emite evento"                         [ "$(total)" -eq "$before" ]
 OUT="$(cd "$WS/proj" && "$TASK" --mark 2>&1; cd "$TMP" && "$TASK" --mark 2>&1; "$TASK" --mark /nao/existe 2>&1)"; RC=$?
 check "--mark fora de worktree com id: nada, código 0" [ "$RC" -eq 0 -a -z "$OUT" ]
-check "--mark: não cria worktree"                      [ ! -e "$WT/proj-mark" -a ! -e "$WT/proj--mark" ]
+check "--mark: não cria worktree"                      [ ! -e "$SP/proj-mark" -a ! -e "$SP/proj--mark" ]
 
 check "nenhum oute.task.* com corpo (1ª parte)"        [ "$(task_ev '.body != null' | grep -c .)" -eq 0 -a "$(total)" -gt 10 ]
 rcv_stop
@@ -216,22 +228,23 @@ rcv_stop
 rcv_start "$TMP/r2"
 # s1: commit com PR mergeado; old: detached contida na base; 7-foo, swarm-0202-0000, 8-sem-rodada, nogravo, fixa: sem commits;
 # semid: sem id e sem commits; fica1: mudança local; fica2: commit sem PR mergeado
-git -C "$WT/proj-s1" commit -q --allow-empty -m entrega; echo "sessao/s1" > "$FAKE/merged"
-git -C "$WT/proj-old" checkout -q --detach origin/main
-t fica1 claude; echo x > "$WT/proj-fica1/novo.txt"
-t fica2 claude; git -C "$WT/proj-fica2" commit -q --allow-empty -m "sem PR"
+git -C "$SP/proj-s1" commit -q --allow-empty -m entrega; echo "sessao/s1" > "$FAKE/merged"
+git -C "$SP/proj-old" checkout -q --detach origin/main
+t fica1 claude; echo x > "$SP/proj-fica1/novo.txt"
+t fica2 claude; git -C "$SP/proj-fica2" commit -q --allow-empty -m "sem PR"
 base_n="$(total)"
 t list
-check "list: lista as worktrees e não emite"           [ "$RC" -eq 0 -a "$(grep -c "^$WT/proj-" <<<"$OUT")" -eq 10 -a "$(total)" -eq "$base_n" ]
+check "list: lista as worktrees e não emite"           [ "$RC" -eq 0 -a "$(grep -c "^$SP/proj-" <<<"$OUT")" -eq 10 -a "$(total)" -eq "$base_n" ]
 t clean
-check "simulação: mostra o que removeria"              grep -qx "remover $WT/proj-s1 (PR mergeado)" <<<"$OUT" && grep -qx "(simulação — rode 'oute-task clean --yes' para aplicar)" <<<"$OUT"
-check "simulação: não remove e não emite"              [ -d "$WT/proj-s1" -a -d "$WT/proj-old" -a "$(total)" -eq "$base_n" ]
+check "fora do herdr: clean só no _sem-space (#277)"   [ "$(head -n1 <<<"$OUT")" == "space _sem-space ($SP)" ]
+check "simulação: mostra o que removeria"              grep -qx "remover $SP/proj-s1 (PR mergeado)" <<<"$OUT" && grep -qx "(simulação — rode 'oute-task clean --yes' para aplicar)" <<<"$OUT"
+check "simulação: não remove e não emite"              [ -d "$SP/proj-s1" -a -d "$SP/proj-old" -a "$(total)" -eq "$base_n" ]
 CLAUDECODE=1 t clean --yes
-check "clean --yes: código 0 e a mesma saída de sempre" [ "$RC" -eq 0 ] && grep -qx "removida $WT/proj-s1 (PR mergeado)" <<<"$OUT" \
-  && grep -qx "removida $WT/proj-old (detached, contida em origin/main)" <<<"$OUT" && grep -qx "removida $WT/proj-7-foo (sem commits além de origin/main)" <<<"$OUT" \
-  && grep -qx "mantém  $WT/proj-fica1 (mudanças locais)" <<<"$OUT" && grep -qx "mantém  $WT/proj-fica2 (sessao/fica2: 1 commit(s) sem PR mergeado)" <<<"$OUT" \
-  && [ "$(grep -c . <<<"$OUT")" -eq 10 -a -z "$ERR" ]
-check "clean --yes: worktrees removidas e mantidas"    [ ! -e "$WT/proj-s1" -a ! -e "$WT/proj-old" -a ! -e "$WT/proj-semid" -a -d "$WT/proj-fica1" -a -d "$WT/proj-fica2" ]
+check "clean --yes: código 0 e a saída de sempre, com o space no topo" [ "$RC" -eq 0 ] && grep -qx "removida $SP/proj-s1 (PR mergeado)" <<<"$OUT" \
+  && grep -qx "removida $SP/proj-old (detached, contida em origin/main)" <<<"$OUT" && grep -qx "removida $SP/proj-7-foo (sem commits além de origin/main)" <<<"$OUT" \
+  && grep -qx "mantém  $SP/proj-fica1 (mudanças locais)" <<<"$OUT" && grep -qx "mantém  $SP/proj-fica2 (sessao/fica2: 1 commit(s) sem PR mergeado)" <<<"$OUT" \
+  && [ "$(grep -c . <<<"$OUT")" -eq 11 -a -z "$ERR" ]
+check "clean --yes: worktrees removidas e mantidas"    [ ! -e "$SP/proj-s1" -a ! -e "$SP/proj-old" -a ! -e "$SP/proj-semid" -a -d "$SP/proj-fica1" -a -d "$SP/proj-fica2" ]
 r="$(task_ev '.name == "oute.task.removed"')"
 check "removed: um por worktree removida (8), nada das mantidas" [ "$(grep -c . <<<"$r")" -eq 8 -a "$(total)" -eq $((base_n + 8)) ] \
   && ! grep -q 'fica' <<<"$r"
@@ -246,24 +259,24 @@ check "removed sem id: só repo e slug"                 jqe -s 'map(select(.attr
 check "removed: quem chamou o clean (claude), sem agente da sessão" jqe -s 'all(.attrs["oute.agent"] == "claude" and .res["oute.agent"] == "claude" and (.attrs | has("oute.task.agent") | not))' <<<"$r"
 check "removed: motivo sempre de valores fechados"     jqe -s 'all(.attrs["oute.task.reason"] | IN("merged", "empty", "detached"))' <<<"$r"
 # worktree que o git se recusa a remover (travada): fica, e não há removed
-t travada claude; git -C "$WS/proj" worktree lock "$WT/proj-travada"
+t travada claude; git -C "$WS/proj" worktree lock "$SP/proj-travada"
 before="$(total)"
 t clean --yes
-check "clean --yes: remoção recusada pelo git não emite" [ -d "$WT/proj-travada" -a "$(total)" -eq "$before" ] && ! grep -q "removida $WT/proj-travada" <<<"$OUT"
-git -C "$WS/proj" worktree unlock "$WT/proj-travada"
+check "clean --yes: remoção recusada pelo git não emite" [ -d "$SP/proj-travada" -a "$(total)" -eq "$before" ] && ! grep -q "removida $SP/proj-travada" <<<"$OUT"
+git -C "$WS/proj" worktree unlock "$SP/proj-travada"
 t clean --yes
-check "clean --yes: destravada, sai com o removed"     [ ! -e "$WT/proj-travada" ] && jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "travada"' <<<"$(last)"
+check "clean --yes: destravada, sai com o removed"     [ ! -e "$SP/proj-travada" ] && jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "travada"' <<<"$(last)"
 before="$(total)"
 t clean --yes
 check "clean --yes de novo: nada a remover, nada emitido" [ "$RC" -eq 0 -a "$(total)" -eq "$before" ]
 if [[ "$(id -u)" -ne 0 ]]; then
   # worktree removida, mas o branch não apaga (refs sem permissão de escrita): a sessão acabou, o removed sai;
   # a linha "removida" continua não saindo, como antes, e o clean segue
-  t ramo claude; rid="$(mark "$WT/proj-ramo" id)"; chmod a-w "$WS/proj/.git/refs/heads/sessao"
+  t ramo claude; rid="$(mark "$SP/proj-ramo" id)"; chmod a-w "$WS/proj/.git/refs/heads/sessao"
   t clean --yes
   chmod u+w "$WS/proj/.git/refs/heads/sessao"
-  check "branch que não apaga: worktree removida, clean segue com código 0" [ "$RC" -eq 0 -a ! -e "$WT/proj-ramo" ] && ! grep -q "removida $WT/proj-ramo" <<<"$OUT" \
-    && grep -q "mantém  $WT/proj-fica2" <<<"$OUT"
+  check "branch que não apaga: worktree removida, clean segue com código 0" [ "$RC" -eq 0 -a ! -e "$SP/proj-ramo" ] && ! grep -q "removida $SP/proj-ramo" <<<"$OUT" \
+    && grep -q "mantém  $SP/proj-fica2" <<<"$OUT"
   check "branch que não apaga: removed emitido com o id"  jqe --arg id "$rid" '.name == "oute.task.removed" and .attrs["oute.task.id"] == $id and .attrs["oute.task.reason"] == "empty"' <<<"$(last)"
   git -C "$WS/proj" branch -q -D sessao/ramo
 fi
@@ -283,7 +296,7 @@ ciclo() {
   printf '%s' "${r//$s/SLUG}"
 }
 up="$(ciclo ciclo-up)"
-check "coletor no ar: o ciclo abre, reabre e remove"   grep -q "^\[3|agente falso claude|worktree $WT/proj-SLUG · branch sessao/SLUG (de origin/main)|p\]\[0|agente falso codex|reabrindo .*removida $WT/proj-SLUG (sem commits além de origin/main)" <<<"$up"
+check "coletor no ar: o ciclo abre, reabre e remove"   grep -q "^\[3|agente falso claude|worktree $SP/proj-SLUG · branch sessao/SLUG (de origin/main)|p\]\[0|agente falso codex|reabrindo .*removida $SP/proj-SLUG (sem commits além de origin/main)" <<<"$(tr '\n' ' ' <<<"$up")"
 check "coletor no ar: opened, reopened e removed do ciclo" [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-up"' | jq -r .name | tr '\n' ' ')" == "oute.task.opened oute.task.reopened oute.task.removed " ]
 live="$OTEL_EXPORTER_OTLP_ENDPOINT"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
@@ -313,5 +326,57 @@ check "oute-emit task: quem chamou inválido = unknown; valor vazio e motivo for
 check "nenhum oute.task.* com corpo (2ª parte)"        [ "$(task_ev '.body != null' | grep -c .)" -eq 0 -a "$(total)" -gt 10 ]
 check "todo oute.task.* com oute.event.id e event.name" [ "$(task_ev '(.attrs["oute.event.id"] | length) != 32 or .attrs["event.name"] != .name' | grep -c .)" -eq 0 ]
 rcv_stop
+
+# ---------------------------------------------------------------- 9. spaces do herdr (#277)
+# dois spaces (w1, w2) e dois repos (proj, outro), cada um com a main local atrás da origin; worktree no formato antigo
+# direto em $WT. O clean de um space não vê nem remove as do outro, e só avança a main dos repos com worktree nele
+printf 'w1 Frentes Engenharia\nw2 oute-agent\nw3 proj-colide\n' > "$FAKE/spaces"
+S1="$WT/frentes-engenharia"; S2="$WT/oute-agent"
+git init -q --bare -b main "$TMP/remote2.git" && git -C "$TMP/seed" push -q "$TMP/remote2.git" main \
+  && git clone -q "$TMP/remote2.git" "$WS/outro" || die "não montei o segundo repo"
+sp() { local w="$1"; shift; HERDR_ENV=1 HERDR_WORKSPACE_ID="$w" t "$@"; }   # sp <id do space> <args do oute-task…>
+sp w1 a1 claude
+check "space: worktree em <space>/<repo>-<slug>, label em nome de pasta" [ "$RC" -eq 0 -a "$ERR" == "worktree $S1/proj-a1 · branch sessao/a1 (de origin/main)" ] \
+  && [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$S1/proj-a1" && pwd -P)" ]
+sp w2 b1 claude; sp w2 -r outro b2 claude
+check "space: outro space, outra pasta (e outro repo)" [ -d "$S2/proj-b1" -a -d "$S2/outro-b2" ]
+sp w9 semlabel claude
+check "space sem label no herdr: _sem-space, com aviso" [ "$RC" -eq 0 -a -d "$SP/proj-semlabel" ] && grep -q "^aviso: não achei o label do space w9 no herdr; usando _sem-space$" <<<"$ERR"
+git -C "$WS/proj" worktree add -q -b sessao/legado "$WT/proj-legado" origin/main
+sp w1 legado codex
+check "formato antigo: reabre onde está, sem migrar"   [ "$RC" -eq 0 -a "$ERR" == "reabrindo $WT/proj-legado (sessao/legado)" -a ! -e "$S1/proj-legado" ] \
+  && [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$WT/proj-legado" && pwd -P)" ]
+git -C "$WS/proj" worktree add -q -b sessao/x "$WT/proj-colide" origin/main
+sp w3 outra claude
+check "pasta do space ocupada por worktree antiga: recusa" [ "$RC" -ne 0 -a ! -e "$WT/proj-colide/proj-outra" ] && grep -q "formato antigo" <<<"$ERR"
+git -C "$WS/proj" worktree remove "$WT/proj-colide"; git -C "$WS/proj" branch -q -D sessao/x
+sp w1 list
+check "list: todos os spaces e o formato antigo"       grep -q "^$S1/proj-a1 " <<<"$OUT" && grep -q "^$S2/proj-b1 " <<<"$OUT" && grep -q "^$S2/outro-b2 " <<<"$OUT" \
+  && grep -q "^$WT/proj-legado " <<<"$OUT"
+# main dos dois repos um commit atrás da origin
+git -C "$TMP/seed" commit -q --allow-empty -m novo && git -C "$TMP/seed" push -q "$TMP/remote.git" main && git -C "$TMP/seed" push -q "$TMP/remote2.git" main
+sp w1 clean
+check "clean (simulação): só o space atual"            [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "space frentes-engenharia ($S1)" ] && grep -qx "remover $S1/proj-a1 (sem commits além de origin/main)" <<<"$OUT" \
+  && ! grep -qE "b1|b2|legado|fica|semlabel" <<<"$OUT" && grep -q "^atualizar $WS/proj " <<<"$OUT" && ! grep -q "$WS/outro" <<<"$OUT"
+check "clean (simulação): avisa do formato antigo"     grep -qx "formato antigo: 1 worktree(s) direto em $WT, fora do escopo; só o 'oute-task clean --all' as considera" <<<"$OUT"
+sp w1 clean --yes
+check "clean --yes: remove só a worktree do space"     [ "$RC" -eq 0 -a ! -e "$S1/proj-a1" -a -d "$S2/proj-b1" -a -d "$S2/outro-b2" -a -d "$WT/proj-legado" -a -d "$SP/proj-semlabel" ]
+check "clean --yes: só a main do repo com worktree no space" [ "$(git -C "$WS/proj" rev-parse HEAD)" == "$(git -C "$WS/proj" rev-parse origin/main)" ] \
+  && [ "$(git -C "$WS/outro" rev-list --count HEAD..origin/main)" -eq 1 ]
+sp w1 clean --space "OUTE agent"
+check "clean --space: outro space, pelo nome normalizado" [ "$(head -n1 <<<"$OUT")" == "space oute-agent ($S2)" ] && grep -qx "remover $S2/outro-b2 (sem commits além de origin/main)" <<<"$OUT" \
+  && grep -qx "(simulação — rode 'oute-task clean --yes --space oute-agent' para aplicar)" <<<"$OUT" && [ -d "$S2/outro-b2" ]
+sp w1 clean --yes --space oute-agent
+check "clean --space --yes: remove o outro space e avança a main dele" [ "$RC" -eq 0 -a ! -e "$S2/proj-b1" -a ! -e "$S2/outro-b2" -a -d "$WT/proj-legado" ] \
+  && [ "$(git -C "$WS/outro" rev-list --count HEAD..origin/main)" -eq 0 ]
+t clean --space _sem-space
+check "clean --space _sem-space: mantém o nome"         [ "$(head -n1 <<<"$OUT")" == "space _sem-space ($SP)" ] && grep -qx "remover $SP/proj-semlabel (sem commits além de origin/main)" <<<"$OUT"
+sp w2 clean --all --yes
+check "clean --all: todos os spaces e o formato antigo" [ "$RC" -eq 0 -a "$(head -n1 <<<"$OUT")" == "todos os spaces ($WT)" -a ! -e "$WT/proj-legado" -a ! -e "$SP/proj-semlabel" -a -d "$SP/proj-fica1" ] \
+  && ! grep -q "^formato antigo" <<<"$OUT"
+for a in "--space x --all" "--all --space x" "--space" "--foo"; do
+  t clean $a
+  check "clean $a: recusa, sem remover nada"           [ "$RC" -ne 0 -a -z "$OUT" -a -d "$SP/proj-fica1" ] && grep -q "^oute-task: " <<<"$ERR"
+done
 
 check_end

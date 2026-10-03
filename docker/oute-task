@@ -3,13 +3,16 @@
 #
 #   oute-task <slug> [claude|codex|shell] [args…]      cria/reabre a worktree da tarefa e abre o agente nela
 #   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
-#   oute-task list                                       worktrees de tarefa abertas
-#   oute-task clean [--yes]                              remove as já mergeadas/vazias (ou detached contidas na base)
-#                                                        e sem mudança local;
-#                                                        avança (só fast-forward) o checkout principal na branch padrão
+#   oute-task list                                       worktrees de tarefa abertas (todos os spaces)
+#   oute-task clean [--yes] [--space <nome> | --all]     remove as já mergeadas/vazias (ou detached contidas na base)
+#                                                        e sem mudança local, só do space atual (--space: de outro;
+#                                                        --all: de todos, inclusive as do formato antigo); avança (só
+#                                                        fast-forward) o checkout principal dos repos com worktree ali
 #
-# Worktree: /workspace/.worktrees/<repo>-<slug>   Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR)
-# Base: origin/<branch padrão> atualizado. Slug: [a-z0-9-].
+# Worktree: /workspace/.worktrees/<space>/<repo>-<slug>, <space> = label do space do herdr em nome de pasta (fora do
+# herdr: _sem-space). Branch: sessao/<slug> (renomeie p/ <tipo>/<issue>-<slug> antes do PR). Slug: [a-z0-9-].
+# Base: origin/<branch padrão> atualizado. Formato antigo (/workspace/.worktrees/<repo>-<slug>, antes da #277): reabre
+# e aparece no list, sem migração; só o clean --all o considera.
 #
 # Sessão no bucket (ADR-04, "Sessões (#128)"): abrir, reabrir e remover (clean --yes) emitem oute.task.opened/reopened/
 # removed pelo oute-emit, e a conversa do agente sai marcada com a sessão no OTEL_RESOURCE_ATTRIBUTES. Nada disso muda
@@ -25,6 +28,24 @@ gitnet() { GIT_TERMINAL_PROMPT=0 git -c credential.https://github.com.helper= -c
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 default_branch() { git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true; }
 all_repos() { local d; for d in "$WS_ROOT"/*/; do [[ -d "$d/.git" ]] && echo "${d%/}"; done; }
+# worktrees de tarefa de um repo sob <raiz>, uma por linha: "<caminho> <branch>" (detached: "-")
+task_worktrees() {   # <repo> <raiz>
+  git -C "$1" worktree list --porcelain | awk -v root="$2" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2} /^detached$/{if (index(w, root"/")==1) print w, "-"}'
+}
+
+# ---------------------------------------------------------------- space do herdr (#277)
+# Cada worktree fica em $WT_ROOT/<space>: o label do space atual do herdr em nome de pasta; fora do herdr, ou sem achar
+# o label, _sem-space (o slugify nunca dá "_", então não colide com um label)
+NO_SPACE=_sem-space
+space_name() { local s; [[ "$1" == "$NO_SPACE" ]] && s="$1" || s="$(slugify "$1")"; printf '%s' "${s:-$NO_SPACE}"; }
+current_space() {
+  local label=""
+  if [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]]; then
+    label="$(herdr workspace get "$HERDR_WORKSPACE_ID" 2>/dev/null | jq -r '.result.workspace.label // empty' 2>/dev/null || true)"
+    [[ -n "$label" ]] || echo "aviso: não achei o label do space $HERDR_WORKSPACE_ID no herdr; usando $NO_SPACE" >&2
+  fi
+  space_name "$label"
+}
 
 # ---------------------------------------------------------------- sessão no bucket (ADR-04, #128)
 # Marca da sessão: <git-dir da worktree>/oute-task, uma chave por linha (id, repo, slug e, em sessão de rodada, round e
@@ -147,10 +168,29 @@ sync_main() {
 }
 
 cmd_clean() {
-  local yes=0; [[ "${1:-}" == --yes ]] && yes=1
-  local r wt br ahead why reason todo=0
+  local yes=0 all=0 sp="" flags="" root
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes) yes=1 ;;
+      --all) all=1; flags=" --all" ;;
+      --space) [[ -n "${2:-}" ]] || die "uso: oute-task clean [--yes] [--space <nome> | --all]"
+               sp="$(space_name "$2")"; flags=" --space $sp"; shift ;;
+      *) die "opção desconhecida: $1 (uso: oute-task clean [--yes] [--space <nome> | --all])" ;;
+    esac
+    shift
+  done
+  (( ! all )) || [[ -z "$sp" ]] || die "--space e --all não andam juntos"
+  # escopo: o space atual (ou o do --space) ou, com --all, tudo sob $WT_ROOT (como antes da #277)
+  if (( all )); then root="$WT_ROOT"; echo "todos os spaces ($WT_ROOT)"
+  else [[ -n "$sp" ]] || sp="$(current_space)"; root="$WT_ROOT/$sp"; echo "space $sp ($root)"; fi
+  local r wt br ahead why reason todo=0 list legacy=0
   who_called || true
   for r in $(all_repos); do
+    list="$(task_worktrees "$r" "$root")"
+    if (( ! all )); then
+      legacy=$(( legacy + $(task_worktrees "$r" "$WT_ROOT" | awk -v root="$WT_ROOT" '{n=$1; sub("/[^/]*$","",n); if (n==root) c++} END {print c+0}') ))
+      [[ -n "$list" ]] || continue   # repo sem worktree no space: nem fetch nem fast-forward
+    fi
     local base; base="$(default_branch "$r")"; base="${base:-main}"
     gitnet -C "$r" fetch -q origin --prune 2>/dev/null || true
     while read -r wt br; do
@@ -176,16 +216,17 @@ cmd_clean() {
       if (( yes )); then task_of "$r" "$wt" || true
         git -C "$r" worktree remove "$wt" && { removed "$base" "$reason"; git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"; }
       else echo "remover $wt ($why)"; fi
-    done < <(git -C "$r" worktree list --porcelain | awk -v root="$WT_ROOT" '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); if (index(w, root"/")==1) print w, $2} /^detached$/{if (index(w, root"/")==1) print w, "-"}')
+    done <<<"$list"
     sync_main "$r" "$base" "$yes" || todo=1
   done
-  (( yes || ! todo )) || echo "(simulação — rode 'oute-task clean --yes' para aplicar)"
+  (( ! legacy )) || echo "formato antigo: $legacy worktree(s) direto em $WT_ROOT, fora do escopo; só o 'oute-task clean --all' as considera"
+  (( yes || ! todo )) || echo "(simulação — rode 'oute-task clean --yes$flags' para aplicar)"
 }
 
 cmd_open() {
   local repo="$1" slug="$2"; shift 2
   local agent="${1:-claude}"; [[ $# -gt 0 ]] && shift
-  local main name base="" wt br ev=reopened
+  local main name base="" wt br sp ev=reopened
   who_called || true
   # antes de criar a worktree: agente fora do stack não deixa sessão vazia para trás
   case "$agent" in
@@ -195,11 +236,14 @@ cmd_open() {
   esac
   main="$(main_root "$repo")" || die "$repo não é um repositório git"
   name="$(basename "$main")"; slug="$(slugify "$slug")"; [[ -n "$slug" ]] || die "slug vazio"
-  wt="$WT_ROOT/$name-$slug"; br="sessao/$slug"
+  sp="$(current_space)"; wt="$WT_ROOT/$sp/$name-$slug"; br="sessao/$slug"
+  # formato antigo (antes da #277): a worktree que já existe direto em $WT_ROOT continua sendo a da tarefa
+  [[ -d "$wt" || ! -d "$WT_ROOT/$name-$slug" ]] || wt="$WT_ROOT/$name-$slug"
   if [[ -d "$wt" ]]; then
     echo "reabrindo $wt ($(git -C "$wt" branch --show-current))" >&2
   else
-    mkdir -p "$WT_ROOT"
+    [[ ! -e "$WT_ROOT/$sp/.git" ]] || die "$WT_ROOT/$sp é uma worktree no formato antigo; não dá para usá-la como pasta do space $sp"
+    mkdir -p "$WT_ROOT/$sp"
     git -C "$main" worktree prune   # registro de worktree cuja pasta sumiu não pode bloquear o add
     gitnet -C "$main" fetch -q origin --prune || echo "aviso: fetch falhou; usando o que há localmente" >&2
     base="$(default_branch "$main")"; base="${base:-main}"
@@ -225,7 +269,7 @@ cmd_open() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
