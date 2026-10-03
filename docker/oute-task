@@ -121,6 +121,12 @@ emit() {
   command -v oute-emit >/dev/null 2>&1 || return 0
   OTEL_RESOURCE_ATTRIBUTES="$(otel_attrs)" oute-emit task "$ev" "$WHO" "$@" </dev/null >/dev/null 2>&1 || true
 }
+# snapshot da cota das assinaturas na abertura (#347): o oute-emit lê o `oute-quota --json` e emite as métricas. Em segundo
+# plano e sem saída: a leitura (até ~6 s) nunca atrasa nem derruba a abertura; sem oute-quota ou oute-emit, nada
+quota_snapshot() {
+  command -v oute-quota >/dev/null 2>&1 && command -v oute-emit >/dev/null 2>&1 || return 0
+  ( OTEL_RESOURCE_ATTRIBUTES="$(otel_attrs)" oute-emit quota open </dev/null >/dev/null 2>&1 & ) >/dev/null 2>&1 || true
+}
 # sessão de uma worktree que o clean vai remover, lida antes (a marca vai embora junto), em T_*. Sem marca (worktree
 # anterior à #128), repo e slug saem do caminho e o removed sai sem id
 task_of() {   # <repo principal> <worktree>
@@ -161,6 +167,7 @@ session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
   fi
   emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy" \
     "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF"
+  quota_snapshot || true
   mark_env "$id" "$rname" "$slug" "$round" "$sess"
 }
 cmd_mark() {

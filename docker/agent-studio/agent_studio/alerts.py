@@ -10,7 +10,12 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
 - **Spool perto de 50 MB** (`spool`): `oute.emit.spool.bytes` do último evento do `oute-emit` acima de
   `spool_max_bytes`, **ou** `oute.emit.spool.dropped` subiu entre dois eventos nos últimos
   `spool_dropped_window_minutes` (#166).
-- **Cota** (`quota`, previsto para a #55, desligado): último ponto de `quota_metric` ≥ `quota_max_pct`.
+- **Cota** (`quota`, #347, ligado no `config.toml`): último ponto de `quota_metric` ≥ `quota_max_pct`, por host, agente
+  e janela (`oute.quota.window`, 5h e 7d). O snapshot sai na abertura e no fechamento de sessão, sem coleta periódica;
+  então o ponto vale só até o reset da janela: `quota_reset_metric` (`oute.quota.reset_in_seconds`, mesma hora do
+  ponto) dá a hora do reset, e ponto cujo reset já passou **não alerta** (ponto velho). Sem esse par, não alerta.
+  Exceção: a janela de **5h** com reset em menos de `quota_reset_grace_minutes` (20), abaixo de 100% e com a 7d do
+  mesmo agente abaixo do corte, não alerta; a 7d nunca tem exceção.
 
 **Host parado** = sem nenhum registro há mais de `no_data_minutes`. Host parado não liga fila, recusa, spool nem cota
 (o último valor dele é velho): o Mac fechado não alerta; o host sempre ligado parado alerta só "host sem dado".
@@ -21,6 +26,7 @@ de log. Tudo pela hora do fato; "desde quando" volta no máximo `lookback_hours`
 `evaluate(con, at_ns, cfg)` é a peça reusável (tray #205, tela #208); `AlertConfig.parse` lê a seção `[alerts]`.
 O tray reusa também `last_data`, `stopped` e `hosts` para as máquinas (pela hora de chegada).
 """
+import json
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 
@@ -28,6 +34,10 @@ MIN_NS = 60 * 1_000_000_000
 
 QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA = "queue", "destination_refusing", "host_no_data", "spool", "quota"
 TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA)
+# alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
+PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
+               "price_fixed_differs")
+ALL_TYPES = TYPES + PRICE_TYPES
 
 # métricas do próprio collector (#162), nomes da versão fixada no compose
 QUEUE_SIZE = "otelcol_exporter_queue_size"
@@ -51,9 +61,11 @@ class AlertConfig:
     spool_max_bytes: int = 40 * 2**20
     spool_dropped_window_minutes: float = 60
     lookback_hours: float = 24
-    quota_enabled: bool = False
+    quota_enabled: bool = True
     quota_max_pct: float = 90
     quota_metric: str = "oute.quota.used_pct"
+    quota_reset_metric: str = "oute.quota.reset_in_seconds"
+    quota_reset_grace_minutes: float = 20
 
     @classmethod
     def parse(cls, raw):
@@ -310,23 +322,57 @@ def _spool(con, lo, at, cfg):
     return out
 
 
+QUOTA_WINDOW = "oute.quota.window"
+QUOTA_SHORT = "5h"  # a única janela com a exceção de reset próximo
+
+
 def _quota(con, lo, at, cfg):
-    rows = _rows(con, """
+    sql = """
         SELECT host_name AS host, oute_instance AS instance, oute_agent AS agent, attributes, time_unix_nano AS t, value
         FROM metrics WHERE metric_name = ? AND time_unix_nano BETWEEN ? AND ?
-        ORDER BY host, instance, agent, attributes, t""", [cfg.quota_metric, lo, at])
+        ORDER BY host, instance, agent, attributes, t"""
+    key = ("host", "instance", "agent", "attributes")
+    # reset de cada ponto: o par de mesma série e mesma hora (os dois saem do mesmo snapshot)
+    resets = {k: {p["t"]: p["value"] for p in pts}
+              for k, pts in _series(_rows(con, sql, [cfg.quota_reset_metric, lo, at]), key).items()}
+    series = _series(_rows(con, sql, [cfg.quota_metric, lo, at]), key)
+    grace = int(cfg.quota_reset_grace_minutes * MIN_NS)
+
+    def window(attrs):
+        try:
+            return json.loads(attrs or "{}").get(QUOTA_WINDOW)
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    def over(p):
+        return p["value"] is not None and p["value"] >= cfg.quota_max_pct
+
+    # último ponto de cada série com o reset dele ainda no futuro (ponto velho e ponto sem par ficam de fora)
+    live = {}
+    for k, pts in series.items():
+        reset_in = resets.get(k, {}).get(pts[-1]["t"])
+        if reset_in is not None and pts[-1]["t"] + int(reset_in * 1_000_000_000) > at:
+            live[k] = (pts, pts[-1]["t"] + int(reset_in * 1_000_000_000))
+
     out = []
-    for (host, instance, agent, attrs), pts in _series(rows, ("host", "instance", "agent", "attributes")).items():
+    for k, (pts, reset_at) in live.items():
+        host, instance, agent, attrs = k
         last = pts[-1]
-        if last["value"] is not None and last["value"] >= cfg.quota_max_pct:
-            out.append(_alert(QUOTA, host, instance, last["value"], "pct", cfg.quota_max_pct,
-                              _run_start(pts, lambda p: p["value"] is not None and p["value"] >= cfg.quota_max_pct),
-                              {"metric": cfg.quota_metric, "agent": agent, "attributes": attrs, "at": iso(last["t"])}))
+        if not over(last):
+            continue
+        if window(attrs) == QUOTA_SHORT and last["value"] < 100 and reset_at - at < grace:
+            # exceção: a 5h está a menos de `grace` do reset e a 7d do agente não passou do corte
+            if not any(over(p[-1]) for (h, i, a, at2), (p, _) in live.items()
+                       if (h, i, a) == (host, instance, agent) and window(at2) != QUOTA_SHORT):
+                continue
+        out.append(_alert(QUOTA, host, instance, last["value"], "pct", cfg.quota_max_pct, _run_start(pts, over),
+                          {"metric": cfg.quota_metric, "agent": agent, "attributes": attrs, "at": iso(last["t"]),
+                           "resets_at": iso(reset_at)}))
     return out
 
 
 def enabled(cfg):
-    return {t: (cfg.quota_enabled if t == QUOTA else True) for t in TYPES}
+    return {t: (cfg.quota_enabled if t == QUOTA else True) for t in ALL_TYPES}
 
 
 def evaluate(con, at_ns, cfg):
@@ -337,8 +383,10 @@ def evaluate(con, at_ns, cfg):
         + _spool(con, lo, at_ns, cfg)
     if cfg.quota_enabled:
         alerts += _quota(con, lo, at_ns, cfg)
+    from . import price_alerts  # aqui e não no topo: o `price_alerts` importa este módulo
+    alerts += price_alerts.evaluate(con, at_ns)
     idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
     alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]
-    alerts.sort(key=lambda a: (TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
+    alerts.sort(key=lambda a: (ALL_TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
                                str(a["evidence"].get("exporter") or a["evidence"].get("attribute") or "")))
     return {"alerts": alerts, "hosts": hosts(last, at_ns, cfg), "checks": enabled(cfg)}

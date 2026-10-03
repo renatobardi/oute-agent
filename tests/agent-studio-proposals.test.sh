@@ -364,7 +364,7 @@ check("alerta: spool descartando", val(a("dropped_events", 1234, 0, window_minut
 check("alerta: cota", val(a("pct", 95.5, 90)) == "95,5% (limite 90%)")
 check("alerta: unidade desconhecida sai crua", val(a("coisas", 7, 1)) == "7 coisas" and val(a("coisas", None, 1)) == "sem valor")
 check("alerta: título de cada tipo; tipo desconhecido sai com o próprio nome",
-      set(alert_text.TITLES) == set(alerts.TYPES) and alert_text.title(a("x", 1, 1, kind="novo")) == "novo")
+      set(alert_text.TITLES) == set(alerts.ALL_TYPES) and alert_text.title(a("x", 1, 1, kind="novo")) == "novo")
 check("idade: hora inválida ou ausente não quebra a página", web._ago("lixo") == "—" and web._ago(None) == "—")
 src = open(web.__file__).read() + open(os.path.join(os.path.dirname(web.__file__), "templates", "base.html")).read()
 check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o alerts.evaluate)",

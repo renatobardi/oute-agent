@@ -1,0 +1,2 @@
+### Added
+- **Teste de regressão do entrypoint e do `codex_config.py`** (#365). `tests/entrypoint-config.test.sh` roda a `setup_agents` e a `setup_ssh` reais num `HOME` temporário, com um `ai-memory` dublê (`tests/lib/fake-ai-memory.sh`): idempotência, `mcp_servers` e `trusted_hash` preservados, yolo ligado e desligado, blocos gerenciados, poda dos `.bak` e asserts estáticos do compose. Só `tests/`; sem release.

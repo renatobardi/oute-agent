@@ -30,14 +30,24 @@ def _query(con, keys, cols, aggs, table, where, params):
     return [dict(zip(names, r)) for r in cur.fetchall()]
 
 
-def _calls(con, keys, from_ns, to_ns):
+def _epoch_col(prices):
+    """Faixa de preço de cada chamada (#339): quantas trocas de preço (`PriceTable.boundaries`) já tinham acontecido na
+    hora do fato. Dentro de uma faixa nenhum preço muda; as horas vão no SQL como inteiros (vêm do nosso banco)."""
+    bounds = prices.boundaries()
+    if not bounds:
+        return "0"
+    return f"len(list_filter([{', '.join(str(int(b)) for b in bounds)}]::UBIGINT[], x -> x <= time_unix_nano))"
+
+
+def _calls(con, keys, from_ns, to_ns, prices):
     aggs = ["count(*) AS calls", "count(cost_usd) AS calls_real", "sum(cost_usd) AS cost_real"]
     for t in ("input", "output", "cache_read", "cache_creation"):
         aggs.append(f"COALESCE(sum({t}_tokens), 0) AS {t}")
         aggs.append(f"COALESCE(sum({t}_tokens) FILTER (WHERE cost_usd IS NULL), 0) AS est_{t}")
     # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
     table, params = window_spans_with_cost(from_ns, to_ns)
-    return _query(con, keys, _COLS, aggs, table, MODEL_CALL_SQL, [*params, *MODEL_CALL_PARAMS])
+    return _query(con, (*keys, "epoch"), {**_COLS, "epoch": _epoch_col(prices)}, aggs, table, MODEL_CALL_SQL,
+                  [*params, *MODEL_CALL_PARAMS])
 
 
 def _p95(con, keys, from_ns, to_ns):
@@ -68,17 +78,24 @@ def _add(a, b):
 
 def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model")):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
-    depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`."""
+    depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
+    na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas."""
     keys = tuple(keys)
     if set(keys) - set(KEYS):
         raise ValueError(f"chave inválida: {keys}")
+    prices = prices.snapshot()  # uma versão da tabela do começo ao fim, mesmo se a rotina de preços trocar no meio
+    bounds = prices.boundaries()
     groups = {} if keys else {(): _empty()}
+
+    def at_ns(epoch):
+        # qualquer hora da faixa serve (nenhum preço muda dentro dela): o início dela; a faixa 0 é "desde sempre"
+        return bounds[epoch - 1] if epoch else 0
 
     def acc(rec):
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
     fine = keys if "model" in keys else keys + ("model",)
-    for rec in _calls(con, fine, from_ns, to_ns):
+    for rec in _calls(con, fine, from_ns, to_ns, prices):
         a = acc(rec)
         a["calls"] += rec["calls"]
         for t in a["tokens"]:
@@ -89,7 +106,7 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model")):
         pending = rec["calls"] - rec["calls_real"]
         if pending:
             est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"],
-                                    rec["est_cache_creation"], prices.lookup(rec["model"]))
+                                    rec["est_cache_creation"], prices.lookup(rec["model"], at_ns(rec["epoch"])))
             if est is None:
                 a["unpriced_calls"] += pending
                 a["unpriced_models"].add(rec["model"])
