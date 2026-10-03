@@ -9,8 +9,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=+1   # o bad mostra a saída inteira
-has() { grep -q -- "$1" <<<"$OUT"; }
-hasnt() { ! has "$1"; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/q"
 cat > "$BIN/docker" <<'SH'

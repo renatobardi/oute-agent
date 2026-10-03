@@ -13,21 +13,17 @@ CPID=""; S3PID=""
 cleanup() { for p in $CPID $S3PID; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; rm -rf "$TMP"; }
 trap cleanup EXIT
 . "$ROOT/tests/lib/check.sh"
-for c in python3 jq curl tar; do command -v "$c" >/dev/null || die "precisa de $c"; done
 
-. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, V
+. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, otelcol_env, otelcol_s3_start, otelcol_start, otelcol_kill9, jqp…
 otelcol_bin
-check "otelcol-contrib $V"                              bash -c '"$1" --version | grep -q " $2\$"' _ "$OTELCOL" "$V"
+check "otelcol-contrib $V"                              otelcol_version_ok
 
 # ---------------------------------------------------------------- 1. config de produção
-export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT=http://127.0.0.1:9 \
-  LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
-  AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+otelcol_env
 CFG="$ROOT/config/otel/collector.yaml"
 check "validate collector.yaml + langfuse.yaml"         "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/langfuse.yaml"
 check "validate collector.yaml + none.yaml"             "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/none.yaml"
-P="$("$OTELCOL" print-config --mode=unredacted --format=json --config="$CFG" 2>/dev/null)"
-jqp() { jq -e "$@" >/dev/null <<<"$P"; }
+P="$(otelcol_print --config="$CFG")"
 for x in traces:314572800 metrics:104857600 logs:629145600; do
   s="${x%%:*}"; q="${x#*:}"
   check "awss3/$s: fila em disco de $((q / 1048576)) MB, sem bloquear" jqp --arg e "awss3/$s" --argjson q "$q" \
@@ -45,57 +41,21 @@ check "processor batch/archive removido"                bash -c '! grep -q "batc
 check "file_storage/queue ativo no service"             jqp '.service.extensions | index("file_storage/queue") != null'
 
 # ---------------------------------------------------------------- collector de teste: mesmo config, portas locais
-S3D="$TMP/s3"; mkdir -p "$S3D"; echo ok > "$S3D/mode"
-python3 "$ROOT/tests/lib/fakes3.py" "$S3D" & S3PID=$!
-for _ in $(seq 1 50); do [[ -s "$S3D/port" ]] && break; sleep 0.1; done
-[[ -s "$S3D/port" ]] || die "S3 falso não subiu"
-export OCI_S3_ENDPOINT="http://127.0.0.1:$(cat "$S3D/port")"
-HTTP="$(closed_port)"; GRPC="$(closed_port)"; HC="$(closed_port)"
+S3D="$TMP/s3"; otelcol_s3_start "$S3D" ok
+otelcol_ports
 # só o que muda no teste: portas em 127.0.0.1, diretório da fila e flush_timeout de 5 s (produção: 5 min)
-cat > "$TMP/test.yaml" <<EOF
-extensions:
-  health_check: {endpoint: 127.0.0.1:$HC}
-  file_storage/queue: {directory: $TMP/queue}
-receivers:
-  otlp: {protocols: {grpc: {endpoint: 127.0.0.1:$GRPC}, http: {endpoint: 127.0.0.1:$HTTP}}}
-exporters:
-  awss3/traces: {sending_queue: {batch: {flush_timeout: 5s}}}
-  awss3/metrics: {sending_queue: {batch: {flush_timeout: 5s}}}
-  awss3/logs: {sending_queue: {batch: {flush_timeout: 5s}}}
+{ otelcol_test_yaml s3; cat <<EOF; } > "$TMP/test.yaml"
 service:
   telemetry: {metrics: {level: none}}
 EOF
-start() {
-  "$OTELCOL" --config="$CFG" --config="$TMP/test.yaml" >>"$TMP/collector.log" 2>&1 & CPID=$!
-  local i; for i in $(seq 1 100); do curl -fs -o /dev/null "127.0.0.1:$HC" && return 0; sleep 0.1; done
-  echo "# collector não subiu"; tail -20 "$TMP/collector.log"; return 1
-}
+start() { otelcol_start --config="$CFG" --config="$TMP/test.yaml"; }
 # counts <run>: "aceitos recebidos perdidos duplicados" (recebidos/perdidos só entre os aceitos)
-counts() {
-  python3 - "$S3D/received.jsonl" "$TMP/accepted-$1.txt" <<'PY'
-import collections, json, sys
-acc = set(l.strip() for l in open(sys.argv[2]) if l.strip())
-c = collections.Counter()
-try:
-    for l in open(sys.argv[1]): c.update(json.loads(l)['ids'])
-except FileNotFoundError: pass
-print(len(acc), len(acc & set(c)), len(acc - set(c)), sum(c[i] - 1 for i in acc if c[i] > 1))
-PY
-}
-# wait_all <run> <s>: espera até <s> segundos por todos os aceitos no S3
-wait_all() { local i; for i in $(seq 1 $(($2 * 2))); do set -- "$1" "$2" $(counts "$1"); [[ "$5" -eq 0 ]] && return 0; sleep 0.5; done; return 1; }
+counts() { { [[ ! -s "$S3D/received.jsonl" ]] || jq -r '.ids[]' "$S3D/received.jsonl"; } | otelcol_tally "$TMP/accepted-$1.txt"; }
 N=300   # por sinal: bem abaixo do min_size (20000), o lote só sai pelo flush_timeout
 
 # ---------------------------------------------------------------- 2. kill -9 com lote pendente
 start || die "collector"
-python3 "$ROOT/tests/lib/otlp-send.py" "$HTTP" k9 "$N" "$TMP/accepted-k9.txt" >/dev/null
-read -r a r _ _ <<<"$(counts k9)"
-check "kill -9: aceitou os $((N * 3)) itens (logs, traces, metrics)" [ "$a" -eq $((N * 3)) ]
-check "kill -9: lote ainda pendente (nada no S3)"      [ "$r" -eq 0 ]
-kill -9 "$CPID"; wait "$CPID" 2>/dev/null; CPID=""
-start || die "collector (restart)"
-if wait_all k9 30; then ok "kill -9: aceitos = recebidos depois do restart"; else bad "kill -9: perdeu itens ($(counts k9))"; fi
-read -r _ _ _ d <<<"$(counts k9)"; echo "# kill -9: duplicados=$d"
+otelcol_kill9 30 S3 "(logs, traces, metrics)"
 
 # ---------------------------------------------------------------- 3. S3 fora na parada
 # Na parada o collector loga "Exporting failed. Dropping data." com o S3 fora: com a fila em disco o lote não sai do
@@ -117,5 +77,5 @@ echo ok > "$S3D/mode"
 start || die "collector (restart)"
 if wait_all s3down 60; then ok "S3 fora: aceitos = recebidos depois do restart"; else bad "S3 fora: perdeu itens ($(counts s3down))"; fi
 
-[[ "$fail" -eq 0 ]] || { echo "# log do collector:"; tail -30 "$TMP/collector.log"; }
+otelcol_log
 check_end

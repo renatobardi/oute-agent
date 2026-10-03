@@ -98,8 +98,6 @@ export OUTE_AGENTS_FALLBACK="$EMPTY"
 # mc <args…>: models-check com as fontes de exemplo; stdout em $OUT, stderr em $ERR, código em $RC
 mc() { OUT="$("$MC" "$@" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(<"$TMP/err")"; }
 ex() { mc --table "$EX"; }                  # com a tabela de exemplo, sem trocas
-has() { grep -qxF -- "$1" <<<"$OUT"; }      # linha inteira no stdout
-hasnt() { ! grep -qF -- "$1" <<<"$OUT"; }
 count() { grep -c "^$1 " <<<"$OUT" || true; }
 
 # ---------------------------------------------------------------- 1. a tabela de exemplo, com fontes que têm tudo
@@ -107,14 +105,14 @@ ex
 check "tabela de exemplo: código 0"                     [ "$RC" -eq 0 ]
 check "tabela de exemplo: sem aviso"                    [ -z "$ERR" ]
 check "tabela de exemplo: nenhum FALTA nem desconhecido" bash -c '! grep -qE "^(FALTA|desconhecido) " <<<"$1"' _ "$OUT"
-check "claude: uma linha ok por id"                     has "ok $OPUS (claude)"
-check "claude: o Haiku com data"                        has "ok $HAIKU (claude)"
+check "claude: uma linha ok por id"                     has_line "ok $OPUS (claude)"
+check "claude: o Haiku com data"                        has_line "ok $HAIKU (claude)"
 check "claude: id repetido na tabela sai uma vez"       [ "$(grep -cxF "ok $HAIKU (claude)" <<<"$OUT")" -eq 1 ]
-check "codex: uma linha ok por id"                      has "ok gpt-6-astra (codex)"
-check "codex: uma linha ok por esforço"                 has "ok gpt-6-luna esforço medium (codex)"
+check "codex: uma linha ok por id"                      has_line "ok gpt-6-astra (codex)"
+check "codex: uma linha ok por esforço"                 has_line "ok gpt-6-luna esforço medium (codex)"
 check "estrutura: as 12 fases e ctx têm linha"          [ "$(grep -c '^ok linha da fase [a-z]* (tabela)$' <<<"$OUT")" -eq 13 ]
-check "estrutura: a faixa ctx"                          has "ok linha da fase ctx (tabela)"
-check "estrutura: label de exceção existe"              has "ok label kaizen (repo)"
+check "estrutura: a faixa ctx"                          has_line "ok linha da fase ctx (tabela)"
+check "estrutura: label de exceção existe"              has_line "ok label kaizen (repo)"
 check "estrutura: o gh lista os labels uma vez"         [ "$(grep -c '^label list' "$FAKE/gh.log")" -eq 1 ]
 # sem --table vale a tabela do repo: a mesma saída de quando ela é apontada, seja qual for o conteúdo dela
 mc; REPO_OUT="$OUT"; REPO_RC="$RC"
@@ -125,47 +123,47 @@ check "sem --table: lê a tabela do repo"                bash -c '[ -n "$1" ] &&
 table -e 's/claude-opus-5-5/claude-opus-9-9/' -e 's/gpt-6-astra/gpt-9-nada/'
 mc --table "$TMP/table.toml"
 check "id inexistente: código 1"                        [ "$RC" -eq 1 ]
-check "id inexistente no Claude: FALTA com o id"        has "FALTA claude-opus-9-9 (claude)"
-check "id inexistente no Codex: FALTA com o id"         has "FALTA gpt-9-nada (codex)"
-check "id inexistente no Codex: esforço dele não sai"   hasnt "gpt-9-nada esforço"
-check "id inexistente: os outros seguem ok"             has "ok $SONNET (claude)"
+check "id inexistente no Claude: FALTA com o id"        has_line "FALTA claude-opus-9-9 (claude)"
+check "id inexistente no Codex: FALTA com o id"         has_line "FALTA gpt-9-nada (codex)"
+check "id inexistente no Codex: esforço dele não sai"   hasnt_str "gpt-9-nada esforço"
+check "id inexistente: os outros seguem ok"             has_line "ok $SONNET (claude)"
 check "id inexistente: só os dois faltam"               [ "$(count FALTA)" -eq 2 ]
 # id que só existe como parte de um mais longo não vale (claude-sonnet-5 dentro de claude-sonnet-5-5)
 table -e 's/claude-sonnet-5-5/claude-sonnet-5/' -e 's/gpt-6.1-sol/gpt-6.1/'
 mc --table "$TMP/table.toml"
-check "id que é prefixo de outro: FALTA no Claude"      has "FALTA claude-sonnet-5 (claude)"
-check "id que é prefixo de outro: FALTA no Codex"       has "FALTA gpt-6.1 (codex)"
+check "id que é prefixo de outro: FALTA no Claude"      has_line "FALTA claude-sonnet-5 (claude)"
+check "id que é prefixo de outro: FALTA no Codex"       has_line "FALTA gpt-6.1 (codex)"
 table -e 's/claude-opus-5-5/claude-opus-5-5[1m]/'
 mc --table "$TMP/table.toml"
-check "id com [1m]: confere o id sem o sufixo"          has "ok claude-opus-5-5[1m] (claude)"
+check "id com [1m]: confere o id sem o sufixo"          has_line "ok claude-opus-5-5[1m] (claude)"
 
 # ---------------------------------------------------------------- 3. esforço não suportado
 table -e 's/effort = "medium"/effort = "ultra"/'
 mc --table "$TMP/table.toml"
 check "esforço não suportado: código 1"                 [ "$RC" -eq 1 ]
-check "esforço não suportado: FALTA com id e esforço"   has "FALTA gpt-6-luna esforço ultra (codex)"
-check "esforço não suportado: o id em si está ok"       has "ok gpt-6-luna (codex)"
+check "esforço não suportado: FALTA com id e esforço"   has_line "FALTA gpt-6-luna esforço ultra (codex)"
+check "esforço não suportado: o id em si está ok"       has_line "ok gpt-6-luna (codex)"
 check "esforço não suportado: só ele falta"             [ "$(count FALTA)" -eq 1 ]
 
 # ---------------------------------------------------------------- 4. estrutura
 table -e 's/"build", "qa", /"build", /' -e 's/"ops", "ctx", /"ops", /'
 mc --table "$TMP/table.toml"
 check "fase sem linha: código 1"                        [ "$RC" -eq 1 ]
-check "fase sem linha: FALTA com a fase"                has "FALTA linha da fase qa (tabela)"
-check "faixa ctx sem linha: FALTA"                      has "FALTA linha da fase ctx (tabela)"
-check "fase sem linha: as outras seguem ok"             has "ok linha da fase build (tabela)"
+check "fase sem linha: FALTA com a fase"                has_line "FALTA linha da fase qa (tabela)"
+check "faixa ctx sem linha: FALTA"                      has_line "FALTA linha da fase ctx (tabela)"
+check "fase sem linha: as outras seguem ok"             has_line "ok linha da fase build (tabela)"
 table -e 's/"ops", "ctx", /"ops", "ctx", "deploy", /'
 mc --table "$TMP/table.toml"
 check "fase fora do ADR-07: FALTA, código 1"            bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA fase deploy (ADR-07)" <<<"$2"' _ "$RC" "$OUT"
 table -e 's/label = "docs"/label = "nao-existe"/'
 mc --table "$TMP/table.toml"
 check "exceção com label que não existe: código 1"      [ "$RC" -eq 1 ]
-check "exceção com label que não existe: FALTA"         has "FALTA label nao-existe (repo)"
-check "exceção com label que existe: ok"                has "ok label kaizen (repo)"
+check "exceção com label que não existe: FALTA"         has_line "FALTA label nao-existe (repo)"
+check "exceção com label que existe: ok"                has_line "ok label kaizen (repo)"
 touch "$FAKE/gh.down"; ex
 check "gh fora do ar: labels desconhecidos, código 3"   bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido label kaizen (repo)" <<<"$2"' _ "$RC" "$OUT"
 check "gh fora do ar: aviso"                            grep -qF 'aviso: o gh não listou os labels do repo' <<<"$ERR"
-check "gh fora do ar: o resto segue conferido"          has "ok $OPUS (claude)"
+check "gh fora do ar: o resto segue conferido"          has_line "ok $OPUS (claude)"
 rm "$FAKE/gh.down"
 cp "$BIN/gh" "$TMP/gh.bak"; printf '#!/usr/bin/env bash\necho "isto não é JSON"\n' > "$BIN/gh"; ex
 check "gh com resposta que não é JSON: desconhecido"    bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido label docs (repo)" <<<"$2"' _ "$RC" "$OUT"
@@ -174,11 +172,11 @@ cp "$TMP/gh.bak" "$BIN/gh"
 # ---------------------------------------------------------------- 5. cache do Codex ausente, velho ou ilegível
 rm "$TMP/codex/models_cache.json"; ex
 check "cache ausente: código 3"                         [ "$RC" -eq 3 ]
-check "cache ausente: id desconhecido, não ok"          has "desconhecido gpt-6-astra (codex)"
-check "cache ausente: esforço desconhecido"             has "desconhecido gpt-6-luna esforço medium (codex)"
-check "cache ausente: nenhum ok do Codex"               hasnt "ok gpt-"
+check "cache ausente: id desconhecido, não ok"          has_line "desconhecido gpt-6-astra (codex)"
+check "cache ausente: esforço desconhecido"             has_line "desconhecido gpt-6-luna esforço medium (codex)"
+check "cache ausente: nenhum ok do Codex"               hasnt_str "ok gpt-"
 check "cache ausente: aviso com o caminho"              grep -qF "aviso: cache de modelos do Codex ausente ou ilegível ($TMP/codex/models_cache.json" <<<"$ERR"
-check "cache ausente: o Claude segue conferido"         has "ok $OPUS (claude)"
+check "cache ausente: o Claude segue conferido"         has_line "ok $OPUS (claude)"
 good_cache 8; ex
 check "cache com 8 dias: desconhecido, código 3"        bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido gpt-6.1-sol (codex)" <<<"$2"' _ "$RC" "$OUT"
 check "cache com 8 dias: aviso com a idade"             grep -qF 'aviso: cache de modelos do Codex com 8 dias, mais de 7' <<<"$ERR"
@@ -202,7 +200,7 @@ good_cache
 OUTE_MODELS_CLAUDE_BIN="$TMP/nao-existe" ex
 check "binário apontado não existe: desconhecido, código 3" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido $3 (claude)" <<<"$2"' _ "$RC" "$OUT" "$OPUS"
 check "binário apontado não existe: aviso"              grep -qF 'aviso: Claude não conferido' <<<"$ERR"
-check "binário apontado não existe: o Codex segue conferido" has "ok gpt-6-astra (codex)"
+check "binário apontado não existe: o Codex segue conferido" has_line "ok gpt-6-astra (codex)"
 : > "$TMP/claude-vazio"; OUTE_MODELS_CLAUDE_BIN="$TMP/claude-vazio" ex
 check "binário vazio: desconhecido, com aviso"          bash -c '[ "$1" -eq 3 ] && grep -qF "Claude não conferido" <<<"$2"' _ "$RC" "$ERR"
 # sem OUTE_MODELS_CLAUDE_BIN: o claude do PATH, pulando o shim (link para oute-agent-shim), senão a reserva

@@ -11,6 +11,9 @@
 # data: HTML (stdin) -> JSON dos elementos com data-* (tests/lib/html-data.py). enc <texto>: para a query string.
 # usd <filtro jq>: filtro jq do valor em micro-dólar inteiro. studio_prices <arquivo>: tabela de preços de exemplo.
 # compose_service <serviço>: o bloco do serviço no docker/compose.yaml.
+# studio_oute_funcs: as funções do agent-studio do scripts/oute (o script inteiro roda o case no fim).
+# studio_oute_up <fim> [VAR=valor…]: roda o agent_studio_up dessas funções (em $FUNCS) num ambiente só com as VAR dadas
+# (HOME e ROOT = $TMP, de onde sai o .env) e depois o trecho <fim>, que imprime o que o teste confere; define OUT e RC.
 STUDIO_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STUDIO_ROOT="$(cd "$STUDIO_LIB/../.." && pwd)"
 # token só do teste, aleatório a cada execução
@@ -84,3 +87,11 @@ cache_read = 0.125
 EOF
 }
 compose_service() { awk -v s="  $1:" '$0 == s {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$STUDIO_ROOT/docker/compose.yaml"; }
+studio_oute_funcs() { sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$STUDIO_ROOT/scripts/oute" | sed '$d'; }
+studio_oute_up() {
+  local fim="$1"; shift
+  OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
+  SERVICES_ENV_FILE=~/.oute/services.env; SERVICES_FOLDER=oute-services
+  env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
+  $FUNCS"$'\n'"agent_studio_up; $fim" 2>&1)"; RC=$?
+}

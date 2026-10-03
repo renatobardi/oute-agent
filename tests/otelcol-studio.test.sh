@@ -15,23 +15,20 @@ CPID=""; RPID=""
 cleanup() { for p in $CPID $RPID; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; rm -rf "$TMP"; }
 trap cleanup EXIT
 . "$ROOT/tests/lib/check.sh"
-for c in python3 jq curl tar; do command -v "$c" >/dev/null || die "precisa de $c"; done
+. "$ROOT/tests/lib/agent-studio.sh"   # studio_oute_funcs, studio_oute_up
 
-. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, V
+. "$ROOT/tests/lib/otelcol.sh"   # otelcol_bin, otelcol_env, otelcol_start, otelcol_kill9, jqp…
 otelcol_bin
-check "otelcol-contrib $V"                              bash -c '"$1" --version | grep -q " $2\$"' _ "$OTELCOL" "$V"
+check "otelcol-contrib $V"                              otelcol_version_ok
 
 # ---------------------------------------------------------------- 1. config de produção
 TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
-export OUTE_HOST=oute-test OUTE_INSTANCE=oute-agent OCI_S3_REGION=sa-saopaulo-1 OCI_S3_ENDPOINT="http://127.0.0.1:$(closed_port)" \
-  LANGFUSE_HOST=https://langfuse.invalid OUTE_LANGFUSE_AUTH=x AWS_ACCESS_KEY_ID=x AWS_SECRET_ACCESS_KEY=y \
-  AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AGENT_STUDIO_INGEST_TOKEN="$TOKEN" \
-  AGENT_STUDIO_URL=http://agent-studio:8430
+otelcol_env
+export AGENT_STUDIO_INGEST_TOKEN="$TOKEN" AGENT_STUDIO_URL=http://agent-studio:8430
 C="$ROOT/config/otel"; CFG="$C/collector.yaml"; STUDIO="$C/agent-studio.yaml"
 check "validate collector + none + agent-studio"        "$OTELCOL" validate --config="$CFG" --config="$C/none.yaml" --config="$STUDIO"
 check "validate collector + langfuse + agent-studio"    "$OTELCOL" validate --config="$CFG" --config="$C/langfuse.yaml" --config="$STUDIO"
-P="$("$OTELCOL" print-config --mode=unredacted --format=json --config="$CFG" --config="$C/none.yaml" --config="$STUDIO" 2>/dev/null)"
-jqp() { jq -e "$@" >/dev/null <<<"$P"; }
+P="$(otelcol_print --config="$CFG" --config="$C/none.yaml" --config="$STUDIO")"
 for x in traces:314572800 metrics:104857600 logs:629145600; do
   s="${x%%:*}"; q="${x#*:}"; e="otlp_http/studio_$s"
   check "$e: agent-studio:8430, json, gzip, Bearer do vault" jqp --arg e "$e" --arg t "Bearer $TOKEN" \
@@ -54,19 +51,16 @@ check "bucket continua igual (três pipelines archive)"  jqp '[.service.pipeline
 check "sizer: bytes nas três filas"                     [ "$(grep -c '^      sizer: bytes$' "$STUDIO")" -eq 3 ]
 check "lote em bytes, até 8 MB (corpo JSON < 64 MB)"    grep -q 'batch: &studio_batch {flush_timeout: [0-9]*s, sizer: bytes, min_size: [0-9]*, max_size: 8388608}' "$STUDIO"
 check "destino só pelo ambiente (o oute up escolhe, #190)" [ "$(grep -c '^    endpoint: ${env:AGENT_STUDIO_URL}$' "$STUDIO")" -eq 3 ]
-P2="$(AGENT_STUDIO_URL=https://agent-studio.oute.pro "$OTELCOL" print-config --mode=unredacted --format=json --config="$CFG" --config="$C/none.yaml" --config="$STUDIO" 2>/dev/null)"
+P2="$(AGENT_STUDIO_URL=https://agent-studio.oute.pro otelcol_print --config="$CFG" --config="$C/none.yaml" --config="$STUDIO")"
 check "vhost da tailnet nos três exporters"             jq -e '[.exporters | to_entries[] | select(.key | startswith("otlp_http/studio_")) | .value.endpoint]
   | length == 3 and all(. == "https://agent-studio.oute.pro")' <<<"$P2" >/dev/null
 check "credencial de ingestão só pelo ambiente (nada fixo no arquivo)" grep -q 'Authorization: "Bearer ${env:AGENT_STUDIO_INGEST_TOKEN}"' "$STUDIO"
 
 # ---------------------------------------------------------------- 2. `oute up` liga só com o agent-studio; compose
 # só as funções do agent-studio (o script inteiro roda o case no fim), como no tests/agent-studio.test.sh
-FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$ROOT/scripts/oute" | sed '$d')"
+FUNCS="$(studio_oute_funcs)"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
-up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
-  SERVICES_ENV_FILE=~/.oute/services.env; SERVICES_FOLDER=oute-services
-  env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
-  $FUNCS"$'\n'"agent_studio_up; echo \"otel=\${OUTE_OTEL_STUDIO-unset}\"; echo \"url=\${AGENT_STUDIO_URL-unset}\"" 2>&1)"; RC=$?; }
+up() { studio_oute_up 'echo "otel=${OUTE_OTEL_STUDIO-unset}"; echo "url=${AGENT_STUDIO_URL-unset}"' "$@"; }
 rm -f "$TMP/.env"
 up AGENT_STUDIO_INGEST_TOKEN=t
 check "sem OUTE_AGENT_STUDIO (Mac), com o token: pipeline do agent-studio" grep -qx 'otel=agent-studio' <<<"$OUT"
@@ -104,15 +98,10 @@ RCV="$TMP/rcv"; RPORT="$(closed_port)"
 rcv_up()   { RCV_TOKEN="$TOKEN" RCV_PORT="$RPORT" python3 "$ROOT/tests/lib/otlp-receiver.py" "$RCV" & RPID=$!
              local i; for i in $(seq 1 50); do curl -s -o /dev/null "127.0.0.1:$RPORT" && return 0; sleep 0.1; done; return 1; }
 rcv_down() { kill -9 "$RPID" 2>/dev/null; wait "$RPID" 2>/dev/null; RPID=""; }
-HTTP="$(closed_port)"; GRPC="$(closed_port)"; HC="$(closed_port)"; PROM="$(closed_port)"
+otelcol_ports; PROM="$(closed_port)"
 # só o que muda no teste: portas em 127.0.0.1, diretório da fila, endpoint do agent-studio e as métricas do collector
 # lidas localmente (Prometheus em 127.0.0.1) para ver a fila. flush_timeout, filas e retry = produção.
-cat > "$TMP/test.yaml" <<EOF
-extensions:
-  health_check: {endpoint: 127.0.0.1:$HC}
-  file_storage/queue: {directory: $TMP/queue}
-receivers:
-  otlp: {protocols: {grpc: {endpoint: 127.0.0.1:$GRPC}, http: {endpoint: 127.0.0.1:$HTTP}}}
+{ otelcol_test_yaml; cat <<EOF; } > "$TMP/test.yaml"
 exporters:
   otlp_http/studio_traces: {endpoint: "http://127.0.0.1:$RPORT"}
   otlp_http/studio_metrics: {endpoint: "http://127.0.0.1:$RPORT"}
@@ -123,17 +112,11 @@ service:
       level: basic
       readers: [{pull: {exporter: {prometheus: {host: 127.0.0.1, port: $PROM}}}}]
 EOF
-start() {
-  "$OTELCOL" --config="$CFG" --config="$C/none.yaml" --config="$STUDIO" --config="$TMP/test.yaml" >>"$TMP/collector.log" 2>&1 & CPID=$!
-  local i; for i in $(seq 1 100); do curl -fs -o /dev/null "127.0.0.1:$HC" && return 0; sleep 0.1; done
-  echo "# collector não subiu"; tail -20 "$TMP/collector.log"; return 1
-}
-# counts <run>: "aceitos recebidos perdidos duplicados" (recebidos/perdidos só entre os aceitos)
-counts() {
-  python3 - "$RCV" "$TMP/accepted-$1.txt" <<'PY'
-import collections, glob, gzip, json, sys
-acc = set(l.strip() for l in open(sys.argv[2]) if l.strip())
-c = collections.Counter()
+start() { otelcol_start --config="$CFG" --config="$C/none.yaml" --config="$STUDIO" --config="$TMP/test.yaml"; }
+# rcv_ids: os ids (corpo do log, nome do span e da métrica) de tudo que chegou ao receptor, um por linha
+rcv_ids() {
+  python3 - "$RCV" <<'PY'
+import glob, gzip, json, sys
 def ids_of(j):
     for r in j.get('resourceLogs', []):
         for s in r.get('scopeLogs', []):
@@ -146,12 +129,12 @@ def ids_of(j):
             for x in s.get('metrics', []): yield x.get('name')
 for f in glob.glob(sys.argv[1] + '/*.json'):
     raw = open(f, 'rb').read()
-    c.update(ids_of(json.loads(gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw)))
-print(len(acc), len(acc & set(c)), len(acc - set(c)), sum(c[i] - 1 for i in acc if c[i] > 1))
+    for i in ids_of(json.loads(gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw)):
+        if i is not None: print(i)
 PY
 }
-# wait_all <run> <s>: espera até <s> segundos por todos os aceitos no receptor
-wait_all() { local i; for i in $(seq 1 $(($2 * 2))); do set -- "$1" "$2" $(counts "$1"); [[ "$5" -eq 0 ]] && return 0; sleep 0.5; done; return 1; }
+# counts <run>: "aceitos recebidos perdidos duplicados" (recebidos/perdidos só entre os aceitos)
+counts() { rcv_ids | otelcol_tally "$TMP/accepted-$1.txt"; }
 # qsize: soma do otelcol_exporter_queue_size dos três exporters do agent-studio (bytes)
 qsize() { curl -fs "127.0.0.1:$PROM/metrics" | awk '/^otelcol_exporter_queue_size\{.*exporter="otlp_http\/studio_/ {s += $NF} END {print s + 0}'; }
 N=300   # por sinal: bem abaixo do min_size do lote (1 MB), o lote só sai pelo flush_timeout
@@ -204,14 +187,7 @@ check "oute.agent: codex_exec vira codex"                test "$(agent_of codex_
 check "oute.agent: service.name do roteador não é mais marcado (#218)" test "$(agent_of "$OLD_SVC")" = "- -"
 
 # ---------------------------------------------------------------- 4. kill -9 com lote pendente
-python3 "$ROOT/tests/lib/otlp-send.py" "$HTTP" k9 "$N" "$TMP/accepted-k9.txt" >/dev/null
-read -r a r _ _ <<<"$(counts k9)"
-check "kill -9: aceitou os $((N * 3)) itens"            [ "$a" -eq $((N * 3)) ]
-check "kill -9: lote ainda pendente (nada no receptor)" [ "$r" -eq 0 ]
-kill -9 "$CPID"; wait "$CPID" 2>/dev/null; CPID=""
-start || die "collector (restart)"
-if wait_all k9 40; then ok "kill -9: aceitos = recebidos depois do restart"; else bad "kill -9: perdeu itens ($(counts k9))"; fi
-read -r _ _ _ d <<<"$(counts k9)"; echo "# kill -9: duplicados=$d"
+otelcol_kill9 40 receptor
 
 # ---------------------------------------------------------------- 5. receptor fora: a fila cresce e esvazia na volta
 rcv_down
@@ -230,5 +206,5 @@ q=1; for _ in $(seq 1 40); do q="$(qsize)"; [[ "${q:-1}" -eq 0 ]] && break; slee
 check "receptor de volta: a fila esvazia"               [ "${q:-1}" -eq 0 ]
 check "nenhum POST sem o token (401), no fim"           test ! -e "$RCV/unauthorized"
 
-[[ "$fail" -eq 0 ]] || { echo "# log do collector:"; tail -30 "$TMP/collector.log"; }
+otelcol_log
 check_end

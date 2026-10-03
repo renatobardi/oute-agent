@@ -1,6 +1,8 @@
 # Contagem e relato dos casos de um tests/*.test.sh, para `source` logo depois de definir ROOT.
 # check <descrição> <comando…>: roda o comando e conta `ok` ou `FAIL`; ok/bad <descrição>: conta direto.
 # CHECK_OUT=<n>: o bad mostra também as últimas <n> linhas de $OUT, a saída do comando conferido (+1 = todas).
+# has <regex>: $OUT tem a expressão (grep); hasnt <regex>: não tem. has_line <texto>: $OUT tem uma linha igual ao
+# texto, sem regex; hasnt_str <texto>: $OUT não tem o texto, sem regex. Outro alvo que não o $OUT: função com outro nome.
 # jqe <filtro> [arquivo…]: `jq -e` sem saída. die <motivo>: falta o que o teste precisa para rodar; sai com 1.
 # has_pty: há script(1) do util-linux para rodar um comando com terminal (`script -qec "<comando>" /dev/null`).
 # check_py <arquivo>: soma os casos que um trecho em Python imprimiu (`ok   …`/`FAIL …`, como o pycheck.py),
@@ -13,6 +15,10 @@ bad() {
   [[ -z "${CHECK_OUT:-}" ]] || printf '%s\n' "${OUT:-}" | tail -n "$CHECK_OUT" | sed 's/^/     | /'
 }
 check() { local desc="$1"; shift; if "$@"; then ok "$desc"; else bad "$desc"; fi; }
+has() { grep -q -- "$1" <<<"${OUT:-}"; }
+hasnt() { ! has "$1"; }
+has_line() { grep -qxF -- "$1" <<<"${OUT:-}"; }
+hasnt_str() { ! grep -qF -- "$1" <<<"${OUT:-}"; }
 jqe() { jq -e "$@" >/dev/null; }
 die() { echo "FAIL $*"; exit 1; }
 has_pty() { command -v script >/dev/null && script -qec true /dev/null </dev/null >/dev/null 2>&1; }

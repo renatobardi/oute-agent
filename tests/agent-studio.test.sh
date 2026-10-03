@@ -226,30 +226,27 @@ check "metrics: 503 = nada gravado"                    test "$(count metrics)" =
 
 # ---------------------------------------------------------------- 7. serviço no compose
 SVC="$(compose_service agent-studio)"
-has() { grep -qE -- "$1" <<<"$SVC"; }
+svc_has() { grep -qE -- "$1" <<<"$SVC"; }
 check "compose: serviço agent-studio existe"           test -n "$SVC"
-check "compose: só com o profile agent-studio"         has '^    profiles: \[agent-studio\]$'
-check "compose: publicado só em 127.0.0.1"             has '^      - "127\.0\.0\.1:\$\{OUTE_AGENT_STUDIO_PORT:-8430\}:8430"$'
+check "compose: só com o profile agent-studio"         svc_has '^    profiles: \[agent-studio\]$'
+check "compose: publicado só em 127.0.0.1"             svc_has '^      - "127\.0\.0\.1:\$\{OUTE_AGENT_STUDIO_PORT:-8430\}:8430"$'
 check "compose: nunca 0.0.0.0"                         bash -c '! grep -q "0\.0\.0\.0" <<<"$0"' "$(grep -v '^ *#' <<<"$SVC")"
-check "compose: mem_limit"                             has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-2g\}$'
-check "compose: volume nomeado para o DuckDB"          has '^      - oute-agent-studio:/data/agent-studio$'
+check "compose: mem_limit"                             svc_has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-2g\}$'
+check "compose: volume nomeado para o DuckDB"          svc_has '^      - oute-agent-studio:/data/agent-studio$'
 check "compose: volume declarado"                      grep -qx '  oute-agent-studio:' "$ROOT/docker/compose.yaml"
-check "compose: mesma imagem do agent"                 has 'image: ghcr\.io/renatobardi/oute-agent:\$\{OUTE_VERSION:-latest\}'
-check "compose: um processo (python -m agent_studio)"  has 'entrypoint: \["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"\]'
-check "compose: credencial de ingestão do ambiente (services.env)" has 'AGENT_STUDIO_INGEST_TOKEN: \$\{AGENT_STUDIO_INGEST_TOKEN:-\}'
-check "compose: credencial de leitura do ambiente (agent.env)" has 'AGENT_STUDIO_READ_TOKEN: \$\{AGENT_STUDIO_READ_TOKEN:-\}'
+check "compose: mesma imagem do agent"                 svc_has 'image: ghcr\.io/renatobardi/oute-agent:\$\{OUTE_VERSION:-latest\}'
+check "compose: um processo (python -m agent_studio)"  svc_has 'entrypoint: \["/opt/agent-studio/venv/bin/python", "-m", "agent_studio"\]'
+check "compose: credencial de ingestão do ambiente (services.env)" svc_has 'AGENT_STUDIO_INGEST_TOKEN: \$\{AGENT_STUDIO_INGEST_TOKEN:-\}'
+check "compose: credencial de leitura do ambiente (agent.env)" svc_has 'AGENT_STUDIO_READ_TOKEN: \$\{AGENT_STUDIO_READ_TOKEN:-\}'
 check "Dockerfile: copia o pacote e instala por hash"  bash -c 'grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$0" && grep -q -- "--require-hashes -r /opt/agent-studio/requirements.txt" "$0"' "$ROOT/docker/Dockerfile"
 
 # ---------------------------------------------------------------- 8. `oute up`: item do vault -> profile
 # só as funções do agent-studio (o script inteiro roda o case no fim)
-FUNCS="$(sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$ROOT/scripts/oute" | sed '$d')"
+FUNCS="$(studio_oute_funcs)"
 check "scripts/oute: funções do agent-studio achadas"  test -n "$FUNCS"
 envf="$TMP/env"; : > "$envf"
 T1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"; S1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
-up() { OUT="$(cd "$TMP" && env -i PATH="$PATH" HOME="$TMP" "$@" bash -c "set -euo pipefail; ROOT=$TMP; AGENT_ENV_FILE=~/.oute/agent.env
-  SERVICES_ENV_FILE=~/.oute/services.env; SERVICES_FOLDER=oute-services
-  env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
-  $FUNCS"$'\n'"agent_studio_up; echo \"profiles=\${COMPOSE_PROFILES:-}\"; echo \"token=\${AGENT_STUDIO_INGEST_TOKEN:-}\"; echo \"antigo=\${AGENT_STUDIO_TOKEN:-}\"" 2>&1)"; RC=$?; }
+up() { studio_oute_up 'echo "profiles=${COMPOSE_PROFILES:-}"; echo "token=${AGENT_STUDIO_INGEST_TOKEN:-}"; echo "antigo=${AGENT_STUDIO_TOKEN:-}"' "$@"; }
 rm -f "$TMP/.env"
 R1="$(python3 -c "import secrets; print(secrets.token_hex(8))")"
 up AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
@@ -398,12 +395,12 @@ check "DuckDB: eventos da rodada e do canal, uma vez"  test "$(count logs "WHERE
 
 # serviço surrealdb no compose
 SVC="$(compose_service surrealdb)"
-check "compose: surrealdb fixado por digest"           has '^    image: \$\{OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v[0-9.]+@sha256:[0-9a-f]{64}\}$'
-check "compose: surrealdb só no profile agent-studio"  has '^    profiles: \[agent-studio\]$'
+check "compose: surrealdb fixado por digest"           svc_has '^    image: \$\{OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v[0-9.]+@sha256:[0-9a-f]{64}\}$'
+check "compose: surrealdb só no profile agent-studio"  svc_has '^    profiles: \[agent-studio\]$'
 check "compose: surrealdb sem porta publicada"         bash -c '! grep -qE "^    ports:" <<<"$0"' "$SVC"
-check "compose: surrealdb com mem_limit"               has '^    mem_limit: \$\{OUTE_SURREALDB_MEM:-1g\}$'
+check "compose: surrealdb com mem_limit"               svc_has '^    mem_limit: \$\{OUTE_SURREALDB_MEM:-1g\}$'
 check "compose: surrealdb em RocksDB num volume"       bash -c 'grep -q "rocksdb:///data/surrealdb" <<<"$0" && grep -q "^      - oute-surrealdb:/data/surrealdb$" <<<"$0"' "$SVC"
-check "compose: surrealdb com senha do vault"          has 'SURREAL_PASS: \$\{AGENT_STUDIO_SURREAL_PASS:-\}'
+check "compose: surrealdb com senha do vault"          svc_has 'SURREAL_PASS: \$\{AGENT_STUDIO_SURREAL_PASS:-\}'
 check "compose: surrealdb sem --unauthenticated"       bash -c '! grep -q unauthenticated <<<"$0"' "$SVC"
 check "compose: volume-init dá o dono do volume"       grep -q '^      - oute-surrealdb:/v/surrealdb$' "$ROOT/docker/compose.yaml"
 

@@ -9,8 +9,6 @@ SCRIPT="$ROOT/addons/skills/oute-aidlc-learn-insights/collect.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=+1   # o bad mostra a saída inteira
-has() { grep -q -- "$1" <<<"$OUT"; }
-hasnt() { ! has "$1"; }
 
 d() { date -u -d "$1" +%Y-%m-%dT%H:%M:%SZ; }
 CANARIO="CANARIO-CONTEUDO-7f3a"
