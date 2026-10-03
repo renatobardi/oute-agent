@@ -96,6 +96,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute oci-bootstrap` | provisiona storage OCI (idempotente, `DRY_RUN=1`) |
 | `oute storage [ls\|lsl\|about] [path]` | lista o bucket direto no OCI (`OUTE_BUCKET=oute-observability` p/ telemetria) |
 | `oute sync-shared` | (re)monta o bucket |
+| `oute memory-backup [--check <arquivo>]` | backup do volume `oute-memory` (`ai-memory backup`) em `backups/ai-memory/` do `oute-shared`, com retenção por origem; `--check` restaura num tmp e confere o banco; ver **Backup da memória** |
 | `oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]` | **só no oute-server**: reenvia o bucket de telemetria à ingestão do agent-studio (remonta o DuckDB e, junto, o SurrealDB); ver **Observabilidade** |
 | `oute lock` / `version` | tranca o vault e apaga a sessão em cache das versões antigas / versão repo × imagem |
 
@@ -120,6 +121,13 @@ Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `
 - **Ferramenta nova** só entra no stack se mandar consumo ao **bucket + agent-studio**, com a origem e `oute.agent` (ADR-08 §11).
 - **Remontar o agent-studio a partir do bucket** (#159, ADR-08 §7), no oute-server: `oute studio replay --from 2026-10-01 --to 2026-10-02` (UTC, pela partição do bucket, com 1 h de folga de cada lado; `--signal`, `--host`, `--legacy` para objetos sem `host=`). Reenvia os objetos pela ingestão do serviço no ar, com dedupe: rodar de novo não duplica, e o SurrealDB volta junto. Resumo por sinal (objetos lidos, gravados × repetidos, falharam); objeto ilegível é listado e pulado, com código ≠ 0. **Objetos com mais de 90 dias estão em Archive (ADR-03): restaure-os antes**, com a credencial de admin do OCI (`oci os object restore --bucket-name oute-observability --name <objeto>`, ~1 h) e rode o replay de novo.
 - Conferir: `OUTE_BUCKET=oute-observability ./scripts/oute storage lsl`; a tela do agent-studio (`agent-studio.oute.pro`, na tailnet).
+
+### Backup da memória (#369)
+O volume `oute-memory` (wiki, banco e config do ai-memory) não tem backup próprio: `oute memory-backup` roda o `ai-memory backup` no container `agent` e grava `backups/ai-memory/<host>-<instância>-<AAAAMMDDTHHMMSSZ>.tar.gz` (UTC) no `oute-shared`. O tarball tem conteúdo de conversa e o config do cliente: fica só no bucket privado, e o comando nunca o põe em log nem em saída (só nome, tamanhos e contagens).
+- **Saída e códigos:** imprime o tamanho do tarball e do banco e avisa se o banco passa de `OUTE_MEMORY_WARN_MB` (padrão 500). Sai ≠ 0 se o backup falhar ou se o arquivo não chegar ao bucket (sem mount ou sem credencial: diz que ficou só local, em `/data/shared/backups/ai-memory/` do container). `OUTE_MEMORY_BACKUP_WAIT` (padrão 60 s) é a espera pelo envio do mount.
+- **Retenção:** ficam os `OUTE_MEMORY_BACKUP_KEEP` (padrão 8) mais recentes da mesma origem (host + instância); arquivo de outra origem nunca é apagado.
+- **Conferir um backup:** `oute memory-backup --check <arquivo local | nome no bucket>` restaura num diretório temporário do container (nunca no volume) e confere que o banco abre, está íntegro e tem páginas. Antes de restaurar de verdade, rode o `--check`.
+- **Restaurar:** `ai-memory restore` recusa rodar com outro ai-memory vivo, então com a stack parada: `oute storage copy backups/ai-memory/<nome> <pasta>` (baixa o tarball), `oute down`, e um one-off que reusa o volume: `docker compose --project-directory <repo> -f docker/compose.yaml run --rm --no-deps -v <pasta>:/in agent ai-memory restore --from /in/<nome> --force`, e `oute up`. O agendamento (timer semanal) é do repo `lab`.
 
 ## Storage comum (ADR-03)
 
