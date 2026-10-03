@@ -106,6 +106,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao
   Langfuse. A saída do script executado no host nunca vai.
   O oute-swarm, o oute-propose, o oute-task e o oute approve chamam sozinhos; falha nunca muda o comando.
+  Endpoint e origem: OTEL_* do ambiente; sem elas (o shell do Bash tool do Claude Code não as
+  herda), do ~/.oute_env, só lido (variável com valor no ambiente vence, uma a uma).
   oute-emit canal <id>              emite a fase atual do pedido (proposto ou decidido)
   oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…

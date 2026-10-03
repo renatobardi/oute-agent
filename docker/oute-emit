@@ -13,6 +13,10 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector); nada ao Langfuse.
 Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"); a sessão do oute-task é a exceção: o
 oute-task passa os campos, porque no removed a worktree (e a marca dela) já não existe. OTLP/HTTP JSON em
 ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs; origem do OTEL_RESOURCE_ATTRIBUTES, service.name=oute.
+Sem as variáveis no ambiente (#250: o shell do Bash tool do Claude Code não as herda), endpoint e origem saem do
+~/.oute_env que o entrypoint grava: só lido (nunca source), só OTEL_EXPORTER_OTLP_ENDPOINT,
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT e OTEL_RESOURCE_ATTRIBUTES; variável com valor no ambiente vence, uma a uma (o
+endpoint como par). Sem endpoint em nenhum dos dois, não envia nem guarda no spool.
 Best-effort: teto de ~2 s por chamada, sempre sai com 0, nunca escreve no stdout. Erro só em stderr com
 OUTE_EMIT_DEBUG=1 (o resumo do backfill sai sempre em stderr). A saída do script executado no host nunca é lida:
 o leitor do .out para na primeira linha em branco.
@@ -87,9 +91,62 @@ def kvs(d):
     return [{"key": k, "value": anyvalue(v)} for k, v in d.items() if v is not None and v != ""]
 
 
+# ---------------------------------------------------------------- endpoint e origem (#250)
+OTEL_KEYS = ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "OTEL_RESOURCE_ATTRIBUTES")
+OUTE_ENV_MAX = 2**20
+# a linha que o `declare -px` do entrypoint grava para valor sem caractere de controle: aspas duplas, com \ antes de
+# " $ ` e \ (o $'…' de valor com controle não é lido: a chave fica ausente)
+KEY_RE = re.compile(r"^declare -x (%s)(=|$)" % "|".join(OTEL_KEYS))
+DECLARE_RE = re.compile(r'^declare -x (%s)="((?:[^"\\$`]|\\["$`\\])*)"$' % "|".join(OTEL_KEYS))
+_oute_env = None
+
+
+def oute_env():
+    """endpoint e origem do ~/.oute_env (o entrypoint grava com declare -px): o shell do Bash tool do Claude Code
+    não herda as OTEL_* (#250). Só lido, nunca source, e só as três chaves; linha de uma delas fora do formato ou
+    repetida = chave ausente; arquivo ausente, ilegível, grande demais ou fora de UTF-8 = nada"""
+    global _oute_env
+    if _oute_env is None:
+        _oute_env, seen, bad = {}, set(), set()
+        try:
+            with open(os.path.join(HOME, ".oute_env"), "rb") as f:
+                raw = f.read(OUTE_ENV_MAX + 1)
+            if len(raw) > OUTE_ENV_MAX:
+                raise ValueError("grande demais")
+            text = raw.decode("utf-8")
+        except (OSError, ValueError) as e:
+            debug(f"~/.oute_env: {e}")
+            return _oute_env
+        for line in text.split("\n"):
+            m = KEY_RE.match(line)
+            if not m:
+                continue
+            k = m.group(1)
+            v = DECLARE_RE.match(line)
+            if k in seen or (m.group(2) and not v):
+                bad.add(k)
+            seen.add(k)
+            if v:
+                _oute_env[k] = re.sub(r'\\(["$`\\])', r"\1", v.group(2))
+        for k in bad:
+            debug(f"~/.oute_env: {k} fora do formato ou repetida; ignorada")
+            _oute_env.pop(k, None)
+    return _oute_env
+
+
+def otel(key):
+    """variável com valor no ambiente vence; sem ela, o ~/.oute_env. O endpoint vale como um par (o de logs e o
+    base): qualquer um dos dois no ambiente = nada do arquivo"""
+    if os.environ.get(key):
+        return os.environ[key]
+    if key in OTEL_KEYS[:2] and any(os.environ.get(k) for k in OTEL_KEYS[:2]):
+        return None
+    return oute_env().get(key) or None
+
+
 def resource(agent):
     attrs = {}
-    for part in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
+    for part in (otel("OTEL_RESOURCE_ATTRIBUTES") or "").split(","):
         k, sep, v = part.partition("=")
         if sep and k.strip():
             attrs[urllib.parse.unquote(k.strip())] = urllib.parse.unquote(v.strip())
@@ -123,10 +180,10 @@ def event(name, agent, ts, attrs, body=None, scope="", key="", nth=1):
 
 
 def endpoint():
-    ep = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    ep = otel("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
     if ep:
         return ep
-    base = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    base = otel("OTEL_EXPORTER_OTLP_ENDPOINT")
     return base.rstrip("/") + "/v1/logs" if base else None
 
 
@@ -149,7 +206,7 @@ def post_logs(logs, timeout):
     "bad" = recusa permanente (4xx: reenviar não adianta)"""
     ep = endpoint()
     if not ep:
-        debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
+        debug("sem endpoint (OTEL_EXPORTER_OTLP_ENDPOINT vazio no ambiente e no ~/.oute_env)")
         return "bad"
     if timeout < MIN_POST:
         return "retry"
@@ -332,7 +389,7 @@ def send(events, deadline, drained):
     (4xx) ou sem endpoint. Enviado = "ok" ou "spool" (o spool é a única fila de reenvio)"""
     if not events or not endpoint():
         if events:
-            debug("OTEL_EXPORTER_OTLP_ENDPOINT vazio")
+            debug("sem endpoint (OTEL_EXPORTER_OTLP_ENDPOINT vazio no ambiente e no ~/.oute_env)")
         return "bad"
     stamp(events)
     logs = resource_logs(events)
@@ -708,7 +765,7 @@ def cmd_backfill():
         sent = min(i + BACKFILL_CHUNK, len(events))
         with open(sent_f, "w") as f:
             f.write(f"{sent}\n")
-    ep = endpoint() or "(OTEL_EXPORTER_OTLP_ENDPOINT vazio)"
+    ep = endpoint() or "(sem endpoint no ambiente e no ~/.oute_env)"
     summary = (f"oute-emit backfill: corte {since}; {sent} de {len(events)} evento(s) emitido(s) "
                f"({len(rounds)} rodada(s)); pulados: {skipped} linha(s) não reconhecida(s), "
                f"{untimed} close(s) sem hora")

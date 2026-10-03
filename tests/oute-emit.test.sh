@@ -16,7 +16,7 @@ command -v jq >/dev/null && command -v python3 >/dev/null || { echo "FAIL precis
 BIN="$TMP/bin"; mkdir -p "$BIN"
 ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 export PATH="$BIN:$PATH" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
-unset CLAUDECODE CODEX_THREAD_ID PI_CODING_AGENT OUTE_PROPOSE_AGENT OUTE_INBOX OUTE_OUTBOX
+unset CLAUDECODE CODEX_THREAD_ID PI_CODING_AGENT OUTE_PROPOSE_AGENT OUTE_INBOX OUTE_OUTBOX OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 
 posts() { ls "$RCV_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; }
 # propose <home> <título> [args]: roda o oute-propose com o script de $SCRIPT; stdout em $OUT, código em $RC
@@ -447,6 +447,113 @@ NH="$TMP/rec-nosince"; mkdir -p "$NH/inbox"; cp "$RH/inbox/20260928-120500-fora.
 rcv_start "$TMP/r7g"
 HOME="$NH" oute-emit reconcile
 check "reconcile sem corte: nada sai, nada marca"       [ "$(posts)" -eq 0 -a ! -e "$NH/.oute/emit/decided" ]
+rcv_stop
+
+# ---------------------------------------------------------------- 8. sem OTEL_* no ambiente: ~/.oute_env (#250)
+# o shell do Bash tool do Claude Code não herda as OTEL_*: o oute-emit lê endpoint e origem do ~/.oute_env que o
+# entrypoint grava (declare -px). Só lido (nunca source), só as três chaves; variável com valor no ambiente vence
+noenv() { env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_EXPORTER_OTLP_LOGS_ENDPOINT -u OTEL_RESOURCE_ATTRIBUTES "$@"; }
+FILE_ORIGIN="host.name=oute-server,oute.instance=oute-agent,deployment.environment=oute-server"
+# envfile <home> [VAR=valor…]: ~/.oute_env como o entrypoint grava (declare -px, mesmo filtro), só com as variáveis
+# dadas e uma OUTE_ e uma GH_ quaisquer; e uma linha de shell solta, que só um source executaria
+envfile() {
+  local h="$1"; shift
+  env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=1 "$@" bash -c 'declare -px' \
+    | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' > "$h/.oute_env"
+  printf 'touch "%s/pwned"\n' "$h" >> "$h/.oute_env"
+}
+# n_in <dir> <jq-select>: registros de um receptor que não é o atual
+n_in() { events "$1" | jq -c "select($2)" | grep -c . || true; }
+EH8="$TMP/oute-env"; mkdir -p "$EH8"
+rcv_start "$TMP/r8"; LIVE="$OTEL_EXPORTER_OTLP_ENDPOINT"
+envfile "$EH8" OTEL_EXPORTER_OTLP_ENDPOINT="$LIVE" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN" OTEL_SERVICE_NAME=outro
+SCRIPT='echo do claude'
+OUT="$(HOME="$EH8" noenv CLAUDECODE=1 "$ROOT/docker/oute-propose" "sem otel" <<<"$SCRIPT" 2>/dev/null)"; RC=$?
+e="$(ev '.name == "oute.canal.proposed" and .attrs["oute.canal.title"] == "sem otel"')"
+check "oute_env: propose sem OTEL_*, rc 0 e só o id"   [ "$RC" -eq 0 -a -f "$EH8/outbox/$OUT.sh" -a "$(grep -c . <<<"$OUT")" -eq 1 ]
+check "oute_env: proposed chega com o endpoint do arquivo" [ "$(grep -c . <<<"$e")" -eq 1 ]
+check "oute_env: oute.agent=claude, origem do arquivo"  jqe '.attrs["oute.agent"] == "claude" and .res["oute.agent"] == "claude" and .res["host.name"] == "oute-server"
+                                                         and .res["oute.instance"] == "oute-agent" and .res["service.name"] == "oute"' <<<"$e"
+check "oute_env: nunca source (nada executado)"         [ ! -e "$EH8/pwned" ]
+R8="$EH8/.oute/swarm/swarm-1002-0800"; mkdir -p "$R8"; printf 'repo=/workspace/lab\nmax=1\nagent=claude\n' > "$R8/meta"
+L8="2026-10-02T08:00:00Z abertura swarm-1002-0800 (repo lab, max 1)"; printf '%s\n' "$L8" > "$R8/log"
+OUT="$(HOME="$EH8" noenv oute-emit swarm swarm-1002-0800 "$L8" 2>&1)"; RC=$?
+check "oute_env: swarm sem OTEL_*, rc 0, nada na tela"  [ "$RC" -eq 0 -a -z "$OUT" ]
+check "oute_env: round.opened com oute.agent=claude e origem do arquivo" [ "$(n '.name == "oute.swarm.round.opened" and .attrs["oute.agent"] == "claude"
+                                                         and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent"')" -eq 1 ]
+# precedência, uma a uma: endpoint do ambiente vence o do arquivo; origem vazia no ambiente = a do arquivo
+rcv_stop; rcv_start "$TMP/r8b"
+printf '# oute-propose\n# titulo: prec\n# como: user\n# agente: claude\n# criado: 2026-10-02T08:01:00Z\n\necho p\n' > "$EH8/outbox/20261002-080100-prec.sh"
+HOME="$EH8" OTEL_RESOURCE_ATTRIBUTES= oute-emit canal 20261002-080100-prec
+check "precedência: endpoint do ambiente vence"         [ "$(n true)" -eq 1 -a "$(n_in "$TMP/r8" '.attrs["oute.canal.id"] == "20261002-080100-prec"')" -eq 0 ]
+check "precedência: origem vazia no ambiente = a do arquivo" [ "$(n '.res["host.name"] == "oute-server"')" -eq 1 ]
+HOME="$EH8" oute-emit canal 20261002-080100-prec
+check "precedência: origem do ambiente vence"           [ "$(n '.res["host.name"] == "oute-mac" and .res["oute.instance"] == "oute-agent"')" -eq 1 ]
+HOME="$EH8" noenv OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT/v1/logs" oute-emit canal 20261002-080100-prec
+check "precedência: endpoint de logs do ambiente vence o base do arquivo" [ "$(n true)" -eq 3 ]
+# endpoint de logs só no arquivo; o endpoint é um par: base no ambiente = nada de endpoint do arquivo
+envfile "$EH8" OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT/v1/logs" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
+HOME="$EH8" noenv oute-emit canal 20261002-080100-prec
+check "oute_env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT do arquivo" [ "$(n true)" -eq 4 ]
+before="$(n_in "$TMP/r8" true)"
+envfile "$EH8" OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="$LIVE/v1/logs" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
+HOME="$EH8" oute-emit canal 20261002-080100-prec
+check "precedência: base no ambiente, endpoint de logs do arquivo não entra" [ "$(n true)" -eq 5 -a "$(n_in "$TMP/r8" true)" -eq "$before" ]
+rcv_stop
+# spool e flush sem OTEL_*: o coletor do arquivo fora → spool; de volta → flush entrega o mesmo oute.event.id
+SH8="$TMP/oute-env-spool"; mkdir -p "$SH8/outbox"; cp "$EH8/outbox/20261002-080100-prec.sh" "$SH8/outbox/"
+envfile "$SH8" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
+OUT="$(HOME="$SH8" noenv oute-emit canal 20261002-080100-prec 2>&1)"; RC=$?
+check "oute_env coletor fora: rc 0, nada na tela, no spool" [ "$RC" -eq 0 -a -z "$OUT" -a "$(ls "$SH8/.oute/emit/spool/"*.json 2>/dev/null | wc -l)" -eq 1 ]
+sid="$(events "$SH8/.oute/emit/spool" | jq -r '.attrs["oute.event.id"]')"
+check "oute_env coletor fora: spool com a origem do arquivo" [ "$(events "$SH8/.oute/emit/spool" | jq -r '.res["host.name"]')" == oute-server ]
+rcv_start "$TMP/r8c"
+envfile "$SH8" OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
+OUT="$(HOME="$SH8" noenv oute-emit flush 2>&1)"; RC=$?
+check "oute_env flush sem OTEL_*: entrega o mesmo id"   [ "$RC" -eq 0 -a -z "$OUT" -a "$(n true)" -eq 1 -a "$(ev true | jq -r '.attrs["oute.event.id"]')" == "$sid" ] \
+                                                         && [ -z "$(ls "$SH8/.oute/emit/spool/"*.json 2>/dev/null)" ]
+rcv_stop
+# teto de 2 s com o endpoint do arquivo e o coletor lento
+RCV_SLEEP=6 rcv_start "$TMP/r8d"
+envfile "$SH8" OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"
+t0=$(ms); OUT="$(HOME="$SH8" noenv oute-emit canal 20261002-080100-prec 2>&1)"; RC=$?; dt=$(( $(ms) - t0 ))
+check "oute_env coletor lento: rc 0, teto de 2 s ($dt ms)" [ "$RC" -eq 0 -a -z "$OUT" -a "$dt" -le 2800 ]
+rcv_stop
+# sem endpoint no ambiente nem no arquivo (ausente, sem a chave, fora do formato, ilegível): nada enviado, nada no
+# spool, rc 0, sem stdout; a reconciliação não marca. O receptor fica no ar, e é ele que está nas linhas quebradas
+rcv_start "$TMP/r8e"; UP8="$OTEL_EXPORTER_OTLP_ENDPOINT"
+XH="$TMP/oute-env-sem"; mkdir -p "$XH/outbox" "$XH/inbox" "$XH/.oute/emit"; cp "$EH8/outbox/20261002-080100-prec.sh" "$XH/outbox/"
+echo 2026-10-01T00:00:00Z > "$XH/.oute/emit/since"
+printf '# id: 20261002-080200-dec\n# rc: 0\n# aprovado: 2026-10-02T08:02:00Z por ubuntu@oute-server\n\nsaida\n' > "$XH/inbox/20261002-080200-dec.out"
+# sem_endpoint <caso>: o ~/.oute_env já montado; canal e reconcile sem OTEL_* não mandam nem guardam nada
+sem_endpoint() {
+  OUT="$(HOME="$XH" noenv oute-emit canal 20261002-080100-prec 2>&1; HOME="$XH" noenv oute-emit reconcile 2>&1; HOME="$XH" noenv oute-emit flush 2>&1)"; RC=$?
+  check "sem endpoint ($1): rc 0, nada na tela, nada enviado, nada no spool, sem marca" \
+    [ "$RC" -eq 0 -a -z "$OUT" -a "$(posts)" -eq 0 -a ! -e "$XH/.oute/emit/spool" -a ! -e "$XH/.oute/emit/decided" ]
+}
+rm -f "$XH/.oute_env"; sem_endpoint "arquivo ausente"
+envfile "$XH" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"; sem_endpoint "arquivo sem a chave"
+envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT=; sem_endpoint "chave vazia"
+envfile "$XH"; sed -i '/^declare -x OTEL_/d' "$XH/.oute_env"; echo "declare -x OTEL_EXPORTER_OTLP_ENDPOINT" >> "$XH/.oute_env"; sem_endpoint "chave sem valor"
+# <caso>|<linha>: a linha do endpoint fora do formato do declare -px (o resto do arquivo é válido)
+for bad in "aspas simples|declare -x OTEL_EXPORTER_OTLP_ENDPOINT='$UP8'" "sem aspas|declare -x OTEL_EXPORTER_OTLP_ENDPOINT=$UP8" \
+           "aspas abertas|declare -x OTEL_EXPORTER_OTLP_ENDPOINT=\"$UP8" "\$'…'|declare -x OTEL_EXPORTER_OTLP_ENDPOINT=\$'$UP8'" \
+           "export|export OTEL_EXPORTER_OTLP_ENDPOINT=\"$UP8\"" "atribuição solta|OTEL_EXPORTER_OTLP_ENDPOINT=\"$UP8\"" \
+           "comando depois|declare -x OTEL_EXPORTER_OTLP_ENDPOINT=\"$UP8\" ; touch $XH/pwned" \
+           "\$(…) sem escape|declare -x OTEL_EXPORTER_OTLP_ENDPOINT=\"\$(echo $UP8)\""; do
+  envfile "$XH" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN"; printf '%s\n' "${bad#*|}" >> "$XH/.oute_env"; sem_endpoint "${bad%%|*}"
+done
+envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT="$UP8"; envfile "$TMP" OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:1"
+grep '^declare -x OTEL_' "$TMP/.oute_env" >> "$XH/.oute_env"; sem_endpoint "chave repetida"
+envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT="$UP8"; printf '\xff\xfe\n' >> "$XH/.oute_env"; sem_endpoint "fora de UTF-8"
+envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT="$UP8"; head -c 1100000 /dev/zero | tr '\0' '#' >> "$XH/.oute_env"; sem_endpoint "grande demais"
+if [[ "$(id -u)" -ne 0 ]]; then
+  envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT="$UP8"; chmod 000 "$XH/.oute_env"; sem_endpoint "ilegível"; chmod 644 "$XH/.oute_env"
+fi
+check "oute_env: nenhuma linha do arquivo executada"   [ ! -e "$XH/pwned" ]
+envfile "$XH" OTEL_EXPORTER_OTLP_ENDPOINT="$UP8"
+HOME="$XH" noenv oute-emit reconcile
+check "oute_env válido de novo: reconcile manda e marca" [ "$(n '.name == "oute.canal.decided"')" -eq 1 -a -e "$XH/.oute/emit/decided/20261002-080200-dec" ]
 rcv_stop
 
 check_end

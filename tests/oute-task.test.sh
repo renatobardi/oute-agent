@@ -58,7 +58,7 @@ for a in claude codex; do ln -s "$ROOT/docker/shims/oute-agent-shim" "$SHIMS/$a"
 ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
       OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC \
-      HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH
+      HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
        GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 
@@ -322,6 +322,17 @@ check "oute-emit task inválido: rc 0, nada na tela, nada emitido" [ "$RC" -eq 0
 oute-emit task opened 'Quem, Chamou=x' repo=a slug=b reason=merged "id="
 check "oute-emit task: quem chamou inválido = unknown; valor vazio e motivo fora do removed não entram" \
   jqe '.attrs["oute.agent"] == "unknown" and .attrs["oute.task.repo"] == "a" and (.attrs | has("oute.task.id") or has("oute.task.reason") | not)' <<<"$(last)"
+
+# sem OTEL_* no ambiente (o shell do Bash tool do Claude Code, #250): endpoint e origem do ~/.oute_env do entrypoint
+FILE_ORIGIN="host.name=oute-server,oute.instance=oute-agent,deployment.environment=oute-server"
+env -i OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" OTEL_RESOURCE_ATTRIBUTES="$FILE_ORIGIN" bash -c 'declare -px' \
+  | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' > "$HOME/.oute_env"
+t semotel claude
+OUT="$(cd "$WS/proj" && env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_RESOURCE_ATTRIBUTES CLAUDECODE=1 "$TASK" clean --yes 2>&1 </dev/null)"; RC=$?
+check "clean --yes sem OTEL_*: removed com a origem do ~/.oute_env" [ "$RC" -eq 0 ] && grep -qx "removida $SP/proj-semotel (sem commits além de origin/main)" <<<"$OUT" \
+  && jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "semotel" and .attrs["oute.agent"] == "claude"
+          and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent"' <<<"$(last)"
+rm -f "$HOME/.oute_env"
 
 check "nenhum oute.task.* com corpo (2ª parte)"        [ "$(task_ev '.body != null' | grep -c .)" -eq 0 -a "$(total)" -gt 10 ]
 check "todo oute.task.* com oute.event.id e event.name" [ "$(task_ev '(.attrs["oute.event.id"] | length) != 32 or .attrs["event.name"] != .name' | grep -c .)" -eq 0 ]
