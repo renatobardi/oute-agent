@@ -892,6 +892,16 @@ check "sem PR: opção numerada fecha a issue e a aba (#115)" grep -qF '`1. fech
 check "sem PR: fechamento com gh issue close e close da aba (#115)" grep -qF '`gh issue close <n> --comment "<resumo da conferência>"` e `oute-swarm close <n>-<slug> --yes`' "$FAKE/oute-task.last"
 check "sem PR: cada regra na sua seção, §1 a §4 (#115)" [ "$(grep -n -e '^## [1-4]\. ' -e '^### 4\.1 ' -e 'Entrega de cada issue escolhida' -e '^- \*\*Issue `só GitHub` (sem PR):\*\*' "$FAKE/oute-task.last" | cut -d: -f2- | cut -c1-12 | tr '\n' '|')" == '## 1. Triage|- **Entrega |## 2. Abertu|- **Issue `s|## 3. Acompa|- **Issue `s|## 4. Fecham|- **Issue `s|### 4.1 Retr|' ]
 check "sem PR: rodada só termina com as issues só GitHub fechadas (#115)" grep -qF 'e todas as issues `só GitHub` fechadas ou abandonadas (confirme com o Bardi)' "$FAKE/oute-task.last"
+# spike com ready (#100): entra na triagem, com entrega = relatório, sem código de produção
+check "spike: só o spike sem ready é descartado (#100)"  grep -qF -- '- Descarte: `needs-info`, `ready-for-human`, `later`, `blocked`, `spike` sem `ready`; issue que já tem PR aberto' "$FAKE/oute-task.last"
+check "spike: o descarte de todo spike saiu (#100)"      bash -c '! grep -qF "\`blocked\`, \`spike\`; issue" "$1"' _ "$FAKE/oute-task.last"
+check "spike: com ready entra na triagem (#100)"         grep -qF -- '- **Spike com `ready`:** issue com os labels `spike` e `ready` entra na triagem como as outras; spike sem `ready` continua descartado.' "$FAKE/oute-task.last"
+check "spike: entrega é relatório, sem código de produção (#100)" grep -qF 'A entrega do spike é um **relatório**, sem código de produção: comentário na issue (`só GitHub` na tabela) ou PR de doc (`PR` na tabela)' "$FAKE/oute-task.last"
+check "spike: marca na coluna da entrega (#100)"         grep -qF 'o spike leva a marca **spike: relatório** na coluna da entrega' "$FAKE/oute-task.last"
+check "spike: instrução da sessão, sem proposta (#100)"  grep -qF 'a sessão publica o relatório como comentário final na issue e termina com `PRONTO #<n>: <url do comentário com o relatório> — sem PR`' "$FAKE/oute-task.last"
+check "spike: conferência de que não entrou código de produção (#100)" grep -qF 'confira também que o relatório responde à pergunta da issue, com evidência, e que não entrou código de produção' "$FAKE/oute-task.last"
+check "spike: código de produção é divergência (#100)"   grep -qF 'Código de produção em spike é divergência: mostre ao Bardi.' "$FAKE/oute-task.last"
+check "spike: cada regra na sua seção, §1 a §3 (#100)"   [ "$(grep -n -e '^## [1-4]\. ' -e '^- \*\*Spike com `ready`:\*\*' -e '^- \*\*Spike (relatório):\*\*' "$FAKE/oute-task.last" | cut -d: -f2- | cut -c1-12 | tr '\n' '|')" == '## 1. Triage|- **Spike co|## 2. Abertu|- **Spike (r|## 3. Acompa|- **Spike (r|## 4. Fecham|' ]
 check "triagem: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 CASE=seletor-abre-cx; round "$CASE"
 opn --max 2 --agent codex
@@ -908,5 +918,19 @@ check "worker sem PR: aplica só depois do ok e registra o resultado na issue (#
 check "worker sem PR: não fecha a issue (#115)"          grep -qF 'Não feche a issue #115: quem fecha é o dispatcher, com o ok do Bardi.' "$P"
 check "worker sem PR: o PRONTO com PR continua (#115)"   grep -qF 'termine com uma linha `PRONTO #115: <url do PR>`' "$P"
 check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
+# 11g. sessão de spike (#100): o pronto é o relatório no comentário final da issue, sem código de produção
+CASE=spike; round "$CASE"
+sw spawn 100-spike "instrução"
+P="$STATE/100-spike.prompt"
+check "worker spike: código 0, com o prompt da sessão"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker spike: o pronto é o relatório, sem código de produção (#100)" grep -qF -- '- **Issue `spike`** (label `spike`: investigação): o pronto é o **relatório**, sem código de produção.' "$P"
+check "worker spike: não altera código do repo (#100)"   grep -qF 'Não altere código, script, config nem teste do repo;' "$P"
+check "worker spike: relatório no comentário final da issue (#100)" grep -qF 'Publique o relatório como comentário final na issue #100: a pergunta, o que foi conferido e como, os achados com evidência, a recomendação e o que ficou em aberto.' "$P"
+check "worker spike: PRONTO com o comentário do relatório (#100)" grep -qF 'Termine com `PRONTO #100: <url do comentário com o relatório> — sem PR`.' "$P"
+check "worker spike: sem proposta nem espera do ok (#100)" grep -qF 'Aqui não há proposta nem espera do ok (a regra acima): o relatório não aplica nada.' "$P"
+check "worker spike: PR de doc quando a instrução pede arquivo (#100)" grep -qF 'entregue por PR de doc (só o doc e o fragmento do changelog), com as regras de PR acima, e o comentário final na issue leva o resumo e o link do PR.' "$P"
+check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova: o que valer virar issue vai no relatório, como recomendação.' "$P"
+check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end
