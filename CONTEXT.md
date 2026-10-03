@@ -8,11 +8,11 @@ Resumo para agentes. **O canônico são os ADRs em `docs/adr/`**, mantidos pelo 
 | `agent` | Ubuntu 24.04 com herdr, sshd (`127.0.0.1:2222`), Claude Code (principal), Codex (reserva), CLIs (gh, oci, gcloud, aws, rclone, ai-memory). IP fixo `172.19.0.5`, uid/gid 10001 |
 | `ai-memory` | memória compartilhada entre agentes (hooks + MCP), dados no volume `oute-memory` |
 | `otel-collector` | telemetria → bucket OCI (tudo) + Langfuse (só metadados, até ser desligado; ADR-08), com fila em disco por destino |
-| `agent-studio` | só no oute-server (profile do compose): recebe OTLP/HTTP JSON do collector de cada host, grava tudo no DuckDB e o estado no SurrealDB; API só leitura para tray, tela e `ops-observe` (ADR-08) |
-| `surrealdb` | só no oute-server: estado derivado (rodadas, sessões, pedidos, aprovações), sem porta publicada (ADR-08) |
+| `agent-studio` | só no oute-server (profile do compose): recebe OTLP/HTTP JSON do collector de cada host (credencial de ingestão), grava tudo no DuckDB e o estado no SurrealDB; API só leitura para tray, tela e `ops-observe` (credencial de leitura; ADR-08 §6) |
+| `surrealdb` | só no oute-server: estado derivado (rodadas, sessões, pedidos, aprovações), sem porta publicada, na rede `studio` só com o `agent-studio` (o `agent` não alcança; ADR-08) |
 | `volume-init` | one-shot: dono 10001 nos volumes |
 
-Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o container recebe os valores da pasta `oute-agent` em `/run/secrets/agent_env`.
+Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o container recebe os valores da pasta `oute-agent` em `/run/secrets/agent_env`. Segredo de serviço fica na pasta `oute-services` (→ `~/.oute/services.env`) e vai só aos serviços, nunca ao `agent` (ADR-01, adendo #256).
 
 ## Decisões (ADRs)
 - **ADR-01, runtime:** o container é a fronteira de isolamento, e os agentes rodam em **yolo** dentro dele. Acesso ao host só como **`oute-ops`** (leitura + allowlist de sudo). Ações com root no host passam pelo **canal de aprovação**: o agente propõe com `oute-propose` e o humano aprova no host com `oute approve`/`oute watch`. Configs dos agentes só com edição estrutural. claude/codex vão para o home sem `curl | sh`: a entrada tem versão e sha256 fixos no `Dockerfile` e o resto é auto-update do fornecedor (#199, #200; `scripts/agent-pins` na release). Uma sessão = uma worktree (`oute-task`). Sessões paralelas por issue: `oute-swarm <repo>` (dispatcher triando, ok do Bardi, uma aba do herdr por issue, merge só sob pedido).
@@ -48,6 +48,8 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **`oute.event.id`:** id fixo de cada evento do `oute-emit`, derivado do próprio fato (tipo, rodada/pedido, hora do fato, chave, ocorrência); o mesmo ao vivo, no spool e no backfill. É a chave de dedupe da ingestão.
 - **hora do fato:** `timeUnixNano` do registro; o agent-studio grava e consulta por ela, nunca pela hora de chegada.
 - **`human`:** valor de `oute.agent` quando quem age é o Bardi (decidir um pedido).
+- **segredo de serviço:** segredo que só um serviço do compose usa, ou que dá escrita em algo que o Bardi lê para decidir (credencial de ingestão do agent-studio, root do SurrealDB). Pasta `oute-services` do vault; nunca chega ao `agent`. O oposto é o **segredo do agente** (pasta `oute-agent`).
+- **credencial de ingestão / de leitura:** as duas do agent-studio (ADR-08 §6): a de ingestão só o collector tem (`POST /v1/*`); a de leitura é do agente, do tray e da tela (`GET`; na ingestão = 403). Evite "o token do agent-studio".
 - **oute-ops:** usuário restrito do host usado pelo container (`ssh oute-server`).
 - **canal de aprovação:** `oute-propose` → `~/outbox` → `oute approve` no host → `~/inbox`.
 - **origem:** máquina (`OUTE_HOST`, padrão = hostname) + instância (`OUTE_INSTANCE`, padrão `oute-agent`); a instância só precisa ser única dentro da máquina.
