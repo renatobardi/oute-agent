@@ -104,6 +104,10 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     repassa sua decisão à sessão (o dispatcher usa quando você decide).
                                     Só com a sessão parada (idle/done/blocked); confere o campo antes do Enter
                                     e recusa se não bater. --force: manda mesmo com a sessão ocupada (só você pede)
+  oute-swarm tell <n>-<slug> "mensagem" --wait [--timeout <s>]
+                                    espera a sessão parar (relê a cada 5 s) e envia; uma linha só no log
+                                    (ok (--wait, Ns) ou a recusa final). Timeout padrão 600 s: recusa e sai com 3.
+                                    Não combina com --force
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm watch [--interval s] [--round ID]

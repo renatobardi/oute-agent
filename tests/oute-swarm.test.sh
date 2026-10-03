@@ -65,6 +65,11 @@ SH
 # sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
 cat > "$BIN/sleep" <<'SH'
 #!/usr/bin/env bash
+if [[ -n "${FAKE_TELLWAIT:-}" ]]; then   # espera do `tell --wait` (#181): $FAKE/on-tsleep-<n> muda o estado; sem gancho, passa 0,2 s de verdade
+  n=$(( $(cat "$FAKE/tsleeps" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE/tsleeps"
+  if [[ -f "$FAKE/on-tsleep-$n" ]]; then . "$FAKE/on-tsleep-$n"; else /bin/sleep 0.2; fi
+  exit 0
+fi
 [[ -n "${FAKE_WATCH:-}" ]] || exit 0
 n=$(( $(cat "$FAKE/sleeps" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE/sleeps"
 if [[ -f "$FAKE/on-sleep-$n" ]]; then . "$FAKE/on-sleep-$n"; else date -u +%FT%TZ > "$STATE/fechada"; fi
@@ -618,6 +623,43 @@ echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"i
 sw tell 8-bar "pode seguir, Bardi aprovou"
 check "tell ok: evento com o texto"                      [ "$RC" -eq 0 -a "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.tell.result"] == "ok"
                                                               and .attrs["oute.swarm.tell.forced"] == false and .body == "pode seguir, Bardi aprovou"')" -eq 1 ]
+# 8b. tell --wait (#181): espera a sessão parar e envia; uma linha no log por tell
+agst() { echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"'"$1"'"}]}}' > "$FAKE/agents.json"; }
+tells() { grep -c ' tell 8-bar ' "$STATE/log" || true; }
+export OUTE_SWARM_TELL_POLL=0.1
+t0="$(tells)"; agst working; rm -f "$FAKE/tsleeps" "$FAKE/on-tsleep-"*
+echo 'echo "{\"result\":{\"agents\":[{\"pane_id\":\"w1:p2\",\"agent\":\"claude\",\"agent_status\":\"idle\"}]}}" > "$FAKE/agents.json"' > "$FAKE/on-tsleep-2"
+FAKE_TELLWAIT=1 sw tell 8-bar "ok do Bardi" --wait
+check "wait: ocupada → parada, código 0 e enviado"       bash -c '[ "$1" -eq 0 ] && grep -q "pane send-keys w1:p2 enter" "$2"' _ "$RC" "$FAKE/herdr.log"
+check "wait: esperou de verdade (≥ 2 sleeps antes do envio)" [ "$(cat "$FAKE/tsleeps")" -ge 2 ]
+check "wait: uma única linha no log, ok (--wait, Ns)"    bash -c '[ "$1" -eq 1 ] && grep -qE " tell 8-bar ok \(--wait, [0-9]+s\)${2}ok do Bardi\$" "$3"' _ "$(( $(tells) - t0 ))" $'\t' "$STATE/log"
+check "wait: oute-emit lê ok (--wait, …): result=ok, forced=false" [ "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.tell.result"] == "ok" and .attrs["oute.swarm.tell.forced"] == false and .body == "ok do Bardi"')" -eq 1 ]
+t0="$(tells)"; agst idle
+FAKE_TELLWAIT=1 sw tell 8-bar "já parada" --wait
+check "wait: sessão já parada envia na hora"             bash -c '[ "$1" -eq 0 ] && grep -qE " tell 8-bar ok \(--wait, [0-9]+s\)" "$2"' _ "$RC" "$STATE/log"
+t0="$(tells)"; agst working; : > "$FAKE/herdr.log"
+FAKE_TELLWAIT=1 sw tell 8-bar "nunca" --wait --timeout 1
+check "wait: timeout → código 3, nada enviado"           bash -c '[ "$1" -eq 3 ] && ! grep -qE "send-(text|keys)" "$2"' _ "$RC" "$FAKE/herdr.log"
+check "wait: timeout → uma linha, recusa final"          bash -c '[ "$1" -eq 1 ] && grep -qE " tell 8-bar recusado: sessão #8 bar ocupada \(working\) depois de [0-9]+ s de espera${2}nunca\$" "$3"' _ "$(( $(tells) - t0 ))" $'\t' "$STATE/log"
+check "wait: timeout → mensagem em stderr"               grep -qE 'depois de [0-9]+ s de espera; nada enviado' <<<"$ERR"
+t0="$(tells)"; rm -f "$FAKE/tsleeps" "$FAKE/on-tsleep-"*
+echo 'echo "{\"result\":{\"panes\":[]}}" > "$FAKE/panes.json"' > "$FAKE/on-tsleep-1"
+FAKE_TELLWAIT=1 sw tell 8-bar "pane sumiu" --wait
+check "wait: pane some na espera → recusa na hora (código 1)" bash -c '[ "$1" -eq 1 ] && grep -q "pane da aba #8 bar não encontrado" "$2"' _ "$RC" "$STATE/log"
+check "wait: pane some → uma linha no log"               [ "$(( $(tells) - t0 ))" -eq 1 ]
+echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"; agst idle
+t0="$(tells)"
+sw tell 8-bar "x" --wait --force
+check "wait+force: erro de uso, sem linha no log"        bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ]' _ "$RC" "$(tells)" "$t0"
+sw tell 8-bar "x" --timeout 5
+check "timeout sem wait: erro de uso, sem linha"         bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ]' _ "$RC" "$(tells)" "$t0"
+sw tell 8-bar "x" --wait --timeout abc
+check "timeout não numérico: erro de uso, sem linha"     bash -c '[ "$1" -eq 1 ] && [ "$2" -eq "$3" ]' _ "$RC" "$(tells)" "$t0"
+agst working
+sw tell 8-bar "x"
+check "sem wait: ocupada recusa como antes (código 1)"   bash -c '[ "$1" -eq 1 ] && grep -q "ocupada (working); tente depois (o Bardi pode usar --force)" "$2"' _ "$RC" "$STATE/log"
+agst idle; unset OUTE_SWARM_TELL_POLL
+check "docs: ajuda, comandos.md e swarm.md citam --wait"  bash -c 'grep -qF -- "--wait [--timeout <s>]" "$1" && grep -qF -- "--wait [--timeout <s>]" "$2" && grep -qF "**\`--wait\`:**" "$3"' _ "$SWARM" "$ROOT/docker/comandos.md" "$ROOT/docker/swarm.md"
 sw close 8-bar --yes
 check "close: linha com hora no log"                     grep -qE '^[0-9T:Z-]+ close 8-bar$' "$STATE/log"
 check "close: oute.swarm.session.closed"                 [ "$(n '.name == "oute.swarm.session.closed" and .attrs["oute.swarm.session"] == "8-bar"')" -eq 1 ]
