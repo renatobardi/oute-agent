@@ -77,6 +77,14 @@ Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aid
   - dependência sem versão travada;
   - `npm install` sem `--ignore-scripts`;
   - `http://` literal em arquivo novo, inclusive em teste, mesmo para nome de serviço interno do compose (o teste compara com a linha do `docker/compose.yaml` ou monta o endereço de partes: esquema, serviço e porta).
+- **Função de shell nova** (em `docker/`, `scripts/` e `tests/`): parâmetro posicional vai para uma variável `local` (`local x="$1"`) e a função termina com `return` explícito (`return 0`, ou `return $?` quando devolve o status do último comando). Regras SonarCloud: S7679 ("Assign this positional parameter to a local variable") e S7682 ("Add an explicit return statement at the end of the function"). Só vale para função nova; não reescrever as existentes. Exemplo mínimo:
+  ```bash
+  foo_new() {
+    local input="$1"
+    # corpo
+    return 0
+  }
+  ```
 - **Exceção do `http://` interno:** `http://` para nome de serviço do compose na rede `oute` (só docker interno, ex.: `http://agent-studio:8430`) não se corrige no código: o agente declara o achado no corpo do PR e a `oute-aidlc-qa-pr-audit` o trata como não bloqueante. Não vale para host externo. Alcance: a linha que já existe em config (`docker/compose.yaml`, `config/`); em arquivo novo o literal não se repete (item da lista acima). Se o gate reprovar mesmo assim, o agente corrige (#295).
 - Gate reprovado fora da exceção: o agente corrige. Dispensar o gate ou marcar achado no SonarCloud (falso positivo, aceito) é só do Bardi, registrado no PR.
 
