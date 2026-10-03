@@ -1,0 +1,141 @@
+{
+  "at": "2026-10-03T14:00:00Z",
+  "bar": {
+    "pending": 3,
+    "alerts": 1
+  },
+  "machines": [
+    {
+      "host": "oute-mac",
+      "state": "active",
+      "always_on": false,
+      "last_data": "2026-10-03T13:59:48Z",
+      "idle_seconds": 12
+    },
+    {
+      "host": "oute-server",
+      "state": "active",
+      "always_on": true,
+      "last_data": "2026-10-03T13:59:55Z",
+      "idle_seconds": 5
+    }
+  ],
+  "proposals": {
+    "available": true,
+    "total": 3,
+    "pending": [
+      {
+        "id": "p <b>5</b>&x=é",
+        "title": "Pedido de id estranho",
+        "as": "user",
+        "agent": "codex",
+        "host": "oute-mac",
+        "instance": "oute-agent",
+        "proposed_at": "2026-10-03T13:58:59Z",
+        "age_seconds": 61,
+        "url": "/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9"
+      },
+      {
+        "id": "20261003-135500-reiniciar-nginx",
+        "title": "Reiniciar nginx",
+        "as": "root",
+        "agent": "claude",
+        "host": "oute-server",
+        "instance": "oute-agent",
+        "proposed_at": "2026-10-03T13:55:00Z",
+        "age_seconds": 300,
+        "url": "/pedido?id=20261003-135500-reiniciar-nginx"
+      },
+      {
+        "id": "20261003-134000-listar-backups",
+        "title": "Listar backups",
+        "as": "user",
+        "agent": "claude",
+        "host": "oute-mac",
+        "instance": "oute-agent",
+        "proposed_at": "2026-10-03T13:40:00Z",
+        "age_seconds": 1200,
+        "url": "/pedido?id=20261003-134000-listar-backups"
+      }
+    ]
+  },
+  "cost_today": {
+    "day": "2026-10-03",
+    "from": "2026-10-03T00:00:00Z",
+    "to": "2026-10-04T00:00:00Z",
+    "usd": 5.5404,
+    "real_usd": 0.0304,
+    "estimated_usd": 5.51,
+    "estimated": true,
+    "unpriced_calls": 1,
+    "agents": [
+      {
+        "agent": "claude",
+        "calls": 3,
+        "usd": 3.03,
+        "real_usd": 0.03,
+        "estimated_usd": 3.0,
+        "estimated": true,
+        "unpriced_calls": 0
+      },
+      {
+        "agent": "codex",
+        "calls": 3,
+        "usd": 2.51,
+        "real_usd": null,
+        "estimated_usd": 2.51,
+        "estimated": true,
+        "unpriced_calls": 1
+      }
+    ]
+  },
+  "errors_last_hour": {
+    "from": "2026-10-03T13:00:00Z",
+    "to": "2026-10-03T14:00:00Z",
+    "total": 3,
+    "rows": [
+      {
+        "host": "oute-mac",
+        "agent": "codex",
+        "spans": 1,
+        "logs": 1,
+        "total": 2
+      },
+      {
+        "host": "oute-server",
+        "agent": "claude",
+        "spans": 1,
+        "logs": 0,
+        "total": 1
+      }
+    ]
+  },
+  "alerts": [
+    {
+      "type": "queue",
+      "host": "oute-server",
+      "instance": "oute-agent",
+      "value": 0.8,
+      "unit": "ratio",
+      "limit": 0.5,
+      "since": "2026-10-03T13:58:00Z",
+      "evidence": {
+        "exporter": "otlphttp/agent-studio",
+        "metrics": [
+          "otelcol_exporter_queue_size",
+          "otelcol_exporter_queue_capacity"
+        ],
+        "size": 800.0,
+        "capacity": 1000.0,
+        "at": "2026-10-03T13:58:50Z"
+      },
+      "title": "Fila do collector acima do limite",
+      "text": "80% da fila (limite 50%)"
+    }
+  ],
+  "config": {
+    "errors": [
+      "[alerts]: chave desconhecida: foo"
+    ]
+  }
+}

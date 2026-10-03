@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Testes do `GET /v1/tray` do agent-studio (#205, ADR-08 §10): o contrato da resposta que o tray no Mac (#158) lê a
 # cada 15 s. Máquinas (pela hora de chegada), pedidos pendentes do SurrealDB com o link do "ver script", custo de hoje
-# (total e por agente, estimado marcado), erros na última hora por host × agente, alertas e os contadores da barra.
+# (total e por agente, estimado marcado), erros na última hora por host × agente, alertas (com title e text prontos, #344)
+# e os contadores da barra, e a fixture do app (tray/Tests/Fixtures) com as mesmas chaves e tipos da resposta real.
 # O DuckDB e o SurrealDB de exemplo nascem pela ingestão de verdade (POST /v1/traces, /v1/logs e /v1/metrics), com as
 # horas em volta de agora; o custo e os alertas são conferidos contra o `/v1/usage` e o `/v1/alerts` (mesma regra).
 # Mais a lógica direto em Python (host parado, outro dia, limite de pedidos), o SurrealDB fora e o tempo de resposta
@@ -170,7 +171,8 @@ check "erros: por host × agente, em ordem; o de 2 h atrás fora" jqe '.errors_l
 check "erros: os mesmos do /v1/usage da última hora"   jqe --argjson r "$R" '.totals.errors.total == $r.errors_last_hour.total' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?hours=1")"
 
 # alertas
-check "alertas: os do /v1/alerts (#204), iguais"       jqe --argjson a "$AL" '.alerts == $a.alerts and (.alerts | length == 1)' <<<"$R"
+check "alertas: os do /v1/alerts (#204), com os mesmos campos; só ganham title e text (#344)" jqe --argjson a "$AL" '(.alerts | length == 1) and ([.alerts[] | del(.title, .text)] == $a.alerts) and ($a.alerts | all(has("title") | not))' <<<"$R"
+check "alerta: title e text prontos, valor e limite por extenso" jqe '.alerts[0] | .title == "Fila do collector acima do limite" and .text == "80% da fila (limite 50%)"' <<<"$R"
 check "alerta: fila do collector do oute-server a 80%" jqe '.alerts[0] | .type == "queue" and .host == "oute-server" and .value == 0.8 and .limit == 0.5 and .unit == "ratio" and (has("since") and has("evidence") and has("instance"))' <<<"$R"
 
 # ---------------------------------------------------------------- 4. SurrealDB fora: o menu segue, sem os pedidos
@@ -179,6 +181,56 @@ D="$(tray)"
 check "SurrealDB fora: 200"                            test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 200
 check "SurrealDB fora: pedidos indisponíveis, contador nulo (nunca zero)" jqe '.proposals == {available: false, total: null, pending: []} and .bar.pending == null' <<<"$D"
 check "SurrealDB fora: o resto do menu igual"          jqe --argjson r "$R" '.bar.alerts == 1 and .cost_today == $r.cost_today and .errors_last_hour.rows == $r.errors_last_hour.rows and ([.machines[].host] == [$r.machines[].host]) and .alerts == $r.alerts' <<<"$D"
+# fixture do app do tray (#344): mesmas chaves e mesmos tipos da resposta real. Pedido local e de outro host, id com
+# caractere inválido, custo estimado e sem preço e alerta vêm de R; o contador nulo, de D (SurrealDB fora).
+echo "$D" > "$TMP/tray-down.json"
+FIX="$ROOT/tray/Tests/Fixtures"
+shape_cmp() { python3 - "$@" <<'PY'
+import json, sys
+def shape(v):
+    if isinstance(v, dict):
+        return {k: shape(x) for k, x in sorted(v.items())}
+    if isinstance(v, list):
+        return [merge([shape(x) for x in v])] if v else []
+    return "null" if v is None else "bool" if isinstance(v, bool) else "number" if isinstance(v, (int, float)) else type(v).__name__
+def merge(shapes):
+    first = shapes[0]
+    for s in shapes[1:]:
+        if isinstance(first, dict) and isinstance(s, dict) and first.keys() == s.keys():
+            first = {k: merge([first[k], s[k]]) for k in first}
+        elif first == "null":
+            first = s
+    return first
+def diff(a, b, path="$"):
+    """Chaves iguais; tipos iguais, e `null` de um lado casa com qualquer tipo do outro (campo anulável)."""
+    if path.endswith(".evidence"):  # cada tipo de alerta tem a sua prova: objeto livre, só confere que é objeto
+        return [] if isinstance(a, dict) and isinstance(b, dict) else [f"{path}: {a} != {b}"]
+    if isinstance(a, dict) and isinstance(b, dict):
+        if a.keys() != b.keys():
+            return [f"{path}: chaves {sorted(a)} != {sorted(b)}"]
+        return [d for k in a for d in diff(a[k], b[k], f"{path}.{k}")]
+    if isinstance(a, list) and isinstance(b, list):
+        return diff(a[0], b[0], path + "[]") if a and b else []
+    return [] if a == b or "null" in (a, b) else [f"{path}: {a} != {b}"]
+fix, real = (shape(json.load(open(f))) for f in sys.argv[1:3])
+errs = diff(fix, real)
+print("\n".join(errs))
+sys.exit(1 if errs else 0)
+PY
+}
+export -f shape_cmp
+check "fixture tray.json: mesmas chaves e tipos da resposta real" shape_cmp "$FIX/tray.json" "$TMP/tray.json"
+check "fixture tray-sem-surrealdb.json: mesmas chaves e tipos da resposta com o SurrealDB fora" shape_cmp "$FIX/tray-sem-surrealdb.json" "$TMP/tray-down.json"
+check "fixture: o mesmo bloco de alertas da API (title e text junto)" jqe '.alerts[0] | keys == ["evidence", "host", "instance", "limit", "since", "text", "title", "type", "unit", "value"]' < "$FIX/tray.json"
+check "fixture: pedido local, de outro host e de id inválido" jqe '[.proposals.pending[] | .host] | unique == ["oute-mac", "oute-server"]' < "$FIX/tray.json"
+check "fixture: o id inválido vai codificado no link" jqe '.proposals.pending[0] | (.id | test("[<>& ]")) and (.url | test("^/pedido\\?id=[A-Za-z0-9%/._-]+$"))' < "$FIX/tray.json"
+check "fixture: custo estimado e chamada sem preço"    jqe '.cost_today | .estimated == true and .unpriced_calls > 0 and (.agents | any(.real_usd == null))' < "$FIX/tray.json"
+check "fixture: contador nulo só com o SurrealDB fora" jqe '.bar.pending == null and .proposals.available == false' < "$FIX/tray-sem-surrealdb.json"
+check "fixture: contadores da barra batem com os blocos" jqe '.bar == {pending: .proposals.total, alerts: (.alerts | length)}' < "$FIX/tray.json"
+jq 'del(.alerts[0].text)' "$FIX/tray.json" > "$TMP/fix-sem-text.json"
+jq '.bar.alerts = "1"' "$FIX/tray.json" > "$TMP/fix-tipo.json"
+check "sanidade do teste de forma: chave a menos na fixture falha" bash -c '! shape_cmp "$1" "$2" >/dev/null' _ "$TMP/fix-sem-text.json" "$TMP/tray.json"
+check "sanidade do teste de forma: tipo trocado na fixture falha" bash -c '! shape_cmp "$1" "$2" >/dev/null' _ "$TMP/fix-tipo.json" "$TMP/tray.json"
 studio_stop
 check "SurrealDB fora: causa só no stderr"             grep -q "tray: pedidos pendentes falhou" "$TMP/s/stderr"
 check "SurrealDB fora: a resposta não leva a causa"    bash -c '! grep -qi "surreal\|refused\|urlopen" <<<"$1"' _ "$D"

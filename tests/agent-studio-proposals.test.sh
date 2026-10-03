@@ -229,7 +229,7 @@ SURREAL_URL="$SURREAL_URL" SURREAL_TEST_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$R
   "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/p1.sh" > "$TMP/py.out" 2>&1 <<'PY'
 import os, re, sys
 import duckdb
-from agent_studio import alerts, proposals, web
+from agent_studio import alert_text, alerts, proposals, web
 from agent_studio.app import create_app
 from agent_studio.surreal import Surreal
 from pycheck import check
@@ -329,7 +329,7 @@ check("POST no pedido: 405", status == 405)
 # texto dos alertas: só apresentação, por unidade
 def a(unit, value, limit, kind="queue", **ev):
     return {"type": kind, "value": value, "unit": unit, "limit": limit, "evidence": ev}
-val = web._alert_value
+val = alert_text.text
 check("alerta: fila", val(a("ratio", 0.8, 0.5)) == "80% da fila (limite 50%)")
 check("alerta: spool em bytes", val(a("bytes", 46 * 2**20, 40 * 2**20)) == "46,0 MiB (limite 40,0 MiB)")
 check("alerta: host sem dado", val(a("seconds", 3600, 1800.0)) == "há 1 h 00 min (limite 30 min 00 s)")
@@ -340,7 +340,7 @@ check("alerta: spool descartando", val(a("dropped_events", 1234, 0, window_minut
 check("alerta: cota", val(a("pct", 95.5, 90)) == "95,5% (limite 90%)")
 check("alerta: unidade desconhecida sai crua", val(a("coisas", 7, 1)) == "7 coisas" and val(a("coisas", None, 1)) == "sem valor")
 check("alerta: título de cada tipo; tipo desconhecido sai com o próprio nome",
-      set(web.ALERT_TITLES) == set(alerts.TYPES) and web._alert_title(a("x", 1, 1, kind="novo")) == "novo")
+      set(alert_text.TITLES) == set(alerts.TYPES) and alert_text.title(a("x", 1, 1, kind="novo")) == "novo")
 check("idade: hora inválida ou ausente não quebra a página", web._ago("lixo") == "—" and web._ago(None) == "—")
 src = open(web.__file__).read() + open(os.path.join(os.path.dirname(web.__file__), "templates", "base.html")).read()
 check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o alerts.evaluate)",
