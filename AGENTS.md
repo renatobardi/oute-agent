@@ -53,7 +53,7 @@ Todo trabalho segue as fases do ADR-07. Cada fase tem um **gate humano** do Bard
 | `ops` | telemetria ADR-04 e ADR-08 (bucket + agent-studio, as duas fontes que a `ops-observe` lê), canal de aprovação, `oute-aidlc-ops-observe`, `oute-aidlc-ops-diagnose` |
 | `learn` | `oute-swarm` §4.1 (kaizen, por rodada), `oute-aidlc-learn-insights` (fecha o ciclo: insights entre rodadas e fontes → lições e melhorias), `oute-aidlc-learn-feedback` |
 | `iter` | `oute-aidlc-iter-roadmap` (abre o próximo ciclo: foco, issues e limpeza do backlog), issues de fim de sessão |
-| `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory, `oute-aidlc-ctx-router`, `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup` |
+| `ctx` | `CONTEXT.md`, `AGENTS.md`, ai-memory, `oute-aidlc-ctx-router`, `oute-aidlc-ctx-domain`, `oute-aidlc-ctx-setup`, `oute-aidlc-ctx-sync` (confere os resumos contra os ADRs) |
 
 Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aidlc-ctx-router`. Utilitária: `oute-skill-writing` (escrever e editar skills).
 

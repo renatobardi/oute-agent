@@ -1,0 +1,5 @@
+interface:
+  display_name: "oute-aidlc-ctx-sync"
+  short_description: "Confere se CONTEXT.md, AGENTS.md e notas seguem os ADRs"
+policy:
+  allow_implicit_invocation: true
