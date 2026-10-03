@@ -1,6 +1,7 @@
 # Pipeline extra: traces -> Langfuse Cloud SÓ COM METADADOS (ADR-04, opção híbrida).
 # Mesclado sobre collector.yaml quando o vault tem o item "langfuse" (oute up decide).
-# Privacidade por padrão: ALLOWLIST de atributos (o que não está aqui não sai) + span events descartados.
+# Privacidade por padrão: ALLOWLIST de atributos (o que não está aqui não sai) + span events descartados +
+# status.message vazio (#149). Teste: tests/otelcol-langfuse.test.sh.
 processors:
   filter/no_events:
     error_mode: ignore
@@ -41,6 +42,9 @@ processors:
           - set(span.attributes["langfuse.session.id"], span.attributes["session.id"]) where span.attributes["session.id"] != nil
       - context: span
         statements:
+          # status do span fica fora da allowlist de atributos: o Langfuse lê o statusMessage dele (texto do erro da
+          # ferramenta, caminhos locais; #149). O código fica (é dele que vem o level=ERROR); o texto segue no bucket.
+          - set(span.status.message, "")
           - >-
             keep_matching_keys(span.attributes,
             "^(gen_ai\\.(system|provider\\.name|operation\\.name|request\\.model|response\\.model|response\\.id|response\\.finish_reasons|usage\\..*)|llm\\.(model_name|token_count\\..*)|langfuse\\.(environment|trace\\.name|trace\\.tags|trace\\.metadata\\.(agent|host|instance)|session\\.id|user\\.id|observation\\.(type|level|model\\.name|usage_details|cost_details))|session\\.id|user\\.id|oute\\..*|model|cost_usd|duration_ms|.*_tokens|tool_name|success|decision|status_code|error\\.type)$")

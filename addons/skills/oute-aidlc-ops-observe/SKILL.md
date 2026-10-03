@@ -35,7 +35,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no Langfuse nem no b
    | `sinal-faltando` | o host mandou algum sinal, mas não os três | Codex não emite `metrics` (ADR-04); Claude sem traces: confira `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA` e `OTEL_TRACES_EXPORTER` no ambiente do agente daquele host (`docker/compose.yaml`) e a versão da imagem. |
    | `agente-sem-telemetria` | agente em `OUTE_AGENTS` deste host sem registro no bucket nas horas lidas | ocioso é normal; se houve uso, é falha. |
    | `sem-oute.agent` | registro sem `oute.agent` | `service.name` novo, fora do `transform/agent` (regra do ADR-04 para agente novo e upgrade). |
-   | `erro-alto` | > 5 % de erro (mín. 5) | o tipo de erro vem do Langfuse (nome da observação, `statusMessage`) sem abrir conteúdo; causa → `oute-aidlc-ops-diagnose`. |
+   | `erro-alto` | > 5 % de erro (mín. 5) | o tipo de erro vem do nome da observação no Langfuse (`level=ERROR`), sem abrir conteúdo; o texto do erro não vai ao Langfuse (#149): fica no bucket e no agent-studio. Causa → `oute-aidlc-ops-diagnose`. |
    | `custo-alto` | custo da janela > 3 × a média diária da base e > US$ 1 (só com uso na base: sem histórico, leia a coluna de custo) | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. |
 
    Sem marca não quer dizer tudo bem: confira também host que sumiu (só na base), p95 fora do normal e `(legado)` (lotes anteriores à 0.7.5, sem `host=`; não é anomalia).
