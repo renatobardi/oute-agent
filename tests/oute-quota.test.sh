@@ -45,6 +45,7 @@ CACHE="$XDG_CACHE_HOME/oute-quota"
 now=$(date +%s)
 R5C=$((now + 7200)); R7C=$((now + 172800)); R5X=$((now + 10800)); R7X=$((now + 400000))
 iso() { date -u -d "@$1" +%FT%TZ; }
+loc() { TZ="$2" date -d "@$1" +%Y-%m-%dT%H:%M:%S%:z; }   # hora do reset no fuso $2, com o deslocamento (#415)
 
 b64u() { python3 -c 'import base64,sys; print(base64.urlsafe_b64encode(sys.stdin.buffer.read()).decode().rstrip("="))'; }
 jwt() { # exp
@@ -104,11 +105,21 @@ check "credencial: nenhum arquivo novo ou alterado no home" test "$TREE" = "$(tr
 
 # ============ tabela ============
 reset_world
-run
+TZ=UTC run   # o TZ do container (America/Sao_Paulo na imagem) não pode mudar este caso: fixo em UTC (+00:00)
 check "tabela: saída 0" test "$RC" -eq 0
 check "tabela: cabeçalho" has "^agente  *janela  *usada  *reset"
-check "tabela: linha do claude 5h com % e reset" has "^claude  *5h  *15.0%  *$(iso $R5C)"
-check "tabela: linha do codex 7d" has "^codex  *7d  *21.5%  *$(iso $R7X)"
+check "tabela: linha do claude 5h com % e reset" has "^claude  *5h  *15.0%  *$(loc $R5C UTC)"
+check "tabela: linha do codex 7d" has "^codex  *7d  *21.5%  *$(loc $R7X UTC)"
+# fuso do container (#415): o reset sai na hora local com o deslocamento; o --json segue em UTC
+TZ=America/Sao_Paulo run
+check "tabela em America/Sao_Paulo: reset do claude 5h em -03:00" has "^claude  *5h  *15.0%  *$(loc $R5C America/Sao_Paulo)  *\$"
+check "tabela em America/Sao_Paulo: reset do codex 7d em -03:00" has "^codex  *7d  *21.5%  *$(loc $R7X America/Sao_Paulo)"
+check "tabela em America/Sao_Paulo: o deslocamento é -03:00" has "5h  *15.0%  *[0-9T:-]*-03:00"
+check "tabela em America/Sao_Paulo: sem a hora em UTC (Z)" hasnt "T[0-9:]*Z"
+TZ=Asia/Kolkata run
+check "tabela em Asia/Kolkata: deslocamento com meia hora (+05:30)" has "^claude  *5h  *15.0%  *$(loc $R5C Asia/Kolkata)"
+TZ=America/Sao_Paulo run --json
+check "--json em America/Sao_Paulo segue em UTC (Z)" oj ".agents.claude.windows[\"5h\"].resets_at == \"$(iso $R5C)\" and .agents.codex.windows[\"7d\"].resets_at == \"$(iso $R7X)\""
 
 # ============ --agent e uso ============
 reset_world

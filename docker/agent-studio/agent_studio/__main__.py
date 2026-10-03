@@ -55,6 +55,8 @@ def main():
     config = config_mod.load()
     for err in config.errors:
         print(f"agent-studio: {err}", file=sys.stderr)
+    for warn in config.warnings:
+        print(f"agent-studio: aviso: {warn}", file=sys.stderr)
     # preços (#339): a semente do config.toml entra no histórico e o histórico vira a tabela viva; a conferência diária
     # nas fontes públicas só liga com AGENT_STUDIO_PRICE_CHECK=1 (o compose liga; teste e uso local ficam sem rede)
     prices_mod.sync(store, config)

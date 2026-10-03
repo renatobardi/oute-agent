@@ -5,7 +5,7 @@
   sinal): `active` ou `stopped` pela regra de host parado do #204 (`alerts.stopped`, `no_data_minutes`).
 - **Pedidos pendentes** (`proposals`): o estado do SurrealDB (`proposals.pending`, as consultas da lista do #208),
   com a idade e o caminho da página "ver script" (`proposals.page_path`).
-- **Custo de hoje** (`cost_today`): `usage.aggregate` (#203) no dia UTC de agora, total e por agente; `estimated`
+- **Custo de hoje** (`cost_today`): `usage.aggregate` (#203) no dia de agora **no fuso configurado** (#415: a meia-noite do fuso, não a do UTC; `tz=` troca), total e por agente; `estimated`
   marca o valor que tem parte estimada pela tabela de preços.
 - **Erros na última hora** (`errors_last_hour`): os erros do mesmo `usage.aggregate`, por host × agente.
 - **Alertas** (`alerts`): os do `alerts.evaluate` (#204), como no `GET /v1/alerts`, mais `title` e `text` prontos
@@ -20,7 +20,8 @@ palpite).
 """
 import logging
 
-from . import alert_text, alerts as alerts_mod, decisions as decisions_mod, proposals as prop_mod, usage as usage_mod
+from . import (alert_text, alerts as alerts_mod, decisions as decisions_mod, proposals as prop_mod, tz as tz_mod,
+               usage as usage_mod)
 
 log = logging.getLogger(__name__)
 HOUR_NS = 3_600_000_000_000
@@ -50,14 +51,14 @@ def _decisions(con, at_ns, cfg):
         return NO_DECISIONS
 
 
-def snapshot(con, at_ns, prices, cfg):
-    """Os blocos que saem do DuckDB na hora `at_ns` (ns): máquinas, custo de hoje, erros na última hora e alertas."""
+def snapshot(con, at_ns, prices, cfg, tz=tz_mod.UTC):
+    """Os blocos que saem do DuckDB na hora `at_ns` (ns): máquinas, custo de hoje (o dia do fuso `tz`), erros na
+    última hora e alertas."""
     received = alerts_mod.last_data(con, alerts_mod.lookback(at_ns, cfg), at_ns, by=alerts_mod.RECEIVED)
     machines = [{**h, "state": "stopped" if alerts_mod.stopped(received.get(h["host"], (None,))[0], at_ns, cfg)
                  else "active"} for h in alerts_mod.hosts(received, at_ns, cfg)]
 
-    day = at_ns // usage_mod.DAY_NS * usage_mod.DAY_NS
-    today = day, day + usage_mod.DAY_NS
+    today = tz_mod.day_bounds(at_ns, tz)
     total = usage_mod.aggregate(con, *today, prices, ())
     by_agent = usage_mod.aggregate(con, *today, prices, ("agent",))
     agents = [{"agent": agent, "calls": a["calls"], **_cost(usage_mod.render((), a, ()))}
@@ -73,7 +74,7 @@ def snapshot(con, at_ns, prices, cfg):
 
     return {
         "machines": machines,
-        "cost_today": {"day": alerts_mod.iso(day)[:10], "from": alerts_mod.iso(today[0]),
+        "cost_today": {"day": tz_mod.local(at_ns, tz).date().isoformat(), "from": alerts_mod.iso(today[0]),
                        "to": alerts_mod.iso(today[1]), **_cost(usage_mod.render((), total[()], ())), "agents": agents},
         "errors_last_hour": {"from": alerts_mod.iso(hour[0]), "to": alerts_mod.iso(at_ns),
                              "total": sum(e["total"] for e in errors), "rows": errors},
@@ -99,10 +100,11 @@ NO_DECISIONS = {"total": 0, "pending": []}
 UNAVAILABLE = {"available": False, "total": None, "pending": []}
 
 
-def response(at_ns, snap, proposals, config_errors):
-    """A resposta do `GET /v1/tray`. `proposals` = o `pending(…)` ou `None` (sem SurrealDB ou leitura que falhou)."""
+def response(at_ns, snap, proposals, config_errors, tz=tz_mod.UTC):
+    """A resposta do `GET /v1/tray`. `proposals` = o `pending(…)` ou `None` (sem SurrealDB ou leitura que falhou).
+    `timezone` = o fuso do dia do `cost_today` (as horas seguem em ISO 8601 com `Z`)."""
     proposals = proposals or UNAVAILABLE
-    return {"at": alerts_mod.iso(at_ns),
+    return {"at": alerts_mod.iso(at_ns), "timezone": tz.key,
             "bar": {"pending": proposals["total"], "alerts": len(snap["alerts"])},
             "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS, "cost_today": snap["cost_today"],
             "errors_last_hour": snap["errors_last_hour"], "alerts": snap["alerts"],

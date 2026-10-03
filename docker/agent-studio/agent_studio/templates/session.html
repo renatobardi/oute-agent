@@ -14,9 +14,9 @@
   {% if st %}
   <dt>Repositório</dt><dd>{{ st.repo or "—" }} · {{ st.slug or "—" }}{% if st.legacy %} (worktree anterior ao id de sessão){% endif %}</dd>
   <dt>Estado</dt><dd>{{ st.state or "—" }}{% if st.removed_reason %} ({{ st.removed_reason }}){% endif %}</dd>
-  {% if st.opened_at %}<dt>Aberta em (UTC)</dt><dd>{{ st.opened_at|when }}</dd>{% endif %}
-  {% if st.reopened_at %}<dt>Reaberta em (UTC)</dt><dd>{{ st.reopened_at|when }}</dd>{% endif %}
-  {% if st.removed_at %}<dt>Removida em (UTC)</dt><dd>{{ st.removed_at|when }}</dd>{% endif %}
+  {% if st.opened_at %}<dt>Aberta em ({{ tzl() }})</dt><dd>{{ st.opened_at|when }}</dd>{% endif %}
+  {% if st.reopened_at %}<dt>Reaberta em ({{ tzl() }})</dt><dd>{{ st.reopened_at|when }}</dd>{% endif %}
+  {% if st.removed_at %}<dt>Removida em ({{ tzl() }})</dt><dd>{{ st.removed_at|when }}</dd>{% endif %}
   {% if st.agent %}<dt>Aberta com</dt><dd>{{ st.agent }}</dd>{% endif %}
   {% endif %}
   <dt>Rodada</dt>
@@ -24,7 +24,7 @@
   <dt>Host</dt><dd>{{ s.host or "—" }}{% if s.instance %} ({{ s.instance }}){% endif %}</dd>
   <dt>Agente</dt><dd>{{ s.agents|join(", ") or "—" }}</dd>
   <dt>Modelo</dt><dd class="modelos">{{ model_list(s.models) }}</dd>
-  <dt>Início (UTC)</dt><dd>{{ s.start_ns|ts }}</dd>
+  <dt>Início ({{ tzl() }})</dt><dd>{{ s.start_ns|ts }}</dd>
   <dt>Duração</dt><dd>{{ s.duration_ns|dur }}</dd>
   <dt>Conversas</dt><dd>{{ s.conversation_count|num }}</dd>
   <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>

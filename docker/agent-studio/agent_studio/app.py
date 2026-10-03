@@ -30,7 +30,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import (auth as auth_mod, config as config_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
-               web)
+               tz as tz_mod, web)
 
 log = logging.getLogger("agent_studio")
 detail = logging.getLogger("agent_studio_detail")
@@ -161,7 +161,11 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         except ValueError as e:
             return JSONResponse({"message": str(e)}, status_code=400)
         try:
-            result = await run_in_threadpool(store.usage, from_ns, to_ns, config.prices)
+            zone = _zone(request.query_params, config)
+        except ValueError as e:
+            return JSONResponse({"message": str(e)}, status_code=400)
+        try:
+            result = await run_in_threadpool(store.usage, from_ns, to_ns, config.prices, zone)
         except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
             tel.warn("usage-failed", "consulta de uso falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta de uso falhou")
@@ -230,17 +234,21 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         if not auth.reader(request):
             tel.warn("unauthorized", "recusado: token ausente ou errado (tray)")
             return JSONResponse({"message": "unauthorized"}, status_code=401)
+        try:
+            zone = _zone(request.query_params, config)
+        except ValueError as e:
+            return JSONResponse({"message": str(e)}, status_code=400)
         at_ns = time.time_ns()
         try:
             # os dois bancos ao mesmo tempo: o SurrealDB lento não soma ao tempo do DuckDB
             snap, pending = await asyncio.gather(
-                run_in_threadpool(store.tray, at_ns, config.prices, config.alerts),
+                run_in_threadpool(store.tray, at_ns, config.prices, config.alerts, zone),
                 run_in_threadpool(_tray_pending, at_ns))
         except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
             tel.warn("tray-failed", "consulta do tray falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta do tray falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
-        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors))
+        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone))
 
     # ------------------------------------------------ tela: login e conversas (#206), sessões (#207), pedidos e
     # alertas (#208)
@@ -265,6 +273,16 @@ def _parse_time(value, name):
         # a hora do fato é UBIGINT em ns: antes de 1970 ou além de 2262 não existe no banco
         raise ValueError(f"{name} fora do intervalo (1970 a 2262)")
     return ns
+
+
+def _zone(args, config):
+    """Fuso dos dias: `tz=<IANA>` da consulta ou o do config (`timezone`). ValueError = 400."""
+    if "tz" not in args:
+        return config.tz
+    try:
+        return tz_mod.parse(args["tz"])
+    except ValueError:
+        raise ValueError("tz inválido: use um nome IANA (ex.: America/Sao_Paulo)") from None
 
 
 def _window(args):

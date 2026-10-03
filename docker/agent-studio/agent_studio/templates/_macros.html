@@ -26,7 +26,7 @@
 
 {% macro log_table(logs, id, next_offset) %}
 <table class="logs">
-  <thead><tr><th>Hora (UTC)</th><th>Nível</th><th>Evento</th><th>Conteúdo</th></tr></thead>
+  <thead><tr><th>Hora ({{ tzl() }})</th><th>Nível</th><th>Evento</th><th>Conteúdo</th></tr></thead>
   <tbody>
   {{ log_rows(logs, id, next_offset) }}
   </tbody>
@@ -39,7 +39,7 @@
     <dt>trace</dt><dd>{{ span.trace_id }}</dd>
     <dt>span</dt><dd>{{ span.span_id }}</dd>
     <dt>pai</dt><dd>{{ span.parent_span_id or "—" }}</dd>
-    <dt>início (UTC)</dt><dd>{{ span.time_unix_nano|ts }}</dd>
+    <dt>início ({{ tzl() }})</dt><dd>{{ span.time_unix_nano|ts }}</dd>
     <dt>duração</dt><dd>{{ span.duration_ns|dur }}</dd>
     {% if span.scope_name %}<dt>escopo</dt><dd>{{ span.scope_name }}</dd>{% endif %}
     {% if span.status_message %}<dt>mensagem do status</dt><dd>{{ span.status_message }}</dd>{% endif %}
@@ -105,7 +105,7 @@
 {% macro session_table() %}
 <table class="sessoes">
   <thead><tr>
-    <th>Início (UTC)</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
+    <th>Início ({{ tzl() }})</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
     <th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
     <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
     <th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>

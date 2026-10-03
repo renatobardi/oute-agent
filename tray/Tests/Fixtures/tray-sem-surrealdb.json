@@ -1,5 +1,6 @@
 {
   "at": "2026-10-03T14:00:00Z",
+  "timezone": "America/Sao_Paulo",
   "bar": {
     "pending": null,
     "alerts": 1
