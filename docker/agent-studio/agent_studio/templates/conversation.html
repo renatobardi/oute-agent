@@ -12,7 +12,7 @@
   <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
   <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>
   {% if c.task_id %}<dt>Sessão</dt><dd><a href="/sessao?id={{ c.task_id|urlencode }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
-  <dt>Início (UTC)</dt><dd>{{ c.start_ns|ts }}</dd>
+  <dt>Início ({{ tzl() }})</dt><dd>{{ c.start_ns|ts }}</dd>
   <dt>Duração</dt><dd>{{ c.duration_ns|dur }}</dd>
   <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>
   <dt>Tokens</dt><dd>entrada {{ u.tokens.input|num }} · saída {{ u.tokens.output|num }} · cache {{ u.tokens.cache_read|num }} lidos / {{ u.tokens.cache_creation|num }} escritos</dd>
@@ -40,7 +40,7 @@
       <a href="{{ url }}" hx-get="{{ url }}" hx-target="next .conteudo" hx-swap="innerHTML">{{ s.name or "(sem nome)" }}</a>
       {% if s.orphan %}<span class="orfao" title="o span pai ({{ s.parent_span_id }}) não está nesta conversa">pai ausente</span>{% endif %}
     </td>
-    <td class="n" title="{{ s.time_unix_nano|ts }} UTC">+{{ (s.time_unix_nano - c.start_ns)|dur }}</td>
+    <td class="n" title="{{ s.time_unix_nano|ts }} {{ tzl() }}">+{{ (s.time_unix_nano - c.start_ns)|dur }}</td>
     <td class="n">{{ s.duration_ns|dur }}</td>
     <td>{{ s.model or "—" }}</td>
     {% if s.is_call %}

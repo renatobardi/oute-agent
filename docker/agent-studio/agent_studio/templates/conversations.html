@@ -4,13 +4,13 @@
 {% block main %}
 <h1>Conversas</h1>
 {{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}
-<p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, UTC), da mais recente
+<p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), da mais recente
   para a mais antiga. Os números são da conversa inteira.
   {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
 {% if conversations %}
 <table class="conversas">
   <thead><tr>
-    <th>Início (UTC)</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
+    <th>Início ({{ tzl() }})</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
     <th class="n">Entrada</th><th class="n">Saída</th><th class="n" title="tokens de cache: leitura / escrita">Cache</th>
     <th class="n">Custo</th><th class="n">Erros</th>
   </tr></thead>

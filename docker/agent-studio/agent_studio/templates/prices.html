@@ -11,7 +11,7 @@
 <section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}">
   <h2>{{ m.model }}{% if m.fixed %} <span class="etiqueta" data-fixo>fixo no config.toml</span>{% endif %}</h2>
   <table class="precos">
-    <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde (UTC)</th><th>Última conferência</th></tr></thead>
+    <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde ({{ tzl() }})</th><th>Última conferência</th></tr></thead>
     <tbody>
     <tr data-vigente data-origin="{{ m.current.origin }}" data-since="{{ m.current.since }}">
       <td>agora</td>{{ cells(m.current) }}<td>{{ m.current.origin }}</td><td class="hora">{{ m.current.since|when }}</td>
@@ -35,7 +35,7 @@
 
 <h2>Fontes</h2>
 <table class="precos fontes">
-  <thead><tr><th>Fonte</th><th>Última conferência (UTC)</th><th>Resultado</th><th>Último sucesso (UTC)</th></tr></thead>
+  <thead><tr><th>Fonte</th><th>Última conferência ({{ tzl() }})</th><th>Resultado</th><th>Último sucesso ({{ tzl() }})</th></tr></thead>
   <tbody>
   {% for s in sources %}
   <tr data-fonte="{{ s.source }}"><td>{{ s.source }}</td><td class="hora">{{ s.last_run|when }}</td>

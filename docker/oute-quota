@@ -9,6 +9,8 @@
 #   status: ok | unknown; reason (só em unknown): sem-credencial, token-expirado, rede, timeout, http-<código>, formato
 #   (http-429 leva também retry_after_s, se o servidor mandou). used_pct em 0–100. stale:true = veio do cache (até 30 min)
 #   porque a leitura nova deu 429, rede ou timeout.
+# tabela (#415): a hora do reset sai no fuso do container (`TZ`), com o deslocamento (`2026-10-03T21:30:00-03:00`);
+#   o --json segue em UTC (`…Z`), contrato de máquina.
 # ambiente: OUTE_QUOTA_MAX_PCT (padrão 90) e o grace de 1200 s só são ecoados no --json, para o consumidor (#258)
 #   decidir sem reler env; XDG_CACHE_HOME (cache em <dir>/oute-quota/<agente>.json: só % e hora do reset, nunca token);
 #   CLAUDE_CONFIG_DIR e CODEX_HOME (onde estão as credenciais). Para teste: OUTE_QUOTA_CLAUDE_URL, OUTE_QUOTA_CODEX_URL
@@ -24,7 +26,7 @@ STALE_MAX=1800       # cache aceito (stale) com 429, rede ou timeout
 RESET_GRACE=1200
 EXP_MARGIN=30        # token que expira em menos que isso já conta como expirado
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 die2() { printf 'oute-quota: %s\n' "$*" >&2; exit 2; }
 
 JSON=0; ONLY=""
@@ -182,12 +184,16 @@ RESULT="$(jq -s -c --argjson now "$NOW" --argjson max "$MAX_PCT" --argjson grace
 if [[ $JSON = 1 ]]; then
   printf '%s\n' "$RESULT"
 else
-  printf '%-7s %-6s %-12s %-21s %s\n' agente janela usada reset obs
+  printf '%-7s %-6s %-12s %-25s %s\n' agente janela usada reset obs
+  # o jq não dá o deslocamento do fuso (%z sai +0000): ele passa o epoch e o `date` (GNU, com o TZ do container) converte
   jq -r '.agents | to_entries[] | .key as $a | .value as $v
     | if $v.status == "ok" then
-        ($v.windows | to_entries[] | [$a, .key, "\(.value.used_pct)%", .value.resets_at, (if $v.stale then "cache de \($v.age_s)s (leitura nova falhou)" else "" end)] | @tsv)
+        ($v.windows | to_entries[] | [$a, .key, "\(.value.used_pct)%", (.value.resets_at | fromdate), (if $v.stale then "cache de \($v.age_s)s (leitura nova falhou)" else "" end)] | @tsv)
       else [$a, "-", "desconhecido", "-", $v.reason + (if $v.retry_after_s then " (retry-after \($v.retry_after_s)s)" else "" end)] | @tsv end' <<<"$RESULT" \
-    | awk -F'\t' '{printf "%-7s %-6s %-12s %-21s %s\n", $1, $2, $3, $4, $5}'
+    | while IFS=$'\t' read -r agent window used reset obs; do
+        [[ "$reset" =~ ^[0-9]+$ ]] && reset="$(date -d "@$reset" +%Y-%m-%dT%H:%M:%S%:z)"
+        printf '%-7s %-6s %-12s %-25s %s\n' "$agent" "$window" "$used" "$reset" "$obs"
+      done
 fi
 # 1 = nenhum agente lido ficou ok
 jq -e '[.agents[] | select(.status == "ok")] | length > 0' <<<"$RESULT" >/dev/null || exit 1

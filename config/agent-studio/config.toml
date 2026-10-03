@@ -1,6 +1,12 @@
 # Config do agent-studio (ADR-08, #203). Montada só leitura no container (/etc/oute/agent-studio/config.toml):
 # mudança entra com `git pull` + `oute down/up`, sem release. Preços (#203) e alertas (#204).
 
+# Fuso de exibição (#415): hora das telas e meia-noite do "dia" (série diária do /v1/usage, "custo de hoje" do tray).
+# Nome IANA, por zoneinfo (nunca deslocamento fixo). Inválido ou ausente = UTC (inválido vai em `config.errors`; ausente
+# só avisa no log). Só a leitura converte: a hora do fato segue em UTC nos bancos e no bucket. Chave de nível de topo:
+# fica antes de qualquer [tabela].
+timezone = "America/Sao_Paulo"
+
 # Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (o Codex).
 # O Claude Code manda o custo real, mas não no span: no log `api_request` de mesmo `request_id`, que o agent-studio
 # junta na consulta (#157). O preço do Claude abaixo é só a reserva para a chamada que ficou sem esse log (marcada

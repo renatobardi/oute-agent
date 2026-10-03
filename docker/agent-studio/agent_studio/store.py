@@ -9,7 +9,7 @@ import threading
 import duckdb
 
 from . import (alerts as alerts_mod, conversations as conv_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
-               sessions as sess_mod, tray as tray_mod, usage as usage_mod)
+               sessions as sess_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -167,20 +167,20 @@ class Store:
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)
 
-    def usage(self, from_ns, to_ns, prices):
+    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
         """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila."""
         with self.lock:
-            return usage_mod.usage(self.con, from_ns, to_ns, prices)
+            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz)
 
     def alerts(self, at_ns, cfg):
         """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
         with self.lock:
             return alerts_mod.evaluate(self.con, at_ns, cfg)
 
-    def tray(self, at_ns, prices, cfg):
+    def tray(self, at_ns, prices, cfg, tz=tz_mod.UTC):
         """Leitura do `/v1/tray` (#205), sob a mesma trava: os blocos do DuckDB numa passada só."""
         with self.lock:
-            return tray_mod.snapshot(self.con, at_ns, prices, cfg)
+            return tray_mod.snapshot(self.con, at_ns, prices, cfg, tz)
 
     def decisions(self, at_ns, cfg):
         """Decisões pendentes do Bardi (#386), sob a mesma trava: o bloco do tray e o topo das telas."""

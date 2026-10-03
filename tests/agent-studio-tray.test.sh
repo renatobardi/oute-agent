@@ -109,7 +109,7 @@ done
 
 # ---------------------------------------------------------------- 2. banco vazio: o menu inteiro, zerado
 E="$(tray)"
-check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals"]' <<<"$E"
+check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "timezone"]' <<<"$E"
 check "vazio: nenhum pedido (a tabela ainda não existe no SurrealDB)" jqe '.proposals == {available: true, total: 0, pending: []} and .bar.pending == 0' <<<"$E"
 check "vazio: custo nulo (nunca zero), sem agente"     jqe '.cost_today | .usd == null and .real_usd == null and .estimated_usd == null and .estimated == false and .unpriced_calls == 0 and .agents == []' <<<"$E"
 check "vazio: nenhum erro"                             jqe '.errors_last_hour | .total == 0 and .rows == []' <<<"$E"
@@ -122,7 +122,7 @@ check "ingestão: métricas = 200"                       test "$(post metrics "$
 # ---------------------------------------------------------------- 3. contrato da resposta (o que o #158 consome)
 R="$(tray)"
 echo "$R" > "$TMP/tray.json"
-check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals"]' <<<"$R"
+check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "timezone"]' <<<"$R"
 check "at: a hora da resposta (UTC, ISO)"              jqe --argjson now "$NOW" '(.at | fromdateiso8601) as $t | $t >= $now and $t < $now + 300' <<<"$R"
 check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 1}' <<<"$R"
 check "bar: iguais ao tamanho dos blocos"              jqe '.bar.pending == .proposals.total and .bar.alerts == (.alerts | length)' <<<"$R"
@@ -298,7 +298,7 @@ out("nenhum pendente: total zero", tray.pending(Fake([], 0), 0) == {"available":
 
 # o app com um SurrealDB que responde fora do formato, e sem SurrealDB
 class Snap:
-    def tray(self, at_ns, prices, cfg):
+    def tray(self, at_ns, prices, cfg, tz=None):
         return {"machines": [], "cost_today": {}, "errors_last_hour": {}, "alerts": [{"type": "queue"}, {"type": "spool"}]}
 for name, surreal in (("resposta fora do formato", Odd()), ("este processo sem SurrealDB", None)):
     status, body = get(create_app(Snap(), TOKEN, surreal), "/v1/tray")

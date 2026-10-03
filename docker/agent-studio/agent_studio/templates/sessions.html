@@ -5,7 +5,7 @@
 <h1>Sessões</h1>
 {{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}
 <p class="nota">Sessões do <code>oute-task</code> (<code>oute.task.id</code>) com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }}
-  (hora do fato, UTC), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
+  (hora do fato, em {{ tzl() }}), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
   inteira.
   {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
 {{ state_warning(state_read) }}

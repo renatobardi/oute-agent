@@ -60,6 +60,7 @@ json.dump(logs, open(f"{tmp}/logs.json", "w"))
 json.dump(queue_metrics("oute-mac", NOW - 60, 900), open(f"{tmp}/metrics.json", "w"))
 PY
 studio_prices "$TMP/prices.toml"
+{ echo 'timezone = "America/Sao_Paulo"'; cat "$TMP/prices.toml"; } > "$TMP/prices-tz.toml" && mv "$TMP/prices-tz.toml" "$TMP/prices.toml"
 
 # credencial de leitura própria (#256), com aspas e barra invertida: o script as escapa no config do curl
 READ="$(python3 -c "import secrets; print(secrets.token_hex(12))")\"a\\b"
@@ -89,6 +90,8 @@ run() {
 # ---------------------------------------------------------------- studio: tabelas, anomalias e alertas
 run studio
 check "studio: código 0, sem ERRO"                     bash -c '[ "$1" -eq 0 ] && ! grep -q "^ERRO" <<<"$0"' "$OUT" "$RC"
+check "studio: diz o fuso dos dias (o do agent-studio, America/Sao_Paulo)" has "^fuso_dos_dias	America/Sao_Paulo	"
+check "studio: não troca o fuso (nenhum tz= na consulta)" bash -c '! grep -q "tz=" "$1"' _ "$ARGV"
 check "studio: cabeçalho com a URL, a janela e a base" has "^## agent-studio ($STUDIO_URL) · janela .*Z → .*Z · base 7 dia(s) antes$"
 check "studio: lê /v1/usage da janela e da base e /v1/alerts" test "$(grep -c '/v1/usage?from=.*&to=' "$ARGV") $(grep -c '/v1/alerts$' "$ARGV") $(wc -l < "$ARGV")" = "2 1 3"
 check "studio: credencial fora do argv e da saída"     bash -c '! grep -qF -- "$2" "$1" && ! grep -qF -- "$2" <<<"$0" && ! grep -qi "bearer" "$1"' "$OUT" "$ARGV" "$READ"

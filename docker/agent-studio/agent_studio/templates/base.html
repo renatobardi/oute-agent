@@ -29,7 +29,7 @@
     {% for a in alerts %}
     <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
       <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
-      {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} UTC{% endif %}
+      {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} {{ tzl() }}{% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -45,7 +45,7 @@
   <ul>
     {% for d in decisions %}
     <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
-      <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }}
+      <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }} (perguntada em {{ d.asked_at|when }} {{ tzl() }})
     </li>
     {% endfor %}
   </ul>

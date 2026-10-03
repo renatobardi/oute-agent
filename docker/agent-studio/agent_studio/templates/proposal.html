@@ -13,11 +13,11 @@
   <dt>Agente</dt><dd>{{ p.agent or "—" }}</dd>
   <dt>Host</dt><dd>{{ p.host or "—" }}{% if p.instance %} ({{ p.instance }}){% endif %}</dd>
   <dt>Estado</dt><dd>{{ p.state or "desconhecido" }}</dd>
-  <dt>Proposto em (UTC)</dt><dd>{{ p.proposed_at|when }}</dd>
+  <dt>Proposto em ({{ tzl() }})</dt><dd>{{ p.proposed_at|when }}</dd>
   {% if p.size is not none %}<dt>Tamanho do script</dt><dd>{{ p.size|num }} bytes</dd>{% endif %}
   {% if p.state == "decidido" %}
   <dt>Decisão</dt><dd>{{ p.decision or "—" }}</dd>
-  <dt>Decidido em (UTC)</dt><dd>{{ p.decided_at|when }}</dd>
+  <dt>Decidido em ({{ tzl() }})</dt><dd>{{ p.decided_at|when }}</dd>
   <dt>Código de saída (rc)</dt><dd{% if p.rc %} class="erro"{% endif %}>{{ "—" if p.rc is none else p.rc }}</dd>
   <dt>Duração</dt><dd>{{ "—" if p.duration_s is none else (p.duration_s * 1000)|ms }}</dd>
   <dt>Tamanho da saída</dt><dd>{{ "—" if p.output_bytes is none else (p.output_bytes|num) ~ " bytes" }}</dd>

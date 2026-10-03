@@ -31,7 +31,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import alert_text, conversations as conv_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod
+from . import (alert_text, conversations as conv_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
+               tz as tz_mod)
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -50,10 +51,13 @@ HEADERS = {
 
 
 # ------------------------------------------------ formatação (filtros dos templates)
-def _ts(ns):
-    if ns is None:
-        return "—"
-    return datetime.fromtimestamp(ns // 1_000_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+# Horas no fuso configurado (#415): o dado segue em UTC, só a exibição converte. Cada filtro nasce amarrado ao fuso.
+def _ts_in(zone):
+    def ts(ns):
+        if ns is None:
+            return "—"
+        return tz_mod.local(ns, zone).strftime("%Y-%m-%d %H:%M:%S")
+    return ts
 
 
 _br, _dur, _num = alert_text.br, alert_text.dur, alert_text.num
@@ -63,9 +67,17 @@ def _ms(ms):
     return _dur(None if ms is None else int(ms * 1e6))
 
 
-def _when(iso):
-    # datetime do SurrealDB (`2026-09-29T07:43:00.5Z`) -> `2026-09-29 07:43:00`
-    return iso[:19].replace("T", " ") if isinstance(iso, str) and iso else "—"
+def _when_in(zone):
+    def when(iso):
+        # datetime do SurrealDB ou ISO com `Z` (`2026-09-29T07:43:00.5Z`, UTC) -> `2026-09-29 04:43:00` no fuso
+        if not isinstance(iso, str) or not iso:
+            return "—"
+        try:
+            then = datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return iso[:19].replace("T", " ")
+        return then.astimezone(zone).strftime("%Y-%m-%d %H:%M:%S")
+    return when
 
 
 def _usd(v):
@@ -82,11 +94,12 @@ def _ago(iso):
     return "—" if age is None else _dur(age * 1_000_000_000)
 
 
-def _env():
+def _env(zone=tz_mod.UTC):
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
-    env.filters.update(ts=_ts, dur=_dur, ms=_ms, when=_when, num=_num, usd=_usd, usdm=_usdm, ago=_ago,
+    env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago,
                        alert_title=alert_text.title, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
+    env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
 
 
@@ -102,7 +115,7 @@ def safe_next(target):
 def mount(app, store, auth, config, tel, window, surreal=None):
     """Liga as rotas da tela no app. `window(query_params)` é a regra de janela do `/v1/usage` (ValueError = 400).
     `surreal` = cliente do SurrealDB para o estado das sessões (`None` = sem ele: a tela mostra só o DuckDB)."""
-    env = _env()
+    env = _env(config.tz)
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
 
     def page(request, name, status=200, headers=None, **ctx):

@@ -69,6 +69,9 @@ studio() {
     echo '{"rows":[],"series":[]}' >"$tmp/base"
   fi
   studio_get "/v1/alerts" "$tmp/alerts" || { echo "ERRO	/v1/alerts ilegível: $STUDIO_WHY"; return 1; }
+  # fuso dos dias (#415): o da série diária do /v1/usage, que o script não troca (sem `tz=`): vale o do agent-studio.
+  # As horas da janela e dos alertas seguem em UTC (ISO com Z); a base por dia conta dias desse fuso.
+  echo "fuso_dos_dias	$(jq -r '.timezone // "UTC (o agent-studio não informou)"' "$tmp/win")	(horas em UTC, dias da base e do custo por dia nesse fuso)"
   echo "### por host × agente, na janela"
   # o /v1/usage devolve host × agente × modelo: aqui soma por host × agente (p95 = o maior entre os modelos).
   # custo real (veio na chamada) e estimado (tabela de preços) nunca se somam numa coluna; "-" = nenhuma chamada.
