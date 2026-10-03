@@ -34,6 +34,10 @@ MIN_NS = 60 * 1_000_000_000
 
 QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA = "queue", "destination_refusing", "host_no_data", "spool", "quota"
 TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA)
+# alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
+PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
+               "price_fixed_differs")
+ALL_TYPES = TYPES + PRICE_TYPES
 
 # métricas do próprio collector (#162), nomes da versão fixada no compose
 QUEUE_SIZE = "otelcol_exporter_queue_size"
@@ -368,7 +372,7 @@ def _quota(con, lo, at, cfg):
 
 
 def enabled(cfg):
-    return {t: (cfg.quota_enabled if t == QUOTA else True) for t in TYPES}
+    return {t: (cfg.quota_enabled if t == QUOTA else True) for t in ALL_TYPES}
 
 
 def evaluate(con, at_ns, cfg):
@@ -379,8 +383,10 @@ def evaluate(con, at_ns, cfg):
         + _spool(con, lo, at_ns, cfg)
     if cfg.quota_enabled:
         alerts += _quota(con, lo, at_ns, cfg)
+    from . import price_alerts  # aqui e não no topo: o `price_alerts` importa este módulo
+    alerts += price_alerts.evaluate(con, at_ns)
     idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
     alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]
-    alerts.sort(key=lambda a: (TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
+    alerts.sort(key=lambda a: (ALL_TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",
                                str(a["evidence"].get("exporter") or a["evidence"].get("attribute") or "")))
     return {"alerts": alerts, "hosts": hosts(last, at_ns, cfg), "checks": enabled(cfg)}

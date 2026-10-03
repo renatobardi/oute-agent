@@ -5,7 +5,9 @@
 #   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
 #   oute-task --agent claude|codex --model <id> <slug>   escolha explícita do agente e/ou do modelo (antes do slug)
 #   oute-task list                                       worktrees de tarefa abertas (todos os spaces)
-#   oute-task clean [--yes] [--space <nome> | --all]     remove as já mergeadas/vazias (ou detached contidas na base)
+#   oute-task clean [--yes] [--space <nome> | --all] [--force-in-use]
+#                                                        remove as já mergeadas/vazias (ou detached contidas na base);
+#                                                        pula as em uso (#374), salvo --force-in-use
 #                                                        e sem mudança local, só do space atual (--space: de outro;
 #                                                        --all: de todos, inclusive as do formato antigo); avança (só
 #                                                        fast-forward) o checkout principal dos repos com worktree ali
@@ -256,6 +258,46 @@ cmd_list() {
   done
 }
 
+# ---------------------------------------------------------------- sessão em uso (#374)
+# Worktree com sessão aberta não é limpa: o critério "sem commits" pegaria spike, dispatcher e worker no começo. Em
+# uso é: (1) a do processo que chama (o PWD dele está nela); (2) de rodada do swarm não fechada: a worktree do
+# dispatcher (branch sessao/swarm-<id> ou pasta <repo>-swarm-<id>, com meta e sem `fechada`) ou a sessão da marca
+# (round + session) que está no `spawned` e fora do `closed`, com a aba viva no herdr (herdr fora do ar: vale o
+# spawned); (3) agente (claude/codex) rodando com o cwd nela, via /proc. Saída: o motivo em IN_USE; 0 = em uso.
+SWARM_STATE="$HOME/.oute/swarm"
+in_use() {   # <worktree>
+  local wt="$1" top c f r s b line tab cwd pid comm tabs
+  IN_USE=""
+  top="$(cd "$wt" 2>/dev/null && pwd -P)" || top="$wt"
+  for c in "$PWD" "$(pwd -P)"; do
+    if [[ "$c" == "$wt" || "$c" == "$wt"/* || "$c" == "$top" || "$c" == "$top"/* ]]; then IN_USE="esta sessão"; return 0; fi
+  done
+  b="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  r=""
+  [[ "$b" =~ ^sessao/(swarm-[A-Za-z0-9-]+)$ ]] && r="${BASH_REMATCH[1]}"
+  [[ -n "$r" ]] || { [[ "${wt##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4})$ ]] && r="${BASH_REMATCH[1]}"; }
+  if [[ -n "$r" && -f "$SWARM_STATE/$r/meta" && ! -f "$SWARM_STATE/$r/fechada" ]]; then IN_USE="dispatcher da rodada $r"; return 0; fi
+  f="$(mark_path "$wt")" || f=""
+  r="$(mark_get "$f" round)"; s="$(mark_get "$f" session)"
+  if [[ -n "$r" && -n "$s" && -f "$SWARM_STATE/$r/spawned" && ! -f "$SWARM_STATE/$r/fechada" ]] \
+     && ! grep -qsxF -- "$s" "$SWARM_STATE/$r/closed"; then
+    line="$(awk -v s="$s" '$1==s' "$SWARM_STATE/$r/spawned" | tail -n1)"; tab="$(awk '{print $5}' <<<"$line")"
+    if [[ -n "$line" ]]; then
+      if [[ -z "$tab" || "$tab" == - ]] || ! tabs="$(herdr tab list 2>/dev/null)" || ! jq -e .result >/dev/null 2>&1 <<<"$tabs" \
+         || jq -e --arg t "$tab" 'any(.. | objects; (.tab_id? // "") == $t)' >/dev/null 2>&1 <<<"$tabs"; then
+        IN_USE="rodada $r"; return 0
+      fi
+    fi
+  fi
+  for c in /proc/[0-9]*; do
+    pid="${c#/proc/}"; cwd="$(readlink "$c/cwd" 2>/dev/null || true)"
+    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* || "$cwd" == "$top" || "$cwd" == "$top"/* ]] || continue
+    comm="$(tr -d '\0' < "$c/comm" 2>/dev/null || true)"
+    case "$comm" in claude|codex|node) IN_USE="agente rodando (pid $pid)"; return 0 ;; esac
+  done
+  return 1
+}
+
 # checkout principal atrás de origin/<base>: só fast-forward, e só se estiver na base e sem mudança local
 sync_main() {
   local r="$1" base="$2" yes="$3" behind
@@ -269,14 +311,15 @@ sync_main() {
 }
 
 cmd_clean() {
-  local yes=0 all=0 sp="" flags="" root
+  local yes=0 all=0 sp="" flags="" root force=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes) yes=1 ;;
       --all) all=1; flags=" --all" ;;
+      --force-in-use) force=1 ;;
       --space) [[ -n "${2:-}" ]] || die "uso: oute-task clean [--yes] [--space <nome> | --all]"
                sp="$(space_name "$2")"; flags=" --space $sp"; shift ;;
-      *) die "opção desconhecida: $1 (uso: oute-task clean [--yes] [--space <nome> | --all])" ;;
+      *) die "opção desconhecida: $1 (uso: oute-task clean [--yes] [--space <nome> | --all] [--force-in-use])" ;;
     esac
     shift
   done
@@ -296,6 +339,7 @@ cmd_clean() {
     gitnet -C "$r" fetch -q origin --prune 2>/dev/null || true
     while read -r wt br; do
       [[ -n "$wt" ]] || continue
+      if (( ! force )) && in_use "$wt"; then echo "em uso  $wt ($IN_USE)"; continue; fi
       if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then echo "mantém  $wt (mudanças locais)"; continue; fi
       if [[ "$br" == - ]]; then   # detached HEAD (ex.: sessão que voltou a origin/<base> depois do merge): sem branch a apagar
         if git -C "$wt" merge-base --is-ancestor HEAD "origin/$base" 2>/dev/null; then why="detached, contida em origin/$base"

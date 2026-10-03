@@ -524,4 +524,29 @@ check "Linux: sem mensagem nova"                       bash -c '! grep -qF -e "$
 check "Linux: nenhuma chamada ao rclone"               test ! -s "$F_RCLONE_LOG"
 unset F_PATHX
 
+# ================================================================ rede (#230): derivação e validação
+# Mac com subnet customizada: range derivado, IP fixo validado
+printf 'OUTE_NET_SUBNET=172.29.0.0/16\nOUTE_NET_GATEWAY=172.29.0.1\nOUTE_AGENT_IP=172.29.0.5\n' > "$REPO/.env"
+: > "$F_LOG"
+oute up
+check "Mac subnet 172.29: rc 0, sobe"                   [ "$RC" -eq 0 ]
+check "Mac subnet 172.29: nenhuma mensagem de erro de rede" bash -c '! grep -qE "OUTE_NET|fora da subnet" <<<"$OUT"'
+check "Mac subnet 172.29: compose up chamado"           grep -q -- ' up -d --no-build' "$F_LOG"
+
+# Range inválido: erro antes do docker
+printf 'OUTE_NET_SUBNET=172.29.0.0/16\nOUTE_NET_IP_RANGE=172.19.0.0/16\n' > "$REPO/.env"
+: > "$F_LOG"
+oute up
+check "range fora da subnet: rc != 0"                   [ "$RC" -ne 0 ]
+check "range fora: aviso"                               has 'está fora da subnet'
+check "range fora: compose up não chamado"              bash -c '! grep -q -- " up -d" "$F_LOG"'
+
+# IP fixo dentro do range: erro antes do docker
+printf 'OUTE_NET_SUBNET=172.29.0.0/16\nOUTE_NET_IP_RANGE=172.29.128.0/17\nOUTE_AGENT_IP=172.29.128.5\n' > "$REPO/.env"
+: > "$F_LOG"
+oute up
+check "IP no range: rc != 0"                           [ "$RC" -ne 0 ]
+check "IP no range: aviso"                             has 'está dentro do range'
+check "IP no range: compose up não chamado"            bash -c '! grep -q -- " up -d" "$F_LOG"'
+
 check_end

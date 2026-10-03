@@ -5,11 +5,21 @@ import sys
 
 import uvicorn
 
-from . import config as config_mod
+from . import config as config_mod, price_sources, prices as prices_mod
 from .app import create_app
 from .store import Store
 from .surreal import Surreal
 from . import telemetry
+
+
+def price_urls():
+    """As duas URLs de preço: as fixas do código; o ambiente só as troca para os testes, e só por `https://`."""
+    urls = dict(price_sources.DEFAULT_URLS)
+    for source, var in ((price_sources.MODELS_DEV, "AGENT_STUDIO_PRICE_URL_MODELS_DEV"),
+                        (price_sources.OPENROUTER, "AGENT_STUDIO_PRICE_URL_OPENROUTER")):
+        if os.environ.get(var):
+            urls[source] = os.environ[var]  # `fetch` recusa o que não for https (E_URL)
+    return urls
 
 
 def main():
@@ -45,7 +55,15 @@ def main():
     config = config_mod.load()
     for err in config.errors:
         print(f"agent-studio: {err}", file=sys.stderr)
-    app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config, read_token=read_token)
+    # preços (#339): a semente do config.toml entra no histórico e o histórico vira a tabela viva; a conferência diária
+    # nas fontes públicas só liga com AGENT_STUDIO_PRICE_CHECK=1 (o compose liga; teste e uso local ficam sem rede)
+    prices_mod.sync(store, config)
+    price_job = None
+    if os.environ.get("AGENT_STUDIO_PRICE_CHECK") == "1":
+        price_job = prices_mod.Job(lambda: prices_mod.check(store, config, tel, urls=price_urls()),
+                                   float(os.environ.get("AGENT_STUDIO_PRICE_INTERVAL", prices_mod.DAY_NS // 10**9)))
+    app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config, read_token=read_token,
+                     price_job=price_job)
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)

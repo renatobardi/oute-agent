@@ -20,7 +20,7 @@ die() { printf 'oute: %s\n' "$*" >&2; exit 1; }
 # --- origem da telemetria = máquina + instância (#22). A instância só precisa ser única DENTRO da máquina.
 # valor do .env sem carregá-lo inteiro (o compose lê o .env; aqui só o que o script precisa decidir)
 env_get() { sed -n "s/^[[:space:]]*$1=//p" "$ROOT/.env" 2>/dev/null | sed "s/[[:space:]]*#.*//; s/^[\"']//; s/[\"']\$//" | tail -1; }
-# nome seguro para Langfuse environment / partição do bucket: minúsculo, [a-z0-9_-], até 40
+# nome seguro para partição do bucket: minúsculo, [a-z0-9_-], até 40
 slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40; }
 # máquina: OUTE_HOST > OUTE_HOSTNAME (nome antigo, mesmo papel) > hostname da máquina
 OUTE_HOST="$(slug "${OUTE_HOST:-$(env_get OUTE_HOST)}")"
@@ -197,13 +197,6 @@ host_secrets() {
   export AI_MEMORY_AUTH_TOKEN="${AI_MEMORY_AUTH_TOKEN:-}"
   export OCI_S3_ACCESS_KEY="${OCI_S3_ACCESS_KEY:-}" OCI_S3_SECRET_KEY="${OCI_S3_SECRET_KEY:-}" \
          OCI_S3_ENDPOINT="${OCI_S3_ENDPOINT:-}" OCI_S3_REGION="${OCI_S3_REGION:-}"
-  # Langfuse (item "langfuse": LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST opcional) liga o pipeline de metadados
-  if [[ -n "${LANGFUSE_PUBLIC_KEY:-}" && -n "${LANGFUSE_SECRET_KEY:-}" ]]; then
-    OUTE_LANGFUSE_AUTH="$(printf '%s:%s' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" | base64 | tr -d '\n')"
-    export OUTE_LANGFUSE_AUTH OUTE_OTEL_LANGFUSE=langfuse LANGFUSE_HOST="${LANGFUSE_HOST:-https://cloud.langfuse.com}"
-  else
-    export OUTE_OTEL_LANGFUSE=none
-  fi
 }
 
 # --- agent-studio (ADR-08, #185): só no host que o liga com OUTE_AGENT_STUDIO=1 no .env (o oute-server; no Mac
@@ -344,6 +337,101 @@ oci_remote_env() {
     RCLONE_CONFIG_OCI_ACCESS_KEY_ID="$OCI_S3_ACCESS_KEY" RCLONE_CONFIG_OCI_SECRET_ACCESS_KEY="$OCI_S3_SECRET_KEY" \
     RCLONE_CONFIG_OCI_ENDPOINT="$OCI_S3_ENDPOINT" RCLONE_CONFIG_OCI_REGION="$OCI_S3_REGION" \
     RCLONE_CONFIG_OCI_FORCE_PATH_STYLE=true RCLONE_CONFIG_OCI_NO_CHECK_BUCKET=true
+}
+
+# --- rede (#230): derivação e validação de OUTE_NET_IP_RANGE
+# derive_ip_range <subnet>: extrai a metade alta (/17) de uma subnet /16
+# Ex.: 172.19.0.0/16 -> 172.19.128.0/17
+derive_ip_range() {
+  local subnet="$1" prefix
+  [[ "$subnet" =~ / ]] || { echo "oute: subnet sem /, esperado <CIDR>: $subnet" >&2; return 1; }
+  prefix="${subnet#*/}"
+  [[ "$prefix" == 16 ]] || { echo "oute: subnet /$prefix (esperado /16); com outra máscara, defina OUTE_NET_IP_RANGE explícito" >&2; return 1; }
+  # octetos da subnet: a.b.0.0/16 -> a.b.128.0/17 (a terceira octetoa passa de 0 para 128)
+  local net="${subnet%/*}" a b c d
+  IFS=. read -r a b c d <<<"$net" || return 1
+  printf '%s.%s.128.0/17\n' "$a" "$b"
+}
+
+# ip_to_int <a.b.c.d>: converte IP para número inteiro (bash 3.2 compat)
+ip_to_int() {
+  local ip="$1" a b c d
+  IFS=. read -r a b c d <<<"$ip" || return 1
+  # a * 256^3 + b * 256^2 + c * 256 + d = a*16777216 + b*65536 + c*256 + d
+  echo $(( a * 16777216 + b * 65536 + c * 256 + d ))
+}
+
+# ip_block_size <prefix>: calcula tamanho do bloco para um prefixo /0-32
+# /16 = 2^(32-16) = 65536, /17 = 32768, /24 = 256, /21 = 2048, /18 = 16384, etc.
+ip_block_size() {
+  local prefix="$1"
+  # validar: prefixo deve ser 0-32 (inteiro)
+  [[ "$prefix" =~ ^[0-9]+$ && $prefix -ge 0 && $prefix -le 32 ]] || \
+    { echo "oute: prefixo /$prefix inválido (esperado 0-32)" >&2; return 1; }
+  echo $(( 1 << (32 - prefix) ))
+}
+
+# validate_net_ip_range <range> <subnet>: verifica se um range está contido em uma subnet
+validate_net_ip_range() {
+  local range="$1" subnet="$2"
+  local range_net="${range%/*}" range_prefix="${range#*/}" subnet_net="${subnet%/*}" subnet_prefix="${subnet#*/}"
+  local range_int subnet_int range_start range_end subnet_start subnet_end range_size subnet_size
+  # valida prefixos
+  range_size="$(ip_block_size "$range_prefix")" || return 1
+  subnet_size="$(ip_block_size "$subnet_prefix")" || return 1
+  # converte IPs
+  range_int="$(ip_to_int "$range_net")" || return 1
+  subnet_int="$(ip_to_int "$subnet_net")" || return 1
+  # calcula inicio e fim
+  range_start="$range_int"
+  range_end=$(( range_start + range_size - 1 ))
+  subnet_start="$subnet_int"
+  subnet_end=$(( subnet_start + subnet_size - 1 ))
+  # valida contenção: range deve estar dentro da subnet
+  [[ $range_start -ge $subnet_start && $range_end -le $subnet_end ]] || \
+    { echo "oute: OUTE_NET_IP_RANGE $range está fora da subnet $subnet" >&2; return 1; }
+}
+
+# validate_agent_ip_not_in_range <range> <agent_ip>: verifica se um IP NÃO está dentro de um range
+validate_agent_ip_not_in_range() {
+  local range="$1" agent_ip="$2"
+  local range_net="${range%/*}" range_prefix="${range#*/}"
+  local range_int ip_int range_start range_end range_size
+  # valida prefixo
+  range_size="$(ip_block_size "$range_prefix")" || return 1
+  # converte IPs
+  range_int="$(ip_to_int "$range_net")" || return 1
+  ip_int="$(ip_to_int "$agent_ip")" || return 1
+  # calcula inicio e fim
+  range_start="$range_int"
+  range_end=$(( range_start + range_size - 1 ))
+  # IP não deve estar no range dinâmico
+  if [[ $ip_int -ge $range_start && $ip_int -le $range_end ]]; then
+    echo "oute: OUTE_AGENT_IP $agent_ip está dentro do range $range (dinâmico)" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ensure_net_ip_range: valida e deriva OUTE_NET_IP_RANGE antes do compose up
+ensure_net_ip_range() {
+  local subnet range agent_ip
+  # lê do ambiente, depois do .env (com fallback para padrão)
+  subnet="${OUTE_NET_SUBNET:-$(env_get OUTE_NET_SUBNET || true)}"
+  range="${OUTE_NET_IP_RANGE:-$(env_get OUTE_NET_IP_RANGE || true)}"
+  agent_ip="${OUTE_AGENT_IP:-$(env_get OUTE_AGENT_IP || true)}"
+  # padrão: subnet=172.19.0.0/16, range=172.19.128.0/17 (sem mudança, nada a fazer)
+  [[ -n "$subnet" ]] || subnet="172.19.0.0/16"
+  if [[ -z "$range" ]]; then
+    # range vazio e subnet definido: derivar
+    range="$(derive_ip_range "$subnet")" || return 1
+    export OUTE_NET_IP_RANGE="$range"
+  fi
+  # validações
+  validate_net_ip_range "$range" "$subnet" || return 1
+  if [[ -n "$agent_ip" ]]; then
+    validate_agent_ip_not_in_range "$range" "$agent_ip" || return 1
+  fi
 }
 
 # mountpoint(1) não existe no macOS
@@ -682,6 +770,7 @@ case "${1:-}" in
     legacy_cleanup
     ensure_image
     queue_reserve_check
+    ensure_net_ip_range
     "${COMPOSE[@]}" up -d --no-build ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true

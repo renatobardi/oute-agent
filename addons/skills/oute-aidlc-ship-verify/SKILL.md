@@ -9,7 +9,7 @@ Fase: `ship` (AI-DLC, ADR-07) · Outcome: deploy verificado em cada host, com ev
 
 Você **só lê**. O deploy (`oute update`, `oute down/up`) é do Bardi; esta skill não reinicia, não puxa imagem, não corrige nada no host. Falha vira relatório e, se for bug, `oute-aidlc-ops-diagnose`.
 
-Três coisas, por host: **versão** (repo e imagem rodando), **serviços** do compose (com `oute-agent-studio` e `oute-surrealdb` no host que liga o profile `agent-studio`, o oute-server; nos outros o script diz que não conferiu) e **presença** de telemetria recente no bucket `oute-observability`. Presença é só "chegou objeto novo nos últimos minutos". Análise do que chegou (volume, erros, Langfuse) é da `oute-aidlc-ops-observe`; se ela não estiver instalada, reporte a presença e pare aí.
+Três coisas, por host: **versão** (repo e imagem rodando), **serviços** do compose (com `oute-agent-studio` e `oute-surrealdb` no host que liga o profile `agent-studio`, o oute-server; nos outros o script diz que não conferiu) e **presença** de telemetria recente no bucket `oute-observability`. Presença é só "chegou objeto novo nos últimos minutos". Análise do que chegou (volume, erros) é da `oute-aidlc-ops-observe`; se ela não estiver instalada, reporte a presença e pare aí.
 
 ## 1. Alvo
 
@@ -47,6 +47,8 @@ Cada linha é `OK`, `AVISO` ou `FALHA`; a última é o resumo. Código 1 = algum
 `AVISO` não reprova o deploy, mas vai no relatório: reinício de container, um sinal sem objeto novo (host ocioso naquele sinal), erro de exportação no log do collector, `rclone` ausente.
 
 Feito quando: cada linha `FALHA` e `AVISO` tem uma leitura e um próximo passo.
+
+**Regressão dos agentes (opcional, sem canal):** quando a imagem ou um CLI (claude, codex) mudou, rodar `oute-regression` no container do host verificado (nível 1, #366: tarefas headless em Haiku, ~2 min; não passa pelo canal de aprovação, usa dublês). Saída 0 = verde; 1 = alguma tarefa vermelha (vai no relatório como `FALHA`, com a tarefa); 2 = não rodou (cota ≥ 60% ou sem login: `AVISO`). O resultado também vai ao agent-studio como `oute.regression.run`. Skill sem `oute-regression` na imagem (versão antiga): pule e diga no relatório.
 
 ## 4. Relatório
 

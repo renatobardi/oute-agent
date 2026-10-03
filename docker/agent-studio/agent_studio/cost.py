@@ -82,20 +82,78 @@ class ModelPrice:
 
 
 class PriceTable:
-    """Preço por modelo. Busca sem diferenciar maiúsculas; sem entrada exata, tenta sem o prefixo do provedor
-    (`openai/gpt-5-codex` -> `gpt-5-codex`)."""
+    """Preço por modelo **e por hora** (#339). Cada modelo tem um histórico `[(início da vigência em ns, ModelPrice)]`:
+    o preço de uma chamada é o que valia na hora do fato (`lookup(modelo, at_ns)`); antes da primeira linha do
+    modelo vale a primeira (o estimado de chamada antiga nunca fica sem preço só porque a linha nasceu depois).
+    Valor `ModelPrice` solto = uma linha só, desde sempre (a tabela do `config.toml`). Sem `at_ns`, o preço vigente.
+
+    Busca sem diferenciar maiúsculas; sem entrada exata, tenta sem o prefixo do provedor (`openai/gpt-5-codex` ->
+    `gpt-5-codex`). A tabela viva do serviço é trocada inteira por `replace` (a rotina de preços, #339): quem lê pega
+    um `snapshot` e enxerga uma versão só do começo ao fim."""
 
     def __init__(self, prices=None):
-        self._by = {str(m).lower(): p for m, p in (prices or {}).items()}
+        self._by = self._build(prices)
 
-    def lookup(self, model):
+    @staticmethod
+    def _build(prices):
+        by = {}
+        for m, p in (prices or {}).items():
+            hist = [(0, p)] if isinstance(p, ModelPrice) else sorted(p, key=lambda row: row[0])
+            if hist:
+                by[str(m).lower()] = tuple(hist)
+        return by
+
+    def _history(self, model, by=None):
+        if not model:
+            return None
+        by = self._by if by is None else by
+        m = model.lower()
+        h = by.get(m)
+        if h is None and "/" in m:
+            h = by.get(m.rsplit("/", 1)[1])
+        return h
+
+    def key(self, model):
+        """Chave da tabela que o `lookup` acharia para `model` (sem caixa e sem prefixo, se for o caso); `None` se não há."""
         if not model:
             return None
         m = model.lower()
-        p = self._by.get(m)
-        if p is None and "/" in m:
-            p = self._by.get(m.rsplit("/", 1)[1])
-        return p
+        if m in self._by:
+            return m
+        if "/" in m and m.rsplit("/", 1)[1] in self._by:
+            return m.rsplit("/", 1)[1]
+        return None
+
+    def lookup(self, model, at_ns=None):
+        h = self._history(model)
+        if h is None:
+            return None
+        if at_ns is None:
+            return h[-1][1]
+        vigente = h[0][1]
+        for start, price in h:
+            if start > at_ns:
+                break
+            vigente = price
+        return vigente
+
+    def boundaries(self):
+        """Horas (ns) em que algum modelo troca de preço, em ordem: o início de toda linha menos a primeira de cada
+        modelo. Entre duas horas seguidas nenhum preço muda, então o estimado se agrupa por faixa."""
+        return sorted({start for h in self._by.values() for start, _ in h[1:]})
+
+    def models(self):
+        return sorted(self._by)
+
+    def replace(self, other):
+        """Troca todo o conteúdo pelo de `other` (uma atribuição só: leitor concorrente vê a versão velha ou a nova)."""
+        self._by = other._by
+
+    def snapshot(self):
+        """Cópia imutável do estado de agora: o conteúdo é trocado por inteiro, nunca editado."""
+        snap = PriceTable()
+        snap._by = self._by
+        return snap
 
     def __len__(self):
         return len(self._by)

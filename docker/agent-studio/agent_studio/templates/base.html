@@ -12,7 +12,7 @@
 <header class="topo">
   <a class="marca" href="/conversas">agent-studio</a>
   {% block nav %}
-  <nav><a href="/conversas">Conversas</a> <a href="/sessoes">Sessões</a> <a href="/pedidos">Pedidos</a></nav>
+  <nav><a href="/conversas">Conversas</a> <a href="/sessoes">Sessões</a> <a href="/pedidos">Pedidos</a> <a href="/precos">Preços</a></nav>
   <form method="post" action="/logout"><button type="submit">Sair</button></form>
   {% endblock %}
 </header>
@@ -28,7 +28,7 @@
   <ul>
     {% for a in alerts %}
     <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
-      <strong>{{ a|alert_title }}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
+      <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
       {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} UTC{% endif %}
     </li>
     {% endfor %}

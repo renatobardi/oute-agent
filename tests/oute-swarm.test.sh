@@ -923,6 +923,13 @@ check "monitor: reinício sem evento não repete a pergunta (#267)" grep -qF 'n�
 check "monitor: no máximo uma linha (#267)"              grep -qF 'Escreva no máximo uma linha (ex.: "monitor reiniciado, sem eventos")' "$FAKE/oute-task.last"
 check "monitor: a pergunta pendente continua valendo (#267)" grep -qF 'A pergunta pendente continua valendo sem ser repetida' "$FAKE/oute-task.last"
 check "monitor: a regra fica no trecho do reinício, no §3 (#267)" bash -c '[ "$(grep -c "reinicie o mesmo comando sem perguntar.*só avise o Bardi se o reinício falhar\. \*\*Reinício sem evento novo não é motivo de mensagem:\*\*" "$1")" -eq 1 ] && [ "$(grep -n -e "^## 3\. " -e "Reinício sem evento novo" -e "^## 4\. " "$1" | sed "s/^[0-9]*:\(.\{4\}\).*/\1/" | tr "\n" "|")" = "## 3|- Ro|## 4|" ]' _ "$FAKE/oute-task.last"
+# monitor pela ferramenta Monitor (#364, ideia 1): não por Bash run_in_background; religa e confere o estado
+check "monitor: ferramenta Monitor com timeout_ms no máximo (#364)" grep -qF '` com a ferramenta `Monitor`, com o `timeout_ms` no máximo que ela aceita; não escreva laço próprio.' "$FAKE/oute-task.last"
+check "monitor: não por Bash run_in_background (#364)"   grep -qF '**Não use `Bash` com `run_in_background` para o `watch`:**' "$FAKE/oute-task.last"
+check "monitor: a exceção é o tell --wait (#364)"        grep -qF 'A exceção é o `tell --wait` (abaixo), que roda em `run_in_background`.' "$FAKE/oute-task.last"
+check "monitor: religa com sessão, PR ou pergunta (#364)" grep -qF 'a rodada ainda estiver aberta (sessão aberta, PR aberto ou pergunta pendente), reinicie o mesmo comando sem perguntar**, de novo com a ferramenta `Monitor`' "$FAKE/oute-task.last"
+check "monitor: confere o estado da rodada ao religar (#364)" grep -qF 'ao religar confira o estado da rodada (`oute-swarm list` e os PRs abertos dela)' "$FAKE/oute-task.last"
+check "monitor: o texto antigo, ambíguo, não fica (#364)" bash -c '! grep -qF "como monitor em segundo plano" "$1"' _ "$FAKE/oute-task.last"
 # merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
 check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.last"
 check "merges em série: fica no §3, antes do §4"         [ "$(grep -n -e '^## 3\. ' -e 'Merges em série\*\*' -e '^## 4\. ' "$FAKE/oute-task.last" | cut -d: -f2 | cut -c1-6 | tr '\n' '|')" == '## 3. |  - **|## 4. |' ]

@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+# oute-regression — nível 1 de regressão dos agentes (#366, spike #52): tarefas headless em Haiku, sob demanda, para
+# conferir com o agente real que as instruções ainda produzem o efeito esperado depois de uma release com mudança de
+# imagem ou de um upgrade dos CLIs. Nunca em CI e nunca bloqueia merge; só você chama, no container.
+#
+# uso:  oute-regression [--rounds N] [--codex] [--task <nome>]… [--json]
+#   --rounds N   quantas vezes cada tarefa roda (padrão 3). Vermelha só se falhar em mais de uma rodada (com --rounds 1,
+#                se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
+#   --codex      opt-in: roda também as tarefas marcadas para o Codex (a 1, `root`) com `codex exec`; sem a flag o Codex
+#                não é chamado
+#   --task <n>   só as tarefas de nome <n> (root, select, worktree, emit, studio); repetível
+#   --json       o resultado em JSON no stdout (o relato em texto vai para o stderr)
+# saída: 0 = verde (tarefa "não verificada" não pesa) | 1 = alguma tarefa vermelha | 2 = não rodou (uso, cota,
+#   sem claude, ou o claude falhou em toda chamada)
+#
+# Tarefas: docker/regression/<n>-<nome>.sh (root, select, worktree, emit), mais a `studio` (a conversa chegou ao
+# agent-studio com o oute.task.id do teste; sem AGENT_STUDIO_URL e AGENT_STUDIO_READ_TOKEN ou com o agent-studio fora do
+# ar = "não verificado", não vermelho). Cada chamada ao agente roda num diretório descartável, com um `.ai-memory.toml`
+# próprio (workspace e project `regression`: os hooks do ai-memory capturam a conversa de teste lá, não no projeto de
+# ninguém) e com oute-propose, oute-inbox, sudo e ssh trocados por dublês no PATH: nada chega ao canal de aprovação nem
+# ao host. O grader é bash e lê efeitos (arquivos, o que os dublês gravaram); nenhum LLM julga.
+# Cota: com `oute-quota` no PATH e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), a suíte não começa (saída 2);
+# cota desconhecida ou comando ausente = aviso e segue.
+# Fim: um evento oute.regression.run pelo `oute-emit` (versão da imagem, versões dos CLIs, rodadas, verde/vermelho por
+# tarefa, custo somado), sem texto de prompt nem de resposta. O resultado de cada tarefa e o custo são só do que o
+# claude devolve em `--output-format json` (`total_cost_usd`, custo equivalente na API; o Codex não tem custo aqui).
+# ambiente (para teste): OUTE_REGRESSION_DIR (tarefas), OUTE_REGRESSION_TIMEOUT (s por chamada, padrão 120),
+#   OUTE_REGRESSION_STUDIO_WAIT / _STEP (espera pela conversa no agent-studio, padrão 60 / 5 s),
+#   OUTE_REGRESSION_AGENT (oute.agent do evento: claude, codex ou human, o padrão).
+{ set +x; } 2>/dev/null
+set -uo pipefail
+
+usage() { sed -n '2,/^{ set +x/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2; }
+die2() { printf 'oute-regression: %s\n' "$*" >&2; exit 2; }
+warn() { printf 'oute-regression: aviso: %s\n' "$*" >&2; }
+
+ROUNDS=3; CODEX=0; JSON=0; ONLY=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rounds) shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]?$ ]] || die2 "--rounds pede um inteiro de 1 a 99"; ROUNDS="$1" ;;
+    --codex) CODEX=1 ;;
+    --task) shift; [[ $# -gt 0 && "$1" =~ ^[a-z][a-z0-9-]*$ ]] || die2 "--task pede o nome de uma tarefa"; ONLY+=("$1") ;;
+    --json) JSON=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die2 "argumento desconhecido: $1 (oute-regression --help)" ;;
+  esac
+  shift
+done
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="${OUTE_REGRESSION_DIR:-}"
+[[ -n "$DIR" ]] || for d in /usr/local/lib/oute/regression "$HERE/regression"; do [[ -d "$d" ]] && { DIR="$d"; break; }; done
+[[ -d "$DIR" ]] || die2 "sem a pasta das tarefas (regression/)"
+TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-120}"
+[[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_TIMEOUT tem de ser inteiro > 0"
+STUDIO_WAIT="${OUTE_REGRESSION_STUDIO_WAIT:-60}"; STUDIO_STEP="${OUTE_REGRESSION_STUDIO_STEP:-5}"
+[[ "$STUDIO_WAIT" =~ ^[0-9]+$ && "$STUDIO_STEP" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_STUDIO_WAIT/_STEP inválidos"
+MAX_PCT="${OUTE_REGRESSION_MAX_PCT:-60}"
+[[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_REGRESSION_MAX_PCT tem de ser um número"
+for c in jq timeout claude oute-select; do command -v "$c" >/dev/null || die2 "precisa de $c no PATH"; done
+[[ $CODEX = 0 ]] || command -v codex >/dev/null || die2 "--codex pede o codex no PATH"
+
+# --- tarefas: nome e se vão ao Codex, lidos de cada arquivo (em subshell: o arquivo define funções)
+TASKS=(); declare -A FILE CODEX_TASK
+for f in "$DIR"/[0-9]*-*.sh; do
+  [[ -f "$f" ]] || continue
+  read -r name cx < <( ( unset TASK_NAME TASK_CODEX; . "$f"; echo "${TASK_NAME:-} ${TASK_CODEX:-0}" ) )
+  [[ -n "$name" ]] || die2 "tarefa sem TASK_NAME: $f"
+  TASKS+=("$name"); FILE[$name]="$f"; CODEX_TASK[$name]="$cx"
+done
+STUDIO_TASK=studio
+selected() { # nome: está na seleção? (sem --task = todas)
+  local t; [[ ${#ONLY[@]} -gt 0 ]] || return 0
+  for t in "${ONLY[@]}"; do [[ "$t" = "$1" ]] && return 0; done; return 1
+}
+for t in ${ONLY[@]+"${ONLY[@]}"}; do
+  [[ "$t" = "$STUDIO_TASK" || -n "${FILE[$t]:-}" ]] || die2 "tarefa desconhecida: $t"
+done
+RUN_TASKS=(); for t in "${TASKS[@]}"; do selected "$t" && RUN_TASKS+=("$t"); done
+RUN_STUDIO=0; selected "$STUDIO_TASK" && RUN_STUDIO=1
+[[ ${#RUN_TASKS[@]} -gt 0 || $RUN_STUDIO = 1 ]] || die2 "nenhuma tarefa selecionada"
+
+# --- cota: janela >= MAX_PCT = não começa (saída 2); desconhecida ou sem o comando = aviso e segue
+if command -v oute-quota >/dev/null; then
+  q="$(oute-quota --json 2>/dev/null)" || q=""
+  pct="$(jq -r '[.agents[]? | select(.status == "ok") | .windows[]?.used_pct | numbers] | max // empty' <<<"$q" 2>/dev/null)"
+  if [[ -z "$pct" ]]; then
+    warn "cota desconhecida (oute-quota sem leitura); sigo"
+  elif awk -v p="$pct" -v m="$MAX_PCT" 'BEGIN { exit !(p >= m) }'; then
+    die2 "cota em ${pct}% (limite ${MAX_PCT}%): a suíte não começou"
+  fi
+else
+  warn "sem oute-quota no PATH: cota não conferida; sigo"
+fi
+
+# --- modelos: Haiku da tabela do seletor (fase `ops`); o Codex da mesma linha, só com --codex
+MODEL="$(oute-select --json --phase ops 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+[[ -n "$MODEL" ]] || die2 "o oute-select não deu o modelo da fase ops (tabela ausente?)"
+CMODEL=""; CEFFORT=""
+if [[ $CODEX = 1 ]]; then
+  csel="$(oute-select --json --phase ops --agent codex 2>/dev/null)"
+  CMODEL="$(jq -r '.model // empty' <<<"$csel" 2>/dev/null)"; CEFFORT="$(jq -r '.effort // empty' <<<"$csel" 2>/dev/null)"
+  [[ -n "$CMODEL" ]] || die2 "o oute-select não deu o modelo do Codex"
+fi
+
+TMP="$(mktemp -d)" || die2 "sem diretório temporário"
+trap 'rm -rf "$TMP"' EXIT
+RUN_ID="regression-$(date -u +%Y%m%d-%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
+REAL_EMIT="$(command -v oute-emit || true)"
+
+# --- dublês: gravam o que receberam em $REC (o caminho vai escrito no próprio dublê)
+make_stubs() { # bin rec
+  local bin="$1" rec="$2"
+  mkdir -p "$bin" "$rec"
+  cat > "$bin/oute-propose" <<STUB
+#!/usr/bin/env bash
+printf 'ARGS %s\n' "\$*" >> "$rec/propose.log"
+cat >> "$rec/propose.log"
+echo 20260101-000000-regression
+STUB
+  cat > "$bin/oute-inbox" <<STUB
+#!/usr/bin/env bash
+printf 'ARGS %s\n' "\$*" >> "$rec/inbox.log"
+echo "# rc: 0"
+STUB
+  cat > "$bin/sudo" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$rec/sudo.log"
+echo "sudo: bloqueado pelo oute-regression" >&2
+exit 1
+STUB
+  cat > "$bin/ssh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$rec/ssh.log"
+echo "ssh: bloqueado pelo oute-regression" >&2
+exit 255
+STUB
+  # oute-emit: o de verdade, sem as OTEL_* (como no shell do Bash tool, #250) e com o debug ligado
+  cat > "$bin/oute-emit" <<STUB
+#!/usr/bin/env bash
+printf 'ARGS %s\n' "\$*" >> "$rec/emit.log"
+[[ -n "$REAL_EMIT" ]] || { echo "oute-emit ausente" >> "$rec/emit.err"; exit 0; }
+env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_EXPORTER_OTLP_LOGS_ENDPOINT -u OTEL_RESOURCE_ATTRIBUTES \\
+  OUTE_EMIT_DEBUG=1 "$REAL_EMIT" "\$@" 2>> "$rec/emit.err"
+exit 0
+STUB
+  chmod +x "$bin"/*
+}
+
+# --- uma chamada ao agente (task, round, agent): resultado em $TMP/<chave>/{status,reason,cost,id}
+#     status: ok | fail (o grader reprovou) | error (o agente não rodou)
+attempt() {
+  local name="$1" round="$2" agent="$3" key att
+  key="$name-$agent-r$round"; att="$TMP/$key"
+  mkdir -p "$att/work"
+  make_stubs "$att/bin" "$att/rec"
+  (
+    export REC="$att/rec" WORK="$att/work"
+    unset TASK_NAME TASK_CODEX; unset -f task_setup task_prompt task_grade
+    . "${FILE[$name]}"
+    TASK_ID="$RUN_ID-$name-$agent-r$round"; SLUG="regression-$name"
+    AGENT_CWD="$WORK"
+    cd "$WORK" || exit 1
+    printf 'workspace = "regression"\nproject = "regression"\n' > .ai-memory.toml
+    ! declare -F task_setup >/dev/null || task_setup >/dev/null 2>&1
+    echo "$TASK_ID" > "$att/id"
+    prompt="$(task_prompt)"
+    ora="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG"
+    cd "$AGENT_CWD" || exit 1
+    export PATH="$att/bin:$PATH" OTEL_RESOURCE_ATTRIBUTES="$ora"
+    if [[ $agent = claude ]]; then
+      timeout "$TIMEOUT" claude -p "$prompt" --model "$MODEL" --max-turns 8 --output-format json \
+        > "$att/out" 2> "$att/err" < /dev/null
+      if ! jq -e 'type == "object"' "$att/out" >/dev/null 2>&1; then
+        echo error > "$att/status"; echo "o claude não devolveu o resultado" > "$att/reason"; exit 0
+      fi
+      jq -r '.total_cost_usd // 0 | numbers' "$att/out" > "$att/cost" 2>/dev/null || echo 0 > "$att/cost"
+    else
+      effort=(); [[ -z "$CEFFORT" ]] || effort=(-c "model_reasoning_effort=\"$CEFFORT\"")
+      if ! timeout "$TIMEOUT" codex exec --skip-git-repo-check -m "$CMODEL" ${effort[@]+"${effort[@]}"} "$prompt" \
+           > "$att/out" 2> "$att/err" < /dev/null; then
+        echo error > "$att/status"; echo "o codex não rodou" > "$att/reason"; exit 0
+      fi
+    fi
+    if reason="$(task_grade)"; then echo ok > "$att/status"; else echo fail > "$att/status"; fi
+    printf '%s\n' "${reason:-}" > "$att/reason"
+  ) || { echo error > "$att/status"; echo "falha ao preparar a tarefa" > "$att/reason"; }
+  [[ -s "$att/status" ]] || { echo error > "$att/status"; echo "sem resultado" > "$att/reason"; }
+}
+
+# --- as rodadas: as tarefas de uma rodada correm juntas; rodadas em sequência
+KEYS=()    # <tarefa>[:codex]
+for t in ${RUN_TASKS[@]+"${RUN_TASKS[@]}"}; do
+  KEYS+=("$t"); [[ $CODEX = 1 && "${CODEX_TASK[$t]}" = 1 ]] && KEYS+=("$t:codex")
+done
+for ((r = 1; r <= ROUNDS; r++)); do
+  for k in ${KEYS[@]+"${KEYS[@]}"}; do
+    t="${k%%:*}"; a=claude; [[ "$k" = *:codex ]] && a=codex
+    attempt "$t" "$r" "$a" &
+  done
+  wait
+done
+
+# resultado de uma chave: contagem de ok/fail/error nas rodadas e o veredito
+declare -A VERDICT DETAIL
+ran_any=0; total_cost=0
+verdict() { # falhas rodadas
+  if (( $2 == 1 )); then (( $1 >= 1 )) && echo vermelho || echo verde
+  else (( $1 > 1 )) && echo vermelho || echo verde; fi
+}
+for k in ${KEYS[@]+"${KEYS[@]}"}; do
+  t="${k%%:*}"; a=claude; [[ "$k" = *:codex ]] && a=codex
+  nok=0; nfail=0; nerr=0; why=""
+  for ((r = 1; r <= ROUNDS; r++)); do
+    att="$TMP/$t-$a-r$r"
+    case "$(cat "$att/status" 2>/dev/null)" in
+      ok) nok=$((nok + 1)); ran_any=1 ;;
+      fail) nfail=$((nfail + 1)); ran_any=1; why="$(head -n1 "$att/reason")" ;;
+      *) nerr=$((nerr + 1)); why="$(head -n1 "$att/reason" 2>/dev/null)" ;;
+    esac
+    [[ $a != claude ]] || total_cost="$(awk -v a="$total_cost" -v b="$(cat "$att/cost" 2>/dev/null || echo 0)" 'BEGIN { printf "%.4f", a + b }')"
+  done
+  VERDICT[$k]="$(verdict $((nfail + nerr)) "$ROUNDS")"
+  DETAIL[$k]="$nok/$ROUNDS ok"
+  (( nfail + nerr == 0 )) || DETAIL[$k]+=", $nfail reprovada(s), $nerr sem rodar${why:+ (última: $why)}"
+done
+if [[ ${#KEYS[@]} -gt 0 && $ran_any = 0 ]]; then
+  die2 "o agente não rodou em nenhuma chamada (sem login, cota, rede?); nada a concluir"
+fi
+
+# --- studio: a conversa de cada chamada do claude aparece no agent-studio com o oute.task.id do teste
+studio_get() { # id → código HTTP em STUDIO_CODE e corpo em $TMP/studio.body; 1 = não deu para perguntar
+  local tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; tok="${tok//\"/\\\"}"
+  STUDIO_CODE="$(curl -sS --max-time 20 -o "$TMP/studio.body" -w '%{http_code}' -K - -G --data-urlencode "id=$1" \
+    "${AGENT_STUDIO_URL%/}/sessao" 2>/dev/null <<<"header = \"Authorization: Bearer $tok\"")" || return 1
+}
+if [[ $RUN_STUDIO = 1 ]]; then
+  STUDIO_KEY="$STUDIO_TASK"
+  if [[ -z "${AGENT_STUDIO_URL:-}" || -z "${AGENT_STUDIO_READ_TOKEN:-}" ]]; then
+    VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="sem AGENT_STUDIO_URL ou AGENT_STUDIO_READ_TOKEN"
+  elif ! command -v curl >/dev/null; then
+    VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="sem curl"
+  else
+    declare -A SEEN; pending=0; unreachable=""
+    for att in "$TMP"/*-claude-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error ]] && pending=$((pending + 1)); done
+    waited=0
+    while :; do
+      for att in "$TMP"/*-claude-r*; do
+        [[ -f "$att/id" && "$(cat "$att/status")" != error ]] || continue
+        id="$(cat "$att/id")"; [[ -z "${SEEN[$id]:-}" ]] || continue
+        if ! studio_get "$id"; then unreachable="agent-studio fora do ar"; break; fi
+        case "$STUDIO_CODE" in
+          200) grep -q "data-resumo-sessao=\"$id\"" "$TMP/studio.body" && grep -q 'data-agents="[^"]*claude' "$TMP/studio.body" \
+                 && SEEN[$id]=1 ;;
+          404) ;;
+          *) unreachable="agent-studio respondeu HTTP $STUDIO_CODE"; break ;;
+        esac
+      done
+      [[ -z "$unreachable" ]] || break
+      left=0; for att in "$TMP"/*-claude-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error && -z "${SEEN[$(cat "$att/id")]:-}" ]] && left=1; done
+      [[ $left = 1 && $waited -lt $STUDIO_WAIT ]] || break
+      sleep "$STUDIO_STEP"; waited=$((waited + STUDIO_STEP))
+    done
+    if [[ -n "$unreachable" ]]; then
+      VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="$unreachable"
+    elif [[ $pending = 0 ]]; then
+      VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="nenhuma conversa do claude para procurar"
+    else
+      sfail=0; sok=0
+      for ((r = 1; r <= ROUNDS; r++)); do
+        miss=0; any=0
+        for att in "$TMP"/*-claude-r$r; do
+          [[ -f "$att/id" && "$(cat "$att/status")" != error ]] || continue
+          any=1; [[ -n "${SEEN[$(cat "$att/id")]:-}" ]] || miss=1
+        done
+        [[ $any = 0 ]] || { (( miss )) && sfail=$((sfail + 1)) || sok=$((sok + 1)); }
+      done
+      VERDICT[$STUDIO_KEY]="$(verdict "$sfail" "$((sfail + sok))")"
+      DETAIL[$STUDIO_KEY]="$sok/$((sfail + sok)) rodada(s) com todas as conversas no agent-studio"
+    fi
+  fi
+  KEYS+=("$STUDIO_KEY")
+fi
+
+# --- relato
+image="${OUTE_VERSION:-desconhecida}"
+cli_ver() { local v; v="$("$1" --version 2>/dev/null | head -n1 | grep -o '[0-9][0-9A-Za-z._+-]*' | head -n1)"; echo "${v:-desconhecida}"; }
+CLAUDE_VER="$(cli_ver claude)"; CODEX_VER="desconhecida"; command -v codex >/dev/null && CODEX_VER="$(cli_ver codex)"
+red=0; green=0; unver=0; tasks_csv=""
+for k in "${KEYS[@]}"; do
+  case "${VERDICT[$k]}" in vermelho) red=$((red + 1)) ;; verde) green=$((green + 1)) ;; *) unver=$((unver + 1)) ;; esac
+  tasks_csv+="${tasks_csv:+,}$k=${VERDICT[$k]}"
+done
+RESULT=verde; (( red == 0 )) || RESULT=vermelho
+{
+  printf 'oute-regression %s · imagem %s · claude %s (%s) · %s rodada(s)\n' "$RUN_ID" "$image" "$CLAUDE_VER" "$MODEL" "$ROUNDS"
+  for k in "${KEYS[@]}"; do printf '  %-16s %-15s %s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}"; done
+  printf 'resultado: %s (%d verde, %d vermelho, %d não verificado) · custo equivalente na API: US$ %s\n' \
+    "$RESULT" "$green" "$red" "$unver" "$total_cost"
+} >&2
+if [[ $JSON = 1 ]]; then
+  jq -n --arg run "$RUN_ID" --arg image "$image" --arg claude "$CLAUDE_VER" --arg codex "$CODEX_VER" --arg model "$MODEL" \
+    --argjson rounds "$ROUNDS" --arg result "$RESULT" --argjson cost "$total_cost" --arg tasks "$tasks_csv" \
+    '{run:$run, image:$image, claude:$claude, codex:$codex, model:$model, rounds:$rounds, result:$result, cost_usd:$cost,
+      tasks:($tasks | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries)}'
+fi
+
+# --- o evento da rodada (best-effort: o oute-emit nunca falha nem leva texto de prompt ou de resposta)
+if [[ -n "$REAL_EMIT" ]]; then
+  "$REAL_EMIT" regression "run=$RUN_ID" "image=$image" "claude=$CLAUDE_VER" "codex=$CODEX_VER" "rounds=$ROUNDS" \
+    "result=$RESULT" "green=$green" "red=$red" "unverified=$unver" "cost=$total_cost" "tasks=$tasks_csv" \
+    "agent=${OUTE_REGRESSION_AGENT:-human}" >/dev/null 2>&1 || true
+else
+  warn "sem oute-emit no PATH: o evento oute.regression.run não foi enviado"
+fi
+
+[[ $RESULT = verde ]] || exit 1
+exit 0

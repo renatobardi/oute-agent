@@ -29,7 +29,7 @@ if yolo:
     cfg["approval_policy"] = "never"
 else:
     cfg.pop("approval_policy", None)
-# #13/#19: logs + traces -> otel-collector (conteúdo só no bucket; Langfuse recebe metadados)
+# #13/#19: logs + traces -> otel-collector (conteúdo completo no bucket e no agent-studio)
 cfg["otel"] = {
     "environment": env,
     "log_user_prompt": True,

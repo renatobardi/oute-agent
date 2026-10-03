@@ -27,7 +27,6 @@ otelcol_env
 export AGENT_STUDIO_INGEST_TOKEN="$TOKEN" AGENT_STUDIO_URL=http://agent-studio:8430
 C="$ROOT/config/otel"; CFG="$C/collector.yaml"; STUDIO="$C/agent-studio.yaml"
 check "validate collector + none + agent-studio"        "$OTELCOL" validate --config="$CFG" --config="$C/none.yaml" --config="$STUDIO"
-check "validate collector + langfuse + agent-studio"    "$OTELCOL" validate --config="$CFG" --config="$C/langfuse.yaml" --config="$STUDIO"
 P="$(otelcol_print --config="$CFG" --config="$C/none.yaml" --config="$STUDIO")"
 for x in traces:314572800 metrics:104857600 logs:629145600; do
   s="${x%%:*}"; q="${x#*:}"; e="otlp_http/studio_$s"

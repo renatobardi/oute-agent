@@ -74,7 +74,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
                                     confiança do Jev e reserva (reserve), sem abrir sessão; --text-file: o texto da tarefa para o Jev
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
-  oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal
+  oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal; pula as em uso (#374; --force-in-use só a pedido do Bardi)
                                     dos repos com worktree nele (sem --yes: só mostra)
     --space <nome> | --all          limpa outro space | todos os spaces e o formato antigo
   Formato antigo (/workspace/.worktrees/<repo>-<slug>, antes da #277): reabre e aparece no list, sem migração;
@@ -146,10 +146,24 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Saída: 0 leitura feita (mesmo com unknown), 1 todos os agentes lidos ficaram unknown, 2 uso. A fonte da reserva
   por cota do ADR-02 (#258).
 
+## CONTAINER — regressão dos agentes (oute-regression, #366)
+  oute-regression [--rounds N] [--codex] [--task <nome>]… [--json]
+                                    nível 1 de regressão: tarefas headless do claude em Haiku (a tabela do seletor, fase ops),
+                                    cada uma num diretório descartável, com oute-propose/oute-inbox/sudo/ssh trocados por
+                                    dublês (nada chega ao canal de aprovação nem ao host). Tarefas: root (propõe com --root,
+                                    não chama sudo), select (oute-select igual ao direto), worktree (escrita cai na worktree),
+                                    emit (oute-emit do Bash tool entrega ou vai ao spool) e studio (a conversa chegou ao
+                                    agent-studio com o oute.task.id do teste; sem AGENT_STUDIO_URL/AGENT_STUDIO_READ_TOKEN:
+                                    não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
+  --rounds N (padrão 3): a tarefa só é vermelha se falhar em mais de uma rodada. --codex: roda também a tarefa root com
+  `codex exec` (sem a flag o Codex não é chamado). Com `oute-quota` e qualquer janela >= 60%, não começa (aviso).
+  Ao fim emite oute.regression.run (imagem, CLIs, rodadas, verde/vermelho por tarefa, custo) pelo oute-emit, sem texto de
+  prompt nem de resposta. Rode depois de uma release com mudança de imagem ou de um upgrade dos CLIs (~2 min, centavos de
+  dólar por rodada). Nunca em CI e nunca bloqueia merge. Saída: 0 verde, 1 alguma tarefa vermelha, 2 não rodou.
+
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
-  oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host; nada ao
-  Langfuse. A saída do script executado no host nunca vai.
+  oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host. A saída do script executado no host nunca vai.
   O oute-swarm, o oute-propose, o oute-task e o oute approve chamam sozinhos; falha nunca muda o comando.
   Endpoint e origem: OTEL_* do ambiente; sem elas (o shell do Bash tool do Claude Code não as
   herda), do ~/.oute_env, só lido (variável com valor no ambiente vence, uma a uma).

@@ -157,6 +157,10 @@ services:
       PYTHONPATH: /opt/agent-studio/app
       # config (#203: preços do custo estimado; #204: hosts e limites), montada só leitura logo abaixo
       AGENT_STUDIO_CONFIG: /etc/oute/agent-studio/config.toml
+      # conferência diária dos preços (#339, ADR-08): única chamada do agent-studio à internet, `GET https://` sem
+      # credencial a models.dev e OpenRouter (duas URLs fixas no código). A tabela do seletor lista os modelos a conferir.
+      AGENT_STUDIO_PRICE_CHECK: "1"
+      AGENT_STUDIO_SELECT_TABLE: /etc/oute/select/models.toml
       # estado derivado (#187): o SurrealDB pela rede studio (#256); os dois bancos juntos ou nenhum (503)
       AGENT_STUDIO_SURREAL_URL: http://surrealdb:8000
       AGENT_STUDIO_SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
@@ -176,6 +180,8 @@ services:
       - oute-agent-studio:/data/agent-studio
       # pasta, não arquivo: o `git pull` troca o arquivo e o `oute down/up` pega o novo, sem release
       - ./config/agent-studio:/etc/oute/agent-studio:ro
+      # tabela do seletor (ADR-02), só leitura: os modelos que a conferência de preços (#339) sempre confere
+      - ./config/select:/etc/oute/select:ro
     healthcheck:
       test: ["CMD", "/opt/agent-studio/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8430/healthz', timeout=3)"]
       interval: 30s
@@ -228,7 +234,6 @@ services:
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:
       - --config=/etc/otelcol/collector.yaml
-      - --config=/etc/otelcol/${OUTE_OTEL_LANGFUSE:-none}.yaml
       # agent-studio (#189, #190): o `oute up` põe agent-studio quando há o token (rede docker no host que o roda, vhost
       # da tailnet nos outros); sem o token, none
       - --config=/etc/otelcol/${OUTE_OTEL_STUDIO:-none}.yaml
@@ -245,8 +250,6 @@ services:
       # when_required = só calcula checksum quando a operação exige (comportamento antigo, compatível com S3-compat).
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
-      OUTE_LANGFUSE_AUTH: ${OUTE_LANGFUSE_AUTH:-}
       # credencial de ingestão do agent-studio (item agent-studio da pasta oute-services do vault, #256), só com o
       # pipeline do agent-studio ligado
       AGENT_STUDIO_INGEST_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}

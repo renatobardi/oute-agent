@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Preços · agent-studio{% endblock %}
+{% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
+{% block main %}
+<h1>Preços</h1>
+<p class="nota">Preço de cada modelo, em {{ unit }}, que estima o custo das chamadas sem custo real. Vale o preço da hora do
+  fato. Esta tela só mostra: a conferência diária (models.dev e OpenRouter) troca o preço, e para travar um modelo
+  vale <code>fixed = true</code> no <code>config.toml</code>.</p>
+{% if models %}
+{% for m in models %}
+<section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}">
+  <h2>{{ m.model }}{% if m.fixed %} <span class="etiqueta" data-fixo>fixo no config.toml</span>{% endif %}</h2>
+  <table class="precos">
+    <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde (UTC)</th><th>Última conferência</th></tr></thead>
+    <tbody>
+    <tr data-vigente data-origin="{{ m.current.origin }}" data-since="{{ m.current.since }}">
+      <td>agora</td>{{ cells(m.current) }}<td>{{ m.current.origin }}</td><td class="hora">{{ m.current.since|when }}</td>
+      <td>{% if m.last_check %}{{ m.last_check.status }} · {{ m.last_check.at|when }}{% else %}—{% endif %}</td>
+    </tr>
+    </tbody>
+  </table>
+  <table class="precos historico">
+    <thead><tr><th>Histórico (data)</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th></tr></thead>
+    <tbody>
+    {% for h in m.history %}
+    <tr data-historico data-origin="{{ h.origin }}" data-since="{{ h.since }}"><td class="hora">{{ h.since|when }}</td>{{ cells(h) }}<td>{{ h.origin }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+{% else %}
+<p class="aviso" id="sem-precos">Nenhum preço no histórico.</p>
+{% endif %}
+
+<h2>Fontes</h2>
+<table class="precos fontes">
+  <thead><tr><th>Fonte</th><th>Última conferência (UTC)</th><th>Resultado</th><th>Último sucesso (UTC)</th></tr></thead>
+  <tbody>
+  {% for s in sources %}
+  <tr data-fonte="{{ s.source }}"><td>{{ s.source }}</td><td class="hora">{{ s.last_run|when }}</td>
+    <td>{% if s.last_run is none %}ainda não conferiu{% elif s.ok %}ok{% else %}falhou{% if s.reason %}: {{ s.reason }}{% endif %}{% endif %}</td>
+    <td class="hora">{{ s.last_ok|when }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

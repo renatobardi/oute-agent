@@ -38,8 +38,8 @@ run "counts() { printf 'a\nb\nc\n' | otelcol_tally '$TMP/aceitos.txt'; }; wait_a
 check "wait_all: tudo entregue, devolve 0"             has_line "rc=0"
 
 # ---------------------------------------------------------------- 3. ambiente e config do teste
-run 'OCI_S3_ENDPOINT=de-fora; otelcol_env; echo "$OUTE_HOST $OUTE_INSTANCE $LANGFUSE_HOST"; echo "s3=$OCI_S3_ENDPOINT"'
-check "otelcol_env: origem de teste e Langfuse inválido" has_line "oute-test oute-agent https://langfuse.invalid"
+run 'OCI_S3_ENDPOINT=de-fora; otelcol_env; echo "$OUTE_HOST $OUTE_INSTANCE"; echo "s3=$OCI_S3_ENDPOINT"'
+check "otelcol_env: origem de teste" has_line "oute-test oute-agent"
 check "otelcol_env: S3 em 127.0.0.1, nunca o do ambiente" has '^s3=[a-z]*://127\.0\.0\.1:[0-9][0-9]*$'
 run 'HTTP=1 GRPC=2 HC=3; otelcol_test_yaml'
 check "otelcol_test_yaml: health check, fila e receiver locais" bash -c 'grep -qxF "  health_check: {endpoint: 127.0.0.1:3}" <<<"$1" &&

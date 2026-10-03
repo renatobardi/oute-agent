@@ -34,7 +34,7 @@ rede oute: 172.19.0.0/16, gateway 172.19.0.1 (= host visto do container)
 volume-init    one-shot (root)          chown dos volumes para 10001 quando preciso
 agent          herdr + sshd + CLIs      172.19.0.5 · :2222 (ssh, bind 127.0.0.1)   vols: workspace, home, shared · secret: agent_env
 ai-memory      akitaonrails/ai-memory   :49374 (interno)              vol: oute-memory
-otel-collector                          (interno)                     → bucket oute-observability + Langfuse (ADR-04)
+otel-collector                          (interno)                     → bucket oute-observability + agent-studio (ADR-04, ADR-08)
 agent-studio   só no oute-server        :8430 (bind 127.0.0.1)        redes oute + studio (ADR-08)
 rede studio (interna): só agent-studio + surrealdb; o agent não está nela (#256)
 ```
@@ -133,7 +133,7 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
 - **Regra para segredo novo:** a pergunta é "o agente usa?". Se só um serviço usa, ou se o valor dá **escrita** em algo que o Bardi lê para decidir, vai na pasta `oute-services`. Na dúvida, `oute-services`. A separação mora no vault: nome que existe na pasta `oute-services` nunca entra no `agent.env`, mesmo repetido na `oute-agent`, sem depender de lista no código.
 - **Rede de segurança no código:** os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` antigo) saem do `agent.env` em todo `oute up`, com aviso que diz só os nomes, inclusive do `agent.env` em cache gravado por versão antiga (sem abrir o vault). O valor vai para o `services.env` quando ele ainda não tem o nome. Sem a pasta `oute-services` (transição), o `oute up` sobe assim e avisa.
 - **agent-studio:** duas credenciais, ingestão (serviço) e leitura (agente); ADR-08 §6. O `surrealdb` sai da rede `oute` para a rede `studio`, só com o agent-studio.
-- **Resíduo aceito:** `OCI_S3_*` segue nas duas pontas (o agente usa o bucket e o collector grava nele); `LANGFUSE_*` sai com a #160; allowlist de variáveis por agente é a #58. `services.env` em texto (0600) no host e nos backups, como o `agent.env`.
+- **Resíduo aceito:** `OCI_S3_*` segue nas duas pontas (o agente usa o bucket e o collector grava nele); `LANGFUSE_*` saiu do compose e do `scripts/oute` em 2026-10-03 (#160); allowlist de variáveis por agente é a #58. `services.env` em texto (0600) no host e nos backups, como o `agent.env`.
 
 ## Adendo 2026-10-03 — SonarCloud só leitura para os agentes (#226)
 - **Problema:** o projeto no SonarCloud é privado e o agente não via o motivo de um gate reprovado (#197, #199, #192): o Bardi colava o achado na sessão.

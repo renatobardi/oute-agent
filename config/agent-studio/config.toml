@@ -9,8 +9,19 @@
 #   cache_read     = entrada lida do cache       cache_creation = escrita no cache
 # `input` e `output` são obrigatórios; cache ausente = preço de `input` (estima para cima, nunca de graça).
 # O nome é o modelo do span (sem diferenciar maiúsculas; `openai/gpt-5` também acha `gpt-5`).
-# Modelo sem entrada = sem custo estimado (nunca zero): o `/v1/usage` lista esses modelos em `unpriced_models`;
-# é a deixa para acrescentar o preço aqui.
+# Modelo sem entrada aqui e sem preço no histórico = sem custo estimado (nunca zero): o `/v1/usage` lista esses
+# modelos em `unpriced_models`.
+#
+# Papel deste arquivo (#339): **semente e trava manual**. O preço vigente mora no histórico do banco do studio
+# (`GET /v1/prices`), e uma conferência diária (e uma na subida) o compara com models.dev e OpenRouter: quando as
+# duas fontes concordam num valor novo, o histórico ganha uma linha com a hora da troca e o estimado passa a usar o
+# preço novo para as chamadas dali em diante (a chamada antiga mantém o preço da época). Por isso:
+#   - modelo novo aqui entra no histórico na próxima subida (a semente), e só nessa;
+#   - editar o preço de um modelo que já tem histórico NÃO o muda: quem manda é o histórico (e a fonte);
+#   - `fixed = true` na entrada trava o modelo: a fonte nunca o troca (a diferença só gera o alerta "preço fixo
+#     difere da fonte") e o preço deste arquivo vale sempre (editar acrescenta uma linha de origem `config`).
+# Modelos conferidos: os da tabela do seletor (`config/select/models.toml`) e todo modelo com chamada nos últimos
+# 30 dias.
 # Fonte dos `gpt-5*`: preços de lista da OpenAI (API, tier padrão). A reserva do ADR-02 (`gpt-6-*`) vem logo depois
 # do bloco do Codex abaixo; o modelo que não estiver aqui continua em `unpriced_models`, nunca como zero.
 
