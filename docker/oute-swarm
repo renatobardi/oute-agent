@@ -119,7 +119,7 @@ cmd_start() {
 
 cmd_spawn() {
   local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
-  local model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin
+  local model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -169,7 +169,7 @@ cmd_spawn() {
     [[ -z "$model" ]] || sargs+=(--model "$model")
     sel="$(printf '%s' "$instr" | oute-select --json --repo "$main" --issue "$n" --text-file - ${sargs[@]+"${sargs[@]}"})" || src=$?
     (( src != 2 )) || die "seletor recusou a sessão $slug (acima)"
-    IFS='|' read -r s_agent s_model s_effort s_phase s_origin < <(jq -r '[.agent, .model, .effort, .phase, .origin] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
+    IFS='|' read -r s_agent s_model s_effort s_phase s_origin s_reserve < <(jq -r '[.agent, .model, .effort, .phase, .origin, .reserve] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
     if (( src != 0 )) || [[ ! "${s_agent:-}" =~ ^(claude|codex)$ ]]; then
       echo "oute-swarm: aviso: o seletor de modelo não respondeu; $slug abre com o modelo padrão do agente" >&2; sel=""
     else agent="$s_agent"; fi
@@ -227,7 +227,7 @@ cmd_spawn() {
     "$( (( kaizen )) && echo kaizen || echo -)" >> "$state/spawned"
   slog "$state" "$(date -u +%FT%TZ) spawn $slug $agent$( (( kaizen )) && echo ' kaizen')"
   quota_snapshot spawn
-  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
+  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$([[ ! "${s_reserve:-}" =~ ^(indisponivel|cota)$ ]] || printf ' · reserva: %s' "$s_reserve")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
 # id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)

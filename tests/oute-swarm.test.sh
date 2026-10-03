@@ -88,6 +88,9 @@ chmod +x "$BIN"/*
 # depender de haver um oute-select no PATH de quem roda o teste). Issue sem $FAKE/labels-<n> = o gh não acha a issue:
 # a sessão abre no padrão (Sonnet), com aviso em stderr
 ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
+# `claude`/`codex` falsos (#258): o oute-select checa `claude auth status` para a reserva; sem eles, o resultado dependeria
+# do claude de quem roda o teste
+cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"; cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/codex"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
@@ -824,6 +827,20 @@ MAX=5 sw spawn 11-ruim "instrução" --model 'x y'
 check "--model inválido: código != 0, com o motivo"      bash -c '[ "$1" -ne 0 ] && grep -qF "oute-select: modelo inválido: x y" <<<"$2" && grep -qF "seletor recusou a sessão 11-ruim" <<<"$2"' _ "$RC" "$ERR"
 check "--model inválido: nada registrado nem aberto"     [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs" ]
 rcv_stop
+
+# 11b2. reserva no Codex (#258): com o claude indisponível, o spawn grava e abre o agente que de fato abre
+CASE=seletor-reserva; round "$CASE"
+labels 8 aidlc:build; labels 9 aidlc:build
+export FAKE_CLAUDE_AUTH_RC=1
+MAX=5 sw spawn 8-rsv "instrução"
+check "reserva: código 0, escolha do Codex com reserve"  [ "$RC" -eq 0 -a "$(sel 8-rsv agent) $(sel 8-rsv model) $(sel 8-rsv effort) $(sel 8-rsv reserve)" == "codex gpt-6.1-sol high indisponivel" ]
+check "reserva: spawned e log com codex"                 bash -c '[ "$(awk "\$1 == \"8-rsv\" {print \$3}" "$1")" == codex ] && grep -q " spawn 8-rsv codex$" "$2"' _ "$STATE/spawned" "$STATE/log"
+check "reserva: oute-task recebe o codex e a escolha"    grep -qF -- "OUTE_SELECT_FILE=$STATE/8-rsv.select oute-task -r $REPO 8-rsv codex " <<<"$(cmd 8-rsv)"
+check "reserva: a linha aberta: mostra a reserva"        [ "$OUT" == "aberta: #8 → pane w1:p2 · worktree repo-8-rsv · agente codex · modelo gpt-6.1-sol (fase build, label) · reserva: indisponivel" ]
+MAX=5 sw spawn 9-exp "instrução" --agent claude
+check "reserva: --agent claude explícito não cai na reserva" [ "$RC" -eq 0 -a "$(sel 9-exp agent) $(sel 9-exp reserve)" == "claude " -a "$(sp_agent swarm-test 9-exp)" == claude ]
+check "reserva: --agent claude, só aviso e sem 'reserva:' na saída" bash -c 'grep -qF "explícita" <<<"$1" && ! grep -qF "reserva:" <<<"$2"' _ "$ERR" "$OUT"
+unset FAKE_CLAUDE_AUTH_RC
 
 # 11c. rodada com --agent (workers=codex): escolha explícita da rodada; o modelo é o do Codex da fase
 CASE=seletor-rodada; round "$CASE"; echo workers=codex >> "$STATE/meta"

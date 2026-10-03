@@ -628,10 +628,13 @@ TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.
              "phase": "oute.task.phase", "origin": "oute.task.origin", "model": "oute.task.model",
              "effort": "oute.task.effort",
              # confiança do Jev (#257): presente quando ele respondeu, com origem jev ou padrao
-             "confidence": "oute.task.confidence"}
+             "confidence": "oute.task.confidence",
+             # motivo da reserva no Codex (ADR-02, #258): só quando a sessão abriu na reserva
+             "reserve": "oute.task.reserve"}
 TASK_REASONS = ("merged", "empty", "detached")
 TASK_ORIGINS = ("manual", "label", "jev", "padrao")
-SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence")
+TASK_RESERVES = ("indisponivel", "cota")
+SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence", "reserve")
 
 
 def cmd_task(kind, caller, pairs):
@@ -658,6 +661,8 @@ def cmd_task(kind, caller, pairs):
         f.pop("reason", None)
         if "origin" in f and f["origin"] not in TASK_ORIGINS:
             raise Skip(f"origem da escolha inválida: {f['origin']}")
+        if "reserve" in f and f["reserve"] not in TASK_RESERVES:
+            raise Skip(f"motivo da reserva inválido: {f['reserve']}")
         if "confidence" in f:
             if not re.fullmatch(r"0(\.[0-9]+)?|1(\.0+)?", f["confidence"]):
                 raise Skip(f"confiança inválida: {f['confidence']}")

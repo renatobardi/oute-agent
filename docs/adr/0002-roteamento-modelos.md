@@ -1,6 +1,6 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258)
 
 ## Decisão
 O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
@@ -32,10 +32,12 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
 
 ### Reserva (Codex)
 A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
-- **`indisponivel`:** o Claude falha ao abrir (erro, auth);
+- **`indisponivel`:** `claude auth status` sai com código ≠ 0, ou o `claude` não existe (adendo 2026-10-03, #258: ver abaixo);
 - **`cota`:** qualquer janela da assinatura do Claude ≥ 90% (medição na #55).
 
 **Fonte da cota (#55, #346):** o comando `oute-quota [--json]` da imagem (bash + `curl` + `jq`), que lê só por `GET https` o uso das duas assinaturas: Claude em `api.anthropic.com/api/oauth/usage`, Codex em `chatgpt.com/backend-api/wham/usage`, com o token que já está no arquivo de credencial do agente (`~/.claude/.credentials.json`, `~/.codex/auth.json`). **Nunca escreve nem renova a credencial:** o refresh token do Claude rotaciona (medido no spike), então quem renovasse invalidaria o do `claude`; token expirado vira `unknown` (`token-expirado`) até o próprio agente renovar. Janelas `5h` e `7d`, `used_pct` de 0 a 100; cache de 120 s (o endpoint do Claude dá 429 em rajada) e, com 429, rede ou timeout, o cache de até 30 min volta com `stale:true`. O seletor (#258) consome o `--json` e aplica a regra; o `oute-quota` só lê.
+
+**`indisponivel`, como foi implementado (fatia 3a, #258):** a checagem mora no `oute-select`, o resolvedor único do `oute-task` e do `spawn`. Sem `--agent`, `--model` nem `--phase`, quando a sessão abriria no Claude, ele roda `claude auth status` (saída descartada, teto de 5 s): código ≠ 0 ou `claude` ausente → `agent: codex`, modelo e esforço da mesma linha, e o campo novo `reserve: "indisponivel"` (senão `""`; o nome evita "fallback", do glossário). "Falha ao abrir" saiu do gatilho: o `oute-task` faz `exec` do agente e não vê a falha. O `auth status` que não responde no teto não troca de agente (aviso, abre no Claude). `--agent`/`--model` explícitos e a `--phase` fixa do dispatcher não caem na reserva: só avisam em stderr, com `reserve` vazio (dispatcher no Codex é a #213). Com o Codex também fora (`codex login status` ≠ 0 ou ausente): aviso "Claude e Codex indisponíveis", abre no Claude e o código é 0. O `oute-task` abre `codex -m <id> -c model_reasoning_effort=<e>`, grava o agente na marca (o restore reabre no Codex) e manda `reserve` no `oute.task.opened`/`reopened` (`oute.task.reserve`); o `spawn` grava no `spawned` e no log o agente que de fato abriu. O gatilho `cota` não entra aqui: é a #355, que usa o `oute-quota`.
 
 Cota desconhecida (leitura falhou) não troca de agente: abre no Claude e avisa. Os dois esgotados: aviso claro, nunca bloqueio em silêncio.
 
@@ -84,9 +86,9 @@ Cada escolha vai como atributos do `oute.task.opened` (sem evento novo): fase, o
 Implementação, em fatias (adendo 2026-10-02):
 1. #219: tabela em `config/`, label de tipo e de fase, `oute-select`, padrão Sonnet;
 2. #257: Jev direto na TypeSafe;
-3. #258: reserva no Codex (`indisponivel` e `cota`), depois do `oute-quota` que sai do spike #55.
+3. #258: reserva no Codex pelo gatilho `indisponivel` (fatia 3a); o gatilho `cota` é a #355, depois do `oute-quota` (#346).
 
-Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tabela). Feitos: #217 (Pi) e #218 (router). O seletor sai sem a reserva: só a fatia 3 depende da cota.
+Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tabela). Feitos: #217 (Pi) e #218 (router). O gatilho `indisponivel` não depende da cota; só o `cota` depende.
 
 ## Histórico
 

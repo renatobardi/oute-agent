@@ -9,10 +9,16 @@
   --phase <fase>   fase fixa, sem ler a issue (o dispatcher do swarm abre em `plan`)
   --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase
   --text-file <f>  texto da tarefa (`-` = stdin), para o Jev classificar a fase quando nenhum label a dá
-  --json           {"phase","origin","agent","model","effort","reason","confidence"}; sem ele, uma linha para ler
+  --json           {"phase","origin","agent","model","effort","reason","confidence","reserve"}; sem ele, uma linha para ler
 
 Precedência: --agent/--model > exceção por label (`kaizen`, `docs`) > label `aidlc:<fase>` > Jev > padrão (Sonnet).
 Origem: `manual`, `label`, `jev` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
+
+Reserva (#258): quando a sessão abriria no Claude e ele está indisponível (`claude auth status` ≠ 0 ou `claude` ausente,
+teto de 5 s), abre no Codex, na linha da mesma fase, e `reserve` vale `indisponivel` (senão ""). Não troca de agente
+com --agent/--model ou --phase explícitos (só avisa), nem quando o `auth status` não responde a tempo (aviso, abre no
+Claude). Com o Codex também fora (`codex login status` ≠ 0 ou ausente): aviso "Claude e Codex indisponíveis" e abre no
+Claude. O gatilho de cota é a #355.
 Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/select/ do checkout, só leitura).
 
 Jev (#257): só sem label de fase (sessão sem issue, ou issue sem `aidlc:<fase>`), com texto da tarefa e sem --model.
@@ -53,6 +59,8 @@ JEV_TIMEOUT = 3.0            # teto da chamada inteira, em segundos
 JEV_MIN_CONFIDENCE = 0.6
 JEV_TEXT_MAX = 16000         # caracteres do texto da tarefa que vão ao Jev (limite dele: 32k tokens)
 JEV_REPLY_MAX = 1 << 20
+# Reserva (#258): checagem de disponibilidade dos agentes. $OUTE_SELECT_AGENT_TIMEOUT só encurta (testes), nunca passa de 5 s.
+AUTH_TIMEOUT = 5.0
 JEV_INSTRUCTIONS = "Em que fase do ciclo de entrega de software esta tarefa está?"
 # o que cada fase do ADR-07 faz, para o Jev escolher; fase da tabela sem descrição aqui vai só com o nome
 PHASE_HINTS = {
@@ -260,6 +268,26 @@ def guess_agent(model, default, phases, exceptions):
     return "codex" if model.startswith(("gpt-", "codex")) else "claude"
 
 
+def auth_timeout():
+    try:
+        t = float(os.environ.get("OUTE_SELECT_AGENT_TIMEOUT", ""))
+    except ValueError:
+        return AUTH_TIMEOUT
+    return t if 0 < t <= AUTH_TIMEOUT else AUTH_TIMEOUT
+
+
+def agent_state(cmd):
+    """"ok", "down" (rc ≠ 0, ausente ou sem permissão) ou "slow" (sem resposta no teto); a saída do agente é descartada"""
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=auth_timeout())
+    except subprocess.TimeoutExpired:
+        return "slow"
+    except (OSError, subprocess.SubprocessError):
+        return "down"
+    return "ok" if r.returncode == 0 else "down"
+
+
 def main(argv):
     opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "text-file": ""}
     it = iter(argv)
@@ -315,6 +343,25 @@ def main(argv):
         reason = " ".join(x for x in (agent and f"--agent {agent}", model and f"--model {model}") if x) + f" ({reason})"
     if not agent:
         agent = guess_agent(model, default, phases, exceptions) if model else "claude"
+    # reserva (#258): só quando a sessão abriria no Claude. Escolha explícita (--agent, --model, --phase) só avisa
+    reserve = ""
+    if agent == "claude":
+        explicit = bool(opt["agent"] or model or opt["phase"])
+        cs = agent_state(["claude", "auth", "status"])
+        if cs == "slow":
+            warn(f"o `claude auth status` não respondeu em {auth_timeout():g} s; abrindo no Claude")
+        elif cs == "down" and explicit:
+            warn("o Claude está indisponível (`claude auth status` falhou), mas a escolha foi explícita "
+                 "(--agent, --model ou --phase); abrindo no Claude")
+        elif cs == "down":
+            xs = agent_state(["codex", "login", "status"])
+            if xs == "down":
+                warn("Claude e Codex indisponíveis; abrindo no Claude")
+            else:
+                if xs == "slow":
+                    warn(f"o `codex login status` não respondeu em {auth_timeout():g} s; abrindo no Codex mesmo assim")
+                agent, reserve = "codex", "indisponivel"
+                warn("o Claude está indisponível (`claude auth status` falhou); abrindo no Codex (reserva)")
     # o aviso só interessa quando o padrão escolheu o modelo; sem tabela, o aviso dela já saiu
     if warning and not model and default:
         warn(f"{warning}; abrindo no padrão ({ln[agent]})" if ln is default else warning)
@@ -322,13 +369,14 @@ def main(argv):
         model = ln[agent]
     effort = ln["effort"] if ln and agent == "codex" else ""
     out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason,
-           "confidence": "" if confidence is None else round(confidence, 4)}
+           "confidence": "" if confidence is None else round(confidence, 4), "reserve": reserve}
     if opt["json"]:
         print(json.dumps(out, ensure_ascii=False))
     else:
         print(f"fase {phase or '-'} · origem {origin} · agente {agent} · modelo {model or '-'}"
               f"{' · esforço ' + effort if effort else ''}"
-              f"{' · confiança ' + fmt_conf(confidence) if confidence is not None else ''} · motivo: {reason}")
+              f"{' · confiança ' + fmt_conf(confidence) if confidence is not None else ''}"
+              f"{' · reserva ' + reserve if reserve else ''} · motivo: {reason}")
     return 0
 
 

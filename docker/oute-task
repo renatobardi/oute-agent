@@ -17,6 +17,8 @@
 # Modelo (ADR-02, #219): o oute-select escolhe pela issue do slug (<n>-…): --agent/--model (ou `codex` posicional, ou
 # --model/-m nos args do agente) > label kaizen/docs > label aidlc:<fase> > Jev > Sonnet. Abre com `claude --model <id>`
 # ou `codex -m <id> -c model_reasoning_effort=<e>`; a escolha fica na marca da sessão e vale no restore. Nunca bloqueia.
+# Reserva (#258): com o Claude indisponível, o oute-select devolve o Codex da linha e `reserve=indisponivel`; o agente que abre
+# é o dele (na marca e no evento). --agent/--model e --phase explícitos não caem na reserva.
 # Jev (#257): sem label de fase e com texto da tarefa (o prompt: último argumento do agente, com mais de uma palavra),
 # o oute-select pede a fase ao Jev; sem texto (sessão aberta na mão), Sonnet sem chamar o Jev.
 #
@@ -164,7 +166,7 @@ session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
     fi
   fi
   emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy" \
-    "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF"
+    "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF" "reserve=$S_RESERVE"
   quota_snapshot || true
   mark_env "$id" "$rname" "$slug" "$round" "$sess"
 }
@@ -177,7 +179,7 @@ cmd_mark() {
 }
 
 # ---------------------------------------------------------------- modelo da sessão (ADR-02, #219)
-S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; MARGS=(); SEL_FILE=""
+S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""; MARGS=(); SEL_FILE=""
 # argumentos de modelo do agente, em MARGS: <agente> <modelo> <esforço>; sem modelo, nenhum
 model_args() {
   MARGS=()
@@ -217,8 +219,8 @@ task_text() {
 # abertura: sem oute-select, nada muda; com ele falhando ou devolvendo algo inválido, aviso e o modelo padrão do
 # agente. Só argumento inválido (código 2 do oute-select, que já disse o motivo) sai com erro.
 select_model() {
-  local js="" rc=0 args=() a m e p o c
-  S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""
+  local js="" rc=0 args=() a m e p o c r
+  S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""
   if [[ -n "$SEL_FILE" && -r "$SEL_FILE" ]]; then js="$(cat "$SEL_FILE" 2>/dev/null || true)"
   elif command -v oute-select >/dev/null 2>&1; then
     [[ -z "$3" ]] || args+=(--agent "$3")
@@ -228,7 +230,7 @@ select_model() {
     else js="$(oute-select --json --repo "$1" ${args[@]+"${args[@]}"} </dev/null)" || rc=$?; fi
     (( rc != 2 )) || exit 1
   else return 0; fi
-  IFS='|' read -r a m e p o c < <(jq -r '[.agent, .model, .effort, .phase, .origin, .confidence] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || true
+  IFS='|' read -r a m e p o c r < <(jq -r '[.agent, .model, .effort, .phase, .origin, .confidence, .reserve] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || true
   if (( rc != 0 )) || [[ ! "${a:-}" =~ ^(claude|codex)$ ]]; then
     echo "aviso: o seletor de modelo não respondeu; a sessão abre com o modelo padrão do agente" >&2; return 0
   fi
@@ -238,6 +240,7 @@ select_model() {
   [[ ! "$p" =~ ^[a-z]+$ ]] || S_PHASE="$p"
   [[ ! "$o" =~ ^(manual|label|jev|padrao)$ ]] || S_ORIGIN="$o"
   [[ ! "${c:-}" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] || S_CONF="$c"
+  [[ ! "${r:-}" =~ ^(indisponivel|cota)$ ]] || S_RESERVE="$r"
 }
 cmd_model_args() {   # <agente> [dir]
   local f
@@ -382,7 +385,7 @@ cmd_open() {
 
 O_AGENT=""; O_MODEL=""; O_PHASE=""
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
