@@ -41,6 +41,8 @@ cp "$BIN/claude" "$BIN/codex" "$BIN/gh" "$NOEMIT/"; cp "$BIN/claude" "$NOTASK/"
 # seletor de modelo (#219): o oute-select de verdade, com a tabela do repo, nas seções todas (o resultado não pode
 # depender de haver um oute-select no PATH de quem roda o teste)
 ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"; ln -s "$ROOT/docker/oute-select" "$NOEMIT/oute-select"
+# o gatilho de cota do seletor (#355) lê o oute-quota: o falso (cota folgada), nunca o de verdade
+cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"; cp "$BIN/oute-quota" "$NOEMIT/oute-quota"
 # herdr: `workspace get <id>` responde o label da linha "<id> <label>" de $FAKE/spaces; id desconhecido sai com erro
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
