@@ -91,6 +91,8 @@ ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 # `claude`/`codex` falsos (#258): o oute-select checa `claude auth status` para a reserva; sem eles, o resultado dependeria
 # do claude de quem roda o teste
 cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"; cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/codex"
+# o gatilho de cota do seletor (#355) lê o oute-quota: o falso (cota folgada), nunca o de verdade; a seção 12 troca por um que repassa ao dela
+cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
@@ -1036,6 +1038,8 @@ d="$(dirname "$0")"
 exit "$(cat "$d/rc" 2>/dev/null || echo 0)"
 SH
 chmod +x "$QB/oute-quota"
+# o `sw` põe $BIN na frente do PATH: o oute-quota de $BIN (o falso de cota folgada) passa a repassar ao desta seção
+printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "$QB/oute-quota" > "$BIN/oute-quota"
 R5="$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
 printf '{"schema":1,"agents":{"claude":{"status":"ok","stale":false,"age_s":0,"windows":{"5h":{"used_pct":15,"resets_at":"%s"}}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' "$R5" > "$QB/json"
 # espera (até 10 s) o que o segundo plano ainda vai entregar
@@ -1065,6 +1069,7 @@ FAKE="$FAKE" "$BIN/fake-tabs" "#11 falha=idle"
 sw spawn 11-falha "faça a issue 11"
 check "cota com falha na leitura: spawn abre normalmente" bash -c '[ "$1" -eq 0 ] && grep -q "aberta: #11" <<<"$2"' _ "$RC" "$OUT"
 export PATH="$OLDPATH"
+cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"
 rcv_stop
 
 # 11g. sessão de spike (#100): o pronto é o relatório no comentário final da issue, sem código de produção
