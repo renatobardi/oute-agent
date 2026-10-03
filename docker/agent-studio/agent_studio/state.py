@@ -11,6 +11,7 @@ Tabelas: `rodada` (id = rodada), `worker` (id = [rodada, slug]), `sessao` (id = 
 (id = `oute.canal.id`), `conversa` (id = `session.id`). Ligações por record link: `worker.rodada`,
 `worker.sessao`, `sessao.rodada`, `sessao.worker`, `conversa.sessao`.
 """
+import base64
 from datetime import datetime, timezone
 
 # tabelas e campos são constantes deste módulo; valores vão sempre em variáveis
@@ -28,9 +29,18 @@ def clean(d):
 
 
 def upsert(table, rid, data, times=None, links=None, initial=None):
-    """Statements de um registro: MERGE dos dados, horas como datetime, links e estado inicial."""
-    out = [(UPSERT.format(t=table), {"id": rid, "d": clean(data)})]
-    sets, value = [], {"id": rid, "t": {}, "l": {}, "s": initial}
+    """Statements de um registro: MERGE dos dados, horas como datetime, links e estado inicial.
+
+    Texto não vai no MERGE (#337): o `/rpc` do SurrealDB lê a variável JSON `"ship: verificar deploy"` como record id
+    (`ship:verificar`) e perde o resto, e o mesmo vale para data, uuid etc. O texto segue em base64 e é decodificado
+    no próprio SurrealDB (`<string>`), que o guarda como string, inteiro."""
+    data = clean(data)
+    texts = {k: v for k, v in data.items() if isinstance(v, str)}
+    out = [(UPSERT.format(t=table), {"id": rid, "d": {k: v for k, v in data.items() if k not in texts}})]
+    sets, value = [], {"id": rid, "t": {}, "l": {}, "s": initial, "b": {}}
+    for k, text in texts.items():
+        sets.append(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)")
+        value["b"][k] = base64.b64encode(text.encode()).decode()
     for k, ns in (times or {}).items():
         if ns:
             sets.append(f"{k} = <datetime> $v.t.{k}")
