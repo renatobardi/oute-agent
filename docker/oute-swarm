@@ -512,7 +512,7 @@ w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
 
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
-  local gh_ok=1 oid old cur k pend
+  local gh_ok=1 oid old cur k pend seen
   local -A prst=() prrepo=()
   W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
@@ -538,17 +538,22 @@ w_snapshot() {
   all=""
   while read -r repo; do
     [[ -n "$repo" ]] || continue
-    ns="$(awk -v m="$main" -v r="$repo" '($6 == "" ? m : $6) == r {split($1, a, "-"); print a[1]}' "$state/spawned" \
+    # só sessão ainda aberta (#419): PR de issue com o mesmo número em outra rodada não entra; o PR que o watch já viu
+    # (pr|<num>|… no retrato anterior) segue acompanhado depois do close, até o merge
+    ns="$(awk -v m="$main" -v r="$repo" -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1}
+          ($6 == "" ? m : $6) == r && !($1 in c) {split($1, a, "-"); print a[1]}' "$state/spawned" \
           | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
+    seen="$(for k in "${!W_PREV[@]}"; do [[ "$k" == "pr|"* ]] || continue; k="${k#pr|}"; echo "${k%%|*}"; done \
+            | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
     if res="$(cd "$repo" && gh pr list --state all --limit 100 --json number,headRefName,headRefOid,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
-       && res="$(jq -r --arg since "$since" --argjson ns "$ns" --arg pf "$(w_pfx "$repo" "$main")" '
+       && res="$(jq -r --arg since "$since" --argjson ns "$ns" --argjson seen "$seen" --arg pf "$(w_pfx "$repo" "$main")" '
           def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
                  | if test("^(SUCCESS|NEUTRAL|SKIPPED)$") then "pass"
                    elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail"
                    else "pending" end;
           .[] | select((.createdAt // "") >= $since) | . as $p
           | ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) as $n
-          | select(any($ns[]; . == $n))
+          | select(any($ns[]; . == $n) or any($seen[]; . == "\($pf)\($p.number)"))
           | "pr\t\($pf)\($p.number)\t\($pf)\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)\t\($p.headRefOid // "")",
             ([$p.statusCheckRollup[]? | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")),
                                            t: (.completedAt // .startedAt // ""), r: r}]
