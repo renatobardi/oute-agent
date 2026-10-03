@@ -42,7 +42,7 @@ When a spec lists a criterion that **asserts the behavior of existing code or an
 **Evidence goes in the spec**: a line reference (e.g., `docker/codex_config.py:26`), a `--help` snippet, or a link to the ADR that contradicts it.
 
 <criterion-verification-example>
-**Example from #365 (kaizen):** The spec criterion stated that `OUTE_AGENT_YOLO=0` would prevent `sandbox_mode` from being set to `"danger-full-access"`. Reading `docker/codex_config.py:26` shows that `sandbox_mode` is **always** set to that value, regardless of the YOLO flag (line 28–31 only control `approval_policy`, not `sandbox_mode`). **False criterion detected.** The PR #372 removed the claim from the spec and declared the divergence in `## Falta`, citing the code line as evidence.
+**Example from #365:** The spec criterion stated that `OUTE_AGENT_YOLO=0` would prevent `sandbox_mode` from being set to `"danger-full-access"`. Reading `docker/codex_config.py:26` shows that `sandbox_mode` is **always** set to that value, regardless of the YOLO flag (line 28–31 only control `approval_policy`, not `sandbox_mode`). **False criterion detected.** Without this check, the criterion would have passed to the gate despite contradicting the code. The correct response: remove or reword the criterion before the gate, or turn it into a question for the Bardi, citing line 26 as evidence.
 
 **How to avoid this:** before committing the spec, spot-check assertions about existing behavior. Even a 30-second skim of the relevant file or CLI output catches most cases.
 </criterion-verification-example>
