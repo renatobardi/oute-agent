@@ -427,6 +427,27 @@ check "watch --round: sai com 0"                         [ "$RC" -eq 0 ]
 check "watch --round: ganha da worktree"                 grep -q 'oute-swarm watch: rodada swarm-nova ' <<<"$ERR"
 check "watch --round: sem aviso"                         bash -c '! grep -q assumindo' _ <<<"$ERR"
 
+# ---------------------------------------------------------------- #407: close registra a baixa antes de escrever
+# quando a saída é cortada por | head -1 (SIGPIPE), mark_closed tem que ter rodado antes do echo
+CASE=close407; round "$CASE"
+# abrir 3 abas (max=3): já tem uma (7-foo), faltam 2
+sw spawn 8-baz "instrução"
+check "407: primeira aba aberta"                         [ "$RC" -eq 0 ]
+sw spawn 9-qux "instrução"
+check "407: segunda aba aberta"                          [ "$RC" -eq 0 ]
+# agora temos 3 abas abertas (7-foo, 8-baz, 9-qux), total 3; o limit é 3
+check "407: max atingido"                                [ "$(grep -c '^' "$STATE/spawned")" -eq 3 ]
+# simular close com | head -1 (SIGPIPE cortando a saída) — não usar sw() porque captura tudo
+env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
+  OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX=3 \
+  "$SWARM" close 8-baz --yes 2>/dev/null | head -1 >/dev/null
+# verificar que a baixa foi registrada mesmo com pipe cortando a saída
+check "407: close com | head -1 registra a baixa"       grep -qxF '8-baz' "$STATE/closed"
+# tentar spawn novo — deve funcionar porque a vaga foi liberada
+MAX=3 sw spawn 10-test "instrução"
+check "407: novo spawn passa (vaga liberada)"           [ "$RC" -eq 0 ]
+check "407: spawned tem 7-foo, 9-qux e 10-test"         [ "$(awk 'NR <= 1 || $1 ~ /(7-foo|9-qux|10-test)/ { print $1 }' "$STATE/spawned" | grep -c .)" -eq 3 ]
+
 # ---------------------------------------------------------------- #266: falha de CI em head já substituído
 # fake-pr <sha do head> [<estado>] [<checks do head, JSON>]: PR #12 da issue #7 no repo da rodada (usável nos ganchos)
 cat > "$BIN/fake-pr" <<'SH'
@@ -976,6 +997,9 @@ check "sem PR: aplicar e comentar o resultado só depois do ok (#115)" grep -qF 
 check "sem PR: done sem PR não é alerta para esse tipo (#115)" grep -qF 'para a issue com `só GitHub` na tabela da triagem, `done` sem PR não é alerta: é o esperado.' "$FAKE/oute-task.last"
 check "sem PR: o alerta continua para issue que deveria gerar PR (#115)" grep -qF 'O alerta `idle`/`done` sem PR continua valendo para a issue que deveria gerar PR (`PR` na tabela).' "$FAKE/oute-task.last"
 check "sem PR: o alerta geral do monitor fica como estava (#115)" grep -qF 'uma sessão ficar `blocked` ou `idle`/`done` sem PR; um PR abrir;' "$FAKE/oute-task.last"
+check "done sem PR: antes de avisar, confira o branch da sessão (#403)" grep -qF '**Antes de avisar uma sessão `idle`/`done` sem PR**, confira o branch da sessão (releia `git log` na worktree dela, `gh pr list --head <branch>` no repo da issue) e aguarde o próximo evento do `oute-swarm watch`' "$FAKE/oute-task.last"
+check "done sem PR: só avise se sem commit novo nem PR (#403)" grep -qF 'só avise o Bardi se não houver commit novo nem PR aberto nesse ínterim e a sessão continuar parada' "$FAKE/oute-task.last"
+check "done sem PR: fica no §3, antes de avisar o Bardi (#403)" bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -q "\*\*Antes de avisar uma sessão.*Avise o Bardi quando:"' _ "$FAKE/oute-task.last"
 check "sem PR: ok do Bardi por opção numerada, repassado por tell (#115)" grep -qF 'Só com a escolha dele repasse o ok à sessão com `oute-swarm tell`.' "$FAKE/oute-task.last"
 check "sem PR: conferência com gh, só leitura, no lugar da auditoria (#115)" grep -qF '**Conferência, no lugar da auditoria do PR:** com a sessão parada no `PRONTO #<n>: … — sem PR`, confira o critério de aceite da issue com `gh`, só leitura' "$FAKE/oute-task.last"
 check "sem PR: dispatcher não aplica nem corrige no GitHub (#115)" grep -qF 'Você não aplica nem corrige nada no GitHub' "$FAKE/oute-task.last"
@@ -1185,5 +1209,17 @@ check "dispatcher: chama ask ao parar com opções numeradas (#386)" grep -qF 't
 check "dispatcher: ask com pergunta curta, sem saída de host (#386)" grep -qF 'nunca saída de comando, de host ou de tela' "$D"
 check "dispatcher: answered ao receber a resposta (#386)" grep -qF 'o primeiro passo é `oute-swarm answered`' "$D"
 check "ajuda e comandos.md citam ask e answered (#386)"   bash -c 'for f in "$@"; do grep -qF "oute-swarm ask" "$f" && grep -qF "oute-swarm answered" "$f" || exit 1; done' _ "$SWARM" "$ROOT/docker/comandos.md"
+
+# 11j. regra de check-lib quando altera testes (#401): rodar check-lib e dizer no corpo do PR
+CASE=check-lib; round "$CASE"
+sw spawn 401-checklib "instrução"
+P="$STATE/401-checklib.prompt"
+check "worker check-lib: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker check-lib: regra sobre check-lib (#401)"     grep -qF -- '**Quando o PR altera `tests/*.test.sh` ou `tests/lib/`**' "$P"
+check "worker check-lib: roda check-lib nos dois ambientes (#401)" grep -qF 'rode também `bash tests/check-lib.test.sh` (no ambiente da sessão e no limpo)' "$P"
+check "worker check-lib: diz no corpo do PR (#401)"        grep -qF 'Diga no corpo do PR que rodou' "$P"
+check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'Falha ali é falha do PR' "$P"
+check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
+check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
 check_end
