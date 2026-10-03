@@ -7,6 +7,8 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector); nada ao Langfuse.
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                      sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session;
                                      escolha do seletor (#219): phase, origin, model, effort
+  oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366): run, image, claude, codex,
+                                     rounds, result, green, red, unverified, cost, tasks, agent (quem causou)
   oute-emit quota <spawn|close|open> snapshot da cota das assinaturas (#347): lê `oute-quota --json` (teto de 8 s) e manda
                                      oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
                                      /v1/metrics) e, para agente sem leitura, o evento oute.quota.unknown com o motivo
@@ -673,6 +675,51 @@ def cmd_task(kind, caller, pairs):
                   scope=f"task/{f.get('id') or f['repo'] + '-' + f['slug']}", key=f.get("reason", ""))]
 
 
+# ---------------------------------------------------------------- regressão dos agentes (#366)
+REGRESSION_VER = re.compile(r"[A-Za-z0-9._+-]{1,64}")
+REGRESSION_TASKS = re.compile(r"([a-z0-9-]+(:codex)?=(verde|vermelho|nao-verificado),)*[a-z0-9-]+(:codex)?=(verde|vermelho|nao-verificado)")
+
+
+def cmd_regression(pairs):
+    """oute.regression.run: o resultado de uma rodada do oute-regression. Só números e nomes fixos (versões, rodadas,
+    verde/vermelho por tarefa, custo): nunca texto de prompt nem de resposta. Hora do fato = agora; id do evento =
+    tipo + id da rodada (`run`): o mesmo envio repetido é um evento só"""
+    f = {}
+    for p in pairs:
+        k, sep, v = p.partition("=")
+        if not sep or k not in ("run", "image", "claude", "codex", "rounds", "result", "green", "red", "unverified",
+                                "cost", "tasks", "agent"):
+            raise Skip(f"campo de regressão inválido: {p}")
+        f[k] = v
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", f.get("run", "")):
+        raise Skip("regressão sem run válido")
+    for k in ("image", "claude", "codex"):
+        if k in f and not REGRESSION_VER.fullmatch(f[k]):
+            raise Skip(f"versão inválida em {k}")
+    if f.get("result") not in ("verde", "vermelho"):
+        raise Skip(f"resultado inválido: {f.get('result')}")
+    attrs = {"oute.regression.run": f["run"], "oute.regression.result": f["result"]}
+    for k in ("rounds", "green", "red", "unverified"):
+        if k in f:
+            if not re.fullmatch(r"[0-9]{1,3}", f[k]):
+                raise Skip(f"número inválido em {k}")
+            attrs[f"oute.regression.{k}"] = int(f[k])
+    if "cost" in f:
+        if not re.fullmatch(r"[0-9]{1,6}(\.[0-9]{1,6})?", f["cost"]):
+            raise Skip("custo inválido")
+        attrs["oute.regression.cost_usd"] = float(f["cost"])
+    if "tasks" in f:
+        if not REGRESSION_TASKS.fullmatch(f["tasks"]):
+            raise Skip("tarefas fora do formato")
+        attrs["oute.regression.tasks"] = f["tasks"]
+    for k, a in (("image", "image"), ("claude", "cli.claude"), ("codex", "cli.codex")):
+        if k in f:
+            attrs[f"oute.regression.{a}"] = f[k]
+    caller = f.get("agent", "human")
+    if not re.fullmatch(r"[a-z0-9_-]{1,32}", caller):
+        caller = "unknown"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [event("oute.regression.run", caller, ts, attrs, scope=f"regression/{f['run']}")]
 # ---------------------------------------------------------------- cota das assinaturas (#347)
 QUOTA_MOMENTS = ("spawn", "close", "open")
 QUOTA_AGENTS = ("claude", "codex")
@@ -901,7 +948,13 @@ def main(argv):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
     valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2}
-    if (len(argv) < 3) if verb == "task" else (valid.get(verb) != len(argv)):
+    if verb == "regression":
+        bad = len(argv) < 2
+    elif verb == "task":
+        bad = len(argv) < 3
+    else:
+        bad = valid.get(verb) != len(argv)
+    if bad:
         debug(f"uso inválido: {' '.join(argv)}")
         return
     quota = None
@@ -924,6 +977,8 @@ def main(argv):
         send(cmd_swarm(argv[1], argv[2]), deadline, drained)
     elif verb == "task":
         send(cmd_task(argv[1], argv[2], argv[3:]), deadline, drained)
+    elif verb == "regression":
+        send(cmd_regression(argv[1:]), deadline, drained)
     elif verb == "quota":
         events, rms = cmd_quota(argv[1], quota, time.time_ns())
         if rms:

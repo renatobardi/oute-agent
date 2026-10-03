@@ -48,6 +48,8 @@ Cada linha é `OK`, `AVISO` ou `FALHA`; a última é o resumo. Código 1 = algum
 
 Feito quando: cada linha `FALHA` e `AVISO` tem uma leitura e um próximo passo.
 
+**Regressão dos agentes (opcional, sem canal):** quando a imagem ou um CLI (claude, codex) mudou, rodar `oute-regression` no container do host verificado (nível 1, #366: tarefas headless em Haiku, ~2 min; não passa pelo canal de aprovação, usa dublês). Saída 0 = verde; 1 = alguma tarefa vermelha (vai no relatório como `FALHA`, com a tarefa); 2 = não rodou (cota ≥ 60% ou sem login: `AVISO`). O resultado também vai ao agent-studio como `oute.regression.run`. Skill sem `oute-regression` na imagem (versão antiga): pule e diga no relatório.
+
 ## 4. Relatório
 
 Uma mensagem por host verificado:
