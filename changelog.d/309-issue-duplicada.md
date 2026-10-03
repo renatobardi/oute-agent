@@ -1,0 +1,2 @@
+### Changed
+- **Notas dos agentes: procurar issue aberta antes de criar outra** (#309). As notas globais (`docker/agent-notes.md`, "Issues e contexto do repositório") passam a pedir a busca antes de `gh issue create`: `gh issue list --state open --search '<arquivo ou termo> in:title,body'`. Se já existe issue aberta sobre o mesmo ponto, a evidência nova vai num comentário nela (`gh issue comment <n>`), e não numa issue nova. **Precisa de release** (`docker/agent-notes.md` vai na imagem).
