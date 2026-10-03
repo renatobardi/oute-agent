@@ -574,7 +574,7 @@ w_snapshot() {
       fi
     done
   else
-    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; W_CUR["falha|gh"]=1
+    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; w_keep "falha|"; W_CUR["falha|gh"]=1
   fi
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do

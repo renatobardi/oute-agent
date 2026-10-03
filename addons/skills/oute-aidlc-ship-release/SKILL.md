@@ -92,10 +92,18 @@ Não chama modelo: lê o binário do `claude`, o `~/.codex/models_cache.json` e 
 - **3, linha `desconhecido`** (cache do Codex ausente ou com mais de 7 dias, binário do `claude` não encontrado, `gh` sem resposta): não foi conferido, e não vale como ok. O aviso em stderr diz a causa; o cache o Codex renova ao abrir. Sem conseguir conferir, vai ao relatório como pendência, para o Bardi decidir.
 - **0:** tudo `ok`.
 
-**Issues abertas após merge do PR** (#387): o dispatcher confere cada PR mergeado que citava uma issue, para ver se ela foi fechada como devia. PRs com `Closes` (ou com `Refs` + só falta `(ship)` e foi fechado) que ainda têm issue aberta, ou PRs com `Refs` (critério de build pendente) com issue aberta por motivo de build devem estar listados com o motivo. Confira no resumo final do `oute-swarm` (quando a rodada foi para production) ou no campo "issue → estado" do resumo da `oute-aidlc-qa-pr-audit` de cada PR:
-- **"Aberta sem motivo escrito"** (issue não fechou mas PR tinha `Closes`, ou issue continua aberta sem `## Falta` no PR): é problema, diga quais PRs;
-- **"Aberta, fase (ship)" / "Aberta, com motivo"**: normal, continue;
-- **Nenhuma abertura:** ok.
+**Issues abertas após merge do PR** (#387): confira quais PRs mergeados desde `LAST` têm issue (citada em `Closes` ou `Refs` no corpo) que continua aberta. Use:
+
+```bash
+git log "$LAST"..origin/main --format='%B' | grep -oE '^(Closes|Refs) #[0-9]+' | sort -u | while read line; do
+  n="${line#* #}"; echo -n "$n: "; gh issue view "$n" --json state --jq '.state'
+done
+```
+
+- **Aberta com `## Falta` só de `(ship)`:** é problema (deveria estar fechada); diga qual PR.
+- **Aberta com `## Falta` tem critério de build:** esperado (a issue fica aberta até o critério entrar); continue.
+- **Fechada:** ok.
+- **Erro no `gh`:** pendência, não conferido.
 
 **Alerta de preço aberto** (#340, ADR-08 adendo "Preços"): o agent-studio confere os preços dos modelos todo dia, e um preço errado só aparece no custo estimado depois. Leia os alertas ativos, só `GET`, com a credencial de leitura pelo stdin do `curl` (nunca no argv) e só os tipos e os modelos, sem abrir a tela:
 
