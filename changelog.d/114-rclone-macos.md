@@ -1,0 +1,2 @@
+### Fixed
+- **`oute up` no Mac explica por que o bucket não monta** (#114). Com o rclone do Homebrew (sem a tag `cmount`) e/ou sem FUSE-T/macFUSE, o `mount_shared` imprime o que falta e a correção (binário do rclone.org, `brew uninstall rclone`; instalar o FUSE-T), não chama `rclone mount` e segue com `/data/shared` local, código 0, em vez do genérico `rclone mount falhou`. Os caminhos do FUSE vêm de `OUTE_FUSE_PATHS`. Linux inalterado. **Não precisa de release** (só `scripts/oute`; entra com `git pull`).
