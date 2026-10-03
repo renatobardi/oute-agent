@@ -101,7 +101,7 @@ check "tabela: colunas (real e estimado separados)"    line "host	agente	chamada
 check "tabela: Claude com custo real, estimado, p95 e base/dia" line "oute-server	claude	3	4	0	0	1.2	3	0	1000370	3900	0.1"
 check "tabela: Codex com erros de span e de log, sem custo real" has "^oute-mac	codex	10	10	6	2	-	0.018	2	9800	1000	0$"
 check "anomalia erro-alto (6 de 10 spans)"             line "ANOMALIA	erro-alto	oute-mac/codex	6 de 10 spans com erro"
-check "anomalia custo-alto (real + estimado × base)"   line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + estimado); base US\$ 0.1/dia"
+check "anomalia custo-alto (real + estimado × base)"   line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + estimado) = US\$ 4.2/dia; base US\$ 0.1/dia"
 check "anomalia sem-telemetria (só na base)"           line "ANOMALIA	sem-telemetria	oute-velho/codex	1 chamadas e 1 spans na base e nada na janela"
 check "anomalia sem-preço, com o modelo"               line "ANOMALIA	sem-preço	oute-mac/codex	2 chamadas de gpt-9-sem-preco sem custo real e sem preço (config/agent-studio/config.toml)"
 check "router só na base: não é sem-telemetria"        hasnt "ANOMALIA	sem-telemetria	oute-server/router"
@@ -167,6 +167,38 @@ check "agent-studio fora do ar: ERRO com o motivo do curl" erro "/v1/usage da ja
 studio_start "$TMP/s2" STUDIO_FAIL_USAGE=1 AGENT_STUDIO_READ_TOKEN="$READ" || die "agent-studio (falha injetada) não subiu"
 run studio
 check "leitura que falha no servidor: ERRO HTTP 500"   erro "/v1/usage da janela ilegível: HTTP 500"
+studio_stop
+
+# ---------------------------------------------------------------- custo-alto: por dia dos dois lados (#298)
+# um gasto por dia (há 1 h, há 1 dia + 1 h, …, há 9 dias + 1 h), custo real: igual = 2/dia sempre; acima = 2,5/dia nos
+# 3 últimos dias e 2 antes (72 h somam 7,5 > 3 × 2, mas por dia não passa); pico = 9 no último dia e 1 antes
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
+import json, sys, time
+from otlp_json import claude_call, rl, rs
+tmp = sys.argv[1]
+NOW = int(time.time())
+gasto = {"h-igual": lambda k: 2, "h-acima": lambda k: 2.5 if k < 3 else 2, "h-pico": lambda k: 9 if k == 0 else 1}
+spans, logs = [], []
+for host, usd in gasto.items():
+    res = {"host.name": host, "service.name": "claude-code", "oute.agent": "claude"}
+    calls = [claude_call(NOW - 3600 - k * 86400, 1, {"model": "claude-sonnet-5", "input_tokens": 10}, usd(k)) for k in range(10)]
+    spans.append(rs(res, [s for s, _ in calls])); logs.append(rl(res, [l for _, l in calls]))
+json.dump({"resourceSpans": spans}, open(f"{tmp}/traces3.json", "w"))
+json.dump({"resourceLogs": logs}, open(f"{tmp}/logs3.json", "w"))
+PY
+studio_start "$TMP/s3" AGENT_STUDIO_CONFIG="$TMP/prices.toml" AGENT_STUDIO_READ_TOKEN="$READ" || die "agent-studio (custo por dia) não subiu"
+check "custo por dia: ingestão do exemplo"             test "$(post traces "$TMP/traces3.json") $(post logs "$TMP/logs3.json")" = "200 200"
+alto() { grep '^ANOMALIA	custo-alto' <<<"$OUT"; }
+PICO_24='ANOMALIA	custo-alto	h-pico/claude	US$ 9 na janela (real + estimado) = US$ 9/dia; base US$ 1/dia'
+run studio
+check "24 h: código 0"                                 [ "$RC" -eq 0 ]
+check "24 h: gasto igual ao da base e pouco acima não disparam, o pico dispara" test "$(alto)" = "$PICO_24"
+run studio --hours 72
+check "72 h: código 0"                                 [ "$RC" -eq 0 ]
+check "72 h: total da janela e base por dia na tabela" has "^h-acima	claude	3	3	0	0	7.5	-	0	30	1000	2$"
+check "72 h: gasto igual ao da base e pouco acima não disparam, o pico dispara por dia" test "$(alto)" = "ANOMALIA	custo-alto	h-pico/claude	US\$ 11 na janela (real + estimado) = US\$ 3.67/dia; base US\$ 1/dia"
+run studio --hours 6
+check "janela menor que 24 h conta como um dia (2 em 6 h contra 2/dia não dispara)" test "$(alto)" = "$PICO_24"
 studio_stop
 
 # ---------------------------------------------------------------- compose: o agent sabe onde ler

@@ -73,7 +73,9 @@ studio() {
   # o /v1/usage devolve host × agente × modelo: aqui soma por host × agente (p95 = o maior entre os modelos).
   # custo real (veio na chamada) e estimado (tabela de preços) nunca se somam numa coluna; "-" = nenhuma chamada.
   # base por dia = custo da base ÷ dias da base que têm algum dado (a base pode ser mais nova que --baseline-days).
-  jq -r --slurpfile base "$tmp/base" '
+  # custo-alto compara por dia dos dois lados (#298): custo da janela ÷ dias da janela (--hours ÷ 24) contra a base
+  # por dia. Janela menor que 24 h conta como um dia: uma hora de uso não vira a taxa de um dia inteiro.
+  jq -r --slurpfile base "$tmp/base" --argjson hours "$HOURS" '
     def sumc(f): map(f | select(. != null)) | if length == 0 then null else add end;
     def usd: if . == null then "-" else (. * 10000 | round / 10000) end;
     def by_ha: group_by([.host // "?", .agent // "?"])
@@ -83,7 +85,8 @@ studio() {
              tok: (map(.tokens | add) | add), p95: (map(.latency_p95_ms | select(. != null)) | max)}
             | . + {cost: ((.real // 0) + (.est // 0)), key: "\(.host)/\(.agent)"});
     ([$base[0].series[].day] | unique | length | if . == 0 then 1 else . end) as $bdays
-    | ($base[0].rows | by_ha | map({key, value: .}) | from_entries) as $b
+    | ($hours / 24 | if . < 1 then 1 else . end) as $wdays
+    | ($base[0].rows | by_ha| map({key, value: .}) | from_entries) as $b
     | (.rows | by_ha) as $w
     | (["host","agente","chamadas","spans","erros_span","erros_log","custo_real_usd","custo_estimado_usd","sem_preço","tokens","p95_ms","base_custo_usd/dia"] | @tsv),
       ($w[] | [.host, .agent, .calls, .spans, .span_err, .log_err, (.real | usd), (.est | usd), .unpriced, .tok,
@@ -92,8 +95,8 @@ studio() {
         ($w[] | select(.span_err >= 5 and .span_err / .spans > 0.05)
               | ["ANOMALIA","erro-alto",.key,"\(.span_err) de \(.spans) spans com erro"] | @tsv),
         ($w[] | ($b[.key] // {cost: 0, calls: 0, spans: 0}) as $x
-              | select(.cost > 1 and ($x.calls + $x.spans) > 0 and .cost > 3 * $x.cost / $bdays)
-              | ["ANOMALIA","custo-alto",.key,"US$ \(.cost*100|round/100) na janela (real + estimado); base US$ \($x.cost/$bdays*100|round/100)/dia"] | @tsv),
+              | select(.cost > 1 and ($x.calls + $x.spans) > 0 and .cost / $wdays > 3 * $x.cost / $bdays)
+              | ["ANOMALIA","custo-alto",.key,"US$ \(.cost*100|round/100) na janela (real + estimado) = US$ \(.cost/$wdays*100|round/100)/dia; base US$ \($x.cost/$bdays*100|round/100)/dia"] | @tsv),
         # pi e router: só em registro até 2026-09-30 (#217, #218); a falta deles não é anomalia
         ($b | to_entries[] | select((.value.calls + .value.spans) > 0 and (.value.agent | IN("pi", "router") | not)) | .key as $k
               | select([$w[].key] | index($k) | not)

@@ -1,0 +1,2 @@
+### Fixed
+- **`oute-aidlc-ops-observe`: a anomalia `custo-alto` compara custo por dia dos dois lados** (#298). O `observe.sh` comparava o custo da janela inteira com a média de um dia da base e disparava à toa com `--hours` maior que 24. Agora divide o custo da janela pelos dias dela (`--hours` ÷ 24; janela menor que 24 h conta como um dia) antes de comparar com 3 × a média diária da base, e a linha da anomalia traz também o custo por dia. Sem release: skill entra com `git pull` + `oute down/up`.
