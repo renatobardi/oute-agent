@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# oute-quota — lê a cota (janelas 5h e 7d) das assinaturas do Claude e do Codex (#346, spike #55).
+# Só leitura: só `GET` e só por https. Nunca escreve nem renova credencial (o refresh token do Claude rotaciona: quem
+# renovasse invalidaria o do `claude`); token expirado = `unknown` com o motivo. Só o cache de cota é gravado.
+#
+# uso:  oute-quota [--json] [--agent claude|codex]     sem --agent, lê os dois, em paralelo
+# saída: 0 = leitura feita (qualquer mistura de ok/unknown) | 1 = todos os agentes lidos ficaram unknown | 2 = uso
+# --json: {"schema":1,"read_at","max_pct","reset_grace_s","agents":{<agente>:{status,reason,stale,age_s,windows}}}
+#   status: ok | unknown; reason (só em unknown): sem-credencial, token-expirado, rede, timeout, http-<código>, formato
+#   (http-429 leva também retry_after_s, se o servidor mandou). used_pct em 0–100. stale:true = veio do cache (até 30 min)
+#   porque a leitura nova deu 429, rede ou timeout.
+# ambiente: OUTE_QUOTA_MAX_PCT (padrão 90) e o grace de 1200 s só são ecoados no --json, para o consumidor (#258)
+#   decidir sem reler env; XDG_CACHE_HOME (cache em <dir>/oute-quota/<agente>.json: só % e hora do reset, nunca token);
+#   CLAUDE_CONFIG_DIR e CODEX_HOME (onde estão as credenciais). Para teste: OUTE_QUOTA_CLAUDE_URL, OUTE_QUOTA_CODEX_URL
+#   (só https://) e OUTE_QUOTA_TIMEOUT (segundos por agente, padrão 5).
+#
+# O token só vai ao curl por um arquivo de configuração lido do stdin (`-K -`): nunca no argv, em log ou na saída. O xtrace
+# é desligado antes de qualquer leitura. O texto vindo do servidor nunca é repetido: só código HTTP e o motivo fixo.
+{ set +x; } 2>/dev/null
+set -uo pipefail
+
+CACHE_TTL=120        # leitura nova só depois disso
+STALE_MAX=1800       # cache aceito (stale) com 429, rede ou timeout
+RESET_GRACE=1200
+EXP_MARGIN=30        # token que expira em menos que isso já conta como expirado
+
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+die2() { printf 'oute-quota: %s\n' "$*" >&2; exit 2; }
+
+JSON=0; ONLY=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json) JSON=1 ;;
+    --agent) shift; [[ $# -gt 0 ]] || die2 "uso: oute-quota [--json] [--agent claude|codex]"; ONLY="$1"
+             [[ "$ONLY" = claude || "$ONLY" = codex ]] || die2 "--agent só claude ou codex" ;;
+    -h|--help) usage; exit 0 ;;
+    *) die2 "argumento desconhecido: uso: oute-quota [--json] [--agent claude|codex]" ;;
+  esac
+  shift
+done
+
+MAX_PCT="${OUTE_QUOTA_MAX_PCT:-90}"
+[[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_QUOTA_MAX_PCT tem de ser um número"
+TIMEOUT="${OUTE_QUOTA_TIMEOUT:-5}"
+[[ "$TIMEOUT" =~ ^[0-9]+$ && "$TIMEOUT" -gt 0 ]] || die2 "OUTE_QUOTA_TIMEOUT tem de ser inteiro > 0"
+CLAUDE_URL="${OUTE_QUOTA_CLAUDE_URL:-https://api.anthropic.com/api/oauth/usage}"
+CODEX_URL="${OUTE_QUOTA_CODEX_URL:-https://chatgpt.com/backend-api/wham/usage}"
+[[ "$CLAUDE_URL" = https://* && "$CODEX_URL" = https://* ]] || die2 "os endereços só podem ser https://"
+CLAUDE_CRED="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"
+CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oute-quota"
+
+command -v curl >/dev/null && command -v jq >/dev/null || die2 "precisa de curl e jq"
+TMP="$(mktemp -d)" || die2 "sem diretório temporário"
+trap 'rm -rf "$TMP"' EXIT
+umask 077
+NOW="$(date +%s)"
+
+# --- resultado de um agente: $TMP/<agente>.json
+unknown() { # agente motivo [retry_after_s]
+  jq -nc --arg r "$2" --arg ra "${3:-}" \
+    '{status:"unknown",reason:$r,stale:false,age_s:null,windows:{}} + (if $ra != "" then {retry_after_s:($ra|tonumber)} else {} end)' > "$TMP/$1.json"
+}
+ok_result() { # agente age_s stale(true|false) windows ({"5h":{used_pct,resets_at_s},"7d":{…}})
+  jq -nc --argjson now "$NOW" --argjson age "$2" --argjson stale "$3" --argjson w "$4" \
+    '{status:"ok",reason:null,stale:$stale,age_s:$age,
+      windows:($w|with_entries(.value |= {used_pct, resets_at:(.resets_at_s|todate), resets_in_s:([.resets_at_s - $now, 0]|max)}))}' > "$TMP/$1.json"
+}
+
+# --- cache
+cache_windows() { # agente idade_máxima: windows no stdout se o cache vale (janelas ainda não resetadas)
+  local f="$CACHE_DIR/$1.json"
+  [[ -f "$f" ]] || return 1
+  jq -ec --argjson now "$NOW" --argjson max "$2" \
+    'select(type == "object" and (.read_at|type) == "number" and ($now - .read_at) <= $max and ($now - .read_at) >= -60)
+     | .windows | select(type == "object" and has("5h") and has("7d"))
+     | select(all(.[]; (.used_pct|type) == "number" and (.resets_at_s|type) == "number" and .resets_at_s > $now))' "$f" 2>/dev/null
+}
+cache_age() { local r; r="$(jq -r '.read_at' "$CACHE_DIR/$1.json" 2>/dev/null)"; echo $(( NOW - ${r%.*} )); }
+cache_write() { # agente windows
+  mkdir -p "$CACHE_DIR" 2>/dev/null && chmod 700 "$CACHE_DIR" 2>/dev/null || return 0
+  local t; t="$(mktemp "$CACHE_DIR/.$1.XXXXXX" 2>/dev/null)" || return 0
+  jq -nc --argjson n "$NOW" --argjson w "$2" '{read_at:$n, windows:$w}' > "$t" 2>/dev/null && mv -f "$t" "$CACHE_DIR/$1.json" || rm -f "$t"
+}
+backoff_until() { cat "$CACHE_DIR/$1.backoff" 2>/dev/null; }
+backoff_write() { # agente epoch
+  mkdir -p "$CACHE_DIR" 2>/dev/null && chmod 700 "$CACHE_DIR" 2>/dev/null || return 0
+  printf '%s\n' "$2" > "$CACHE_DIR/$1.backoff" 2>/dev/null || true
+}
+
+# --- GET: configuração do curl no stdin; define CODE e FAIL (rede|timeout) e deixa o corpo em $TMP/<agente>.body
+CODE=""; FAIL=""; RETRY=""
+fetch() { # agente url < configuração
+  local agent="$1" rc
+  CODE=""; FAIL=""; RETRY=""
+  CODE="$(curl -s -K - --proto '=https' --max-time "$TIMEOUT" -D "$TMP/$agent.hdr" -o "$TMP/$agent.body" -w '%{http_code}' "$2" 2>/dev/null)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    if [[ $rc -eq 28 ]]; then FAIL=timeout; else FAIL=rede; fi
+    return 1
+  fi
+  if [[ "$CODE" != 200 ]]; then
+    FAIL="http-$CODE"
+    RETRY="$(grep -i '^retry-after:' "$TMP/$agent.hdr" 2>/dev/null | tail -n1 | tr -d '\r' | sed 's/^[^:]*:[[:space:]]*//')"
+    [[ "$RETRY" =~ ^[0-9]{1,6}$ ]] || RETRY=""
+    return 1
+  fi
+}
+safe_value() { [[ "$1" =~ ^[A-Za-z0-9._~+/=-]+$ ]]; }   # vai entre aspas numa linha de configuração do curl
+
+# --- leitura nova de cada agente: WIN (windows em JSON) ou FAIL
+WIN=""
+live_claude() {
+  [[ -r "$CLAUDE_CRED" ]] || { FAIL=sem-credencial; return 1; }
+  local exp tok
+  exp="$(jq -r '.claudeAiOauth.expiresAt // 0 | if type == "number" then . else 0 end' "$CLAUDE_CRED" 2>/dev/null)"
+  tok="$(jq -r '.claudeAiOauth.accessToken // empty' "$CLAUDE_CRED" 2>/dev/null)"
+  [[ -n "$tok" ]] || { FAIL=sem-credencial; return 1; }
+  if (( ${exp%.*} / 1000 <= NOW + EXP_MARGIN )); then FAIL=token-expirado; return 1; fi
+  safe_value "$tok" || { FAIL=formato; return 1; }
+  fetch claude "$CLAUDE_URL" < <(printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$tok") || return 1
+  local row u5 r5 u7 r7 e5 e7
+  row="$(jq -r 'select((.five_hour.utilization|type) == "number" and (.five_hour.resets_at|type) == "string"
+                       and (.seven_day.utilization|type) == "number" and (.seven_day.resets_at|type) == "string")
+                | [.five_hour.utilization, .five_hour.resets_at, .seven_day.utilization, .seven_day.resets_at] | @tsv' "$TMP/claude.body" 2>/dev/null)"
+  [[ -n "$row" ]] || { FAIL=formato; return 1; }
+  IFS=$'\t' read -r u5 r5 u7 r7 <<<"$row"
+  e5="$(date -u -d "$r5" +%s 2>/dev/null)" && e7="$(date -u -d "$r7" +%s 2>/dev/null)" || { FAIL=formato; return 1; }
+  WIN="$(jq -nc --argjson u5 "$u5" --argjson e5 "$e5" --argjson u7 "$u7" --argjson e7 "$e7" \
+    '{"5h":{used_pct:$u5,resets_at_s:$e5},"7d":{used_pct:$u7,resets_at_s:$e7}}')"
+}
+live_codex() {
+  [[ -r "$CODEX_AUTH" ]] || { FAIL=sem-credencial; return 1; }
+  local tok acct exp
+  tok="$(jq -r '.tokens.access_token // empty' "$CODEX_AUTH" 2>/dev/null)"
+  acct="$(jq -r '.tokens.account_id // empty' "$CODEX_AUTH" 2>/dev/null)"
+  [[ -n "$tok" && -n "$acct" ]] || { FAIL=sem-credencial; return 1; }
+  exp="$(jq -rR 'split(".")[1] // empty | gsub("-";"+") | gsub("_";"/") | . + "=" * ((4 - length % 4) % 4) | @base64d | fromjson | .exp // 0' <<<"$tok" 2>/dev/null)"
+  [[ "$exp" =~ ^[0-9]+$ ]] || exp=0
+  if (( exp <= NOW + EXP_MARGIN )); then FAIL=token-expirado; return 1; fi
+  safe_value "$tok" && safe_value "$acct" || { FAIL=formato; return 1; }
+  fetch codex "$CODEX_URL" < <(printf 'header = "Authorization: Bearer %s"\nheader = "ChatGPT-Account-Id: %s"\n' "$tok" "$acct") || return 1
+  local row u5 e5 u7 e7
+  row="$(jq -r 'select((.rate_limit.primary_window.used_percent|type) == "number" and (.rate_limit.primary_window.reset_at|type) == "number"
+                       and (.rate_limit.secondary_window.used_percent|type) == "number" and (.rate_limit.secondary_window.reset_at|type) == "number")
+                | [.rate_limit.primary_window.used_percent, (.rate_limit.primary_window.reset_at|floor),
+                   .rate_limit.secondary_window.used_percent, (.rate_limit.secondary_window.reset_at|floor)] | @tsv' "$TMP/codex.body" 2>/dev/null)"
+  [[ -n "$row" ]] || { FAIL=formato; return 1; }
+  IFS=$'\t' read -r u5 e5 u7 e7 <<<"$row"
+  WIN="$(jq -nc --argjson u5 "$u5" --argjson e5 "$e5" --argjson u7 "$u7" --argjson e7 "$e7" \
+    '{"5h":{used_pct:$u5,resets_at_s:$e5},"7d":{used_pct:$u7,resets_at_s:$e7}}')"
+}
+
+resolve() { # agente
+  local agent="$1" w until
+  if w="$(cache_windows "$agent" "$CACHE_TTL")"; then ok_result "$agent" "$(cache_age "$agent")" false "$w"; return; fi
+  until="$(backoff_until "$agent")"
+  if [[ "$until" =~ ^[0-9]+$ ]] && (( until > NOW )); then   # 429 recente: não repete a chamada antes do retry-after
+    FAIL=http-429; RETRY=$(( until - NOW ))
+  else
+    WIN=""; FAIL=""; RETRY=""
+    if "live_$agent"; then cache_write "$agent" "$WIN"; ok_result "$agent" 0 false "$WIN"; return; fi
+    [[ "$FAIL" != http-429 || -z "$RETRY" ]] || backoff_write "$agent" $(( NOW + RETRY ))
+  fi
+  case "$FAIL" in
+    http-429|rede|timeout)
+      if w="$(cache_windows "$agent" "$STALE_MAX")"; then ok_result "$agent" "$(cache_age "$agent")" true "$w"; return; fi ;;
+  esac
+  unknown "$agent" "$FAIL" "$RETRY"
+}
+
+AGENTS=(claude codex)
+[[ -z "$ONLY" ]] || AGENTS=("$ONLY")
+for a in "${AGENTS[@]}"; do resolve "$a" & done
+wait
+
+FILES=(); for a in "${AGENTS[@]}"; do FILES+=("$TMP/$a.json"); done
+RESULT="$(jq -s -c --argjson now "$NOW" --argjson max "$MAX_PCT" --argjson grace "$RESET_GRACE" --args \
+  '{schema:1, read_at:($now|todate), max_pct:$max, reset_grace_s:$grace, agents:(. as $r | $ARGS.positional | to_entries | map({key:.value, value:$r[.key]}) | from_entries)}' \
+  "${AGENTS[@]}" < <(cat "${FILES[@]}"))" || { echo "oute-quota: falha ao montar o resultado" >&2; exit 1; }
+
+if [[ $JSON = 1 ]]; then
+  printf '%s\n' "$RESULT"
+else
+  printf '%-7s %-6s %-12s %-21s %s\n' agente janela usada reset obs
+  jq -r '.agents | to_entries[] | .key as $a | .value as $v
+    | if $v.status == "ok" then
+        ($v.windows | to_entries[] | [$a, .key, "\(.value.used_pct)%", .value.resets_at, (if $v.stale then "cache de \($v.age_s)s (leitura nova falhou)" else "" end)] | @tsv)
+      else [$a, "-", "desconhecido", "-", $v.reason + (if $v.retry_after_s then " (retry-after \($v.retry_after_s)s)" else "" end)] | @tsv end' <<<"$RESULT" \
+    | awk -F'\t' '{printf "%-7s %-6s %-12s %-21s %s\n", $1, $2, $3, $4, $5}'
+fi
+# 1 = nenhum agente lido ficou ok
+jq -e '[.agents[] | select(.status == "ok")] | length > 0' <<<"$RESULT" >/dev/null || exit 1
+exit 0
