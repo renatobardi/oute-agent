@@ -166,7 +166,7 @@
 <section class="cartao bloco grafico" data-grafico="atividade" data-peak="{{ heat.peak }}" data-total="{{ heat.total }}">
   <div class="grafico-topo"><h2>Atividade por dia e hora</h2><span class="nota">últimos 7 dias, {{ tzl() }}</span></div>
   <div class="rolagem">
-  <div class="calor" role="img" aria-label="Chamadas ao modelo por dia da semana e hora, nos últimos 7 dias">
+  <div class="calor" role="group" aria-label="Chamadas ao modelo por dia da semana e hora, nos últimos 7 dias">
     {% for row in heat.rows %}
     <div class="calor-linha" data-dia="{{ row.day }}"><span class="calor-dia">{{ row.day }}</span>{% for c in row.cells %}<span class="calor-celula n{{ c.level }}" data-hora="{{ c.hour }}" data-calls="{{ c.calls }}" data-nivel="{{ c.level }}" title="{{ row.day }} {{ '%02d'|format(c.hour) }}h · {{ c.calls|calls }}"></span>{% endfor %}</div>
     {% endfor %}
