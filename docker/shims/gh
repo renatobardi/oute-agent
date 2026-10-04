@@ -58,6 +58,8 @@ for d in "$STATE_ROOT"/*/; do
   hit="$(awk -v n="$issue" -v m="$mrepo" -v pr="$prrepo" '
     { split($1, a, "-"); rp = ($6 == "" ? m : $6); sub(".*/", "", rp); if (a[1] == n && rp == pr) { print $1; exit } }' "$d/spawned")"
   [[ -n "$hit" ]] || continue
+  # sessão com a aba fechada (oute-swarm close) já não prende o PR à rodada
+  ! grep -qxF -- "$hit" "$d/closed" 2>/dev/null || continue
   # dispatcher da rodada: OUTE_SWARM_ID ou, com ele reiniciado sem a variável, a worktree sessao/<rodada>
   if [[ "${OUTE_SWARM_ID:-}" == "$r" || "$cur_branch" == "sessao/$r" ]]; then pass "$@"; fi
   mine="$r $hit"

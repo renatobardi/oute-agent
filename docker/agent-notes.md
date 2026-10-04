@@ -60,7 +60,7 @@ O container é um só e todas as sessões são o mesmo usuário: `ps` e `pgrep` 
 - **Só encerre processo que você abriu**, pelo PID ou pelo id da tarefa que você guardou. `pkill` e `killall` (e `pkill -f`) são recusados nas sessões dos agentes: matam por nome e atingem processo de outras sessões.
 - **"O que está rodando":** liste primeiro o que você abriu (a sua lista de tarefas) e, à parte, o que é de outra sessão, com o dono quando der para saber. Nunca chame de "desta sessão" o que veio de `ps` ou `pgrep`.
 - **Comentário de merge:** sessão avulsa que faz merge (PR fora de rodada, a pedido do Bardi) comenta no PR antes ou junto: a sessão (worktree e id), "a pedido do Bardi" ou a autorização usada, e o head mergeado. O dispatcher segue o formato dele (`docker/swarm.md`).
-- **Limites:** a trava do merge e o bloqueio do `pkill` protegem contra engano, não contra quem contorna (API do `gh`, `bash -c`, outro binário). Não valem para merge feito pelo Bardi no site.
+- **Limites:** a trava do merge e o bloqueio do `pkill` protegem contra engano, não contra quem contorna (API do `gh`, `bash -c`, outro binário). Não valem para merge feito pelo Bardi no site. O hook do `pkill` também tem falso positivo: texto entre aspas com `pkill` ou `killall` logo depois de `;`, `&&` ou `|` (ex.: `git commit -m "a; pkill x"`) é recusado mesmo sem executar nada; reescreva o texto sem a palavra nessa posição.
 
 ## Issues e contexto do repositório
 

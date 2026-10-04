@@ -90,6 +90,13 @@ check "branch sem número de issue: passa"                bash -c 'test "$1" -eq
 jq '.url = "https://github.com/dono/outro-repo/pull/601"' "$FAKE/pr-601.json" > "$FAKE/x" && mv "$FAKE/x" "$FAKE/pr-601.json"
 reset; run -- pr merge 601
 check "PR de issue da rodada, mas de outro repo: passa"  test "$RC" -eq 0
+# aba da sessão em closed (rodada sem `fechada`): o PR deixa de ser da rodada
+printf '507-pagina-rodada\n' > "$H/.oute/swarm/swarm-1004-1306/closed"
+reset; run -- pr merge 517 --squash
+check "rodada sem fechada, mas com a aba da sessão em closed: passa" bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
+: > "$H/.oute/swarm/swarm-1004-1306/closed"
+reset; run -- pr merge 517 --squash
+check "closed vazio: volta a recusar"                    test "$RC" -eq 77
 touch "$H/.oute/swarm/swarm-1004-1306/fechada"
 reset; run -- pr merge 517 --squash
 check "rodada fechada (fechada): passa"                  bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
