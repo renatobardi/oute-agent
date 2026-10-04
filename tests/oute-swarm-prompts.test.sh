@@ -201,6 +201,18 @@ check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'fal
 check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
 check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 11j1. regra de parallel-lib quando altera testes (#450): rodar parallel-lib e dizer no corpo do PR
+CASE=parallel-lib; round "$CASE"
+sw spawn 450-parallellib "instrução"
+P="$STATE/450-parallellib.prompt"
+check "worker parallel-lib: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker parallel-lib: regra sobre parallel-lib (#450)" grep -qF -- 'rode também `bash tests/parallel-lib.test.sh`' "$P"
+check "worker parallel-lib: nos dois ambientes (#450)"     grep -qF '(no ambiente da sessão e no limpo)' "$P"
+check "worker parallel-lib: diz no corpo do PR (#450)"     grep -qF 'diga no corpo do PR que rodou' "$P"
+check "worker parallel-lib: confere testes com serviço (#450)" grep -qF 'para conferir testes que sobem serviços em segundo plano' "$P"
+check "worker parallel-lib: referência da issue (#450)"    grep -qF '#450' "$P"
+check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
 # 11k. Haiku reprovado 2x pelo mesmo motivo reabre em Sonnet (#417)
 opn --max 2
 D="$FAKE/oute-task.last"
