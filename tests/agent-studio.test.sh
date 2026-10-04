@@ -231,7 +231,7 @@ check "compose: serviço agent-studio existe"           test -n "$SVC"
 check "compose: só com o profile agent-studio"         svc_has '^    profiles: \[agent-studio\]$'
 check "compose: publicado só em 127.0.0.1"             svc_has '^      - "127\.0\.0\.1:\$\{OUTE_AGENT_STUDIO_PORT:-8430\}:8430"$'
 check "compose: nunca 0.0.0.0"                         bash -c '! grep -q "0\.0\.0\.0" <<<"$0"' "$(grep -v '^ *#' <<<"$SVC")"
-check "compose: mem_limit"                             svc_has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-2g\}$'
+check "compose: mem_limit"                             svc_has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-6g\}$'
 check "compose: volume nomeado para o DuckDB"          svc_has '^      - oute-agent-studio:/data/agent-studio$'
 check "compose: volume declarado"                      grep -qx '  oute-agent-studio:' "$ROOT/docker/compose.yaml"
 check "compose: mesma imagem do agent"                 svc_has 'image: ghcr\.io/renatobardi/oute-agent:\$\{OUTE_VERSION:-latest\}'
@@ -398,7 +398,7 @@ SVC="$(compose_service surrealdb)"
 check "compose: surrealdb fixado por digest"           svc_has '^    image: \$\{OUTE_SURREALDB_IMAGE:-surrealdb/surrealdb:v[0-9.]+@sha256:[0-9a-f]{64}\}$'
 check "compose: surrealdb só no profile agent-studio"  svc_has '^    profiles: \[agent-studio\]$'
 check "compose: surrealdb sem porta publicada"         bash -c '! grep -qE "^    ports:" <<<"$0"' "$SVC"
-check "compose: surrealdb com mem_limit"               svc_has '^    mem_limit: \$\{OUTE_SURREALDB_MEM:-1g\}$'
+check "compose: surrealdb com mem_limit"               svc_has '^    mem_limit: \$\{OUTE_SURREALDB_MEM:-2g\}$'
 check "compose: surrealdb em RocksDB num volume"       bash -c 'grep -q "rocksdb:///data/surrealdb" <<<"$0" && grep -q "^      - oute-surrealdb:/data/surrealdb$" <<<"$0"' "$SVC"
 check "compose: surrealdb com senha do vault"          svc_has 'SURREAL_PASS: \$\{AGENT_STUDIO_SURREAL_PASS:-\}'
 check "compose: surrealdb sem --unauthenticated"       bash -c '! grep -q unauthenticated <<<"$0"' "$SVC"
