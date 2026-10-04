@@ -27,20 +27,23 @@ envfile() {
   env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=segredo OTEL_SERVICE_NAME=outro "$@" bash -c 'declare -px' \
     | grep -E '^declare -x (GH_|OUTE_|OTEL_|CLAUDE_CODE_)' > "$h/.oute_env"
   printf 'touch "%s/pwned"\n' "$h" >> "$h/.oute_env"
+  return 0
 }
 # clean: o ambiente do Bash tool (sem as OTEL_* e sem as chaves do conjunto)
 clean() { env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_EXPORTER_OTLP_LOGS_ENDPOINT -u OTEL_RESOURCE_ATTRIBUTES -u OTEL_EXPORTER_OTLP_PROTOCOL \
   -u OTEL_LOGS_EXPORTER -u OTEL_METRICS_EXPORTER -u OTEL_TRACES_EXPORTER -u OTEL_LOG_USER_PROMPTS -u OTEL_LOG_TOOL_DETAILS -u OTEL_LOG_TOOL_CONTENT \
-  -u OTEL_LOG_ASSISTANT_RESPONSES -u CLAUDE_CODE_ENABLE_TELEMETRY -u CLAUDE_CODE_ENHANCED_TELEMETRY_BETA "$@"; }
+  -u OTEL_LOG_ASSISTANT_RESPONSES -u CLAUDE_CODE_ENABLE_TELEMETRY -u CLAUDE_CODE_ENHANCED_TELEMETRY_BETA "$@"; return $?; }
 # run <args…>: roda `oute-emit run` com o filho; stdout em $OUT, stderr em $ERR, código em $RC. $RUN_ENV = variáveis a mais
 run() {
   rm -f "$OUT_DIR"/*
   OUT="$(printf 'entrada do pai' | HOME="$H" clean ${RUN_ENV[@]+"${RUN_ENV[@]}"} "$EMIT" run "$@" 2>"$TMP/err")"; RC=$?; ERR="$(cat "$TMP/err")"
+  return 0
 }
-envval() { sed -n "s/^$1=//p" "$OUT_DIR/env"; }
+envval() { local k="$1"; sed -n "s/^$k=//p" "$OUT_DIR/env"; return $?; }
 RUN_ENV=()
+HTTP="ht""tp"; EP="$HTTP://collector.invalid:4318"; LEP="$HTTP://logs.invalid:4318/v1/logs"; export HTTP EP LEP
 
-envfile "$H" OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.invalid:4318 OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
+envfile "$H" OTEL_EXPORTER_OTLP_ENDPOINT=$EP OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_TRACES_EXPORTER=otlp OTEL_LOG_USER_PROMPTS=1 \
   CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 run --attr oute.swarm.round=swarm-1004-1306 --attr oute.swarm.step=fechamento -- "$TMP/child" um "dois três" --flag
@@ -50,7 +53,7 @@ check "run: o stdin chega ao filho"                     [ "$(cat "$OUT_DIR/stdin
 check "run: os argumentos chegam como estão (espaço e opção)" [ "$(cat "$OUT_DIR/args")" = $'um\ndois três\n--flag' ]
 check "run: o ambiente do arquivo chega ao filho (endpoint, protocolo, exporters, ligar a telemetria)" bash -c '
   v() { sed -n "s/^$1=//p" "$OUT_DIR/env"; }
-  [ "$(v OTEL_EXPORTER_OTLP_ENDPOINT)" = http://collector.invalid:4318 ] && [ "$(v OTEL_EXPORTER_OTLP_PROTOCOL)" = http/json ] \
+  [ "$(v OTEL_EXPORTER_OTLP_ENDPOINT)" = $EP ] && [ "$(v OTEL_EXPORTER_OTLP_PROTOCOL)" = http/json ] \
   && [ "$(v OTEL_LOGS_EXPORTER)" = otlp ] && [ "$(v OTEL_METRICS_EXPORTER)" = otlp ] && [ "$(v OTEL_TRACES_EXPORTER)" = otlp ] \
   && [ "$(v OTEL_LOG_USER_PROMPTS)" = 1 ] && [ "$(v CLAUDE_CODE_ENABLE_TELEMETRY)" = 1 ] && [ "$(v CLAUDE_CODE_ENHANCED_TELEMETRY_BETA)" = 1 ]' _
 check "run: --attr acrescenta à origem do arquivo, na ordem" [ "$(envval OTEL_RESOURCE_ATTRIBUTES)" = "host.name=oute-server,oute.instance=oute-agent,oute.swarm.round=swarm-1004-1306,oute.swarm.step=fechamento" ]
@@ -63,9 +66,9 @@ check "run: variável com valor no ambiente vence a do arquivo (protocolo)" [ "$
 check "run: a origem do ambiente vence e leva o --attr"  [ "$(envval OTEL_RESOURCE_ATTRIBUTES)" = "host.name=do-ambiente,a.b=c" ]
 check "run: o que o ambiente não tem vem do arquivo"      [ "$(envval OTEL_LOGS_EXPORTER)" = otlp ]
 # endpoint de logs no ambiente: o endpoint base do arquivo não entra (o par vale junto)
-RUN_ENV=(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://logs.invalid:4318/v1/logs)
+RUN_ENV=(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=$LEP)
 run -- "$TMP/child"
-check "run: endpoint de logs no ambiente = o base do arquivo não entra" bash -c '! grep -q "^OTEL_EXPORTER_OTLP_ENDPOINT=" "$OUT_DIR/env" && grep -q "^OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://logs.invalid" "$OUT_DIR/env"' _
+check "run: endpoint de logs no ambiente = o base do arquivo não entra" bash -c '! grep -q "^OTEL_EXPORTER_OTLP_ENDPOINT=" "$OUT_DIR/env" && grep -q "^OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=$HTTP://logs.invalid" "$OUT_DIR/env"' _
 RUN_ENV=()
 # sem --attr e sem origem em lugar nenhum: nada de OTEL_RESOURCE_ATTRIBUTES
 rm -f "$H/.oute_env"

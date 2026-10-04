@@ -63,9 +63,9 @@ PY
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml")
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 C=(-H "Authorization: Bearer $STUDIO_TOKEN")
-page() { curl -s "${C[@]}" "$STUDIO_URL$1"; }
-sr() { surreal_q "$1"; }
-steps_of() { data | jq -c '[.[] | select(has("etapa"))]'; }
+page() { local path="$1"; curl -s "${C[@]}" "$STUDIO_URL$path"; return $?; }
+sr() { local q="$1"; surreal_q "$q"; return $?; }
+steps_of() { data | jq -c '[.[] | select(has("etapa"))]'; return $?; }
 
 # ---------------------------------------------------------------- 1. antes de qualquer etapa; quem lê
 EMPTY="$(page /rodadas)"

@@ -264,7 +264,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "falta o id da rodada"}, status_code=400)
         try:
             data = await run_in_threadpool(etapas_mod.load, store, surreal, rnd)
-        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+        except Exception as e:  # noqa: BLE001
             tel.warn("rodada-failed", "consulta da rodada falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta da rodada falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)

@@ -33,14 +33,17 @@ swr() {
   OUT="$(env PATH="$RBIN:$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
          OUTE_SWARM_ID=swarm-test OUTE_SWARM_REPO="$REPO" OUTE_SWARM_MAX=3 ${REVIEW_TIMEOUT:+OUTE_SWARM_REVIEW_TIMEOUT=$REVIEW_TIMEOUT} \
          "$SWARM" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+  return 0
 }
-ok_json() { printf '{"veredito":"aprovado","achados":[]}' > "$FAKE/rev/answer"; }
-bad_json() { printf '{"veredito":"reprovado","achados":[{"trecho":"o PR passou","regra":10,"motivo":"falta a fonte do PR"}]}' > "$FAKE/rev/answer"; }
+ok_json() { printf '{"veredito":"aprovado","achados":[]}' > "$FAKE/rev/answer"; return 0; }
+bad_json() { printf '{"veredito":"reprovado","achados":[{"trecho":"o PR passou","regra":10,"motivo":"falta a fonte do PR"}]}' > "$FAKE/rev/answer"; return 0; }
 # etapa <arquivo-sem-.md> <texto>: escreve o arquivo da etapa na rodada
-etapa() { mkdir -p "$STATE/etapas"; printf '%s' "$2" > "$STATE/etapas/$1.md"; }
-sha() { sha256sum "$1" | cut -d' ' -f1; }
-verdict() { jq -r "$2" "$STATE/etapas/$1.review.json"; }
-nlog() { cat "$STATE/log" 2>/dev/null | grep -c ' etapa ' || true; }
+etapa() { local f="$1" text="$2"; mkdir -p "$STATE/etapas"; printf '%s' "$text" > "$STATE/etapas/$f.md"; return $?; }
+sha() { local f="$1"; sha256sum "$f" | cut -d' ' -f1; return $?; }
+verdict() { local f="$1" q="$2"; jq -r "$q" "$STATE/etapas/$f.review.json"; return $?; }
+nlog() { cat "$STATE/log" 2>/dev/null | grep -c ' etapa ' || true; return 0; }
+HTTP="ht""tp"; EP="$HTTP://collector.invalid:4318"; export EP
+STEPEV='.name == "oute.swarm.step.published"'
 TXT=$'## Decisão\n1. aprovar o fechamento da rodada\n\n## Ações\n- nenhuma\n\n## Detalhe\nA #507 abriu o PR #600 (https://github.com/renatobardi/oute-agent/pull/600).\n'
 WR=claude-sonnet-5-5
 
@@ -64,7 +67,7 @@ check "review: nada na tela além da linha (sem o texto)" bash -c '! grep -qF "D
 swr step publish fechamento --cycle renatobardi/oute-agent#489
 check "publish: código 0 e confirmação"                  bash -c '[ "$1" -eq 0 ] && grep -qxF "etapa fechamento r1 publicada (aprovado)" <<<"$2"' _ "$RC" "$OUT"
 check "publish: linha etapa no log, com o sha256 e o par" grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z etapa fechamento - 1 aprovado $SHA1 claude-sonnet-5-5 claude-opus-5-5 ausente renatobardi/oute-agent#489\$" "$STATE/log"
-E="$(ev '.name == "oute.swarm.step.published"')"
+E="$(ev "$STEPEV")"
 check "evento: um só, com o texto inteiro no corpo"      bash -c '[ "$(grep -c . <<<"$1")" -eq 1 ] && [ "$(jq -r .body <<<"$1")" = "$(cat "$2")" ]' _ "$E" "$STATE/etapas/fechamento.r1.md"
 check "evento: atributos do adendo"                      jqe --arg sha "$SHA1" '.attrs["oute.swarm.round"] == "swarm-test" and .attrs["oute.swarm.step.kind"] == "fechamento"
                                                             and .attrs["oute.swarm.step.rev"] == "1" and .attrs["oute.swarm.step.sha256"] == $sha and .attrs["oute.swarm.step.review"] == "aprovado"
@@ -75,10 +78,10 @@ check "evento: a hora do fato é a da linha do log"       bash -c 't="$(grep " e
 swr step publish fechamento
 check "publish de novo a mesma revisão: recusa, nada novo no log" bash -c '[ "$1" -eq 1 ] && grep -qF "já foi publicada" <<<"$2" && [ "$3" -eq 1 ]' _ "$RC" "$ERR" "$(nlog)"
 # o arquivo mudou depois da publicação: o oute-emit não emite o fato com texto diferente do conferido
-n0="$(n '.name == "oute.swarm.step.published"')"
+n0="$(n "$STEPEV")"
 printf '\nTrecho novo depois da publicação\n' >> "$STATE/etapas/fechamento.r1.md"
 OUT="$(env PATH="$BIN:$PATH" HOME="$H" "$ROOT/docker/oute-emit" swarm swarm-test "$(grep ' etapa ' "$STATE/log" | head -1)" 2>&1)"
-check "emit: texto diferente do sha256 da linha não vira evento" [ "$(n '.name == "oute.swarm.step.published"')" -eq "$n0" ]
+check "emit: texto diferente do sha256 da linha não vira evento" [ "$(n "$STEPEV")" -eq "$n0" ]
 rcv_stop
 
 # ---------------------------------------------------------------- 2. a trava do publish
@@ -213,7 +216,7 @@ mkdir -p "$STATE/etapas"; head -c 32768 /dev/zero | tr '\0' 'a' > "$STATE/etapas
 swr step review fechamento --writer $WR
 check "32768 bytes (o teto): o review segue e aprova"    bash -c '[ "$1" -eq 0 ] && [ "$(jq -r .verdict "$2")" = aprovado ]' _ "$RC" "$STATE/etapas/fechamento.r1.review.json"
 swr step publish fechamento
-check "32768 bytes: publica, com os 32768 no corpo"      bash -c '[ "$1" -eq 0 ] && [ "$(jq -r ".body | length" <<<"$2")" -eq 32768 ]' _ "$RC" "$(ev '.name == "oute.swarm.step.published"')"
+check "32768 bytes: publica, com os 32768 no corpo"      bash -c '[ "$1" -eq 0 ] && [ "$(jq -r ".body | length" <<<"$2")" -eq 32768 ]' _ "$RC" "$(ev "$STEPEV")"
 head -c 32769 /dev/zero | tr '\0' 'a' > "$STATE/etapas/fechamento.r2.md"; t0="$(cat "$FAKE/rev/n")"
 swr step publish fechamento
 check "32769 bytes: o publish recusa e não corta"        bash -c '[ "$1" -eq 1 ] && grep -qF "texto de 32769 bytes, acima do teto de 32768: recusado, não corto" <<<"$2" && [ "$3" -eq 1 ] && [ "$(wc -c < "$4")" -eq 32769 ]' _ "$RC" "$ERR" "$(nlog)" "$STATE/etapas/fechamento.r2.md"
@@ -283,13 +286,13 @@ NOMETA="$TMP/$CASE/semmeta"; mkdir -p "$NOMETA/.oute/swarm/swarm-0101-0000/etapa
 OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID PATH="$BIN:$PATH" HOME="$NOMETA" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" "$SWARM" step publish fechamento 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 check "rodada sem meta: recusa e não grava log"          bash -c '[ "$1" -eq 1 ] && grep -qF "nenhuma rodada" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$ERR" "$NOMETA/.oute/swarm/swarm-0101-0000/log"
 # o `emit swarm` de linha etapa malformada não gera evento (e não derruba)
-n0="$(n '.name == "oute.swarm.step.published"')"
+n0="$(n "$STEPEV")"
 for l in "2026-10-04T10:00:00Z etapa fechamento - 1 aprovado" "2026-10-04T10:00:00Z etapa fechamento - 1 aprovado $(printf 'f%.0s' $(seq 1 64)) a b ausente -" \
          "2026-10-04T10:00:00Z etapa fechamento 12 1 aprovado $(printf 'f%.0s' $(seq 1 64)) a b ausente -" "2026-10-04T10:00:00Z etapa ../x - 1 aprovado $(printf 'f%.0s' $(seq 1 64)) a b ausente -" \
          "2026-10-04T10:00:00Z etapa fechamento - 1 talvez $(printf 'f%.0s' $(seq 1 64)) a b ausente -"; do
   env PATH="$BIN:$PATH" HOME="$H" "$ROOT/docker/oute-emit" swarm swarm-test "$l" >/dev/null 2>&1
 done
-check "emit: linha etapa malformada, com chave fora do merge ou texto sem arquivo não vira evento" [ "$(n '.name == "oute.swarm.step.published"')" -eq "$n0" ]
+check "emit: linha etapa malformada, com chave fora do merge ou texto sem arquivo não vira evento" [ "$(n "$STEPEV")" -eq "$n0" ]
 rcv_stop
 
 # ---------------------------------------------------------------- 7. dispatcher em Codex (revisor pelo agente da linha da tabela)
@@ -314,14 +317,14 @@ rm -f "$RBIN/codex"
 
 # ---------------------------------------------------------------- 7b. o shell do dispatcher não tem as OTEL_* (#250): o revisor as leva do ~/.oute_env
 CASE=otel; round "$CASE"; mkdir -p "$FAKE/rev"; ok_json
-env -i OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.invalid:4318 OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
+env -i OTEL_EXPORTER_OTLP_ENDPOINT=$EP OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_LOGS_EXPORTER=otlp CLAUDE_CODE_ENABLE_TELEMETRY=1 GH_X=segredo bash -c 'declare -px' | grep -E '^declare -x (GH_|OTEL_|CLAUDE_CODE_)' > "$H/.oute_env"
 etapa fechamento.r1 "$TXT"
 KEEP_EP="$OTEL_EXPORTER_OTLP_ENDPOINT"; KEEP_RA="$OTEL_RESOURCE_ATTRIBUTES"; unset OTEL_EXPORTER_OTLP_ENDPOINT OTEL_RESOURCE_ATTRIBUTES
 swr step review fechamento --writer $WR
 export OTEL_EXPORTER_OTLP_ENDPOINT="$KEEP_EP" OTEL_RESOURCE_ATTRIBUTES="$KEEP_RA"
 check "sem OTEL_* no ambiente: o revisor roda e aprova"  bash -c '[ "$1" -eq 0 ] && [ "$(jq -r .verdict "$2")" = aprovado ]' _ "$RC" "$STATE/etapas/fechamento.r1.review.json"
-check "sem OTEL_* no ambiente: o agente do revisor recebe o endpoint e a telemetria do ~/.oute_env" bash -c 'e="$1"; grep -qx "OTEL_EXPORTER_OTLP_ENDPOINT=http://collector.invalid:4318" "$e" && grep -qx "OTEL_LOGS_EXPORTER=otlp" "$e" && grep -qx "CLAUDE_CODE_ENABLE_TELEMETRY=1" "$e"' _ "$FAKE/rev/env.1"
+check "sem OTEL_* no ambiente: o agente do revisor recebe o endpoint e a telemetria do ~/.oute_env" bash -c 'e="$1"; grep -qx "OTEL_EXPORTER_OTLP_ENDPOINT=$EP" "$e" && grep -qx "OTEL_LOGS_EXPORTER=otlp" "$e" && grep -qx "CLAUDE_CODE_ENABLE_TELEMETRY=1" "$e"' _ "$FAKE/rev/env.1"
 check "sem OTEL_* no ambiente: origem do arquivo mais a rodada e a etapa" grep -qx "OTEL_RESOURCE_ATTRIBUTES=host.name=oute-server,oute.instance=oute-agent,oute.swarm.round=swarm-test,oute.swarm.step=fechamento" "$FAKE/rev/env.1"
 check "sem OTEL_* no ambiente: credencial do arquivo não vai ao revisor" bash -c '! grep -q "^GH_X=" "$1"' _ "$FAKE/rev/env.1"
 

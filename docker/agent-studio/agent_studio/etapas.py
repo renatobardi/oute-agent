@@ -142,7 +142,8 @@ def load(store, surreal, rnd):
         try:
             record, recs = surreal_steps(surreal, rnd)
             state_read = True
-        except Exception as e:  # noqa: BLE001 — o estado só dá a revisão vigente: sem ele, a página sai do DuckDB
+        except Exception as e:  # noqa: BLE001
+            # o estado só dá a revisão vigente: sem ele, a página sai do DuckDB
             state_read, error = False, type(e).__name__
     if recs:
         steps = [_step_from_record(r) for r in recs]
@@ -184,7 +185,7 @@ def bar(steps):
     return out
 
 
-_INLINE = re.compile(r"(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|\[([^\]\n]+)\]\((https://[^\s()<>\"'`]{1,1000})\)")
+_INLINE = re.compile(r"(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}\*\*)|\[([^\]\n]{1,500})\]\((https://[^\s()<>\"'`]{1,1000})\)")
 _ITEM = re.compile(r"^(?:[-*] +|\d{1,3}[.)] +)(.*)$")
 _ORDERED = re.compile(r"^\d{1,3}[.)] ")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -209,69 +210,84 @@ def inline(text):
     return out
 
 
+class _Parser:
+    """Estado do `parse`: seções, parágrafo e lista em andamento e a cerca de código aberta."""
+
+    def __init__(self):
+        self.sections, self.cur, self.para, self.items, self.ordered, self.fence = [], None, [], [], False, None
+
+    def section(self, name):
+        self.cur = {"title": name, "blocks": []}
+        self.sections.append(self.cur)
+
+    def blocks(self):
+        if self.cur is None:
+            self.section(None)
+        return self.cur["blocks"]
+
+    def flush(self):
+        if self.para:
+            self.blocks().append({"t": "p", "inl": inline(" ".join(self.para))})
+        if self.items:
+            self.blocks().append({"t": "ol" if self.ordered else "ul", "items": [inline(i) for i in self.items]})
+        self.para, self.items = [], []
+
+    def in_fence(self, line):
+        if line.strip().startswith("```"):
+            self.blocks().append({"t": "pre", "s": "\n".join(self.fence)})
+            self.fence = None
+        else:
+            self.fence.append(line)
+
+    def item(self, s):
+        if self.para or (self.items and self.ordered != bool(_ORDERED.match(s))):
+            self.flush()
+        self.ordered = bool(_ORDERED.match(s))
+        self.items.append(_ITEM.match(s).group(1))
+
+    def line(self, line):
+        if self.fence is not None:
+            return self.in_fence(line)
+        s = line.strip()
+        if s.startswith("```"):
+            self.flush()
+            self.fence = []
+        elif s.startswith("## ") and s[3:].strip() in SECTIONS:
+            self.flush()
+            self.section(s[3:].strip())
+        elif s.startswith("### ") and s[4:].strip():
+            self.flush()
+            self.blocks().append({"t": "h", "inl": inline(s[4:].strip())})
+        elif not s:
+            self.flush()
+        elif _ITEM.match(s) and not line.startswith("    "):
+            self.item(s)
+        elif self.items and line.startswith(" "):
+            self.items[-1] += " " + s
+        else:
+            if self.items:
+                self.flush()
+            self.para.append(s)
+        return None
+
+    def finish(self):
+        if self.fence is not None:
+            self.blocks().append({"t": "pre", "s": "\n".join(self.fence)})
+        self.flush()
+        found = {sec["title"] for sec in self.sections}
+        return {"sections": self.sections, "missing": [name for name in SECTIONS if name not in found]}
+
+
 def parse(text):
     """Texto da etapa -> `{"sections": [{"title": …|None, "blocks": […]}], "missing": [seções que faltam]}`.
 
     Gramática (a da `design` da fatia 1): `## Decisão`, `## Ações` e `## Detalhe` abrem seção (outro `## …` é texto);
     `### …` é subtítulo; parágrafo; lista com `- ` ou `1. ` (linha seguinte indentada continua o item); bloco entre cercas
     ``` ; `**negrito**`, `` `código` `` e `[texto](https://…)` dentro da linha. HTML, tabela e imagem não existem: viram texto."""
-    lines = _CTRL.sub("", text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")).split("\n")
-    sections, cur, para, items, ordered, fence = [], None, [], [], False, None
-
-    def section(name):
-        nonlocal cur
-        cur = {"title": name, "blocks": []}
-        sections.append(cur)
-
-    def blocks():
-        if cur is None:
-            section(None)
-        return cur["blocks"]
-
-    def flush():
-        nonlocal para, items
-        if para:
-            blocks().append({"t": "p", "inl": inline(" ".join(para))})
-        if items:
-            blocks().append({"t": "ol" if ordered else "ul", "items": [inline(i) for i in items]})
-        para, items = [], []
-
-    for line in lines:
-        if fence is not None:
-            if line.strip().startswith("```"):
-                blocks().append({"t": "pre", "s": "\n".join(fence)})
-                fence = None
-            else:
-                fence.append(line)
-            continue
-        s = line.strip()
-        if s.startswith("```"):
-            flush()
-            fence = []
-        elif s.startswith("## ") and s[3:].strip() in SECTIONS:
-            flush()
-            section(s[3:].strip())
-        elif s.startswith("### ") and s[4:].strip():
-            flush()
-            blocks().append({"t": "h", "inl": inline(s[4:].strip())})
-        elif not s:
-            flush()
-        elif _ITEM.match(s) and not line.startswith("    "):
-            if para or (items and ordered != bool(_ORDERED.match(s))):
-                flush()
-            ordered = bool(_ORDERED.match(s))
-            items.append(_ITEM.match(s).group(1))
-        elif items and line.startswith(" "):
-            items[-1] += " " + s
-        else:
-            if items:
-                flush()
-            para.append(s)
-    if fence is not None:
-        blocks().append({"t": "pre", "s": "\n".join(fence)})
-    flush()
-    found = {sec["title"] for sec in sections}
-    return {"sections": sections, "missing": [name for name in SECTIONS if name not in found]}
+    p = _Parser()
+    for line in _CTRL.sub("", text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")).split("\n"):
+        p.line(line)
+    return p.finish()
 
 
 def render(steps):
