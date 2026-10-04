@@ -39,6 +39,7 @@ Com o opt-in `OUTE_MEMORY_RUN=1` (desligado por padrão; vale só com ele), a se
 - Antes do primeiro push, renomeie o branch para `<tipo>/<issue>-<slug>` (`git branch -m …`); tipos: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Commits pequenos, mensagem no padrão convencional. Entrega por PR (`gh pr create`). **Merge só quando o usuário pedir.**
 - Depois do merge, `oute-task clean` lista o que pode ser removido; `oute-task clean --yes` remove. Os dois agem só no space atual do herdr (`--space <nome>`: outro; `--all`: todos, inclusive as worktrees no formato antigo, direto em `/workspace/.worktrees`).
+- O `oute-task clean` também lista, uma linha por handoff aberto do ai-memory das worktrees removidas (`handoff id=<id> workspace=<W> project=<P> cwd=<worktree>`), mas **nunca cancela**. Se você rodou o `clean --yes` e há essas linhas, cancele cada uma com a ferramenta `memory_handoff_cancel` (`id`, com o `workspace` e o `project` da linha) e diga quantos cancelou; sem as ferramentas `memory_*`, diga que não cancelou. Linha `aviso: …` = a listagem falhou: não cancele nada por palpite. Nunca use `ai-memory handoffs --expire-all`: ele expira também os handoffs das worktrees vivas.
 
 ## Issues e contexto do repositório
 

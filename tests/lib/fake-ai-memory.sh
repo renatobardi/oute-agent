@@ -7,6 +7,8 @@
 #   install-hooks --agent claude-code   -> hooks em ~/.claude/settings.json (jq, sem apagar o resto)
 #   run <agente> [opções] --executable <bin> -- <args…> (#367) -> como o real: AI_MEMORY_RUN_ID no ambiente e exec do <bin>
 #       com <args…>, no mesmo cwd; a linha do log leva as opções (--no-autowire, --yolo…) para o teste conferir
+#   handoffs --workspace W --project P --limit N --json (#435) -> o array de $FAKE_AI_MEMORY_HANDOFFS (`[]` sem ele); sai com
+#       $FAKE_AI_MEMORY_RC (erro) ou dorme $FAKE_AI_MEMORY_SLEEP s; o log leva os argumentos (o teste confere que não há --expire-all)
 # Idempotente como o real: o que já está lá não é escrito de novo; se o arquivo já existia e muda, deixa um
 # <arquivo>.bak-<n> (o real deixa .bak-<ts> a cada --apply); FAKE_AI_MEMORY_BAK=0 não deixa .bak. Cada chamada vai, em uma linha, em $FAKE_AI_MEMORY_LOG.
 fake_ai_memory_install() {
@@ -23,6 +25,13 @@ if [[ "$cmd" == run ]]; then
   [[ -n "$exe" ]] || { echo "ai-memory falso: run sem --executable" >&2; exit 2; }
   export AI_MEMORY_RUN_ID=fake-run
   exec "$exe" "$@"
+fi
+if [[ "$cmd" == handoffs ]]; then   # lista (#435): o JSON de $FAKE_AI_MEMORY_HANDOFFS (um array, como o real), ou erro/sem resposta
+  [[ -z "${FAKE_AI_MEMORY_SLEEP:-}" ]] || sleep "$FAKE_AI_MEMORY_SLEEP"
+  [[ "${FAKE_AI_MEMORY_RC:-0}" == 0 ]] || { echo "ai-memory falso: erro" >&2; exit "$FAKE_AI_MEMORY_RC"; }
+  echo "INFO ai-memory falso" >&2
+  if [[ -s "${FAKE_AI_MEMORY_HANDOFFS:-}" ]]; then cat "$FAKE_AI_MEMORY_HANDOFFS"; else echo '[]'; fi
+  exit 0
 fi
 agent=""; apply=0
 while [[ $# -gt 0 ]]; do
