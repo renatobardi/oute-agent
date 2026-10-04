@@ -23,7 +23,7 @@
 
 <section class="kpis" id="kpis" aria-label="Indicadores">
   {% for k in snap.kpis %}
-  <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"
+  <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"{% if k.get("hint") %} title="{{ k.hint }}"{% endif %}
        {% if k.key == "cost" %}data-real-usd="{{ raw(k.real_usd) }}" data-estimated-usd="{{ raw(k.estimated_usd) }}" data-estimated-share="{{ raw(k.estimated_share) }}" data-unpriced-calls="{{ k.unpriced_calls }}"{% endif %}
        {% if k.key == "errors" %}data-errors="{{ k.errors }}" data-prev-errors="{{ k.prev_errors }}"{% endif %}>
     <div class="kpi-topo"><span class="kpi-rotulo">{{ k.label }}</span><span class="kpi-icone">{{ icon(k.icon, 14) }}</span></div>
