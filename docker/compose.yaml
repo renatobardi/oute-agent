@@ -209,7 +209,7 @@ services:
       SURREAL_USER: root
       SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
     # obrigatório: sem limite, o cache do RocksDB mede pela RAM do host (~metade dela, #139)
-    mem_limit: ${OUTE_SURREALDB_MEM:-1g}
+    mem_limit: ${OUTE_SURREALDB_MEM:-2g}
     # sem porta publicada: só o agent-studio, pela rede studio
     volumes:
       - oute-surrealdb:/data/surrealdb
