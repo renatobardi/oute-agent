@@ -895,6 +895,7 @@ STEP_SECRETS=(
   'token-github=gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}'
   'chave-de-api=(^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}'
   'chave-aws=AKIA[0-9A-Z]{16}'
+  'credencial-em-url=://[^/[:space:]@:]+:[^/[:space:]@]+@[A-Za-z0-9[]'
   'token-slack=xox[abpr]-[A-Za-z0-9-]{10,}'
   'jwt=eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.'
   'cabecalho-de-credencial=([Bb]earer|[Aa]uthorization:) +[A-Za-z0-9._~+/=-]{20,}'
@@ -984,10 +985,13 @@ step_check_long_token() {
 }
 
 # step_check_chars <arquivo> <o que é>: recusa (die) marca de direção e separador Unicode (U+200B-200F, U+2028-202E,
-# U+2060-2069, U+FEFF): não aparecem na tela, mas trocam a ordem do texto ou quebram a linha de quem lê (o `ask` também tira)
+# U+2060-2069, U+FEFF): não aparecem na tela, mas trocam a ordem do texto ou quebram a linha de quem lê (o `ask` também tira).
+# Exceção: o ZWJ (U+200D) entre pictogramas (emoji composto, ex.: família) passa; ZWJ solto, no começo ou no fim, é recusado
 step_check_chars() {
-  local f="$1" what="$2"
-  if LC_ALL=C grep -Eq $'\xe2\x80[\x8b-\x8f\xa8-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf' "$f"; then
+  local f="$1" what="$2" pic
+  pic=$'\xf0\x9f[\x8c-\xab][\x80-\xbf]|\xe2[\x98-\x9e][\x80-\xbf]|\xef\xb8\x8f'
+  if LC_ALL=C sed -E ":a; s/($pic)\xe2\x80\x8d(\xf0\x9f[\x8c-\xab][\x80-\xbf]|\xe2[\x98-\x9e][\x80-\xbf])/\1\2/; ta" "$f" \
+       | LC_ALL=C grep -Eq $'\xe2\x80[\x8b-\x8f\xa8-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf'; then
     die "$what tem marca de direção ou separador Unicode (U+202E, U+2028, U+200B, U+FEFF…): recusado; tire os caracteres e rode de novo"
   fi
   return 0
@@ -1080,6 +1084,9 @@ cmd_step_review() {
   done
   [[ "$writer" =~ ^[A-Za-z0-9][]A-Za-z0-9._[-]{0,63}$ ]] || die "step review pede --writer <id do seu modelo> (ex.: claude-sonnet-5-5)"
   rev="$S_REV"; vf="$(step_verdict_file "$rev")"
+  # sobra de um SIGKILL (o trap não roda): pastas .revisor.* com mais de 1 dia no estado da rodada saem (modo 700, mas com texto,
+  # fontes e prompt). A pasta da execução em andamento é nova, não casa
+  find "$S_STATE" -maxdepth 1 -type d -name '.revisor.*' -mtime +0 -exec rm -rf {} + 2>/dev/null || true
   # pasta de trabalho própria (mktemp -d, modo 700) que sai no fim ou se o processo morrer: o prompt não fica em disco. O texto
   # é copiado uma vez e tudo (checagem, sha256, prompt) sai da cópia, não do arquivo da rodada
   REV_WD="$(mktemp -d "$S_STATE/.revisor.XXXXXX")" || die "não criei a pasta de trabalho do revisor em $S_STATE"
