@@ -1,0 +1,9 @@
+artefato	palavras	frases	media_pal_frase	mediana	max	pct_frases_>20	pct_frases_>25	paragrafos	max_frases_par	pct_par_>6frases	pct_frases_passivas(heuristica)
+p1/original-auditoria-457.md	523	47	8.5	6	30	6	2	20	8	5	4
+p1/sonnet/pedido-merge.md	1068	95	10.5	9	23	5	0	36	8	6	7
+p1/haiku/pedido-merge.md	617	71	8.3	6	39	7	4	40	5	0	1
+p3/original-resumo-ciclo-437.md	369	38	8.8	7.0	26	3	3	20	5	0	5
+p3/p3-texto.md	972	81	6.6	6	18	0	0	50	6	0	4
+p2/original.sh (prosa extraida)	146	20	7.0	5.0	15	0	0	16	2	0	5
+p2/sonnet/pedido.sh (prosa extraida)	418	50	7.9	8.0	14	0	0	31	4	0	6
+p2/haiku/pedido.sh (prosa extraida)	252	36	6.5	6.0	19	0	0	28	3	0	8

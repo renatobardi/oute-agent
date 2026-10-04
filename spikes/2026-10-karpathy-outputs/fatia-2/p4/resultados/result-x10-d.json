@@ -1,0 +1,15 @@
+{
+  "run": "regression-20261004-103613-c1a87b",
+  "image": "0.7.35",
+  "claude": "2.1.289",
+  "codex": "0.159.2",
+  "model": "claude-haiku-4-5-20251001",
+  "rounds": 10,
+  "result": "verde",
+  "cost_usd": 0.5874,
+  "tasks": {
+    "root": "verde",
+    "select": "verde",
+    "emit": "verde"
+  }
+}

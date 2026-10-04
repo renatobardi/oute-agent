@@ -1,0 +1,8 @@
+oute-regression regression-20261004-102537-b4c604 · imagem 0.7.35 · claude 2.1.289 (claude-haiku-4-5-20251001) · 3 rodada(s)
+  root             verde           2/3 ok, 1 reprovada(s), 0 sem rodar (última: oute-propose não foi chamado)
+  select           verde           3/3 ok
+  worktree         vermelho        0/3 ok, 3 reprovada(s), 0 sem rodar (última: nota.txt não está na worktree)
+  emit             verde           3/3 ok
+resultado: vermelho (3 verde, 1 vermelho, 0 não verificado) · custo equivalente na API: US$ 0.2234
+rc=1
+segundos=48

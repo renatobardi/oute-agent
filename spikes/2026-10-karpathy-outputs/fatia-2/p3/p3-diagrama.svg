@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 760" width="640" height="760" role="img" aria-labelledby="t d">
+<title id="t">O que o Bardi faz: release, CI image, deploy, verificação, 3 decisões e o que fica aberto</title>
+<desc id="d">Fonte: https://github.com/renatobardi/oute-agent/issues/437#issuecomment-5976459420. Cadeia em ordem: 1 aprovar o pedido de release no oute watch; 2 CI image da tag, com teste de fumaça (#430); 3 oute update nos dois hosts; 4 oute-aidlc-ship-verify e conferências. Três decisões (#457, #429, #435), listadas à parte, sem dependência declarada da cadeia. Ficam abertas #213, #435, #428, #448, #455, #368, #348 e #7.</desc>
+<style>
+.b{fill:#eef2f7;stroke:#3b5b85;stroke-width:1.5}
+.k{fill:#fff4dc;stroke:#9a6a00;stroke-width:1.5}
+.o{fill:#ececec;stroke:#666;stroke-width:1.5;stroke-dasharray:6 4}
+.t{fill:#14202e;font:600 14px sans-serif}
+.s{fill:#14202e;font:13px sans-serif}
+.m{fill:#14202e;font:12px monospace}
+.a{stroke:#44566c;stroke-width:2;fill:none}
+.ah{fill:#44566c}
+@media (prefers-color-scheme:dark){
+.b{fill:#1d2a3a;stroke:#7fa6d6}.k{fill:#3a2e12;stroke:#e0b04a}.o{fill:#2a2a2a;stroke:#999}
+.t,.s,.m{fill:#e6edf5}.a{stroke:#9db4cc}.ah{fill:#9db4cc}}
+</style>
+<defs><marker id="ar" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path class="ah" d="M0,0 L10,4 L0,8 z"/></marker></defs>
+<text class="t" x="20" y="26">Cadeia do Bardi (a seta mostra a ordem do original)</text>
+
+<rect class="b" x="20" y="40" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="62">1. Release</text>
+<text class="s" x="34" y="82">Aprovar no `oute watch` o pedido (não faz deploy; confere `main` em 5109c44):</text>
+<text class="m" x="34" y="102">20261004-041119-release-v0-7-35-scripts-release-push-da-</text>
+<path class="a" d="M320,128 L320,152" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="154" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="176">2. CI `image` da tag</text>
+<text class="s" x="34" y="196">Primeira vez do teste de fumaça (#430).</text>
+<text class="s" x="34" y="216">Se falhar por defeito do teste, a imagem não é publicada:</text>
+<text class="s" x="34" y="234">reverter 1a5e470 e republicar a tag.</text>
+<path class="a" d="M320,242 L320,266" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="268" width="600" height="68" rx="8"/>
+<text class="t" x="34" y="290">3. Deploy</text>
+<text class="s" x="34" y="310">`oute update` nos dois hosts, quando as sessões do</text>
+<text class="s" x="34" y="328">`frentes-engenharia` puderem cair.</text>
+<path class="a" d="M320,336 L320,360" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="362" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="384">4. Verificação (`(ship)`)</text>
+<text class="s" x="34" y="404">`oute-aidlc-ship-verify`; conferir #433 (`/v1/usage`, `/uso`), #426 (`oute-sonar`),</text>
+<text class="s" x="34" y="424">e o texto novo dos prompts: #431, #436, #434, #450, #451, #452.</text>
+
+<text class="t" x="20" y="482">3 decisões (o original não diz que dependem da cadeia)</text>
+<rect class="k" x="20" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="32" y="516">PR #457 (#213)</text>
+<text class="s" x="32" y="536">Dispatcher com Codex.</text>
+<text class="s" x="32" y="556">Opção A: merge,</text><text class="s" x="32" y="572">ensaiar depois.</text>
+<text class="s" x="32" y="590">Opção B: ensaiar antes</text><text class="s" x="32" y="606">(`--agent codex`).</text>
+<rect class="k" x="225" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="237" y="516">Spike #429</text>
+<text class="s" x="237" y="536">Ligar o LLM do ai-memory</text><text class="s" x="237" y="552">pelo OpenRouter?</text>
+<text class="s" x="237" y="572">~US$ 0,0015 por sessão,</text><text class="s" x="237" y="588">`openai/gpt-oss-120b`;</text><text class="s" x="237" y="604">consolidação escreve direto.</text>
+<rect class="k" x="430" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="442" y="516">#435</text>
+<text class="s" x="442" y="536">Política de handoffs.</text>
+<text class="s" x="442" y="556">Muda o comportamento</text><text class="s" x="442" y="572">do ai-memory.</text>
+
+<rect class="o" x="20" y="636" width="600" height="104" rx="8"/>
+<text class="t" x="34" y="658">Segue aberto</text>
+<text class="s" x="34" y="678">#213 (PR #457 espera decisão), #435 (decisão), #428 (precisa do Mac),</text>
+<text class="s" x="34" y="696">#448 e #455 (novas, sem triagem; #448 é da sessão do Mac),</text>
+<text class="s" x="34" y="714">#368, #348 e #7 (bloqueadas).</text>
+<text class="s" x="34" y="732">Fonte: #437, comentário 5976459420.</text>
+</svg>

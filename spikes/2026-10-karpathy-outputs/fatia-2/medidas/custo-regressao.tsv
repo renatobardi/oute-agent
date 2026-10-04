@@ -1,0 +1,11 @@
+execucao	rodadas	custo_equivalente_api_usd	segundos
+a	3	0.2373	46
+a2	3	0.2314	52
+b	3	0.2157	41
+c	3	0.2234	48
+d	3	0.2199	58
+x10-a	10	0.589	152
+x10-b	10	0.5816	155
+x10-c	10	0.6094	165
+x10-d	10	0.5874	146
+checagem-ambiente-real (sem CLAUDE_CONFIG_DIR; tarefas root e worktree; so para validar o arranjo)	3	0.1195	nao medido

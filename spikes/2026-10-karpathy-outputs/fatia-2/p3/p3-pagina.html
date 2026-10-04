@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resumo do ciclo 2026-10-04</title>
+<style>
+:root{--bg:#fff;--fg:#14202e;--mut:#4a5a6c;--card:#f4f6f9;--line:#c9d2dd;--warn:#fff4dc;--warnl:#9a6a00;--lk:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#10161e;--fg:#e6edf5;--mut:#a5b4c4;--card:#18212c;--line:#33414f;--warn:#3a2e12;--warnl:#e0b04a;--lk:#7fb4ee}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.3rem;margin:.2em 0}h2{font-size:1.1rem;margin:1.4em 0 .4em}
+a{color:var(--lk)}code{font:.85em ui-monospace,monospace;background:var(--card);padding:0 .25em;border-radius:3px;overflow-wrap:anywhere}
+.dec{background:var(--warn);border:1px solid var(--warnl);border-radius:8px;padding:12px 16px}
+.dec h2{margin-top:0}
+.src{color:var(--mut);font-size:.85rem}
+ul.chk{list-style:none;padding:0}ul.chk li{margin:.5em 0}
+ul.chk label{display:flex;gap:10px;align-items:flex-start}
+ul.chk input{width:22px;height:22px;flex:none;margin-top:2px}
+input:checked+span{color:var(--mut);text-decoration:line-through}
+details{border:1px solid var(--line);border-radius:8px;padding:8px 14px;margin:10px 0;background:var(--card)}
+summary{cursor:pointer;font-weight:600;padding:4px 0}
+figure{margin:12px 0}svg{width:100%;height:auto;display:block}
+</style>
+</head>
+<body><main>
+<h1>Resumo do ciclo, 2026-10-04 01h10 (GMT-3)</h1>
+<p class="src">Fonte de tudo: <a href="https://github.com/renatobardi/oute-agent/issues/437#issuecomment-5976459420">#437, comentário 5976459420</a> (o "resumo" do dispatcher). Todo número vem do resumo; não foi remedido.</p>
+
+<section class="dec" aria-labelledby="dec">
+<h2 id="dec">Decisão do Bardi: 3 itens</h2>
+<ol>
+<li><strong>PR #457 (#213, dispatcher com Codex).</strong> A auditoria não achou nada crítico. O teste prova o caminho padrão (Claude) igual ao de antes. Falta o ensaio de uma rodada curta com <code>--agent codex</code>. Opções: (A) fazer merge e ensaiar depois; (B) ensaiar antes. O resumo não marca recomendação. <a href="https://github.com/renatobardi/oute-agent/pull/457#issuecomment-5976361202">Relatório do PR #457</a>.</li>
+<li><strong>Spike #429 (LLM do ai-memory pelo OpenRouter).</strong> Ler e decidir se liga. Funciona. Custa ~US$ 0,0015 por sessão, com <code>openai/gpt-oss-120b</code>. A consolidação escreve direto.</li>
+<li><strong>#435 (política de handoffs).</strong> Decidir. A política muda o comportamento do ai-memory.</li>
+</ol>
+<p class="src">Fonte: resumo, "Ações do Bardi", itens 4 a 6.</p>
+</section>
+
+<h2>Ações do Bardi, na ordem</h2>
+<p class="src">Fonte: resumo, "Ações do Bardi, na ordem". Marque o que já fez (guardado só neste navegador).</p>
+<ul class="chk" id="acoes">
+<li><label><input type="checkbox" data-k="a1"><span><strong>1. Release.</strong> Aprovar no <code>oute watch</code> o pedido <code>20261004-041119-release-v0-7-35-scripts-release-push-da-</code>. O pedido não faz deploy. Ele confere que a <code>main</code> está em <code>5109c44</code>.</span></label></li>
+<li><label><input type="checkbox" data-k="a2"><span><strong>2. CI <code>image</code> da tag.</strong> É a primeira vez do teste de fumaça (#430). Se ele falhar por defeito dele, a imagem não é publicada. Nesse caso, reverter <code>1a5e470</code> e republicar a tag.</span></label></li>
+<li><label><input type="checkbox" data-k="a3"><span><strong>3. Deploy.</strong> Rodar <code>oute update</code> nos dois hosts, quando as sessões do <code>frentes-engenharia</code> puderem cair. Depois, rodar <code>oute-aidlc-ship-verify</code>.</span></label></li>
+<li><label><input type="checkbox" data-k="a4"><span><strong>4. Decidir o PR #457.</strong> Ver a decisão 1 acima.</span></label></li>
+<li><label><input type="checkbox" data-k="a5"><span><strong>5. Ler o spike #429 e decidir.</strong> Ver a decisão 2 acima.</span></label></li>
+<li><label><input type="checkbox" data-k="a6"><span><strong>6. Decidir a #435.</strong> Ver a decisão 3 acima.</span></label></li>
+</ul>
+
+<h2>Diagrama</h2>
+<figure>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 760" width="640" height="760" role="img" aria-labelledby="t d">
+<title id="t">O que o Bardi faz: release, CI image, deploy, verificação, 3 decisões e o que fica aberto</title>
+<desc id="d">Fonte: https://github.com/renatobardi/oute-agent/issues/437#issuecomment-5976459420. Cadeia em ordem: 1 aprovar o pedido de release no oute watch; 2 CI image da tag, com teste de fumaça (#430); 3 oute update nos dois hosts; 4 oute-aidlc-ship-verify e conferências. Três decisões (#457, #429, #435), listadas à parte, sem dependência declarada da cadeia. Ficam abertas #213, #435, #428, #448, #455, #368, #348 e #7.</desc>
+<style>
+.b{fill:#eef2f7;stroke:#3b5b85;stroke-width:1.5}
+.k{fill:#fff4dc;stroke:#9a6a00;stroke-width:1.5}
+.o{fill:#ececec;stroke:#666;stroke-width:1.5;stroke-dasharray:6 4}
+.t{fill:#14202e;font:600 14px sans-serif}
+.s{fill:#14202e;font:13px sans-serif}
+.m{fill:#14202e;font:12px monospace}
+.a{stroke:#44566c;stroke-width:2;fill:none}
+.ah{fill:#44566c}
+@media (prefers-color-scheme:dark){
+.b{fill:#1d2a3a;stroke:#7fa6d6}.k{fill:#3a2e12;stroke:#e0b04a}.o{fill:#2a2a2a;stroke:#999}
+.t,.s,.m{fill:#e6edf5}.a{stroke:#9db4cc}.ah{fill:#9db4cc}}
+</style>
+<defs><marker id="ar" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path class="ah" d="M0,0 L10,4 L0,8 z"/></marker></defs>
+<text class="t" x="20" y="26">Cadeia do Bardi (a seta mostra a ordem do original)</text>
+
+<rect class="b" x="20" y="40" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="62">1. Release</text>
+<text class="s" x="34" y="82">Aprovar no `oute watch` o pedido (não faz deploy; confere `main` em 5109c44):</text>
+<text class="m" x="34" y="102">20261004-041119-release-v0-7-35-scripts-release-push-da-</text>
+<path class="a" d="M320,128 L320,152" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="154" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="176">2. CI `image` da tag</text>
+<text class="s" x="34" y="196">Primeira vez do teste de fumaça (#430).</text>
+<text class="s" x="34" y="216">Se falhar por defeito do teste, a imagem não é publicada:</text>
+<text class="s" x="34" y="234">reverter 1a5e470 e republicar a tag.</text>
+<path class="a" d="M320,242 L320,266" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="268" width="600" height="68" rx="8"/>
+<text class="t" x="34" y="290">3. Deploy</text>
+<text class="s" x="34" y="310">`oute update` nos dois hosts, quando as sessões do</text>
+<text class="s" x="34" y="328">`frentes-engenharia` puderem cair.</text>
+<path class="a" d="M320,336 L320,360" marker-end="url(#ar)"/>
+
+<rect class="b" x="20" y="362" width="600" height="88" rx="8"/>
+<text class="t" x="34" y="384">4. Verificação (`(ship)`)</text>
+<text class="s" x="34" y="404">`oute-aidlc-ship-verify`; conferir #433 (`/v1/usage`, `/uso`), #426 (`oute-sonar`),</text>
+<text class="s" x="34" y="424">e o texto novo dos prompts: #431, #436, #434, #450, #451, #452.</text>
+
+<text class="t" x="20" y="482">3 decisões (o original não diz que dependem da cadeia)</text>
+<rect class="k" x="20" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="32" y="516">PR #457 (#213)</text>
+<text class="s" x="32" y="536">Dispatcher com Codex.</text>
+<text class="s" x="32" y="556">Opção A: merge,</text><text class="s" x="32" y="572">ensaiar depois.</text>
+<text class="s" x="32" y="590">Opção B: ensaiar antes</text><text class="s" x="32" y="606">(`--agent codex`).</text>
+<rect class="k" x="225" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="237" y="516">Spike #429</text>
+<text class="s" x="237" y="536">Ligar o LLM do ai-memory</text><text class="s" x="237" y="552">pelo OpenRouter?</text>
+<text class="s" x="237" y="572">~US$ 0,0015 por sessão,</text><text class="s" x="237" y="588">`openai/gpt-oss-120b`;</text><text class="s" x="237" y="604">consolidação escreve direto.</text>
+<rect class="k" x="430" y="494" width="190" height="122" rx="8"/>
+<text class="t" x="442" y="516">#435</text>
+<text class="s" x="442" y="536">Política de handoffs.</text>
+<text class="s" x="442" y="556">Muda o comportamento</text><text class="s" x="442" y="572">do ai-memory.</text>
+
+<rect class="o" x="20" y="636" width="600" height="104" rx="8"/>
+<text class="t" x="34" y="658">Segue aberto</text>
+<text class="s" x="34" y="678">#213 (PR #457 espera decisão), #435 (decisão), #428 (precisa do Mac),</text>
+<text class="s" x="34" y="696">#448 e #455 (novas, sem triagem; #448 é da sessão do Mac),</text>
+<text class="s" x="34" y="714">#368, #348 e #7 (bloqueadas).</text>
+<text class="s" x="34" y="732">Fonte: #437, comentário 5976459420.</text>
+</svg>
+<figcaption class="src">Fonte: resumo (#437, comentário 5976459420). As setas mostram só a ordem que o resumo dá. O resumo não diz que as decisões dependem da cadeia.</figcaption>
+</figure>
+
+<details>
+<summary>Feito nesta noite</summary>
+<p class="src">Fonte: resumo, "Feito nesta noite".</p>
+<ul>
+<li>A rodada <code>swarm-1003-2048</code> fechou 10 issues do ciclo: #427, #431, #432, #430, #425, #436, #426, #433, #429 e #434.</li>
+<li>A rodada fez 11 merges pela autorização repassada.</li>
+<li>A rodada executou e fez merge do kaizen #450 e do #451.</li>
+<li>A rodada <code>swarm-1004-0013</code> fez merge da #452 (PR #456).</li>
+<li>A #213 tem o PR #457 <strong>aberto de propósito</strong>.</li>
+<li>Checklist da release 0.7.35, tudo ok: changelog com 14 fragmentos e saída 0; pré-condições; CI verde nos 14 PRs; <code>agent-pins</code> ok; <code>models-check</code> com saída 0; nenhuma issue órfã; nenhum alerta de preço.</li>
+</ul>
+</details>
+
+<details>
+<summary>Conferir depois do deploy (<code>(ship)</code>)</summary>
+<p class="src">Fonte: resumo, "Para conferir depois do deploy".</p>
+<ul>
+<li>#433: <code>/v1/usage</code> e a tela <code>/uso</code> mostram o custo dos dispatchers separado do custo dos workers.</li>
+<li>#426: <code>oute-sonar</code> está no PATH do dispatcher.</li>
+<li>#431, #436, #434, #450, #451, #452: o texto novo dos prompts está na imagem.</li>
+</ul>
+</details>
+
+<details>
+<summary>Seguem abertas</summary>
+<p class="src">Fonte: resumo, "Seguem abertas".</p>
+<ul>
+<li>#213: o PR #457 espera decisão.</li>
+<li>#435: espera decisão.</li>
+<li>#428: precisa do Mac.</li>
+<li>#448 e #455: são novas e sem triagem. A #448 é da sessão do Mac.</li>
+<li>#368, #348 e #7: estão bloqueadas.</li>
+</ul>
+</details>
+
+<details>
+<summary>Observações</summary>
+<p class="src">Fonte: resumo, "Observações".</p>
+<ul>
+<li>A consolidação do <code>swarm-worker.md</code> (#434) reduziu 12%. A meta era 30%. O PR explica.</li>
+<li>Na limpeza, o dispatcher cancelou 15 handoffs de sessões e rodadas já encerradas.</li>
+<li>A aba do dispatcher <code>r15</code> e a aba da sessão da #213 ficaram abertas. Elas esperam a decisão do #457.</li>
+</ul>
+</details>
+</main>
+<script>
+(function(){
+var boxes=document.querySelectorAll('#acoes input'),s={};
+try{s=JSON.parse(localStorage.getItem('p3-437')||'{}')||{};}catch(e){s={};}
+boxes.forEach(function(b){
+ b.checked=!!s[b.dataset.k];
+ b.addEventListener('change',function(){
+  s[b.dataset.k]=b.checked;
+  try{localStorage.setItem('p3-437',JSON.stringify(s));}catch(e){}
+ });
+});
+})();
+</script>
+</body></html>

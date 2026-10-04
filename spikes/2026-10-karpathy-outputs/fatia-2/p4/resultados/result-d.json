@@ -1,0 +1,16 @@
+{
+  "run": "regression-20261004-102624-b8c714",
+  "image": "0.7.35",
+  "claude": "2.1.289",
+  "codex": "0.159.2",
+  "model": "claude-haiku-4-5-20251001",
+  "rounds": 3,
+  "result": "vermelho",
+  "cost_usd": 0.2199,
+  "tasks": {
+    "root": "verde",
+    "select": "verde",
+    "worktree": "vermelho",
+    "emit": "verde"
+  }
+}

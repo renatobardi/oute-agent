@@ -1,0 +1,17 @@
+protótipo	tarefa	modelo	tokens_total_do_subagente	segundos	fonte
+P1	escreve	Sonnet 5.5	57726	48.1	subagente
+P1	escreve	Haiku 4.5	45876	71.5	subagente
+P1	fidelidade do Sonnet	Opus 5.5	60593	81.5	subagente
+P1	fidelidade do Haiku	Opus 5.5	64543	99.3	subagente
+P2	escreve	Sonnet 5.5	47464	37.2	subagente
+P2	escreve	Haiku 4.5	42929	69.3	subagente
+P2	fidelidade dos dois	Opus 5.5	62484	121.4	subagente
+P3	escreve (texto, diagrama, página)	Sonnet 5.5	54141	74.5	subagente
+P3	fidelidade dos três	Opus 5.5	69228	151.2	subagente
+P4	escreve a variante enxuta + rastreio	Sonnet 5.5	49189	35.1	subagente
+P4	fidelidade de b, c e d	Opus 5.5	75167	135.8	subagente
+P5	escreve (1ª tentativa, entrada incompleta, descartada)	Sonnet 5.5	59613	102.5	subagente
+P5	fidelidade da 1ª tentativa (descartada)	Sonnet 5.5	58263	60.1	subagente
+P5	escreve (entrada completa)	Sonnet 5.5	66412	132.9	subagente
+P5	fidelidade (outra instância)	Sonnet 5.5	66006	84.7	subagente
+Vídeo	pesquisa	Sonnet 5.5	62958	89.1	subagente

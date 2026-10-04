@@ -1,0 +1,17 @@
+arquivo	o200k	haiku	sonnet	opus
+in/p1-audit-457.md	1007	1209	1560	1560
+out/p1-sonnet/pedido-merge.md	1885	2271	2916	2916
+out/p1-haiku/pedido-merge.md	1294	1582	2017	2017
+in/p2-pedido-surrealdb.sh	653	787	1021	1021
+out/p2-sonnet/pedido.sh	1134	1367	1719	1719
+out/p2-haiku/pedido.sh	881	1089	1382	1382
+in/p3-437-cycle.md	761	909	1147	1147
+out/p3-sonnet/p3-texto.md	1843	2304	2782	2782
+out/p3-sonnet/p3-diagrama.svg	1782	1982	2314	2314
+out/p3-sonnet/p3-pagina.html	3979	4702	5640	5640
+docker/agent-notes.md	1439	1729	2292	2292
+b-en-concise/docker/agent-notes.md	1347	1477	1962	1962
+c-en-ste80/docker/agent-notes.md	1483	1622	2107	2107
+out/p4-d/agent-notes.md	1169	1306	1761	1761
+private-p5-original	2700	3345	4322	4322
+private-p5-artefato	6049	7479	9303	9303

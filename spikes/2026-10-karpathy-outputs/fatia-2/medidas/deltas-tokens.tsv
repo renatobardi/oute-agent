@@ -1,0 +1,13 @@
+comparacao	o200k	haiku	sonnet_opus
+P1 Sonnet vs auditoria	+87%	+88%	+87%
+P1 Haiku vs auditoria	+29%	+31%	+29%
+P2 Sonnet vs original	+74%	+74%	+68%
+P2 Haiku vs original	+35%	+38%	+35%
+P3 texto vs original	+142%	+153%	+143%
+P3 diagrama vs original	+134%	+118%	+102%
+P3 página vs original	+423%	+417%	+392%
+P4 b vs a	-6%	-15%	-14%
+P4 c vs a	+3%	-6%	-8%
+P4 d vs a	-19%	-24%	-23%
+P4 d vs b	-13%	-12%	-10%
+P5 artefato vs original (privado)	+124%	+124%	+115%
