@@ -25,9 +25,14 @@ O script é `scripts/verify-host.sh`, nesta pasta da skill (no container: `/opt/
 
 ```bash
 S=/opt/oute/addons/skills/oute-aidlc-ship-verify/scripts/verify-host.sh
-{ printf 'EXPECTED=%q\n' '<esperada>'; cat "$S"; } \
+{ printf '%s\n' '# RESUMO' \
+    '# Faz: confere versão, serviços do compose e telemetria recente deste host. Host: o do `oute approve`.' \
+    '# Altera: nada (só leitura). Não toca: containers, volumes e arquivos. Reinicia: nada.'
+  printf 'EXPECTED=%q\n' '<esperada>'; cat "$S"; } \
   | OUTE_PROPOSE_AGENT=<claude|codex> oute-propose "ship: verificar deploy v<esperada>"
 ```
+
+O script não remove, recria nem para nada, então não leva `# CUIDADO:`. O bloco `# RESUMO` abre o pedido, e a regra de `docker/agent-notes.md` (#480) vale para todo pedido: se você acrescentar passo que altera algo, ele leva `# CUIDADO:` antes. Os dois blocos são comentário.
 
 `WINDOW_MIN=<min>` na mesma linha do `EXPECTED` muda a janela da telemetria (padrão 60). Anote o `id` impresso e espere: `oute-inbox --wait <id>` (código 3 = ainda pendente ou expirou: avise o Bardi que o pedido está na fila do `oute approve` e espere de novo).
 
