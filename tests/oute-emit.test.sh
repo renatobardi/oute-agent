@@ -2,7 +2,7 @@
 # Testes dos eventos operacionais do canal e do backfill (#124). Bash puro + python3/jq, sem Docker nem rede.
 # Costura 1: receptor OTLP/HTTP falso (tests/lib/otlp-receiver.py) no OTEL_EXPORTER_OTLP_ENDPOINT.
 # Costura 2: `docker` falso no PATH para o `oute approve` (repassa o exec ao oute-emit local; "imagem antiga" =
-# comando não encontrado). A rodada do swarm fica em tests/oute-swarm.test.sh. Só comportamento externo:
+# comando não encontrado). A rodada do swarm fica em tests/oute-swarm-*.test.sh. Só comportamento externo:
 # stdout, código de saída e o que chega ao receptor. Uso: tests/oute-emit.test.sh   (sai != 0 se algo falhar)
 set -uo pipefail
 
