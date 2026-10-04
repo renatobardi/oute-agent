@@ -179,7 +179,7 @@ class Store:
 
     def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
-        sob a trava, parava todas as telas e a ingestão (504 em produção, #475). Uma por vez (`_dash_lock`), com
+        sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500) e cache de `DASH_TTL_S`
         por janela arredondada ao minuto, para recarregar a página não repetir a conta."""
         minute = 60 * 10**9
