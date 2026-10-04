@@ -3,7 +3,7 @@
 {% set crumbs = [("Governança", none), ("Pedidos", none)] %}
 {% from "_macros.html" import badge, icon, copy_button %}
 {% block head %}<script src="/static/copiar.js" defer></script>{% endblock %}
-{% block title %}Pedidos · agent-studio{% endblock %}
+{% block title %}Pedidos · Agent Studio{% endblock %}
 {% macro proposal_data(p) %}data-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}" data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}" data-rc="{{ '' if p.rc is none else p.rc }}"{% endmacro %}
 {% macro proposal_link(p) %}<a href="{{ p.id|proposal_path }}">{{ p.title or p.id }}</a>{% if p.title %} <span class="sub">{{ p.id }}</span>{% endif %}{% endmacro %}
 {% macro as_badge(p) %}{% if p.as == "root" %}{{ badge("root", "destrutivo", "shield-alert") }}{% elif p.as == "user" %}{{ badge("user", "secundario", "user") }}{% else %}{{ p.as or "—" }}{% endif %}{% endmacro %}
@@ -11,8 +11,6 @@
 <div class="pagina">
 <div class="pagina-topo">
   <h1>Pedidos</h1>
-  <p class="nota">Pedidos do canal de aprovação (<code>oute-propose</code>). Esta tela só mostra: aprovar e recusar continuam
-    no host, com o <code>oute approve</code>.</p>
 </div>
 <div class="pilha">
 <h2 class="secao">Pendentes ({{ pending_total|num }})</h2>

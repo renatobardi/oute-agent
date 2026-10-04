@@ -16,7 +16,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"refreshOnHistoryMiss":true}'>
-<title>{% block title %}agent-studio{% endblock %}</title>
+<title>{% block title %}Agent Studio{% endblock %}</title>
 <link rel="stylesheet" href="/static/studio.css">
 <script src="/static/htmx.min.js" defer></script>
 {% block head %}{% endblock %}
@@ -29,7 +29,7 @@
 <div class="app">
   <aside class="barra" id="barra" aria-label="Menu">
     <div class="barra-topo">
-      <a class="marca" href="/conversas">{{ logo(30) }}<span class="marca-texto"><strong>agent-studio</strong><span>telemetria dos agentes</span></span></a>
+      <a class="marca" href="/">{{ logo(30) }}<span class="marca-texto"><strong>Agent Studio</strong><span>O painel de controle dos seus agentes de código.</span></span></a>
       <label class="botao icone-botao so-celular" for="menu" title="Fechar o menu"><span class="so-leitor">Fechar o menu</span>{{ icon("x") }}</label>
     </div>
     <div class="barra-nav">

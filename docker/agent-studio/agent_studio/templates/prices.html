@@ -2,15 +2,12 @@
 {% set nav = "precos" %}
 {% set crumbs = [("Análise", none), ("Preços", none)] %}
 {% from "_macros.html" import badge, icon %}
-{% block title %}Preços · agent-studio{% endblock %}
+{% block title %}Preços · Agent Studio{% endblock %}
 {% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
   <h1>Preços</h1>
-  <p class="nota">Preço de cada modelo, em {{ unit }}, que estima o custo das chamadas sem custo real. Vale o preço da hora do
-    fato. Esta tela só mostra: a conferência diária (models.dev e OpenRouter) troca o preço, e para travar um modelo
-    vale <code>fixed = true</code> no <code>config.toml</code>.</p>
 </div>
 
 <div class="fontes">

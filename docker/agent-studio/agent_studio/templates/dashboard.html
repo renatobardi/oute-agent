@@ -7,14 +7,14 @@
    distingue real de estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
 {% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
 {% macro money(c) %}{% if c.real_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
-{% block title %}Dashboard · agent-studio{% endblock %}
+{% block title %}Dashboard · Agent Studio{% endblock %}
 {% block main %}
 {% set W = 600 %}{% set H = 180 %}
 <div class="pagina dashboard">
 <div class="pagina-topo">
 <div class="titulo-linha">
   <div><h1>Dashboard</h1>
-  <p>Chamadas ao modelo entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), comparadas com a janela anterior de mesmo tamanho. Preço de lista, não gasto: os agentes rodam por assinatura.</p></div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
   <nav class="janelas" aria-label="Janela">
     {% for value, label in windows %}<a href="/?hours={{ value }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
   </nav>

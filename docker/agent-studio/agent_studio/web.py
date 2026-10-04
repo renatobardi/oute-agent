@@ -39,7 +39,7 @@ from . import alerts as alerts_mod
 detail_log = logging.getLogger("agent_studio_detail")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOME = "/conversas"
+HOME = "/"
 MAX_LOGIN_BODY = 4096
 # janelas oferecidas na lista (horas -> rótulo); a URL aceita também from/to, como o /v1/usage
 WINDOWS = (("24", "24 horas"), ("168", "7 dias"), ("720", "30 dias"), ("8784", "366 dias"))
