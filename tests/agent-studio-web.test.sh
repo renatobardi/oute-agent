@@ -168,12 +168,65 @@ check "CSS: @font-face Inter Variable 100-900 com local('Inter') e a url de /sta
 check "CSS: nenhum hex de cor nem variável antiga"      bash -c '! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | grep -qE "#[0-9a-fA-F]{3,8}\b|--(fundo|painel|texto|fraco|linha|link|erro|est|real)\b"' _ "$TMP/studio.css"
 check "CSS: tokens Kubo no claro e no escuro (OKLCH)"   bash -c 'for v in background foreground card muted muted-foreground border primary destructive gate gate-tint; do [ "$(grep -c -- "^ *--$v: oklch(" "$1")" = 2 ] || exit 1; done' _ "$TMP/studio.css"
 check "CSS: dark por prefers-color-scheme"              grep -q "@media (prefers-color-scheme: dark)" "$TMP/studio.css"
-check "CSS: âmbar (--gate) só em .decisoes"             bash -c '[ "$(grep -c "var(--gate" "$1")" -ge 1 ] && ! grep "var(--gate" "$1" | grep -vqE "^ +(border-bottom: 1px solid var\(--gate\)|color: var\(--gate\);)|border-bottom: 1px solid var\(--gate\); background: var\(--gate-tint\);" ' _ "$TMP/studio.css"
+check "CSS: âmbar (--gate) só em .decisoes"             bash -c '[ "$(grep -c "var(--gate" "$1")" -ge 2 ] && ! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | perl -0ne "while (/([^{}]+)\{([^{}]*)\}/g) { my (\$s, \$b) = (\$1, \$2); \$s =~ s/^\\s+|\\s+\$//g; print qq{\$s\n} if \$b =~ /var\(--gate/ }" | grep -vqE "^\s*\.decisoes\s*\$"' _ "$TMP/studio.css"
 check "CSS: body Inter 14px, h1 20px/600/-0.025em, h2 16px/500, mono 12px" bash -c 'grep -q "font: 14px/1.5 var(--font-sans)" "$1" && grep -q "^h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.025em;" "$1" && grep -q "^h2 { font-size: 16px; font-weight: 500;" "$1" && grep -q "font-family: var(--font-mono); font-size: 12px;" "$1"' _ "$TMP/studio.css"
 check "CSS: .real sem cor; .est muted itálico"          bash -c '! grep -E "^\.real \{.*color" "$1" && grep -q "^\.est { color: var(--muted-foreground); font-style: italic; }" "$1"' _ "$TMP/studio.css"
 check "CSS: .aviso.erro e tr.erro com --destructive tingido" bash -c 'grep -E "^\.aviso\.erro" "$1" | grep -q "color-mix(in oklch, var(--destructive)" && grep -q "^tr\.erro > td:first-child { box-shadow: inset 3px 0 var(--destructive); }" "$1"' _ "$TMP/studio.css"
 check "páginas não vão para cache"                     test "$(hdr cache-control "${C[@]}" "$STUDIO_URL/conversas")" = no-store
 check "sem build de front-end no repo"                 bash -c '! ls "$1"/package.json "$1"/../package.json "$1"/node_modules 2>/dev/null | grep -q .' _ "$PKG"
+
+# ---------------------------------------------------------------- 2b. casco: sidebar, header, sprite e Entrar (#467)
+echo "$LOGIN" > "$TMP/login.html"
+GLIFOS="layout-dashboard message-square layers chart-column receipt shield-check siren hand panel-left log-out moon sun chevron-right chevron-left chevron-down chevron-up info triangle-alert copy check x server terminal sparkles wrench workflow corner-down-right circle-dot repeat archive loader user shield-alert lock eye eye-off arrow-left arrow-right menu network database sakura"
+check "sprite /static/lucide.svg: 200 sem login, como svg" test "$(code "$STUDIO_URL/static/lucide.svg")$(hdr content-type "$STUDIO_URL/static/lucide.svg" | cut -d';' -f1)" = "200image/svg+xml"
+curl -s "$STUDIO_URL/static/lucide.svg" > "$TMP/lucide.svg"
+check "sprite: é o arquivo do repo"                    cmp -s "$TMP/lucide.svg" "$PKG/static/lucide.svg"
+check "sprite: XML válido, um <symbol> por glifo, sem id repetido" python3 -c '
+import sys, xml.etree.ElementTree as ET
+ids = [e.get("id") for e in ET.parse(sys.argv[1]).iter() if e.tag.endswith("symbol")]
+sys.exit(0 if sorted(ids) == sorted(set(ids)) and set(ids) == set(sys.argv[2].split()) else 1)' "$TMP/lucide.svg" "$GLIFOS"
+check "sprite: sem script, estilo nem recurso de fora" bash -c '! sed "s/xmlns=\"[^\"]*\"//" "$1" | grep -qiE "<script|<style|style=|href=|xlink|https?:|[ \"]on[a-z]+="' _ "$TMP/lucide.svg"
+curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b" > "$TMP/logs.html"
+curl -s "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe" > "$TMP/erro.html"
+curl -s -X POST --data-urlencode "token=${STUDIO_TOKEN}x" "$STUDIO_URL/login" > "$TMP/login-erro.html"
+check "páginas: todo ícone aponta para um símbolo do sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/list.html" "$TMP/a.html" "$TMP/logs.html" "$TMP/erro.html" "$TMP/login-erro.html" "$TMP/login.html"
+check "templates: <svg só na macro (icon e logo), nunca colado" bash -c '! grep -l "<svg" "$1"/templates/*.html | grep -v "/_macros.html$" && [ "$(grep -c "<svg" "$1/templates/_macros.html")" = 2 ]' _ "$PKG"
+check "templates: nenhum style= nem <style"            bash -c '! grep -rnE "style=|<style" "$1/templates"' _ "$PKG"
+check "macro icon(name, size=16): <use> do sprite, traço currentColor, escondido do leitor de tela" bash -c 'grep -q "macro icon(name, size=16" "$1" && grep -q "stroke=\"currentColor\"" "$1" && grep -q "aria-hidden=\"true\"><use href=\"/static/lucide.svg#{{ name }}\"/>" "$1"' _ "$PKG/templates/_macros.html"
+check "páginas: o ícone sai do sprite com o tamanho pedido" bash -c 'grep -q "<svg class=\"icone\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" [^>]*><use href=\"/static/lucide.svg#layers\"/></svg>" "$1" && grep -q "<svg class=\"icone\" width=\"14\" height=\"14\" [^>]*><use href=\"/static/lucide.svg#chevron-right\"/>" "$1"' _ "$TMP/list.html"
+# barra lateral
+check "sidebar: <aside> com a marca, no 256 px do CSS" bash -c 'grep -q "<aside class=\"barra\" id=\"barra\"" "$1" && grep -q "^\.barra { flex: 0 0 256px; width: 256px;" "$2"' _ "$TMP/list.html" "$TMP/studio.css"
+check "sidebar: Dashboard acima dos grupos (aponta para as conversas até o PR do dashboard)" bash -c 'a="$(grep -n "<span>Dashboard</span>" "$1" | cut -d: -f1)"; g="$(grep -n "nav-rotulo\">Telemetria" "$1" | cut -d: -f1)"; grep -q "<a class=\"nav-item\" href=\"/conversas\">.*<span>Dashboard</span>" "$1" && [ "$a" -lt "$g" ]' _ "$TMP/list.html"
+check "sidebar: grupos Telemetria, Análise e Governança, nessa ordem" test "$(grep -o 'nav-rotulo">[^<]*' "$TMP/list.html" | cut -d'>' -f2 | paste -sd,)" = "Telemetria,Análise,Governança"
+check "sidebar: itens Conversas, Sessões, Uso, Preços, Pedidos, nessa ordem" test "$(grep -o 'class="nav-item" href="[^"]*"[^>]*><svg[^>]*><use href="[^"]*"/></svg><span>[^<]*' "$TMP/list.html" | sed -E 's/.*#([^"]*)"\/><\/svg><span>/\1=/' | paste -sd,)" = "layout-dashboard=Dashboard,message-square=Conversas,layers=Sessões,chart-column=Uso,receipt=Preços,shield-check=Pedidos"
+check "sidebar: só o item da tela está ativo (aria-current)" test "$(grep -o 'class="nav-item" href="[^"]*" aria-current="page"' "$TMP/list.html")" = 'class="nav-item" href="/conversas" aria-current="page"'
+check "sidebar: no detalhe da conversa o item Conversas segue ativo" grep -q 'class="nav-item" href="/conversas" aria-current="page"' "$TMP/a.html"
+check "sidebar: rodapé com Renato Bardi e o Sair"      bash -c 'grep -q "<strong>Renato Bardi</strong>" "$1" && [ "$(grep -c "<form method=\"post\" action=\"/logout\">" "$1")" = 2 ]' _ "$TMP/list.html"
+# cabeçalho e trilha
+check "header: 72 px, botão de recolher (panel-left), divisor e trilha" bash -c 'grep -q "^\.cabecalho { height: 72px;" "$2" && grep -q "<header class=\"cabecalho\">" "$1" && grep -q "for=\"menu\" title=\"Mostrar ou esconder o menu\"" "$1" && grep -q "lucide.svg#panel-left" "$1" && grep -q "class=\"divisor so-desktop\"" "$1" && grep -q "<nav class=\"trilha\" aria-label=\"Trilha\">" "$1"' _ "$TMP/list.html" "$TMP/studio.css"
+check "header: na lista a trilha é Telemetria › Conversas" bash -c 'grep -q "<span class=\"trilha-pai\">Telemetria</span>" "$1" && grep -q "<span class=\"trilha-atual\" aria-current=\"page\">Conversas</span>" "$1"' _ "$TMP/list.html"
+check "header: no detalhe a trilha é Conversas › <id>, com link na primeira" bash -c 'grep -q "<a class=\"trilha-pai\" href=\"/conversas\">Conversas</a>" "$1" && grep -q "<span class=\"trilha-atual\" aria-current=\"page\">conv-a</span>" "$1"' _ "$TMP/a.html"
+check "header: à direita o selo do host e o Sair"      bash -c 'grep -q "class=\"selo\">.*oute-server</span>" "$1" && grep -q "class=\"botao\">.*Sair</button>" "$1"' _ "$TMP/list.html"
+check "header: o menu (celular) abre pela barra, sem script" bash -c 'grep -q "<input type=\"checkbox\" id=\"menu\" class=\"menu-interruptor\"" "$1" && grep -q "for=\"menu\" title=\"Abrir o menu\"" "$1" && grep -q "menu-interruptor:checked ~ .app .barra" "$2"' _ "$TMP/list.html" "$TMP/studio.css"
+check "celular: na lista há o menu e nenhum voltar"    bash -c 'grep -q "title=\"Abrir o menu\"" "$1" && ! grep -q "title=\"Voltar\"" "$1"' _ "$TMP/list.html"
+check "celular: no detalhe o voltar (para a lista) toma o lugar do menu" bash -c 'grep -q "<a class=\"botao icone-botao so-celular\" href=\"/conversas\" title=\"Voltar\">" "$1" && ! grep -q "title=\"Abrir o menu\"" "$1"' _ "$TMP/a.html"
+check "celular: CSS até 640 px, header 56 px e barra em folha" bash -c 'grep -q "@media (max-width: 640px)" "$1" && grep -q "^  \.cabecalho { height: 56px;" "$1" && grep -q "z-index: 20; inset: 0 auto 0 0; width: 300px" "$1"' _ "$TMP/studio.css"
+check "casco só para quem entrou: o trecho do htmx não leva barra nem cabeçalho" bash -c '! grep -qE "class=\"(barra|cabecalho)\"" <<<"$1"' _ "$(curl -s "${C[@]}" -H 'HX-Request: true' "$STUDIO_URL/conversa/logs?id=conv-b")"
+check "erro de quem entrou (404) leva o casco, com o #conteudo" bash -c 'grep -q "class=\"barra\"" "$1" && grep -q "<main id=\"conteudo\">" "$1"' _ "$TMP/erro.html"
+check "logs do detalhe: casco com o voltar para a conversa" bash -c 'grep -q "href=\"/conversa?id=conv-b\" title=\"Voltar\"" "$1"' _ "$TMP/logs.html"
+# tela Entrar
+check "Entrar: duas colunas (painel e formulário), sem o casco" bash -c 'grep -q "<section class=\"entrar-painel\">" "$1" && grep -q "<main id=\"conteudo\" class=\"entrar-form\">" "$1" && ! grep -qE "class=\"(barra|cabecalho)\"|<aside|/logout" "$1"' _ "$TMP/login.html"
+check "Entrar: painel com logo, frase e 3 pontos"      bash -c 'grep -q "lucide.svg#sakura" "$1" && grep -q "Telemetria e estado dos agentes do oute." "$1" && [ "$(grep -c "<li><svg" "$1")" = 6 ] && grep -q "Só leitura" "$1" && grep -q "Só na tailnet" "$1"' _ "$TMP/login.html"
+check "Entrar: label, dica do vault, campo e botão grande" bash -c 'grep -q "<label for=\"token\">Token</label>" "$1" && grep -q "Vaultwarden · pasta oute-services" "$1" && grep -q "<input id=\"token\" name=\"token\" type=\"password\" autocomplete=\"current-password\"" "$1" && grep -q "class=\"botao primario grande\">Entrar" "$1"' _ "$TMP/login.html"
+check "Entrar: mostrar/esconder só com o script (botão nasce escondido)" bash -c 'grep -q "id=\"token-ver\" hidden aria-controls=\"token\" aria-label=\"Mostrar token\"" "$1" && grep -q "<script src=\"/static/login.js\" defer>" "$1"' _ "$TMP/login.html"
+check "Entrar: scripts só do /static (htmx e login.js)" test "$(grep -ho '<script[^>]*>' "$TMP/login.html" | sort -u | paste -sd,)" = '<script src="/static/htmx.min.js" defer>,<script src="/static/login.js" defer>'
+check "Entrar: /static/login.js servido, sem eval nem recurso de fora" bash -c '[ "$(curl -s -o "$2" -w "%{http_code}" "$1/static/login.js")" = 200 ] && ! grep -qE "eval|innerHTML|document\.write|https?:|fetch\(|XMLHttpRequest" "$2" && grep -q "addEventListener(\"click\"" "$2"' _ "$STUDIO_URL" "$TMP/login.js"
+check "Entrar: sem erro, sem o aviso de token"         bash -c '! grep -qE "Token errado|aria-invalid|role=\"alert\"" "$1"' _ "$TMP/login.html"
+check "Entrar com token errado: callout com triangle-alert e o campo inválido" bash -c 'grep -q "<div class=\"aviso erro login-erro\" role=\"alert\">" "$1" && grep -q "lucide.svg#triangle-alert" "$1" && grep -q "<strong>Token errado.</strong>" "$1" && grep -q "aria-invalid=\"true\"" "$1"' _ "$TMP/login-erro.html"
+check "Entrar: o erro não devolve o token digitado"    bash -c '! grep -qF "$2" "$1"' _ "$TMP/login-erro.html" "${STUDIO_TOKEN}x"
+check "Entrar: o 413 de quem não entrou sai sem o casco" bash -c '! curl -s -X POST --data-urlencode "token=$(head -c 5000 /dev/zero | tr "\0" x)" "$1/login" | grep -qE "class=\"(barra|cabecalho)\""' _ "$STUDIO_URL"
+check "CSS: Entrar em duas colunas, uma só até 640 px"  bash -c 'grep -q "^\.entrar-painel { flex: 1 1 520px;" "$1" && grep -q "^\.entrar-form { flex: 1 1 520px;" "$1" && grep -q "^  \.entrar-painel { flex: 0 0 auto;" "$1"' _ "$TMP/studio.css"
+check "CSS: faixas .alertas (destructive tingido) e .decisoes (--gate-tint)" bash -c 'grep -q "^\.alertas { background: color-mix(in oklab, var(--destructive) 10%, transparent);" "$1" && grep -q "background: var(--gate-tint);" "$1"' _ "$TMP/studio.css"
 
 # ---------------------------------------------------------------- 3. lista de conversas
 L="$(data < "$TMP/list.html" | jq -c '[.[] | select(.conversa)]')"

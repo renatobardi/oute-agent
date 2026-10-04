@@ -1,3 +1,9 @@
+{# ícones Lucide do sprite /static/lucide.svg (#467): o único jeito de pôr ícone numa página; nada de SVG colado em template #}
+{% macro icon(name, size=16, class="") %}<svg class="icone{% if class %} {{ class }}{% endif %}" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/static/lucide.svg#{{ name }}"/></svg>{% endmacro %}
+
+{# o logo do Kubo (flor de cerejeira), do mesmo sprite; as cores vêm do CSS (.sakura) #}
+{% macro logo(size=30) %}<svg class="sakura" width="{{ size }}" height="{{ size }}" viewBox="0 0 100 100" aria-hidden="true"><use href="/static/lucide.svg#sakura"/></svg>{% endmacro %}
+
 {# custo real e estimado sempre separados; o estimado vai marcado (#203) #}
 {% macro cost(c) %}
 {% if c.real_usd is not none %}<span class="real" title="custo real, informado pela fonte">{{ c.real_usd|usd }}</span>{% endif %}

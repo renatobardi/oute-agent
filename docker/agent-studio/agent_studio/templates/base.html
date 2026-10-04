@@ -1,3 +1,15 @@
+{% from "_macros.html" import icon, logo %}
+{# o casco (#467): barra lateral de 256 px, cabeçalho de 72 px com a trilha, e as faixas dos alertas e do Gate sob o cabeçalho.
+   A página filha diz onde está: `nav` (item ativo da barra), `crumbs` (lista de (texto, link ou none)), `detail` (tela de
+   detalhe: sem as faixas e, no celular, com o botão de voltar para `back`). Nada disso é o `#conteudo`: o htmx troca só ele. #}
+{% set _nav = nav if nav is defined else "" %}
+{% set _crumbs = crumbs if crumbs is defined else [] %}
+{% set _detail = detail is defined and detail %}
+{% set _groups = (
+  ("Telemetria", (("conversas", "/conversas", "Conversas", "message-square"), ("sessoes", "/sessoes", "Sessões", "layers"))),
+  ("Análise", (("uso", "/uso", "Uso", "chart-column"), ("precos", "/precos", "Preços", "receipt"))),
+  ("Governança", (("pedidos", "/pedidos", "Pedidos", "shield-check"),)),
+) %}
 <!doctype html>
 <html lang="pt-BR">
 <head>
@@ -7,52 +19,117 @@
 <title>{% block title %}agent-studio{% endblock %}</title>
 <link rel="stylesheet" href="/static/studio.css">
 <script src="/static/htmx.min.js" defer></script>
+{% block head %}{% endblock %}
 </head>
 <body>
-<header class="topo">
-  <a class="marca" href="/conversas">agent-studio</a>
-  {% block nav %}
-  <nav><a href="/conversas">Conversas</a> <a href="/sessoes">Sessões</a> <a href="/uso">Uso</a> <a href="/pedidos">Pedidos</a> <a href="/precos">Preços</a></nav>
-  <form method="post" action="/logout"><button type="submit">Sair</button></form>
-  {% endblock %}
-</header>
+{% block body %}
+{% if authed is defined and authed %}
+{# o botão de recolher (desktop) e o menu (celular) são um só interruptor, sem script: a barra some ou abre por CSS #}
+<input type="checkbox" id="menu" class="menu-interruptor" aria-label="Mostrar ou esconder o menu">
+<div class="app">
+  <aside class="barra" id="barra" aria-label="Menu">
+    <div class="barra-topo">
+      <a class="marca" href="/conversas">{{ logo(30) }}<span class="marca-texto"><strong>agent-studio</strong><span>telemetria dos agentes</span></span></a>
+      <label class="botao icone-botao so-celular" for="menu" title="Fechar o menu"><span class="so-leitor">Fechar o menu</span>{{ icon("x") }}</label>
+    </div>
+    <div class="barra-nav">
+      <nav class="nav-grupo" aria-label="Principal">
+        <a class="nav-item" href="/conversas">{{ icon("layout-dashboard") }}<span>Dashboard</span></a>
+      </nav>
+      {% for label, items in _groups %}
+      <div class="nav-bloco">
+        <div class="nav-rotulo">{{ label }}</div>
+        <nav class="nav-grupo" aria-label="{{ label }}">
+          {% for key, href, text, glyph in items %}
+          <a class="nav-item" href="{{ href }}"{% if key == _nav %} aria-current="page"{% endif %}>{{ icon(glyph) }}<span>{{ text }}</span></a>
+          {% endfor %}
+        </nav>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="barra-rodape">
+      <span class="avatar" aria-hidden="true">R</span>
+      <span class="usuario"><strong>Renato Bardi</strong><span>agent-studio.oute.pro</span></span>
+      <form method="post" action="/logout"><button type="submit" class="botao icone-botao" title="Sair"><span class="so-leitor">Sair</span>{{ icon("log-out") }}</button></form>
+    </div>
+  </aside>
+  <label class="fundo so-celular" for="menu" aria-hidden="true"></label>
+
+  <div class="principal">
+    <header class="cabecalho">
+      {% if _detail and back is defined %}<a class="botao icone-botao so-celular" href="{{ back }}" title="Voltar"><span class="so-leitor">Voltar</span>{{ icon("arrow-left") }}</a>{% endif %}
+      {% if not (_detail and back is defined) %}<label class="botao icone-botao so-celular" for="menu" title="Abrir o menu"><span class="so-leitor">Abrir o menu</span>{{ icon("menu") }}</label>{% endif %}
+      <label class="botao icone-botao so-desktop" for="menu" title="Mostrar ou esconder o menu"><span class="so-leitor">Mostrar ou esconder o menu</span>{{ icon("panel-left") }}</label>
+      <span class="divisor so-desktop" aria-hidden="true"></span>
+      <nav class="trilha" aria-label="Trilha">
+        {% for text, link in _crumbs %}
+        {% if not loop.last %}
+        {% if link %}<a class="trilha-pai" href="{{ link }}">{{ text }}</a>{% else %}<span class="trilha-pai">{{ text }}</span>{% endif %}
+        <span class="trilha-sep">{{ icon("chevron-right", 14) }}</span>
+        {% else %}
+        <span class="trilha-atual" aria-current="page">{{ text }}</span>
+        {% endif %}
+        {% endfor %}
+      </nav>
+      <div class="cabecalho-acoes so-desktop">
+        <span class="selo">{{ icon("server", 12) }}oute-server</span>
+        <form method="post" action="/logout"><button type="submit" class="botao">{{ icon("log-out") }}Sair</button></form>
+      </div>
+    </header>
+{# faixas sob o cabeçalho (#467): só nas listas; nos detalhes (conversa, sessão, pedido) somem #}
 {# alertas do pipeline (#204) no topo de toda página de quem entrou; fora do #conteudo, que o htmx troca #}
-{% if alerts_shown is defined and alerts_shown %}
+{% if alerts_shown is defined and alerts_shown and not _detail %}
 {% if alerts is none %}
 <section class="alertas" id="alertas" data-alertas="" role="alert">
+  {{ icon("siren") }}
   <p>Os alertas do pipeline não puderam ser calculados. A causa está no log do agent-studio.</p>
 </section>
 {% elif alerts %}
 <section class="alertas" id="alertas" data-alertas="{{ alerts|length }}" role="alert">
-  <h2>{{ alerts|length }} {{ "alerta" if alerts|length == 1 else "alertas" }} do pipeline</h2>
-  <ul>
-    {% for a in alerts %}
-    <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
-      <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
-      {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} {{ tzl() }}{% endif %}
-    </li>
-    {% endfor %}
-  </ul>
+  {{ icon("siren") }}
+  <div class="faixa-corpo">
+    <h2>{{ alerts|length }} {{ "alerta" if alerts|length == 1 else "alertas" }} do pipeline</h2>
+    <ul>
+      {% for a in alerts %}
+      <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
+        <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
+        {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} {{ tzl() }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
 </section>
 {% else %}
 <div id="alertas" data-alertas="0" hidden></div>
 {% endif %}
 {% endif %}
 {# decisão pendente do Bardi (#386): rodada do swarm esperando resposta; fora do #conteudo, como os alertas #}
-{% if decisions is defined and decisions %}
+{% if decisions is defined and decisions and not _detail %}
 <section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" role="status">
-  <h2>{{ decisions|length }} {{ "decisão pendente" if decisions|length == 1 else "decisões pendentes" }}</h2>
-  <ul>
-    {% for d in decisions %}
-    <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
-      <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }} (perguntada em {{ d.asked_at|when }} {{ tzl() }})
-    </li>
-    {% endfor %}
-  </ul>
+  {{ icon("hand") }}
+  <div class="faixa-corpo">
+    <h2>{{ decisions|length }} {{ "decisão pendente" if decisions|length == 1 else "decisões pendentes" }}</h2>
+    <ul>
+      {% for d in decisions %}
+      <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
+        <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }} (perguntada em {{ d.asked_at|when }} {{ tzl() }})
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <a class="faixa-link" href="/pedidos">Ver pedidos</a>
 </section>
 {% endif %}
-<main id="conteudo">
+    <main id="conteudo">
 {% block main %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% else %}
+<main id="conteudo">
+{{ self.main() }}
 </main>
+{% endif %}
+{% endblock %}
 </body>
 </html>

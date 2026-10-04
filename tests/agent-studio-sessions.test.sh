@@ -150,7 +150,7 @@ srow() { jq -c --arg id "$1" '.[] | select(.sessao == $id)' <<<"$L"; }
 check "lista: as 4 sessões da janela, da mais recente para a mais antiga (pelo início)" \
   jqe --arg s1 "$S1" --arg s2 "$S2" --arg s3 "$S3" --arg s4 "$S4" 'map(.sessao) == [$s2, $s4, $s3, $s1]' <<<"$L"
 check "lista: hora do fato (sessão de janeiro fora)"   jqe 'all(.sessao | test("antiga") | not)' <<<"$L"
-check "lista: menu com conversas e sessões"            bash -c 'grep -q "<a href=\"/conversas\">Conversas</a>" "$1" && grep -q "<a href=\"/sessoes\">Sessões</a>" "$1"' _ "$TMP/list.html"
+check "lista: menu com conversas e sessões"            bash -c 'grep -qE "<a class=\"nav-item\" href=\"/conversas\"[^>]*>.*<span>Conversas</span></a>" "$1" && grep -qE "<a class=\"nav-item\" href=\"/sessoes\"[^>]*>.*<span>Sessões</span></a>" "$1"' _ "$TMP/list.html"
 R1="$(srow "$S1")"
 check "S1: host e agente"                              jqe '.host == "oute-server" and .agents == "claude"' <<<"$R1"
 check "S1: modelos das chamadas, do mais chamado para o menos" jqe '.models == "claude-sonnet-5,claude-opus-5" and (.text | test("claude-sonnet-5 ×3 claude-opus-5 ×1"))' <<<"$R1"

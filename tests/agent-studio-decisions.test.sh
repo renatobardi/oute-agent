@@ -98,6 +98,9 @@ check "tela: respondida e fechada fora do bloco"       bash -c '! grep -qF "data
 check "tela: texto 'Decisão pendente na rodada'"       bash -c 'grep -qF "Decisão pendente na rodada r-velha" <<<"$1"' _ "$PAGE"
 check "tela: o topo vem antes do conteúdo"             bash -c 'a="$(grep -bo "id=\"decisoes\"" <<<"$1" | head -1 | cut -d: -f1)"; b="$(grep -bo "id=\"conteudo\"" <<<"$1" | head -1 | cut -d: -f1)"; [ -n "$a" ] && [ "$a" -lt "$b" ]' _ "$PAGE"
 check "tela: pedido do htmx não leva o topo"           bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(curl -s "${A[@]}" -H 'HX-Request: true' "$STUDIO_URL/conversas")"
+check "tela: a faixa tem o ícone hand e o link Ver pedidos (#467)" bash -c 'grep -q "lucide.svg#hand" <<<"$1" && grep -qF "<a class=\"faixa-link\" href=\"/pedidos\">Ver pedidos</a>" <<<"$1"' _ "$PAGE"
+check "tela: a faixa fica sob o cabeçalho, antes do conteúdo" bash -c 'h="$(grep -bo "</header>" <<<"$1" | head -1 | cut -d: -f1)"; d="$(grep -bo "id=\"decisoes\"" <<<"$1" | head -1 | cut -d: -f1)"; [ -n "$h" ] && [ "$h" -lt "$d" ]' _ "$PAGE"
+check "tela: nos detalhes (logs da conversa) a faixa some" bash -c '! grep -qF "id=\"decisoes\"" <<<"$1" && grep -qF "class=\"cabecalho\"" <<<"$1"' _ "$(curl -s "${A[@]}" "$STUDIO_URL/conversa/logs?id=x")"
 check "login: sem decisões no topo"                    bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(curl -s "$STUDIO_URL/login")"
 studio_stop
 

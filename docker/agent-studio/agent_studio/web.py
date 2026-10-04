@@ -121,8 +121,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     def page(request, name, status=200, headers=None, **ctx):
         # os alertas só existem em página de quem passou pelo `gate` (o login não os mostra)
         shown = hasattr(request.state, "alerts")
+        # o casco (barra lateral e cabeçalho, #467) só aparece para quem entrou; o login e o erro de quem não entrou saem sem ele
         html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=getattr(request.state, "alerts", None),
-                                             decisions=getattr(request.state, "decisions", None))
+                                             decisions=getattr(request.state, "decisions", None),
+                                             authed=shown or bool(auth.reader(request)))
         return HTMLResponse(html, status_code=status, headers={**HEADERS, **(headers or {})})
 
     def error(request, status, message):

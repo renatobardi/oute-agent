@@ -69,15 +69,16 @@ check("modelo fixo marcado (e só ele)", 'data-fixed="true"' in section("claude-
 check("origem config no modelo sem troca", 'data-origin="config"' in section("claude-sonnet-5"))
 check("nome de modelo escapado: nada de HTML do dado", "<b>x</b>" not in html and "m&lt;b&gt;x&lt;/b&gt;&amp;y" in html)
 check("fontes: as duas, ainda sem conferência", html.count("ainda não conferiu") == 2)
-check("link no menu", '<a href="/precos">Preços</a>' in html)
+check("link no menu", re.search(r'<a class="nav-item" href="/precos"[^>]*>.*<span>Preços</span></a>', html) is not None)
 check("o aviso 'preço trocado' no topo leva à página",
       'data-alerta="price_changed"' in html and '<a href="/precos">Preço trocado</a>' in html
       and "US$ 1,25 → US$ 1,5 por 1M tokens" in html)
-check("o link do menu também está nas outras telas", '<a href="/precos">Preços</a>' in get(app, "/conversas")[1])
+check("o link do menu também está nas outras telas", re.search(r'<a class="nav-item" href="/precos"[^>]*>.*<span>Preços</span></a>', get(app, "/conversas")[1]) is not None)
 
 # só mostra: nenhuma ação
-check("sem formulário nem botão além do Sair", re.findall(r"<form[^>]*>", html) == ['<form method="post" action="/logout">']
-      and html.count("<button") == 1 and "<input" not in html)
+check("sem formulário nem botão além do Sair", re.findall(r"<form[^>]*>", html) == ['<form method="post" action="/logout">'] * 2
+      and html.count("<button") == 2 and html.count('title="Sair"') + html.count(">Sair</button>") == 2
+      and re.findall(r"<input[^>]*>", html) == ['<input type="checkbox" id="menu" class="menu-interruptor" aria-label="Mostrar ou esconder o menu">'])
 check("nenhuma rota de /precos além do GET", [sorted(r.methods) for r in app.routes if "preco" in getattr(r, "path", "")] == [["GET"]])
 check("POST /precos = 405", get(app, "/precos", method="POST")[0] == 405)
 rows_after = st.read(P.history_rows)

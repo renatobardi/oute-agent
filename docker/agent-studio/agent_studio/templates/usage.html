@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% set nav = "uso" %}
+{% set crumbs = [("Análise", none), ("Uso", none)] %}
 {% from "_macros.html" import cost %}
 {% macro usage_table(kind, label, rows) %}
 <table class="uso" data-uso="{{ kind }}">

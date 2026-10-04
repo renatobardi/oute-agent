@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% set nav = "sessoes" %}
+{% set crumbs = [("Telemetria", none), ("Sessões", none)] %}
 {% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
 {% block title %}Sessões · agent-studio{% endblock %}
 {% block main %}

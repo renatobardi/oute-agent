@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% set nav = "sessoes" %}
+{% set detail = true %}
+{% set back = "/sessoes" %}
+{% set crumbs = [("Sessões", "/sessoes"), (id, none)] %}
 {% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, log_table, state_warning %}
 {% set s = session %}
 {% set st = s.state %}
