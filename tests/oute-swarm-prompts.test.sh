@@ -296,4 +296,13 @@ check "merge: recomendação do dispatcher é rotulada (#479)" grep -qF 'escreva
 check "merge: condição da auditoria aparece inteira (#479)" grep -qF '**A condição da auditoria aparece inteira.**' "$D"
 check "merge: condição copiada sem encurtar (#479)"     grep -qF 'sem encurtar nem tirar o "só se", o "pelo menos" ou o "antes de"' "$D"
 check "merge: regras ficam no §3 (#479)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -qF "Formato do pedido de merge (#479)"' _ "$D"
+# 481. sessão em Haiku: a redação final para o Bardi vai a um subagente em Sonnet
+for f in "$W" "$N"; do b="$(basename "$f")"
+  check "haiku: $b manda a redação final a um subagente em Sonnet (#481)" grep -qF 'A sessão em Haiku passa a redação final a um subagente em Sonnet' "$f"
+  check "haiku: $b passa fatos e fontes ao subagente (#481)"        grep -qF 'Ela entrega ao subagente os fatos e as fontes' "$f"
+  check "haiku: $b confere o resultado contra os fatos (#481)"      grep -qF 'a sessão confere o texto do subagente contra os fatos' "$f"
+  check "haiku: $b diz como saber o próprio modelo (#481)"          grep -qF '**Como saber o próprio modelo:**' "$f"
+  check "haiku: $b trata id desconhecido como Haiku (#481)"         grep -qF 'Se o id não aparecer, trate a sessão como Haiku' "$f"
+  check "haiku: $b sem subagente publica e avisa (#481)"            grep -qF 'avisa, na primeira linha do texto, que ele saiu do Haiku' "$f"
+done
 check_end
