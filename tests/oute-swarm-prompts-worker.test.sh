@@ -98,6 +98,20 @@ check "worker parallel-lib: confere testes com serviço (#450)" grep -qF 'para c
 check "worker parallel-lib: referência da issue (#450)"    grep -qF '#450' "$P"
 check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 11k. conferência do diff contra SonarCloud antes de abrir PR (#540): evita gates reprovados
+CASE=sonar; round "$CASE"
+sw spawn 540-sonar "instrução"
+P="$STATE/540-sonar.prompt"
+check "worker sonar: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sonar: confere diff contra SonarCloud antes do PR (#540)" grep -qF 'confira o diff contra a lista do SonarCloud do `AGENTS.md`' "$P"
+check "worker sonar: cita a seção Validar antes do PR (#540)" grep -qF 'seção "Validar antes do PR"' "$P"
+check "worker sonar: lista função de shell nova com local (#540)" grep -qF 'função de shell nova com `local` e `return`' "$P"
+check "worker sonar: lista sem http literal em arquivo novo (#540)" grep -qF 'sem `http://` literal em arquivo novo' "$P"
+check "worker sonar: lista sem regex com quantificador aninhado (#540)" grep -qF 'sem regex com quantificador aninhado' "$P"
+check "worker sonar: lista sem colchete aninhado (#540)" grep -qF 'sem `[x]` aninhado' "$P"
+check "worker sonar: corrija antes de esperar o gate (#540)" grep -qF 'Corrija o que encontrar em vez de esperar o gate reprovado' "$P"
+check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
 # qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
 A="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
 check "audit: relatório abre com ação e decisão, antes do head (#482)" bash -c 'r=$(sed -n "/^<!-- oute-aidlc-qa-pr-audit -->/,/^### Gates/p" "$1" | head -12); a=$(grep -n "^\*\*Ação recomendada:\*\*" <<<"$r" | head -1 | cut -d: -f1); d=$(grep -n "^\*\*Decisão do Bardi:\*\*" <<<"$r" | head -1 | cut -d: -f1); h=$(grep -n "^\*\*Head auditado:\*\*" <<<"$r" | head -1 | cut -d: -f1); [ -n "$a" ] && [ -n "$d" ] && [ -n "$h" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$h" ]' _ "$A"
