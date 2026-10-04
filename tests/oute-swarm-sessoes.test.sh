@@ -145,7 +145,7 @@ check "multi: código 0"                                  [ "$RC" -eq 0 ]
 check "multi: PR do repo da rodada"                      logged "[pr] PR #12 aberto (issue #7) https://github.com/x/repo/pull/12"
 check "multi: PR do outro repo, com o repo"              logged "[pr] PR lab#12 aberto (issue lab#7) https://github.com/x/lab/pull/12"
 check "multi: CI do outro repo"                          logged "[ci] PR lab#12 · test: fail"
-check "multi: CI do repo da rodada"                      logged "[ci] PR #12 · test: pass"
+check "multi: CI do repo da rodada"                      logged "[ci] PR #12 · verde: test"
 check "multi: conflito do outro repo"                    logged "[conflito] PR lab#12 em conflito com a base (mergeable=CONFLICTING)"
 check "multi: sessão da rodada com o PR dela"            logged "[sessao] #7 foo: idle (PR #12 open)"
 check "multi: sessão kaizen com o PR dela"               logged "[sessao] #7 bar: idle (PR lab#12 open)"
