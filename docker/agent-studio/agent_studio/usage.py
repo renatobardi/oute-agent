@@ -2,6 +2,11 @@
 agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
+Papel e fase da sessão (#433): `role` = dispatcher, worker ou avulsa; `phase` = o `aidlc:<fase>` que o seletor usou ou
+`desconhecida`. Nada vem de atributo novo: saem dos eventos `oute.task.opened`/`reopened` da própria sessão (`oute.task.phase`
+e `oute.swarm.round`/`oute.swarm.session`), também no histórico, e a chamada de sessão sem esses eventos cai no que o resource
+dela diz (papel) ou em `desconhecida`/`avulsa`: nunca some do total.
+
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
 from . import tz as tz_mod
@@ -9,11 +14,14 @@ from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_S
                    estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
-KEYS = ("day", "host", "agent", "model", "conversation", "session")
+KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase")
+ROLES = ("dispatcher", "worker", "avulsa")
+UNKNOWN_PHASE = "desconhecida"
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
-         "model": "model", "conversation": "session_id", "session": "oute_task_id"}
+         "model": "model", "conversation": "session_id", "session": "oute_task_id", "role": "role", "phase": "phase"}
+_PER_SESSION = {"role", "phase"}
 # logs não têm modelo: agrupados por modelo, caem no modelo nulo
 _LOG_MODEL = {"model": "CAST(NULL AS VARCHAR)"}
 _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"
@@ -25,6 +33,27 @@ def _cols(tz, extra=None):
     day = (f"CAST(timezone('{tz.key}', make_timestamp_ns(CAST(time_unix_nano AS BIGINT)) AT TIME ZONE 'UTC') "
            "AS DATE)")
     return {"day": day, **_COLS, **(extra or {})}
+
+
+# papel e fase por sessão, dos eventos de abertura (valores fixos no SQL; nada vem de entrada). Fase fora de `[a-z]{2,16}`
+# não vale (é só o nome de uma fase do ADR-07); a primeira fase conhecida fica
+_SESSION_INFO = (
+    "(SELECT oute_task_id AS task, "
+    "CASE WHEN count(*) FILTER (WHERE json_extract_string(attributes, '$.\"oute.swarm.session\"') IS NOT NULL) > 0 "
+    "THEN 'worker' WHEN count(oute_swarm_round) > 0 THEN 'dispatcher' ELSE 'avulsa' END AS role, "
+    "arg_min(phase, time_unix_nano) FILTER (WHERE regexp_full_match(phase, '[a-z]{2,16}')) AS phase "
+    "FROM (SELECT *, json_extract_string(attributes, '$.\"oute.task.phase\"') AS phase FROM logs "
+    "WHERE event_name IN ('oute.task.opened', 'oute.task.reopened') AND oute_task_id IS NOT NULL) GROUP BY oute_task_id)")
+# sem evento da sessão: o papel sai do resource da própria chamada
+_SCOPE = (f"(SELECT t.*, COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
+          "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
+          f"ELSE 'avulsa' END) AS role, COALESCE(i.phase, '{UNKNOWN_PHASE}') AS phase "
+          f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id)")
+
+
+def _scope(table, keys):
+    """`table` com as colunas `role` e `phase`, só quando alguma chave pede (as outras consultas não pagam a junção)."""
+    return _SCOPE.replace("@TABLE@", table) if _PER_SESSION & set(keys) else table
 
 
 def _query(con, keys, cols, aggs, table, where, params):
@@ -53,23 +82,23 @@ def _calls(con, keys, from_ns, to_ns, prices, tz):
         aggs.append(f"COALESCE(sum({t}_tokens) FILTER (WHERE cost_usd IS NULL), 0) AS est_{t}")
     # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
     table, params = window_spans_with_cost(from_ns, to_ns)
-    return _query(con, (*keys, "epoch"), _cols(tz, {"epoch": _epoch_col(prices)}), aggs, table, MODEL_CALL_SQL,
+    return _query(con, (*keys, "epoch"), _cols(tz, {"epoch": _epoch_col(prices)}), aggs, _scope(table, keys), MODEL_CALL_SQL,
                   [*params, *MODEL_CALL_PARAMS])
 
 
 def _p95(con, keys, from_ns, to_ns, tz):
-    return _query(con, keys, _cols(tz), ["quantile_cont(CAST(duration_ns AS DOUBLE), 0.95) / 1e6 AS p95"], "spans",
+    return _query(con, keys, _cols(tz), ["quantile_cont(CAST(duration_ns AS DOUBLE), 0.95) / 1e6 AS p95"], _scope("spans", keys),
                   f"{_WINDOW} AND duration_ns IS NOT NULL AND {MODEL_CALL_SQL}", [from_ns, to_ns, *MODEL_CALL_PARAMS])
 
 
 def _spans(con, keys, from_ns, to_ns, tz):
     """Todos os spans (o denominador da taxa de erro) e os com status de erro."""
-    return _query(con, keys, _cols(tz), ["count(*) AS spans", "count(*) FILTER (WHERE status_code = ?) AS n"], "spans",
+    return _query(con, keys, _cols(tz), ["count(*) AS spans", "count(*) FILTER (WHERE status_code = ?) AS n"], _scope("spans", keys),
                   _WINDOW, [SPAN_STATUS_ERROR, from_ns, to_ns])
 
 
 def _log_errors(con, keys, from_ns, to_ns, tz):
-    return _query(con, keys, _cols(tz, _LOG_MODEL), ["count(*) AS n"], "logs", f"{_WINDOW} AND severity_number >= ?",
+    return _query(con, keys, _cols(tz, _LOG_MODEL), ["count(*) AS n"], _scope("logs", keys), f"{_WINDOW} AND severity_number >= ?",
                   [from_ns, to_ns, LOG_SEVERITY_ERROR])
 
 
@@ -165,11 +194,14 @@ def _sorted(groups):
 
 
 def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
-    """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo) e `series` (dia × host × agente × modelo;
-    o dia é o do fuso `tz`, e `timezone` diz qual)."""
+    """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
+    o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
+    `by_phase` (fase do seletor ou `desconhecida`): cada uma soma o mesmo que `totals`."""
     total = aggregate(con, from_ns, to_ns, prices, (), tz)[()]
     rows = aggregate(con, from_ns, to_ns, prices, ("host", "agent", "model"), tz)
     series = aggregate(con, from_ns, to_ns, prices, ("day", "host", "agent", "model"), tz)
+    by_role = aggregate(con, from_ns, to_ns, prices, ("role",), tz)
+    by_phase = aggregate(con, from_ns, to_ns, prices, ("phase",), tz)
     return {
         "timezone": tz.key,
         "totals": render((), total, ()),
@@ -177,4 +209,6 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
         "unpriced_models": sorted(total["unpriced_models"], key=lambda m: (m is None, m or "")),
         "rows": [render(k, a, ("host", "agent", "model")) for k, a in _sorted(rows)],
         "series": [render(k, a, ("day", "host", "agent", "model")) for k, a in _sorted(series)],
+        "by_role": [render(k, a, ("role",)) for k, a in _sorted(by_role)],
+        "by_phase": [render(k, a, ("phase",)) for k, a in _sorted(by_phase)],
     }

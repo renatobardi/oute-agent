@@ -1,6 +1,6 @@
 """Tela do agent-studio (ADR-08 §9): login por token que vira cookie, lista de conversas e detalhe (#206), as
 sessões do `oute-task` com as conversas de cada uma (#207), os pedidos do canal de aprovação e os alertas do
-pipeline no topo das páginas (#208) e a página de preços (#340).
+pipeline no topo das páginas (#208) e a página de preços (#340) e o uso por papel e por fase (#433).
 
 HTML gerado no servidor (Jinja2, sempre com autoescape) + htmx servido daqui mesmo (`/static`): sem SPA, sem build
 de front-end e sem CDN. Só leitura.
@@ -325,6 +325,28 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if data["session"]["start_ns"] is None and not data["session"]["state"]:
             return error(request, 404, "Sessão não encontrada.")
         return page(request, "session.html", **data, id=task_id, state_read=state, event_limit=sess_mod.EVENT_LIMIT)
+
+    # ------------------------------------------------ uso por papel e por fase (#433)
+    @app.get("/uso")
+    async def usage(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        q = request.query_params
+        try:
+            from_ns, to_ns = window(q)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz)
+        if failed:
+            return failed
+
+        def by_cost(rows):
+            # o que mais custou primeiro (real + estimado); empate pela ordem da API
+            return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
+        return page(request, "usage.html", totals=data["totals"], by_role=by_cost(data["by_role"]),
+                    by_phase=by_cost(data["by_phase"]), from_ns=from_ns, to_ns=to_ns, windows=WINDOWS,
+                    hours=q.get("hours", "" if "from" in q else "24"),
+                    range={"from": q.get("from", ""), "to": q.get("to", "")})
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura
     async def proposal_state(what, fn, *args):
