@@ -1,0 +1,2 @@
+### Changed
+- **ADR-08: adendo da página da rodada e do ciclo** (#506, fatia 0 da #489). Registra a arquitetura aprovada no gate de `arch` (D1=1, D2=1, D3=1, D4=1, D5=1, D6=1, D7=2): evento operacional `oute.swarm.step.published` (linha nova no catálogo do ADR-04, atributos provisórios), revisor, estado derivado, quatro fatias e a exceção ao §10 só para `POST /rodada/acao`. Os termos etapa, barra de etapas, credencial de marcação e revisor entram no `CONTEXT.md`. Só documentação: **não precisa de release**.
