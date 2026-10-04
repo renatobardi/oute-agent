@@ -234,13 +234,13 @@ class Store:
         with self.lock:
             return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent)
 
-    def conversation(self, session_id, prices):
+    def conversation(self, session_id, prices, errors_only=False):
         with self.lock:
-            return conv_mod.detail(self.con, session_id, prices)
+            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only)
 
-    def conversation_logs(self, session_id, offset):
+    def conversation_logs(self, session_id, offset, errors_only=False):
         with self.lock:
-            return conv_mod.logs(self.con, session_id, offset)
+            return conv_mod.logs(self.con, session_id, offset, errors_only=errors_only)
 
     def span(self, trace_id, span_id):
         with self.lock:

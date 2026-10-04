@@ -457,3 +457,8 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .etapa-fechada { margin: 0 20px 16px; }
 .etapa-fechada > summary { cursor: pointer; color: var(--muted-foreground); font-size: 13px; padding: 4px 0; }
 .etapa-fechada > .etapa-texto { padding: 12px 0 0; }
+
+/* nome amigável da conversa e link do selo de erros (#530) */
+.conv-nome { font-weight: 500; }
+.conv-id { word-break: break-all; }
+a.erros-link { text-decoration: none; }

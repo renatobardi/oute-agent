@@ -9,6 +9,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+nome() { PYTHONPATH="$ROOT/docker/agent-studio" python3 -c 'import sys; from agent_studio.names import friendly; print(friendly(sys.argv[1]))' "$1"; }
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
@@ -182,7 +183,10 @@ of() { jq -c --arg id "$1" '[.[] | select(.["da-sessao"] == $id)]' <<<"$V"; }
 check "S1: as conversas dela, em ordem"                jqe 'map(.conversa) == ["s1-0", "s1-a", "s1-b"]' <<<"$(of "$S1")"
 check "agrupadas: cada conversa logo abaixo da sua sessão" jqe --arg s1 "$S1" --arg s2 "$S2" --arg s3 "$S3" --arg s4 "$S4" \
   '[.[] | select(.sessao or .conversa) | (.sessao // .conversa)] == [$s2, "s2-a", $s4, $s3, "s3-a", $s1, "s1-0", "s1-a", "s1-b", "solta 2/&é", "solta-1"]' <<<"$ALL"
-check "conversa: link para o detalhe (#206)"           grep -qF '<a href="/conversa?id=s1-a">s1-a</a>' "$TMP/list.html"
+check "conversa: link para o detalhe (#206)"           grep -qF "<a href=\"/conversa?id=s1-a\">$(nome s1-a)</a>" "$TMP/list.html"
+check "conversa: nome amigável e, abaixo, o id inteiro (#530)" grep -qF "<span class=\"fino conv-id\">s1-a</span>" "$TMP/list.html"
+check "conversa com erro: o selo é link para os erros dela (#530)" grep -qF 'href="/conversa?id=s1-b&amp;erros=1"' "$TMP/list.html"
+check "conversa sem erro: sem link de erros (#530)"    bash -c '! grep -qF "id=s1-a&amp;erros=1" "$1"' _ "$TMP/list.html"
 check "conversa: agente, modelo e números dela"        jqe ".agent == \"claude\" and .models == \"claude-sonnet-5\" and .calls == \"2\" and $(usd '.["real-usd"]') == 10000 and $(usd '.["estimated-usd"]') == 3000000" <<<"$(jq -c '.[] | select(.conversa == "s1-a")' <<<"$V")"
 check "conversa: p95 dela (2 e 4 s = 3,9 s)"           jqe '(.["p95-ms"] | tonumber) == 3900' <<<"$(jq -c '.[] | select(.conversa == "s1-a")' <<<"$V")"
 check "sessão = soma das conversas dela (mesma regra)" jqe --argjson r "$R1" \
@@ -227,7 +231,7 @@ check "sessão: as somas da lista"                      jqe --argjson r "$R1" '.
 check "sessão: repo, estado, abertura e agente da abertura" jqe '.text | test("Repositório oute-agent · 207-tela Estado aberta Aberta em \\(UTC\\) 2025-09-24 19:06:50 Aberta com claude")' <<<"$RS"
 check "sessão: rodada, label, estado, worker e issue"  jqe --arg r "$RND" '.text | test("Rodada " + $r + " · studio-tela · aberta · worker 207-tela · issue #207")' <<<"$RS"
 check "sessão: host, agente, modelos e p95"            jqe '.text | test("Host oute-server \\(oute-agent\\) Agente claude Modelo claude-sonnet-5 ×3 claude-opus-5 ×1") and test("p95 das chamadas 9,1 s")' <<<"$RS"
-check "sessão: as 3 conversas, com link"               bash -c 'test "$(jq -c "[.[] | select(.conversa) | .conversa]" <<<"$1")" = "[\"s1-0\",\"s1-a\",\"s1-b\"]" && grep -qF "<a href=\"/conversa?id=s1-b\">s1-b</a>" "$2"' _ "$D" "$TMP/s1.html"
+check "sessão: as 3 conversas, com link"               bash -c 'test "$(jq -c "[.[] | select(.conversa) | .conversa]" <<<"$1")" = "[\"s1-0\",\"s1-a\",\"s1-b\"]" && grep -qF "<a href=\"/conversa?id=s1-b\">$3</a>" "$2"' _ "$D" "$TMP/s1.html" "$(nome s1-b)"
 G="$(jq -c '[.[] | select(.log)]' <<<"$D")"
 check "sessão: eventos dela, pela hora do fato (os logs das conversas não entram)" jqe 'map(.text | capture("(?<e>oute\\.[a-z.]+)").e) == ["oute.task.opened", "oute.exemplo.seletor", "oute.canal.proposed", "oute.swarm.round.asked"]' <<<"$G"
 check "sessão: a escolha do seletor aparece no oute.task.opened (#219)" jqe '.[0].text | test("\"oute.task.phase\": \"build\"") and test("\"oute.task.origin\": \"label\"") and test("\"oute.task.model\": \"claude-sonnet-5-5\"")' <<<"$G"

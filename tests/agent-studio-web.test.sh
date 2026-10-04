@@ -13,6 +13,7 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
+nome() { PYTHONPATH="$ROOT/docker/agent-studio" python3 -c 'import sys; from agent_studio.names import friendly; print(friendly(sys.argv[1]))' "$1"; }
 
 
 # ---------------------------------------------------------------- DuckDB de exemplo
@@ -207,7 +208,7 @@ check "sidebar: rodapé com Renato Bardi e o Sair"      bash -c 'grep -q "<stron
 # cabeçalho e trilha
 check "header: 72 px, botão de recolher (panel-left), divisor e trilha" bash -c 'grep -q "^\.cabecalho { height: 72px;" "$2" && grep -q "<header class=\"cabecalho\">" "$1" && grep -q "for=\"menu\" title=\"Mostrar ou esconder o menu\"" "$1" && grep -q "lucide.svg#panel-left" "$1" && grep -q "class=\"divisor so-desktop\"" "$1" && grep -q "<nav class=\"trilha\" aria-label=\"Trilha\">" "$1"' _ "$TMP/list.html" "$TMP/studio.css"
 check "header: na lista a trilha é Telemetria › Conversas" bash -c 'grep -q "<span class=\"trilha-pai\">Telemetria</span>" "$1" && grep -q "<span class=\"trilha-atual\" aria-current=\"page\">Conversas</span>" "$1"' _ "$TMP/list.html"
-check "header: no detalhe a trilha é Conversas › <id>, com link na primeira" bash -c 'grep -q "<a class=\"trilha-pai\" href=\"/conversas\">Conversas</a>" "$1" && grep -q "<span class=\"trilha-atual\" aria-current=\"page\">conv-a</span>" "$1"' _ "$TMP/a.html"
+check "header: no detalhe a trilha é Conversas › <id>, com link na primeira" bash -c 'grep -q "<a class=\"trilha-pai\" href=\"/conversas\">Conversas</a>" "$1" && grep -q "<span class=\"trilha-atual\" aria-current=\"page\">$2</span>" "$1"' _ "$TMP/a.html" "$(nome conv-a)"
 check "header: à direita o selo do host e o Sair"      bash -c 'grep -q "class=\"selo\">.*oute-server</span>" "$1" && grep -q "class=\"botao\">.*Sair</button>" "$1"' _ "$TMP/list.html"
 check "header: o menu (celular) abre pela barra, sem script" bash -c 'grep -q "<input type=\"checkbox\" id=\"menu\" class=\"menu-interruptor\"" "$1" && grep -q "for=\"menu\" title=\"Abrir o menu\"" "$1" && grep -q "menu-interruptor:checked ~ .app .barra" "$2"' _ "$TMP/list.html" "$TMP/studio.css"
 check "celular: na lista há o menu e nenhum voltar"    bash -c 'grep -q "title=\"Abrir o menu\"" "$1" && ! grep -q "title=\"Voltar\"" "$1"' _ "$TMP/list.html"
@@ -333,8 +334,8 @@ check "CSS: cartão com anel (ring de 1 px a 10%), th 12px/500 muted, linha com 
 check "CSS: árvore de spans com 16 px por nível" bash -c 'grep -q "\.d1 { padding-left: 36px; } \.d2 { padding-left: 52px; }" "$1" && grep -q "\.d12 { padding-left: 212px; }" "$1"' _ "$TMP/studio.css"
 check "CSS celular: tabela empilha vira cartão/linha de 2 níveis, alvos de 44 px" bash -c 'm="$(perl -0ne "print \$1 if /\@media \(max-width: 640px\) \{\n  \.tiles(.*?)\n\}\n/s" "$1")"; grep -q "table.empilha .sec { display: none; }" <<<"$m" && grep -q "table.empilha tr { display: flex; flex-wrap: wrap;" <<<"$m" && grep -q "\.botao, \.copiar { min-height: 44px; }" <<<"$m"' _ "$TMP/studio.css"
 check "listas: tabela no cartão, Tokens ent / saí numa célula com o cache embaixo, sem as colunas Entrada e Saída" bash -c 'grep -q "<div class=\"cartao rolagem\">" "$1" && grep -q "<table class=\"conversas empilha\">" "$1" && grep -q "<th class=\"n\" title=\"[^\"]*\">Tokens ent / saí</th>" "$1" && grep -q "<span class=\"fino\" title=\"tokens de cache: leitura / escrita\">cache " "$1" && ! grep -qE "<th class=\"n\">(Entrada|Saída|Cache)</th>" "$1"' _ "$TMP/list.html"
-check "listas: no celular a linha de baixo (início, host, agente, chamadas, duração) e as colunas secundárias marcadas" bash -c 'grep -q "<span class=\"so-celular-linha\">" "$1" && grep -q "<td class=\"hora sec\">" "$1" && grep -q "<td class=\"prim\"><a href=\"/conversa?id=" "$1"' _ "$TMP/list.html"
-check "listas: Erros em Badge destrutivo só onde há erro, linha sem class erro" bash -c 'n="$(grep -c "data-errors=\"[1-9]" "$1")"; [ "$n" -ge 1 ] && [ "$(grep -o "<td class=\"n\"><span class=\"badge destrutivo\">" "$1" | wc -l)" = "$n" ] && ! grep -q "class=\"erro\"" "$1"' _ "$TMP/list.html"
+check "listas: no celular a linha de baixo (início, host, agente, chamadas, duração) e as colunas secundárias marcadas" bash -c 'grep -q "<span class=\"so-celular-linha\">" "$1" && grep -q "<td class=\"hora sec\">" "$1" && grep -q "<td class=\"prim\"><span class=\"conv-nome\"><a href=\"/conversa?id=" "$1"' _ "$TMP/list.html"
+check "listas: Erros em Badge destrutivo só onde há erro, linha sem class erro" bash -c 'n="$(grep -c "data-errors=\"[1-9]" "$1")"; [ "$n" -ge 1 ] && [ "$(grep -o "<td class=\"n\"><a class=\"erros-link\" href=\"[^\"]*\" title=\"[^\"]*\"><span class=\"badge destrutivo\">" "$1" | wc -l)" = "$n" ] && ! grep -q "class=\"erro\"" "$1"' _ "$TMP/list.html"
 check "detalhe: 4 StatTiles (chamadas, tokens ent / saí, custo, duração) fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && grep -q "Tokens ent / saí</strong>\|tile-rotulo\"><svg[^>]*><use href=\"/static/lucide.svg#arrow-left-right\"/></svg>Tokens ent / saí" "$1" && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/a.html"
 check "detalhe: resumo num cartão, spans num cartão com o Badge de erros" bash -c 'grep -q "<div class=\"cartao bloco\">" "$1" && grep -q "<span class=\"badge destrutivo\">1 com erro</span>" "$1"' _ "$TMP/a.html"
 check "árvore: ícone por tipo (workflow, sparkles, wrench, terminal) e o mesmo ícone de chamada para a chamada sem pai" python3 -c '
@@ -351,6 +352,48 @@ check "árvore: o conteúdo do span segue pelo htmx (hx-get, hx-target, linha de
 check "logs: tabela no cartão, nível em Badge (erro destrutivo, o resto de contorno), sem class erro na linha" bash -c 'grep -q "<table class=\"logs empilha\">" "$1" && grep -q "<span class=\"badge destrutivo\">" "$1" && grep -q "<span class=\"badge contorno\">" "$1" && ! grep -q "<tr [^>]*class=\"erro\"" "$1"' _ "$TMP/a.html"
 check "detalhe e logs: botão de voltar com o ícone, no lugar do link solto" bash -c 'grep -q "<a class=\"botao\" href=\"/conversas\">.*Conversas</a>" "$1" && grep -q "<a class=\"botao\" href=\"/conversa?id=conv-b\">" "$2"' _ "$TMP/a.html" "$TMP/logs.html"
 check "ícones das páginas novas todos no sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/a.html" "$TMP/list.html"
+
+# ---------------------------------------------------------------- 4b. nome amigável e erros da conversa (#530)
+NA="$(nome conv-a)"
+check "nome: formato Adjetivo_Substantivo"             bash -c '[[ "$1" =~ ^[A-Z][a-z]+_[A-Z][a-z]+$ ]]' _ "$NA"
+check "nome: o mesmo id dá o mesmo nome"               test "$(nome conv-a)" = "$NA"
+check "lista: o nome com o link e, abaixo, o id inteiro" grep -qF "<span class=\"conv-nome\"><a href=\"/conversa?id=conv-a\">$NA</a></span><span class=\"fino conv-id\">conv-a</span>" "$TMP/list.html"
+check "lista: o id inteiro segue no data-conversa e na URL" bash -c 'grep -q "data-conversa=\"conv-a\"" "$1" && grep -qF "href=\"/conversa?id=conv%20d/1%26x%3D%C3%A9\"" "$1"' _ "$TMP/list.html"
+check "lista: conversa do Codex também tem nome"       grep -qF "<a href=\"/conversa?id=conv-b\">$(nome conv-b)</a>" "$TMP/list.html"
+check "detalhe: o mesmo nome, com o id inteiro abaixo" grep -qF "<span class=\"conv-nome\">$NA</span><span class=\"fino conv-id\">conv-a</span>" "$TMP/a.html"
+check "lista: selo de erros com link para os erros da conversa" grep -qF 'href="/conversa?id=conv-a&amp;erros=1"' "$TMP/list.html"
+check "lista: linha sem erro não tem link de erros"    bash -c '[ "$(grep -c "class=\"erros-link\"" "$1")" = 1 ]' _ "$TMP/list.html"
+curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-a&erros=1" > "$TMP/ae.html"
+AE="$(data < "$TMP/ae.html")"
+check "filtrado: só o span com erro"                   jqe '[.[] | select(.span)] | map(.span[-2:]) == ["a4"]' <<<"$AE"
+check "filtrado: só o log ERROR ou acima"              jqe '[.[] | select(.log)] | map(.log) == ["1759000008000000000"]' <<<"$AE"
+check "filtrado: as somas seguem as da conversa inteira" jqe '.[] | select(has("resumo")) | .calls == "3"' <<<"$AE"
+check "filtrado: link de volta à conversa inteira"     grep -qF '<a href="/conversa?id=conv-a">Ver a conversa inteira</a>' "$TMP/ae.html"
+check "sem filtro: sem o link de volta"                bash -c '! grep -q "data-filtro-erros" "$1"' _ "$TMP/a.html"
+check "filtro que não é 1 (erros=0): conversa inteira" bash -c '[ "$(curl -s "${@:2}" "$1/conversa?id=conv-a&erros=0" | grep -c "<tr data-span=")" = 7 ]' _ "$STUDIO_URL" "${C[@]}"
+CBE="$(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-b&erros=1")"
+check "filtrado, conversa sem erro: avisos e nenhuma linha" bash -c 'grep -q "não tem spans com erro" <<<"$1" && grep -q "não tem logs com erro" <<<"$1" && ! grep -q "<tr data-log" <<<"$1"' _ "$CBE"
+check "logs filtrados (htmx): só a linha com erro"     bash -c '[ "$(curl -s "${@:2}" -H "HX-Request: true" "$1/conversa/logs?id=conv-a&erros=1" | grep -c "<tr data-log")" = 1 ]' _ "$STUDIO_URL" "${C[@]}"
+check "logs filtrados: página inteira volta ao filtro" grep -qF 'href="/conversa?id=conv-a&amp;erros=1" title="Voltar"' <(curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-a&erros=1")
+cat > "$TMP/names.py" <<'PY'
+import os, re, sys
+sys.path.insert(0, os.environ["PKG_PARENT"])
+from agent_studio import names, web
+ok = lambda name, cond: print(("ok   " if cond else "FAIL ") + name)
+ok("palavras: 64 adjetivos, 32 animais e 32 pessoas, sem repetição", (len(names.ADJECTIVES), len(names.ANIMALS), len(names.PEOPLE)) == (64, 32, 32)
+   and len(set(names.ADJECTIVES)) == 64 and len(set(names.NOUNS)) == 64)
+ok("palavras: uma palavra só, capitalizada, em letras ASCII", all(re.fullmatch(r"[A-Z][a-z]+", w) for w in names.ADJECTIVES + names.NOUNS))
+ofensivas = {"Idiot", "Stupid", "Dumb", "Ugly", "Fat", "Dead", "Evil", "Nazi", "Slave", "Whore", "Bitch", "Fool", "Crazy", "Mad"}
+ok("palavras: nenhuma da lista de ofensivas", not ofensivas & set(names.ADJECTIVES + names.NOUNS))
+ok("nome: o mesmo id, o mesmo nome, em formato Adjetivo_Substantivo", all(names.friendly(i) == names.friendly(i) and re.fullmatch(r"[A-Z][a-z]+_[A-Z][a-z]+", names.friendly(i)) for i in ("a", "conv d/1&x=é", "0" * 36)))
+ok("nome: cobre as listas (ids diferentes dão nomes diferentes)", len({names.friendly(f"id-{i}") for i in range(2000)}) > 1000)
+ok("nome: o filtro `nome` dos templates é o mesmo", web._env().filters["nome"] is names.friendly)
+m = web._env().get_template("_macros.html").module
+ok("logs: o link de mais logs leva o filtro de erros", 'offset=200&amp;erros=1' in str(m.log_rows([], "x", 200, True)) and 'erros=1' not in str(m.log_rows([], "x", 200, False)))
+PY
+PKG_PARENT="$ROOT/docker/agent-studio" "$STUDIO_PY" "$TMP/names.py" > "$TMP/names.out" 2>&1
+check_py "$TMP/names.out"
+check "nomes e erros: os 7 casos em Python rodaram"    test "$((n_ok + n_fail))" = 7
 
 studio_stop
 

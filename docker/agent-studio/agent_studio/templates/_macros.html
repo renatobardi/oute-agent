@@ -24,7 +24,10 @@
 {% if c.real_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
 {% endmacro %}
 
-{% macro log_rows(logs, id, next_offset) %}
+{# o nome amigável da conversa (#530) e, abaixo, o id inteiro em letra menor; `link` = o destino do nome, se tiver #}
+{% macro conv_name(id, link="") %}<span class="conv-nome">{% if link %}<a href="{{ link }}">{{ id|nome }}</a>{% else %}{{ id|nome }}{% endif %}</span><span class="fino conv-id">{{ id }}</span>{% endmacro %}
+
+{% macro log_rows(logs, id, next_offset, errors_only=false) %}
 {% for l in logs %}
 <tr data-log="{{ l.time_unix_nano }}">
   <td class="hora">{{ l.time_unix_nano|ts }}</td>
@@ -37,17 +40,17 @@
 </tr>
 {% endfor %}
 {% if next_offset is not none %}
-{% set more = "/conversa/logs?id=" ~ (id|urlencode) ~ "&offset=" ~ next_offset %}
+{% set more = "/conversa/logs?id=" ~ (id|urlencode) ~ "&offset=" ~ next_offset ~ ("&erros=1" if errors_only else "") %}
 <tr class="mais"><td colspan="4"><a href="{{ more }}" hx-get="{{ more }}" hx-target="closest tr" hx-swap="outerHTML">mais logs</a></td></tr>
 {% endif %}
 {% endmacro %}
 
-{% macro log_table(logs, id, next_offset) %}
+{% macro log_table(logs, id, next_offset, errors_only=false) %}
 <div class="cartao rolagem">
 <table class="logs empilha">
   <thead><tr><th>Hora ({{ tzl() }})</th><th>Nível</th><th>Evento</th><th>Conteúdo</th></tr></thead>
   <tbody>
-  {{ log_rows(logs, id, next_offset) }}
+  {{ log_rows(logs, id, next_offset, errors_only) }}
   </tbody>
 </table>
 </div>
@@ -127,12 +130,12 @@
 {% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
 
 {# calls, tokens (ent / saí, o cache numa segunda linha menor), custo, p95 e erros; no celular só o custo e os erros ficam à vista #}
-{% macro usage_cells(u) %}
+{% macro usage_cells(u, errors_href="") %}
 <td class="n sec">{{ u.calls|num }}</td>
 <td class="n sec">{{ u.tokens.input|num }} / {{ u.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</span></td>
 <td class="n custo">{{ cost(u.cost) }}</td>
 <td class="n sec">{{ u.latency_p95_ms|ms }}</td>
-<td class="n">{% if u.errors.total %}{{ badge(u.errors.total|num, "destrutivo") }}{% else %}{{ u.errors.total|num }}{% endif %}</td>
+<td class="n">{% if u.errors.total and errors_href %}<a class="erros-link" href="{{ errors_href }}" title="só os erros desta conversa">{{ badge(u.errors.total|num, "destrutivo") }}</a>{% elif u.errors.total %}{{ badge(u.errors.total|num, "destrutivo") }}{% else %}{{ u.errors.total|num }}{% endif %}</td>
 {% endmacro %}
 
 {# modelos das chamadas ao modelo; com mais de um, quantas chamadas cada #}
@@ -159,12 +162,12 @@
     data-models="{{ c.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-start-ns="{{ c.start_ns }}"
     data-duration-ns="{{ c.duration_ns }}" {{ usage_data(c.usage) }}>
   <td class="hora sec">{{ c.start_ns|ts }}</td>
-  <td class="prim{% if c.session %} da-sessao{% endif %}">{% if c.session %}{{ icon("corner-down-right", 14) }}{% endif %}<a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a>
+  <td class="prim{% if c.session %} da-sessao{% endif %}">{% if c.session %}{{ icon("corner-down-right", 14) }}{% endif %}{{ conv_name(c.id, "/conversa?id=" ~ (c.id|urlencode)) }}
     <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ c.usage.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
   <td class="sec">{{ c.host or "—" }}</td>
   <td class="sec">{{ c.agent or "—" }} {{ model_list(c.models) }}</td>
   <td class="n sec">{{ c.duration_ns|dur }}</td>
-  {{ usage_cells(c.usage) }}
+  {{ usage_cells(c.usage, "/conversa?id=" ~ (c.id|urlencode) ~ "&erros=1") }}
 </tr>
 {% endmacro %}
 
