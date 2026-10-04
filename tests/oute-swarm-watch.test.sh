@@ -281,7 +281,11 @@ check "fechada vista: mergeado depois do close"          logged "[pr] PR #12 mer
 check "fechada vista: log = stdout"                      [ "$(log_events)" == "$(out_events)" ]
 # 9. CI verde numa linha só (#487): todos os checks do head passam = uma linha com o head e a lista (com o SonarCloud);
 # falha e pendência seguem uma linha por check
-succ() { printf '{"name":"%s","conclusion":"SUCCESS","completedAt":"2026-06-01T00:05:00Z"}' "$1"; }
+succ() {
+  local name="$1"
+  printf '{"name":"%s","conclusion":"SUCCESS","completedAt":"2026-06-01T00:05:00Z"}' "$name"
+  return $?
+}
 ALL="[$(succ checks),$(succ lint),$(succ 'SonarCloud Code Analysis')]"
 CASE=verde; round "$CASE"
 FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
