@@ -296,4 +296,10 @@ check "merge: recomendação do dispatcher é rotulada (#479)" grep -qF 'escreva
 check "merge: condição da auditoria aparece inteira (#479)" grep -qF '**A condição da auditoria aparece inteira.**' "$D"
 check "merge: condição copiada sem encurtar (#479)"     grep -qF 'sem encurtar nem tirar o "só se", o "pelo menos" ou o "antes de"' "$D"
 check "merge: regras ficam no §3 (#479)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -qF "Formato do pedido de merge (#479)"' _ "$D"
+
+# trechos ambíguos reescritos (#488)
+check "swarm.md: spike sem a frase truncada (#488)"      bash -c '! grep -qF "uma linha claro" "$1"' _ "$D"
+check "swarm.md: cada issue recomendada numa linha clara (#488)" grep -qF 'cada uma descrita numa linha clara, sem código de produção' "$D"
+check "audit: Refs troca para Closes e o Falta só de (ship) fica (#488)" grep -qF 'A correção é trocar para `Closes`; o `## Falta` com itens só de `(ship)` fica como está, com a marca, e sem item nenhum a seção sai.' "$A"
+check "audit: sem o 'remover a seção ou manter como está' (#488)" bash -c '! grep -qF "remover a seção ou manter como está" "$1"' _ "$A"
 check_end
