@@ -1,6 +1,7 @@
 ### Added
 - **Página da rodada no agent-studio, fatia 1** (#507). O dispatcher escreve o resumo de fechamento num arquivo, um revisor de outro modelo confere, e o Bardi lê na tela `/rodada?id=` (barra de etapas, Markdown restrito sempre escapado, aviso fixo quando a etapa sai `reprovado` ou `sem-revisor`), com a lista `/rodadas` e o JSON `GET /v1/rodada?id=`.
   - `oute-swarm step review` e `oute-swarm step publish`: teto de 32 KiB (recusa sem cortar), recusa de texto com segredo, trava do `publish` pelo sha256 do veredito, evento `oute.swarm.step.published` com o texto no corpo.
+  - A recusa de segredo é best-effort (padrões conhecidos, nome de variável de credencial, hex e base64 longos, quebras removidas) e vale também para `--fontes`; marcas de direção Unicode são recusadas. O revisor roda em pasta `mktemp -d` própria; só o `claude` vale como revisor.
   - Par de modelos do revisor em `config/select/models.toml` (`[[reviewer]]`), conferido pelo `scripts/models-check`; prompt fixo em `docker/step-review.md`.
   - `oute-emit run [--attr k=v]… -- <comando>`: roda o agente headless do revisor com o ambiente de telemetria do `~/.oute_env`, para o consumo dele chegar ao bucket e ao agent-studio.
   - `etapa` no SurrealDB (a revisão mais alta vence); `oute studio rebuild-state` remonta e imprime `etapas=`.

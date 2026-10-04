@@ -8,7 +8,7 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
     $OUTE_MODELS_CLAUDE_BIN aponta outro arquivo).
   - Codex: `slug` e esforço em ${CODEX_HOME:-~/.codex}/models_cache.json (`supported_reasoning_levels`). Cache
     ausente, ilegível ou com mais de 7 dias = `desconhecido`, com aviso (o Codex o renova ao abrir).
-  - Revisor das etapas (#507): `[[reviewer]]` com o modelo conferido como os demais, o autor na tabela, o revisor diferente do
+  - Revisor das etapas (#507): `[[reviewer]]` só com agent = "claude" (a linha com "codex" é recusada, código 2), o modelo conferido como os demais, o autor na tabela, o revisor diferente do
     autor e o autor do dispatcher (fase plan) com revisor.
   - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, toda fase de `unless_phases` de uma
     exceção é do ADR-07 (#409), e toda exceção usa um label que existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
@@ -78,11 +78,13 @@ def load_table(path):
         if not isinstance(ex.get("unless_phases", []), list) or not all(isinstance(p, str) for p in ex.get("unless_phases", [])):
             die(f"[[exception]] {i} com unless_phases inválido ({path})")
     for i, rv in enumerate(reviewers, 1):   # #507: o par autor × revisor das etapas da rodada
-        if (not isinstance(rv, dict) or rv.get("agent") not in ("claude", "codex")
+        if isinstance(rv, dict) and rv.get("agent") == "codex":
+            die(f"[[reviewer]] {i}: agent = \"codex\" não vale por enquanto (o codex herdaria o ~/.codex, sem isolamento conferido, #507); use claude ({path})")
+        if (not isinstance(rv, dict) or rv.get("agent") != "claude"
                 or not all(isinstance(rv.get(k), str) and rv[k] for k in ("model", "effort"))
                 or not isinstance(rv.get("writers"), list) or not rv["writers"]
                 or not all(isinstance(w, str) and w for w in rv["writers"])):
-            die(f"[[reviewer]] {i} sem writers, agent (claude ou codex), model ou effort ({path})")
+            die(f"[[reviewer]] {i} sem writers, agent (claude), model ou effort ({path})")
     return rows, lines, exceptions, reviewers
 
 
@@ -220,9 +222,8 @@ def main(argv):
         if table is None:
             die(f"--table sem valor\n{USAGE}")
     rows, lines, exceptions, reviewers = load_table(table)
-    check_claude(list(dict.fromkeys([r["claude"] for _, r in rows] + [rv["model"] for rv in reviewers if rv["agent"] == "claude"])))
-    check_codex(list(dict.fromkeys([(r["codex"], r["effort"]) for _, r in rows]
-                                   + [(rv["model"], rv["effort"]) for rv in reviewers if rv["agent"] == "codex"])))
+    check_claude(list(dict.fromkeys([r["claude"] for _, r in rows] + [rv["model"] for rv in reviewers])))
+    check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows)))
     check_reviewers(lines, reviewers)
     check_structure(lines, exceptions)
     if status["FALTA"]:

@@ -284,16 +284,9 @@ assert old in t
 print(t.replace(old, 'agent = "codex"\nmodel = "gpt-6-luna"\neffort = "medium"', 1), end="")
 PY
 mc --table "$TMP/table.toml"
-check "revisor pelo codex: o modelo e o esforço dele saem pelo cache do Codex" bash -c '[ "$1" -eq 0 ] && grep -qxF "ok gpt-6-luna (codex)" <<<"$2" && grep -qxF "ok gpt-6-luna esforço medium (codex)" <<<"$2"' _ "$RC" "$OUT"
-python3 - "$EX" > "$TMP/table.toml" <<'PY'
-import sys
-t = open(sys.argv[1]).read()
-print(t.replace('agent = "claude"\nmodel = "claude-opus-5-5"\neffort = "high"', 'agent = "codex"\nmodel = "gpt-6-luna"\neffort = "xhigh"', 1), end="")
-PY
-mc --table "$TMP/table.toml"
-check "revisor pelo codex com esforço que o modelo não tem: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA gpt-6-luna esforço xhigh (codex)" <<<"$2"' _ "$RC" "$OUT"
+check "revisor com agent = codex: recusado, código 2 (sem isolamento conferido)" bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1: agent = \"codex\" não vale por enquanto" <<<"$2" && [ -z "$3" ]' _ "$RC" "$ERR" "$OUT"
 table -e 's/^agent = "claude"/agent = "outro"/'; mc --table "$TMP/table.toml"
-check "revisor com agent fora de claude e codex: código 2" bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers, agent (claude ou codex), model ou effort" <<<"$2"' _ "$RC" "$ERR"
+check "revisor com agent fora de claude e codex: código 2" bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers, agent (claude), model ou effort" <<<"$2"' _ "$RC" "$ERR"
 table -e 's/^writers = \["claude-sonnet-5-5", "gpt-6.1-sol"\]/writers = []/'; mc --table "$TMP/table.toml"
 check "revisor sem autor na lista: código 2"             bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers" <<<"$2"' _ "$RC" "$ERR"
 check "tabela do repo: tem [[reviewer]] e o par passa na estrutura" bash -c 'grep -q "^\[\[reviewer\]\]" "$1" && ! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA (autor|revisor)"' _ "$TABLE" "$MC"

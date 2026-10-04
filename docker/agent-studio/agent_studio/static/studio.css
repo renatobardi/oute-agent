@@ -453,6 +453,7 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .etapa-texto .texto-secao:first-child h3 { margin-top: 0; }
 .etapa-texto p, .etapa-texto ul, .etapa-texto ol { margin: .5rem 0; }
 .etapa-texto li { margin: .2rem 0; }
+.link-host { color: var(--muted-foreground); font-size: 12px; }
 .etapa-fechada { margin: 0 20px 16px; }
 .etapa-fechada > summary { cursor: pointer; color: var(--muted-foreground); font-size: 13px; padding: 4px 0; }
 .etapa-fechada > .etapa-texto { padding: 12px 0 0; }

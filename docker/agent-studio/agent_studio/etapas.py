@@ -15,7 +15,7 @@ listas, `**negrito**`, `código`, links `https://` e blocos de código), o parse
 escapa tudo. Etapa `reprovado` ou `sem-revisor` sai com um aviso fixo do agent-studio e o texto fechado.
 """
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from .conversations import _dicts
 from .state import STEP_EVENT as EVENT, STEP_KINDS as KINDS, iso, step_valid
@@ -189,7 +189,9 @@ _INLINE = re.compile(r"`[^`\n]{1,500}`|\*\*[^*\n]{1,500}\*\*|\[[^\]\n]{1,500}\]\
 _LINK = re.compile(r"^\[([^\]]*)\]\((https://.*)\)$")
 _ITEM = re.compile(r"^(?:[-*]|\d{1,3}[.)]) (.*)$")
 _ORDERED = re.compile(r"^\d{1,3}[.)] ")
-_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+# controles e as marcas de direção e separadores Unicode (U+200B-200F, U+2028-202E, U+2060-2069, U+FEFF): não aparecem na
+# tela, mas trocam a ordem do texto ou quebram a linha de quem lê
+_CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
 
 
 def inline(text):
@@ -206,7 +208,7 @@ def inline(text):
             out.append({"t": "b", "s": tok[2:-2]})
         else:
             link = _LINK.match(tok)
-            out.append({"t": "a", "s": link.group(1), "href": link.group(2)})
+            out.append({"t": "a", "s": link.group(1), "href": link.group(2), "host": urlsplit(link.group(2)).hostname or ""})
         pos = m.end()
     if pos < len(text):
         out.append({"t": "text", "s": text[pos:]})
@@ -286,7 +288,7 @@ def parse(text):
 
     Gramática (a da `design` da fatia 1): `## Decisão`, `## Ações` e `## Detalhe` abrem seção (outro `## …` é texto);
     `### …` é subtítulo; parágrafo; lista com `- ` ou `1. ` (linha seguinte indentada continua o item); bloco entre cercas
-    ``` ; `**negrito**`, `` `código` `` e `[texto](https://…)` dentro da linha. HTML, tabela e imagem não existem: viram texto."""
+    ``` ; `**negrito**`, `` `código` `` e `[texto](https://…)` dentro da linha (o link mostra o host do destino ao lado do texto, para o texto não esconder o destino). HTML, tabela e imagem não existem: viram texto."""
     p = _Parser()
     for line in _CTRL.sub("", text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")).split("\n"):
         p.line(line)

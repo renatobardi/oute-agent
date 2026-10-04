@@ -898,6 +898,8 @@ STEP_SECRETS=(
   'token-slack=xox[abpr]-[A-Za-z0-9-]{10,}'
   'jwt=eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.'
   'cabecalho-de-credencial=([Bb]earer|[Aa]uthorization:) +[A-Za-z0-9._~+/=-]{20,}'
+  # o `~` no fim do nome liga o grep sem diferença de caixa: nome de variável de credencial e um valor de 12 ou mais caracteres
+  'variavel-de-credencial~=(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|APIKEY|API_KEY|SENHA|CREDENTIAL)[A-Za-z0-9_]*.? *[=:] *.?[A-Za-z0-9+/=_.-]{12,}'
 )
 
 # step_resolve <tipo> [--pr <n>] [--rev <n>]: define S_STATE S_KIND S_KEY S_REV S_BASE S_FILE e S_ARGS (o que sobrou)
@@ -941,20 +943,53 @@ step_check_text() {
   (( size <= STEP_MAX )) || die "texto de $size bytes, acima do teto de $STEP_MAX: recusado, não corto; encurte o arquivo"
   [[ "$(tr -d '\0' < "$f" | wc -c)" -eq "$size" ]] || die "o texto da etapa tem byte nulo: recusado"
   iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || die "o texto da etapa não é UTF-8 válido: recusado"
+  step_check_chars "$f" "o texto"
   step_check_secrets "$f" "o texto"
   return 0
 }
 
 # step_check_secrets <arquivo> <o que é, para a mensagem>: recusa (die) arquivo com padrão de segredo conhecido. Vale para o
-# texto da etapa e para cada arquivo de --fontes: o prompt do revisor (texto e fontes) vai ao bucket pela telemetria
+# texto da etapa e para cada arquivo de --fontes: o prompt do revisor (texto e fontes) vai ao bucket pela telemetria.
+# Best-effort, não é garantia: lista de padrões (nome de variável de credencial, formatos conhecidos, sequência longa de
+# hex ou de base64), conferida na linha e com as quebras de linha removidas (segredo partido em duas linhas). Segredo sem
+# formato conhecido passa; a regra do prompt do dispatcher continua valendo
 step_check_secrets() {
-  local f="$1" what="$2" spec name pat
+  local f="$1" what="$2" spec name pat flag joined
+  joined="$(tr -d '\n\r' < "$f")"
   for spec in "${STEP_SECRETS[@]}"; do
-    name="${spec%%=*}"; pat="${spec#*=}"
-    if grep -Eq -e "$pat" "$f"; then
+    [[ "$spec" == '#'* ]] && continue
+    name="${spec%%=*}"; pat="${spec#*=}"; flag="-E"
+    if [[ "$name" == *"~" ]]; then name="${name%\~}"; flag="-Ei"; fi
+    if grep $flag -q -e "$pat" "$f" || grep $flag -q -e "$pat" <<<"$joined"; then
       die "$what parece ter segredo ($name): recusado; o que vai ao revisor vai ao bucket, que nunca é apagado. Tire o trecho e rode de novo"
     fi
   done
+  step_check_long_token "$joined" && die "$what tem uma sequência longa de hex ou de base64 que parece segredo (sequência-longa): recusado; o que vai ao revisor vai ao bucket, que nunca é apagado. Tire o trecho e rode de novo"
+  return 0
+}
+
+# step_check_long_token <texto sem quebras>: sai 0 se há hex de 32 ou mais caracteres (fora o git sha-1 de 40 e o sha256 de
+# 64, que os textos citam) ou base64 de 40 ou mais que não seja só caminho em minúsculas; 1 se não há
+step_check_long_token() {
+  local text="$1" run
+  while IFS= read -r run; do
+    [[ -n "$run" ]] || continue
+    if [[ "$run" =~ ^[0-9A-Fa-f]+$ ]]; then
+      (( ${#run} == 40 || ${#run} == 64 )) || return 0
+    elif [[ ! "$run" =~ ^[a-z/]+$ ]]; then
+      return 0
+    fi
+  done < <(grep -Eo '[A-Za-z0-9+/]{32,}' <<<"$text")
+  return 1
+}
+
+# step_check_chars <arquivo> <o que é>: recusa (die) marca de direção e separador Unicode (U+200B-200F, U+2028-202E,
+# U+2060-2069, U+FEFF): não aparecem na tela, mas trocam a ordem do texto ou quebram a linha de quem lê (o `ask` também tira)
+step_check_chars() {
+  local f="$1" what="$2"
+  if LC_ALL=C grep -Eq $'\xe2\x80[\x8b-\x8f\xa8-\xae]|\xe2\x81[\xa0-\xa9]|\xef\xbb\xbf' "$f"; then
+    die "$what tem marca de direção ou separador Unicode (U+202E, U+2028, U+200B, U+FEFF…): recusado; tire os caracteres e rode de novo"
+  fi
   return 0
 }
 
@@ -1033,7 +1068,7 @@ step_parse_answer() {
 }
 
 cmd_step_review() {
-  local sha pair agent model effort writer="" srcs=() src n rev t0 dt out err prompt nonce vf rc=0 cost parsed v why="" findings files runner=() t wd
+  local sha pair agent model effort writer="" srcs=() src n rev t0 dt out err prompt nonce vf rc=0 cost parsed v why="" findings files runner=() t text k=0
   step_resolve "$@"
   set -- ${S_ARGS[@]+"${S_ARGS[@]}"}
   while [[ $# -gt 0 ]]; do
@@ -1045,8 +1080,13 @@ cmd_step_review() {
   done
   [[ "$writer" =~ ^[A-Za-z0-9][]A-Za-z0-9._[-]{0,63}$ ]] || die "step review pede --writer <id do seu modelo> (ex.: claude-sonnet-5-5)"
   rev="$S_REV"; vf="$(step_verdict_file "$rev")"
-  step_check_text "$S_FILE"
-  sha="$(step_sha "$S_FILE")"
+  # pasta de trabalho própria (mktemp -d, modo 700) que sai no fim ou se o processo morrer: o prompt não fica em disco. O texto
+  # é copiado uma vez e tudo (checagem, sha256, prompt) sai da cópia, não do arquivo da rodada
+  REV_WD="$(mktemp -d "$S_STATE/.revisor.XXXXXX")" || die "não criei a pasta de trabalho do revisor em $S_STATE"
+  trap 'rm -rf "${REV_WD:?}"' EXIT INT TERM
+  text="$REV_WD/texto.md"; cp "$S_FILE" "$text"
+  step_check_text "$text"
+  sha="$(step_sha "$text")"
   if [[ -f "$vf" ]]; then
     v="$(jq -r '.verdict // empty' "$vf" 2>/dev/null || true)"
     case "$v" in
@@ -1055,13 +1095,15 @@ cmd_step_review() {
   fi
   n="$(step_rejects)"
   (( n < STEP_REJECTS )) || die "a etapa já teve $n reprovações: não revise de novo; publique com step publish (sai como reprovado)"
-  # fontes: arquivos do dispatcher, só como dado; o total tem teto
+  # fontes: arquivos do dispatcher, só como dado, copiados uma vez; passam pela mesma checagem do texto; o total tem teto
   files=0
   for src in ${srcs[@]+"${srcs[@]}"}; do
     [[ -f "$src" ]] || die "fonte não existe: $src"
-    iconv -f UTF-8 -t UTF-8 "$src" >/dev/null 2>&1 || die "a fonte $(basename "$src") não é UTF-8 válido: recusada"
-    step_check_secrets "$src" "a fonte $(basename "$src")"
-    files=$((files + $(wc -c < "$src")))
+    k=$((k + 1)); cp "$src" "$REV_WD/fonte.$k"
+    iconv -f UTF-8 -t UTF-8 "$REV_WD/fonte.$k" >/dev/null 2>&1 || die "a fonte $(basename "$src") não é UTF-8 válido: recusada"
+    step_check_chars "$REV_WD/fonte.$k" "a fonte $(basename "$src")"
+    step_check_secrets "$REV_WD/fonte.$k" "a fonte $(basename "$src")"
+    files=$((files + $(wc -c < "$REV_WD/fonte.$k")))
   done
   (( files <= STEP_SOURCES_MAX )) || die "fontes somam $files bytes, acima do teto de $STEP_SOURCES_MAX"
   t="${OUTE_SWARM_REVIEW_TIMEOUT:-$STEP_TIMEOUT_MAX}"
@@ -1069,19 +1111,23 @@ cmd_step_review() {
   pair="$(step_pair "$writer")"
   if [[ -z "$pair" ]]; then why=sem-par; fi
   IFS=$'\t' read -r agent model effort <<<"$pair"
-  if [[ -z "$why" ]] && ! command -v "${agent:-claude}" >/dev/null 2>&1; then why=sem-cli; fi
+  # só o claude roda como revisor por enquanto: o codex herdaria o ~/.codex e leria o sistema de arquivos (sem isolamento
+  # conferido, #507); o models-check também recusa a linha com agent = "codex"
+  if [[ -z "$why" && "$agent" != claude ]]; then why=agente-nao-suportado; fi
+  if [[ -z "$why" ]] && ! command -v claude >/dev/null 2>&1; then why=sem-cli; fi
   if [[ -z "$why" ]]; then
     [[ -f "$LIB/step-review.md" ]] || die "prompt do revisor ausente: $LIB/step-review.md"
     nonce="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
-    prompt="$S_STATE/.revisor.$$"
+    prompt="$REV_WD/prompt"; out="$REV_WD/out"; err="$REV_WD/err"
     {
       sed "s|{{NONCE}}|$nonce|g" "$LIB/step-review.md"
-      printf '\n<<<TEXTO-%s sha256=%s\n' "$nonce" "$sha"; cat "$S_FILE"; printf '\nTEXTO-%s>>>\n' "$nonce"
+      printf '\n<<<TEXTO-%s sha256=%s\n' "$nonce" "$sha"; cat "$text"; printf '\nTEXTO-%s>>>\n' "$nonce"
+      k=0
       for src in ${srcs[@]+"${srcs[@]}"}; do
-        printf '\n<<<FONTE-%s nome=%s\n' "$nonce" "$(basename "$src")"; cat "$src"; printf '\nFONTE-%s>>>\n' "$nonce"
+        k=$((k + 1))
+        printf '\n<<<FONTE-%s nome=%s\n' "$nonce" "$(basename "$src")"; cat "$REV_WD/fonte.$k"; printf '\nFONTE-%s>>>\n' "$nonce"
       done
     } > "$prompt"
-    out="$S_STATE/.revisor.out.$$"; err="$S_STATE/.revisor.err.$$"
     # o consumo do revisor entra no bucket e no agent-studio pelo próprio agente (ADR-08 §11). O shell do Bash tool do
     # dispatcher não herda as OTEL_* (#250): `oute-emit run` leva o ambiente de telemetria do ~/.oute_env ao agente headless,
     # com a rodada e a etapa na origem. Sem ferramenta nenhuma: o texto é dado, não pode agir
@@ -1091,32 +1137,22 @@ cmd_step_review() {
     # pasta vazia como diretório de trabalho e sem as configurações do usuário, do projeto e do local: o revisor não lê o
     # CLAUDE.md nem o AGENTS.md da sessão, não roda os hooks do ai-memory e não carrega o MCP. Medido em 2026-10-04: o mesmo
     # texto custou US$ 0,36 na pasta do repo e US$ 0,06 assim (#507)
-    wd="$S_STATE/.revisor.d.$$"; mkdir -p "$wd"
+    mkdir "$REV_WD/cwd"
     t0="$(date +%s)"
-    if [[ "${agent:-claude}" == codex ]]; then
-      ( cd "$wd" && ${runner[@]+"${runner[@]}"} timeout "$t" codex exec --skip-git-repo-check -s read-only -m "$model" \
-          -c "model_reasoning_effort=\"$effort\"" - ) < "$prompt" > "$out" 2> "$err" || rc=$?
-    else
-      ( cd "$wd" && ${runner[@]+"${runner[@]}"} timeout "$t" claude -p --model "$model" --tools "" --max-turns 3 \
-          --no-session-persistence --output-format json --setting-sources "" --disable-slash-commands --strict-mcp-config \
-          --system-prompt "Você é o revisor de uma etapa de rodada. Confira o texto da mensagem e responda só com o JSON pedido." \
-          ) < "$prompt" > "$out" 2> "$err" || rc=$?
-    fi
-    rm -rf "${wd:?}"
+    ( cd "$REV_WD/cwd" && ${runner[@]+"${runner[@]}"} timeout "$t" claude -p --model "$model" --tools "" --max-turns 3 \
+        --no-session-persistence --output-format json --setting-sources "" --disable-slash-commands --strict-mcp-config \
+        --system-prompt "Você é o revisor de uma etapa de rodada. Confira o texto da mensagem e responda só com o JSON pedido." \
+        ) < "$prompt" > "$out" 2> "$err" || rc=$?
     dt=$(( $(date +%s) - t0 ))
     cost=null
     if (( rc == 124 )); then why=tempo
     elif (( rc != 0 )); then why=erro
     else
-      if [[ "${agent:-claude}" == codex ]]; then cp "$out" "$out.txt"
-      else
-        cost="$(jq -r '.total_cost_usd // empty | numbers' "$out" 2>/dev/null || true)"; cost="${cost:-null}"
-        jq -r 'if type == "object" then (.result // empty) else empty end' "$out" > "$out.txt" 2>/dev/null || : > "$out.txt"
-      fi
+      cost="$(jq -r '.total_cost_usd // empty | numbers' "$out" 2>/dev/null || true)"; cost="${cost:-null}"
+      jq -r 'if type == "object" then (.result // empty) else empty end' "$out" > "$out.txt" 2>/dev/null || : > "$out.txt"
       parsed="$(step_parse_answer "$out.txt")"
       [[ -n "$parsed" ]] || why=saida-invalida
     fi
-    rm -f "$prompt" "$out" "$out.txt" "$err"
   fi
   if [[ -n "$why" ]]; then
     step_write_verdict "$rev" "$(step_verdict_json "$sha" sem-revisor "$why" '[]' "$writer" "${model:-}" "${agent:-}" "${dt:-0}" "${cost:-null}")"
@@ -1124,7 +1160,7 @@ cmd_step_review() {
     return 3
   fi
   v="$(jq -r .veredito <<<"$parsed")"; findings="$(jq -c .achados <<<"$parsed")"
-  step_write_verdict "$rev" "$(step_verdict_json "$sha" "$v" ok "$findings" "$writer" "$model" "${agent:-claude}" "$dt" "$cost")"
+  step_write_verdict "$rev" "$(step_verdict_json "$sha" "$v" ok "$findings" "$writer" "$model" claude "$dt" "$cost")"
   echo "etapa $S_KIND${S_KEY:+ #$S_KEY} r$rev: $v (revisor $model, ${dt} s)"
   if [[ "$v" == reprovado ]]; then
     jq -r '.[] | "  achado" + (if .regra then " (regra \(.regra))" else "" end) + ": " + .motivo + " | trecho: " + .trecho' <<<"$findings"

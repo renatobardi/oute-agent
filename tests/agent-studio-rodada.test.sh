@@ -41,7 +41,7 @@ def step(t, rnd, eid, kind, rev, review, text, key=None, writer="claude-sonnet-5
     return event(t, "oute.swarm.step.published", eid, attrs, text)
 T1 = ("## Decisão\n1. aprovar o fechamento da rodada **swarm-1004-1306** <b>negrito falso</b>\n2. pedir ajuste\n\n"
       "## Ações\n- rodar `oute update` no host\n- ler o PR [#600](https://github.com/renatobardi/oute-agent/pull/600), [mau](javascript:alert(1)) e [http](http://x.invalid/a)\n\n"
-      "## Detalhe\nParágrafo com <script>alert('detalhe')</script> e &amp; literal.\n\n### Subtítulo\n```\nbloco <b>cru</b> & mais\n```\n")
+      "## Detalhe\nParágrafo com <script>alert('detalhe')</script> e &amp; literal e uma marca\u202e de direção.\nVeja [https://github.com/renatobardi/oute-agent](https://evil.example/phishing).\n\n### Subtítulo\n```\nbloco <b>cru</b> & mais\n```\n")
 T1R1 = "## Decisão\n1. versão antiga r1, sem revisor\n"
 TMERGE = "## Decisão\n1. fazer merge do #12?\n\n## Detalhe\nCI verde.\n"
 TKAIZEN = "## Decisão\n1. aplicar a lição <script>alert('kaizen')</script>\n\n## Ações\n- nada\n\n## Detalhe\nSem fonte para o número 42.\n"
@@ -119,6 +119,8 @@ check "aprovado: lista numerada, lista de itens, negrito e código" bash -c 'gre
 check "aprovado: texto aberto, sem aviso nem <details> no fechamento" bash -c 'f="$1"; s="$(sed -n "/id=\"etapa-fechamento\"/,/<\/section>/p" "$f")"; grep -q "data-texto>" <<<"$s" && ! grep -q "data-aviso\|<details" <<<"$s"' _ "$TMP/r1.html"
 check "aprovado: HTML do texto sai escapado (nada de tag viva)" bash -c 'f="$1"; ! grep -q "<b>negrito falso</b>\|<script>alert\|<b>cru</b>" "$f" && grep -q "&lt;b&gt;negrito falso&lt;/b&gt;" "$f" && grep -q "&lt;script&gt;alert(&#39;detalhe&#39;)&lt;/script&gt; e &amp;amp; literal" "$f" && grep -q "bloco &lt;b&gt;cru&lt;/b&gt; &amp; mais" "$f"' _ "$TMP/r1.html"
 check "aprovado: link https vira link com rel e título; javascript: e http: ficam texto" bash -c 'f="$1"; grep -q "<a href=\"https://github.com/renatobardi/oute-agent/pull/600\" rel=\"noopener noreferrer nofollow\" referrerpolicy=\"no-referrer\" title=\"https://github.com/renatobardi/oute-agent/pull/600\">#600</a>" "$f" && ! grep -q "href=\"javascript\|href=\"http://" "$f" && grep -q "\[mau\](javascript:alert(1))" "$f"' _ "$TMP/r1.html"
+check "aprovado: o link mostra o host do destino ao lado do texto (github.com e o enganoso evil.example)" bash -c 'grep -q "title=\"https://github.com/renatobardi/oute-agent/pull/600\">#600</a> <span class=\"link-host\">(github.com)</span>" "$1" && grep -q ">https://github.com/renatobardi/oute-agent</a> <span class=\"link-host\">(evil.example)</span>" "$1"' _ "$TMP/r1.html"
+check "aprovado: a marca de direção U+202E não chega à página" bash -c '! grep -q $'"'"'\xe2\x80\xae'"'"' "$1" && grep -q "uma marca de direção" "$1"' _ "$TMP/r1.html"
 check "aprovado: bloco de código em <pre>"             bash -c 'grep -q "<pre class=\"script\">bloco &lt;b&gt;cru&lt;/b&gt; &amp; mais</pre>" "$1" && grep -q "<h4>Subtítulo</h4>" "$1"' _ "$TMP/r1.html"
 check "etapa: revisão, autor, revisor e sha256 curto no topo" bash -c 'grep -qE "revisão 2 · publicada em 20[0-9-]+ [0-9:]+ GMT-3 · autor claude-sonnet-5-5 · revisor claude-opus-5-5 · sha256 <code>[0-9a-f]{12}</code>" "$1"' _ "$TMP/r1.html"
 check "etapa: o ciclo aparece quando o evento traz"    grep -q "ciclo renatobardi/oute-agent#489" "$TMP/r1.html"
@@ -214,11 +216,15 @@ inl = etapas.inline("a `c` **b** [t](https://x.example/p?q=1) fim")
 check("inline: texto, código, negrito e link", [t["t"] for t in inl] == ["text", "code", "text", "b", "text", "a", "text"] and inl[5]["href"] == "https://x.example/p?q=1")
 for bad in ("[x](javascript:alert(1))", "[x](http://a.example)", "[x](data:text/html;base64,AAAA)", "[x](//a.example)", "[x](https://a.example/ b)", "[x](https://a.example/\")"):
     check(f"inline: link recusado fica texto ({bad})", all(t["t"] == "text" for t in etapas.inline(bad)))
+check("inline: o host do link sai do destino, não do texto (e userinfo não engana)", [t["host"] for t in etapas.inline("[a.com](https://b.example/x) [c](https://github.com@evil.example/y) [d](https://Sub.Exemplo.COM:8443/z?q=1)") if t["t"] == "a"] == ["b.example", "evil.example", "sub.exemplo.com"])
 check("inline: HTML cru e entidade ficam texto, para o template escapar", etapas.inline("<b>x</b> &amp;") == [{"t": "text", "s": "<b>x</b> &amp;"}])
 check("inline: negrito sem fechar e crase sem fechar ficam texto", [t["t"] for t in etapas.inline("**a e `b")] == ["text"])
 check("fence: bloco não fechado vai até o fim, sem perder texto", flat(etapas.parse("```\nlinha\nlinha 2")) == [(None, "pre")] and etapas.parse("```\nlinha\nlinha 2")["sections"][0]["blocks"][0]["s"] == "linha\nlinha 2")
 check("fence: dentro do bloco `## Decisão` é código, não seção", [s["title"] for s in etapas.parse("```\n## Decisão\n```\n")["sections"]] == [None])
 check("controle: CRLF, TAB e controles não quebram nem entram", etapas.parse("## Decisão\r\nlinha\x00\x1b com \tTAB\r\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "linha com     TAB")
+for cp in (0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0xfeff):
+    check(f"direção: U+{cp:04X} sai do texto antes de montar os blocos", etapas.parse("## Decisão\na" + chr(cp) + "b\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "ab")
+check("direção: acento e emoji ficam", etapas.parse("ação ✓\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "ação ✓")
 check("grande: 32 KiB de uma linha só passam sem erro", flat(etapas.parse("a" * 32768)) == [(None, "p")])
 check("grande: 4000 itens de lista passam", len(etapas.parse("\n".join("- i" for _ in range(4000)))["sections"][0]["blocks"][0]["items"]) == 4000)
 steps = [{"kind": "fechamento", "key": "", "review": "sem-revisor"}, {"kind": "merge", "key": "7", "review": "aprovado"}, {"kind": "merge", "key": "9", "review": "reprovado"}]
