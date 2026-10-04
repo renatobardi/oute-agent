@@ -34,6 +34,7 @@ from starlette.staticfiles import StaticFiles
 
 from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
                tz as tz_mod)
+from . import alerts as alerts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -141,12 +142,32 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     env = _env(config.tz)
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
 
+    def alert_age(a, now):
+        """Idade em segundos do alerta que recolhe por tempo (#524); `None` = nunca recolhe."""
+        if a.get("type") not in alerts_mod.BAND_AGING_TYPES or not a.get("since"):
+            return None
+        return now - datetime.fromisoformat(a["since"].replace("Z", "+00:00")).timestamp()
+
+    def band_split(items, age, now):
+        """(recentes, antigos) das faixas da tela (#524): só a apresentação, sem escrita; `None` passa como está."""
+        if not items:
+            return items, []
+        limit = config.alerts.band_recent_hours * 3600
+        recent, old = [], []
+        for it in items:
+            a = age(it, now)
+            (old if a is not None and a > limit else recent).append(it)
+        return recent, old
+
     def page(request, name, status=200, headers=None, **ctx):
         # os alertas só existem em página de quem passou pelo `gate` (o login não os mostra)
         shown = hasattr(request.state, "alerts")
         # o casco (barra lateral e cabeçalho, #467) só aparece para quem entrou; o login e o erro de quem não entrou saem sem ele
-        html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=getattr(request.state, "alerts", None),
-                                             decisions=getattr(request.state, "decisions", None),
+        now = time.time()
+        alerts_new, alerts_old = band_split(getattr(request.state, "alerts", None), alert_age, now)
+        decisions_new, decisions_old = band_split(getattr(request.state, "decisions", None), lambda d, _now: d["age_seconds"], now)
+        html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=alerts_new, alerts_old=alerts_old,
+                                             decisions=decisions_new, decisions_old=decisions_old,
                                              authed=shown or bool(auth.reader(request)))
         return HTMLResponse(html, status_code=status, headers={**HEADERS, **(headers or {})})
 

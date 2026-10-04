@@ -218,6 +218,47 @@ check "trecho do htmx não leva os alertas"             bash -c '! grep -q "aler
 check "ingestão: fila a 10% = 200"                     test "$(post metrics "$TMP/metrics-low.json")" = 200
 check "alerta desliga sozinho com o dado seguinte"     test "$(api)$(alerts_of "$U1")" = "[][]"
 
+# ---------------------------------------------------------------- 6b. faixas: o que tem mais de 2 h vira "antigos" (#524)
+#   fila (exporter studio_metrics) alta desde há 3 h: nunca recolhe por tempo, fica aberta na faixa
+#   r-parada: rodada aberta há 3 h, sem evento -> round_stalled com mais de 2 h (recolhe)
+#   r-pergunta: aberta há 4 h, perguntada há 3 h -> decisão antiga (recolhe) e round_stalled antigo
+#   r-recente: aberta há 20 min, perguntada há 10 min -> decisão recente, fica aberta
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
+import json, sys
+from otlp_json import event, queue_metrics, rl
+tmp, NOW = sys.argv[1], int(sys.argv[2])
+O, A = "oute.swarm.round.opened", "oute.swarm.round.asked"
+sw = lambda mins, name, rnd, n, body=None: event(NOW - mins * 60, name, f"b-{n}", {"oute.swarm.round": rnd}, body)
+json.dump({"resourceLogs": [rl({"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": "human"}, [
+    sw(180, O, "r-parada", 1), sw(240, O, "r-pergunta", 2), sw(180, A, "r-pergunta", 3, "pergunta antiga"),
+    sw(20, O, "r-recente", 4), sw(10, A, "r-recente", 5, "pergunta recente")])]}, open(f"{tmp}/band-logs.json", "w"))
+json.dump(queue_metrics("oute-server", NOW - 10800, 800, exporter="otlp_http/studio_metrics"), open(f"{tmp}/band-q-old.json", "w"))
+json.dump(queue_metrics("oute-server", NOW - 5, 800, exporter="otlp_http/studio_metrics"), open(f"{tmp}/band-q-now.json", "w"))
+PY
+for f in band-logs band-q-old band-q-now; do
+  check "faixas: ingestão de $f = 200" test "$(post "$([ "$f" = band-logs ] && echo logs || echo metrics)" "$TMP/$f.json")" = 200
+done
+# a faixa como a página a entrega: o que está aberto e o que está dentro do <details> "antigos"
+band() { python3 -c 'import json, re, sys
+h = sys.stdin.read(); i = sys.argv[1]
+m = re.search(r"<section [^>]*id=\"" + i + r"\"[^>]*>(.*?)</section>", h, re.S)
+b = m.group(1) if m else ""
+d = re.search(r"<details class=\"antigos\".*?</details>", b, re.S)
+old = d.group(0) if d else ""; op = b.replace(old, "")
+pick = lambda t: re.findall(r"data-(?:alerta|decisao)=\"([^\"]*)\"", t)
+print(json.dumps({"abertos": pick(op), "antigos": pick(old), "contador": re.findall(r"antigos \((\d+)\)", old),
+                  "attrs": re.findall(r"data-(?:alertas|decisoes)(?:-antigas?|-antigos)?=\"(\d+)\"", m.group(0)) if m else []}))' "$1"; }
+for path in /conversas /sessoes /pedidos; do
+  B="$(page "$path" | band alertas)"
+  check "faixas: alertas em $path, a fila de 3 h aberta e as rodadas paradas em antigos (2)" jqe '.abertos == ["queue"] and (.antigos | sort) == ["round_stalled", "round_stalled"] and .contador == ["2"] and .attrs == ["1", "2"]' <<<"$B"
+  B="$(page "$path" | band decisoes)"
+  check "faixas: decisões em $path, a recente aberta e a de 3 h em antigos (1)" jqe '.abertos == ["r-recente"] and .antigos == ["r-pergunta"] and .contador == ["1"] and .attrs == ["1", "1"]' <<<"$B"
+done
+check "faixas: nada escrito no servidor, o contador é só um <details> (sem formulário, sem script, sem hx-)" bash -c 'h="$(sed -n "/id=\"alertas-antigos\"/,/<\/details>/p" <<<"$1")"; test -n "$h" && ! grep -qiE "<form|<script|hx-|href=\"#" <<<"$h"' _ "$(page /pedidos)"
+check "faixas: o /v1/alerts segue com todos (a fila e as duas rodadas paradas, com o since de antes)" jqe '([.[].type] | sort) == ["queue", "round_stalled", "round_stalled"] and all(.[]; .since != null)' <<<"$(api)"
+check "faixas: o /v1/tray segue com as duas decisões pendentes" jqe '[.decisions.pending[].round] | sort == ["r-pergunta", "r-recente"]' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/v1/tray")"
+check "faixas: o limite é a chave band_recent_hours do [alerts] do config.toml, padrão 2" bash -c 'grep -qE "^band_recent_hours = 2$" "$1/config/agent-studio/config.toml" && python3 -c "import sys; sys.path.insert(0, sys.argv[1]); from agent_studio.alerts import AlertConfig; sys.exit(AlertConfig().band_recent_hours != 2)" "$1/docker/agent-studio"' _ "$ROOT"
+
 # ---------------------------------------------------------------- 7. sem CDN, sem script inline, mesma CSP
 PAGES=("$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" "$TMP/p4.html" "$TMP/alert.html" "$TMP/alert-pedido.html" "$TMP/p6.html" "$TMP/p1-forjado.html")
 check "páginas: nenhum script, estilo ou link de fora" bash -c '! grep -hoiE "(src|href|action|hx-get)=\"[^\"]*\"" "$@" | grep -qE "=\"([a-z]+:)?//"' _ "${PAGES[@]}"
@@ -366,6 +407,43 @@ status, body = get(app, "/pedido", f"id={P1}")
 check("SurrealDB com resposta inesperada: pedido 200 com aviso", status == 200 and "data-estado-indisponivel" in body
       and "data-script" in body)
 
+# faixas (#524): sem item recente a faixa mostra só o contador; o limite vem do config; cada tipo recolhe ou não por tempo
+import time
+from agent_studio.config import Config
+def iso_ago(h):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - h * 3600))
+def al(kind, h, **ev):
+    unit = "usd_per_mtok" if kind == "price_changed" else "seconds"
+    return {"type": kind, "host": "oute-server", "instance": None, "value": 1, "unit": unit, "limit": 0,
+            "since": iso_ago(h), "evidence": {"round": "r", "sessions": [], "model": "m", "field": "input", "old": 2, **ev}}
+class Fixed(Store):
+    def __init__(self, alerts_, decisions_):
+        self.a, self.d = alerts_, decisions_
+    def alerts(self, *x):
+        return {"alerts": self.a}
+    def decisions(self, *x):
+        return {"pending": self.d}
+dec = lambda h: {"round": "r", "host": "oute-server", "instance": None, "question": "q", "asked_at": iso_ago(h), "age_seconds": int(h * 3600)}
+old_only = [al("round_stalled", 3, round="r"), al("round_old", 30, round="r"), al("price_changed", 5)]
+status, body = get(create_app(Fixed(old_only, [dec(3)]), TOKEN), "/pedidos")
+check("faixas: só itens antigos = só o contador, sem lista aberta nem título",
+      'data-alertas="0" data-alertas-antigos="3"' in body and "antigos (3)" in body and "do pipeline</h2>" not in body
+      and 'data-decisoes="0" data-decisoes-antigas="1"' in body and "pendente</h2>" not in body and "decisões pendentes</h2>" not in body)
+never = [al(k, 9, exporter="x") for k in ("queue", "destination_refusing", "host_no_data", "spool", "quota")]
+status, body = get(create_app(Fixed(never, []), TOKEN), "/pedidos")
+check("faixas: fila, destino recusando, host sem dado, spool e cota com 9 h nunca recolhem",
+      'data-alertas="5" data-alertas-antigos="0"' in body and "antigos (" not in body)
+status, body = get(create_app(Fixed([al("round_stalled", 1.9)], [dec(1.9)]), TOKEN), "/pedidos")
+check("faixas: 1 h 54 min ainda é recente (folga do limite de 2 h)", 'data-alertas="1" data-alertas-antigos="0"' in body and "antigos (" not in body)
+status, body = get(create_app(Fixed([al("round_stalled", 2.1)], [dec(2.1)]), TOKEN), "/pedidos")
+check("faixas: 2 h 06 min já é antigo", 'data-alertas="0" data-alertas-antigos="1"' in body and 'data-decisoes="0" data-decisoes-antigas="1"' in body)
+status, body = get(create_app(Fixed([al("round_stalled", 2.1)], []), TOKEN, config=Config(alerts=alerts.AlertConfig(band_recent_hours=4))), "/pedidos")
+check("faixas: band_recent_hours = 4 mantém 2 h 06 min na faixa", 'data-alertas="1" data-alertas-antigos="0"' in body)
+status, body = get(create_app(Fixed([al("round_stalled", 3)], []), TOKEN), "/conversa/logs", "id=x")
+check("faixas: nos detalhes segue sem faixa", "id=\"alertas\"" not in body and "antigos (" not in body)
+status, body = get(create_app(Fixed([], []), TOKEN), "/pedidos")
+check("faixas: sem alerta nem decisão, nada de faixa (alertas escondido)", 'data-alertas="0" hidden' in body and 'id="decisoes"' not in body)
+
 # a tela não tem ação: nenhuma rota que escreve além do login, do logout e da ingestão
 app = create_app(Store(), TOKEN, surreal=sdb)
 writes = sorted((r.path, m) for r in app.routes for m in (getattr(r, "methods", None) or ()) if m not in ("GET", "HEAD"))
@@ -399,7 +477,7 @@ check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o a
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^AttributeError\|^$\|tela: .* falhou' "$TMP/py.out" || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 36 casos rodaram"          test "$((n_ok + n_fail))" = 36
+check "lógica em Python: os 43 casos rodaram"          test "$((n_ok + n_fail))" = 43
 
 # ---------------------------------------------------------------- 10. imagem
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"
