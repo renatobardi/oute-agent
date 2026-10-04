@@ -122,4 +122,9 @@ check "o oute --help lista o tray" has '^  tray install|uninstall '
 OUT="$(bash -n "$OUTE" 2>&1)"; RC=$?
 check "bash -n scripts/oute" [ "$RC" -eq 0 ]
 
+# bash 3.2 do macOS: `$VAR` colado num caractere não ASCII ("$TRAY_APP…") é lido como outro nome de variável, e o
+# `set -u` derruba o script ("TRAY_APP?: unbound variable"). O nome vai entre chaves: "${TRAY_APP}…".
+OUT="$(LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]' "$OUTE")"
+check "scripts/oute: nenhum \$VAR colado em caractere não ASCII (bash 3.2)" [ -z "$OUT" ]
+
 check_end

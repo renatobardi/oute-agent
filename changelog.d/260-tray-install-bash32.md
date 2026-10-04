@@ -1,0 +1,2 @@
+### Fixed
+- **`oute tray install` parava no bash 3.2 do macOS** (#260). A mensagem "montando $TRAY_APP…" tinha a variável colada no `…`; o bash 3.2 lia isso como outro nome e o `set -u` derrubava o script ("TRAY_APP?: unbound variable") depois de compilar e antes de montar o `.app`. O nome agora vai entre chaves, e o `tests/oute-tray.test.sh` recusa `$VAR` colado em caractere não ASCII no `scripts/oute`.
