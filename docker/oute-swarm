@@ -686,7 +686,8 @@ w_snapshot() {
 }
 
 w_diff() {
-  local k new old kind a b slug num pr f t
+  local k new old kind a b slug num pr f t head names
+  local -A okpr=()
   while IFS= read -r k; do
     [[ -n "$k" ]] || continue
     new="${W_CUR[$k]:-}" old="${W_PREV[$k]:-}"
@@ -720,8 +721,9 @@ w_diff() {
           *) w_ev pr "PR $(w_ref "$a"): $new (issue $(w_ref "$b"))" ;;
         esac ;;
       ci)
-        [[ "$new" == pass || "$new" == fail ]] || continue
-        w_ev ci "PR $(w_ref "$a") · $b: $new" ;;
+        # fail: uma linha por check; pass: uma linha por PR, depois do laço, só quando todos os checks passam (#487)
+        if [[ "$new" == fail ]]; then w_ev ci "PR $(w_ref "$a") · $b: $new"
+        elif [[ "$new" == pass ]]; then okpr[$a]=1; fi ;;
       oldci)
         [[ -z "$old" && "$new" == "fail "* ]] || continue
         w_ev ci "PR $(w_ref "$a") · ${b#*|}: fail (head ${b%%|*}, já substituído por ${new#fail })" ;;
@@ -745,6 +747,15 @@ w_diff() {
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
              | awk -F'|' 'BEGIN { split("falha tab agent pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
+  for a in "${!okpr[@]}"; do
+    names="" head="${W_CUR[head|$a]:-}"
+    while IFS= read -r k; do
+      [[ "${W_CUR[$k]}" == pass ]] || { names=""; break; }
+      names+="${names:+, }${k#"ci|$a|"}"
+    done < <(for k in "${!W_CUR[@]}"; do [[ "$k" == "ci|$a|"* ]] && echo "$k"; done | sort)
+    [[ -z "$names" ]] || w_ev ci "PR $(w_ref "$a") · verde${head:+ (head ${head:0:7})}: $names"
+  done
+  return 0
 }
 
 w_check_merged_issues() {

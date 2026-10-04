@@ -122,7 +122,7 @@ fake-checks $A checks= lint=CANCELLED
 cp "\$STATE/log" "\$FAKE/log.p2" 2>/dev/null || : > "\$FAKE/log.p2"
 SH
 cat > "$FAKE/on-sleep-2" <<SH
-cp "\$STATE/log" "\$FAKE/log.p2"
+cp "\$STATE/log" "\$FAKE/log.p2" 2>/dev/null || : > "\$FAKE/log.p2"
 fake-checks $A checks=FAILURE lint=CANCELLED
 SH
 echo : > "$FAKE/on-sleep-3"
@@ -140,7 +140,7 @@ fake-checks $A checks=FAILURE
 : > "\$FAKE/checks-$A.fail"
 SH
 cat > "$FAKE/on-sleep-2" <<SH
-cp "\$STATE/log" "\$FAKE/log.p2"
+cp "\$STATE/log" "\$FAKE/log.p2" 2>/dev/null || : > "\$FAKE/log.p2"
 rm -f "\$FAKE/checks-$A.fail"
 SH
 watch
@@ -279,4 +279,44 @@ check "fechada vista: código 0"                          [ "$RC" -eq 0 ]
 check "fechada vista: CI do PR depois do close"          logged "[ci] PR #12 · test: fail"
 check "fechada vista: mergeado depois do close"          logged "[pr] PR #12 mergeado (issue #7)"
 check "fechada vista: log = stdout"                      [ "$(log_events)" == "$(out_events)" ]
+# 9. CI verde numa linha só (#487): todos os checks do head passam = uma linha com o head e a lista (com o SonarCloud);
+# falha e pendência seguem uma linha por check
+succ() { printf '{"name":"%s","conclusion":"SUCCESS","completedAt":"2026-06-01T00:05:00Z"}' "$1"; }
+ALL="[$(succ checks),$(succ lint),$(succ 'SonarCloud Code Analysis')]"
+CASE=verde; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $A OPEN '$ALL'
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "verde: código 0"                                  [ "$RC" -eq 0 ]
+check "verde: uma linha com o head e os checks"          [ "$(ci_events)" == "[ci] PR #12 · verde (head aaaaaaa): SonarCloud Code Analysis, checks, lint" ]
+check "verde: log = stdout"                              [ "$(log_events)" == "$(out_events)" ]
+watch
+check "verde: não repete depois do reinício"             [ "$(count "$(ci_events)")" -eq 1 ]
+
+CASE=verdependente; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $A OPEN '[$(succ checks),{"name":"SonarCloud Code Analysis","status":"IN_PROGRESS","conclusion":"","startedAt":"2026-06-01T00:01:00Z","completedAt":"0001-01-01T00:00:00Z"}]'
+cp "\$STATE/log" "\$FAKE/log.p2" 2>/dev/null || : > "\$FAKE/log.p2"
+SH
+cat > "$FAKE/on-sleep-2" <<SH
+fake-pr $A OPEN '[$(succ checks),$(succ 'SonarCloud Code Analysis')]'
+SH
+echo : > "$FAKE/on-sleep-3"
+watch
+check "pendente: nenhuma linha de CI enquanto um check roda" [ -z "$(grep -F '[ci]' "$FAKE/log.p2")" ]
+check "pendente: a linha única sai quando o último passa" [ "$(ci_events)" == "[ci] PR #12 · verde (head aaaaaaa): SonarCloud Code Analysis, checks" ]
+
+CASE=verdefalha; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+cat > "$FAKE/on-sleep-1" <<SH
+fake-pr $A OPEN '[$(succ checks),{"name":"lint","conclusion":"FAILURE","completedAt":"2026-06-01T00:05:00Z"}]'
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "falha: uma linha para o check que falhou"         [ "$(ci_events)" == "[ci] PR #12 · lint: fail" ]
+
 check_end
