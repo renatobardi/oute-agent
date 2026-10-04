@@ -21,6 +21,7 @@ de front-end e sem CDN. Só leitura.
 """
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote
@@ -99,6 +100,7 @@ def _env(zone=tz_mod.UTC):
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
     env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago,
                        alert_title=alert_text.title, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
+    env.tests["safe_cmd_id"] = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v) is not None  # id que cabe num comando sem aspas
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
 
@@ -322,7 +324,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if failed:
             return failed
         # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
-        data = data or {"session": sess_mod.blank(task_id), "events": [], "events_truncated": False}
+        data = data or {"session": sess_mod.blank(task_id), "events": [], "events_truncated": False, "phase": None}
         state = await with_state([data["session"]])
         if data["session"]["start_ns"] is None and not data["session"]["state"]:
             return error(request, 404, "Sessão não encontrada.")

@@ -1,17 +1,34 @@
 {% extends "base.html" %}
 {% set nav = "precos" %}
 {% set crumbs = [("Análise", none), ("Preços", none)] %}
+{% from "_macros.html" import badge, icon %}
 {% block title %}Preços · agent-studio{% endblock %}
 {% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
 {% block main %}
-<h1>Preços</h1>
-<p class="nota">Preço de cada modelo, em {{ unit }}, que estima o custo das chamadas sem custo real. Vale o preço da hora do
-  fato. Esta tela só mostra: a conferência diária (models.dev e OpenRouter) troca o preço, e para travar um modelo
-  vale <code>fixed = true</code> no <code>config.toml</code>.</p>
+<div class="pagina">
+<div class="pagina-topo">
+  <h1>Preços</h1>
+  <p class="nota">Preço de cada modelo, em {{ unit }}, que estima o custo das chamadas sem custo real. Vale o preço da hora do
+    fato. Esta tela só mostra: a conferência diária (models.dev e OpenRouter) troca o preço, e para travar um modelo
+    vale <code>fixed = true</code> no <code>config.toml</code>.</p>
+</div>
+
+<div class="fontes">
+  {% for s in sources %}
+  <div class="cartao fonte" data-fonte="{{ s.source }}">
+    <span class="fonte-icone{% if s.last_run is not none and not s.ok %} falhou{% endif %}">{{ icon("check" if s.ok else ("triangle-alert" if s.last_run is not none else "info"), 16) }}</span>
+    <span class="fonte-texto"><strong>{{ s.source }}</strong>
+      <span>Última conferência ({{ tzl() }}): {{ s.last_run|when }} · Último sucesso ({{ tzl() }}): {{ s.last_ok|when }}</span></span>
+    {% if s.last_run is none %}{{ badge("ainda não conferiu", "secundario") }}{% elif s.ok %}{{ badge("ok") }}{% else %}{{ badge("falhou" ~ (": " ~ s.reason if s.reason else ""), "destrutivo") }}{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
 {% if models %}
 {% for m in models %}
-<section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}">
-  <h2>{{ m.model }}{% if m.fixed %} <span class="etiqueta" data-fixo>fixo no config.toml</span>{% endif %}</h2>
+<section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}" class="cartao">
+  <div class="modelo-topo"><h2>{{ m.model }}</h2>{% if m.fixed %}<span class="badge contorno" data-fixo>{{ icon("lock", 12) }}fixo no config.toml</span>{% endif %}</div>
+  <div class="rolagem">
   <table class="precos">
     <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde ({{ tzl() }})</th><th>Última conferência</th></tr></thead>
     <tbody>
@@ -21,29 +38,24 @@
     </tr>
     </tbody>
   </table>
-  <table class="precos historico">
-    <thead><tr><th>Histórico (data)</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th></tr></thead>
-    <tbody>
-    {% for h in m.history %}
-    <tr data-historico data-origin="{{ h.origin }}" data-since="{{ h.since }}"><td class="hora">{{ h.since|when }}</td>{{ cells(h) }}<td>{{ h.origin }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  </div>
+  {% set top = m.history|map(attribute="input")|map("default", 0, true)|max %}
+  <details class="historico">
+    <summary>Histórico (data) · {{ m.history|length|num }}</summary>
+    <table class="precos historico">
+      <thead><tr><th>Data</th><th>Preço de entrada</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th></tr></thead>
+      <tbody>
+      {% for h in m.history %}
+      <tr data-historico data-origin="{{ h.origin }}" data-since="{{ h.since }}"><td class="hora">{{ h.since|when }}</td>
+        <td class="barra"><meter min="0" max="{{ top or 1 }}" value="{{ h.input or 0 }}" aria-label="preço de entrada"></meter></td>{{ cells(h) }}<td>{{ h.origin }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
 </section>
 {% endfor %}
 {% else %}
 <p class="aviso" id="sem-precos">Nenhum preço no histórico.</p>
 {% endif %}
-
-<h2>Fontes</h2>
-<table class="precos fontes">
-  <thead><tr><th>Fonte</th><th>Última conferência ({{ tzl() }})</th><th>Resultado</th><th>Último sucesso ({{ tzl() }})</th></tr></thead>
-  <tbody>
-  {% for s in sources %}
-  <tr data-fonte="{{ s.source }}"><td>{{ s.source }}</td><td class="hora">{{ s.last_run|when }}</td>
-    <td>{% if s.last_run is none %}ainda não conferiu{% elif s.ok %}ok{% else %}falhou{% if s.reason %}: {{ s.reason }}{% endif %}{% endif %}</td>
-    <td class="hora">{{ s.last_ok|when }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+</div>
 {% endblock %}

@@ -1,19 +1,22 @@
 {% extends "base.html" %}
 {% set nav = "conversas" %}
 {% set crumbs = [("Telemetria", none), ("Conversas", none)] %}
-{% from "_macros.html" import cost, filter %}
+{% from "_macros.html" import cost, filter, badge %}
 {% block title %}Conversas · agent-studio{% endblock %}
 {% block main %}
-<h1>Conversas</h1>
-{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}
-<p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), da mais recente
-  para a mais antiga. Os números são da conversa inteira.
-  {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}</div>
+  <p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), da mais recente
+    para a mais antiga. Os números são da conversa inteira.
+    {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
+</div>
 {% if conversations %}
-<table class="conversas">
+<div class="cartao rolagem">
+<table class="conversas empilha">
   <thead><tr>
     <th>Início ({{ tzl() }})</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
-    <th class="n">Entrada</th><th class="n">Saída</th><th class="n" title="tokens de cache: leitura / escrita">Cache</th>
+    <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
     <th class="n">Custo</th><th class="n">Erros</th>
   </tr></thead>
   <tbody>
@@ -25,22 +28,23 @@
       data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
       data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
       data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-errors="{{ u.errors.total }}">
-    <td class="hora">{{ c.start_ns|ts }}</td>
-    <td>{{ c.host or "—" }}</td>
-    <td>{{ c.agent or "—" }}</td>
-    <td><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a></td>
-    <td class="n">{{ c.duration_ns|dur }}</td>
-    <td class="n">{{ u.calls|num }}</td>
-    <td class="n">{{ u.tokens.input|num }}</td>
-    <td class="n">{{ u.tokens.output|num }}</td>
-    <td class="n">{{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</td>
+    <td class="hora sec">{{ c.start_ns|ts }}</td>
+    <td class="sec">{{ c.host or "—" }}</td>
+    <td class="sec">{{ c.agent or "—" }}</td>
+    <td class="prim"><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a>
+      <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ u.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
+    <td class="n sec">{{ c.duration_ns|dur }}</td>
+    <td class="n sec">{{ u.calls|num }}</td>
+    <td class="n sec">{{ u.tokens.input|num }} / {{ u.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</span></td>
     <td class="n custo">{{ cost(u.cost) }}</td>
-    <td class="n{% if u.errors.total %} erro{% endif %}">{{ u.errors.total|num }}</td>
+    <td class="n">{% if u.errors.total %}{{ badge(u.errors.total|num, "destrutivo") }}{% else %}{{ u.errors.total|num }}{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 <p class="aviso" id="vazio">Nenhuma conversa nessa janela.</p>
 {% endif %}
+</div>
 {% endblock %}

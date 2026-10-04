@@ -3,14 +3,16 @@
 {% set detail = true %}
 {% set back = "/conversa?id=" ~ (id|urlencode) %}
 {% set crumbs = [("Conversas", "/conversas"), (id, back), ("Logs", none)] %}
-{% from "_macros.html" import log_table %}
+{% from "_macros.html" import log_table, icon %}
 {% block title %}Logs · {{ id }} · agent-studio{% endblock %}
 {% block main %}
-<p><a href="/conversa?id={{ id|urlencode }}">← Conversa <code>{{ id }}</code></a></p>
-<h1>Logs a partir do {{ offset + 1 }}º</h1>
+<div class="pagina">
+<div class="pagina-topo"><div class="titulo-linha"><h1>Logs a partir do {{ offset + 1 }}º</h1>
+  <a class="botao" href="/conversa?id={{ id|urlencode }}">{{ icon("arrow-left", 14) }}Conversa <code>{{ id }}</code></a></div></div>
 {% if logs %}
 {{ log_table(logs, id, next_offset) }}
 {% else %}
 <p class="aviso">Sem mais logs.</p>
 {% endif %}
+</div>
 {% endblock %}

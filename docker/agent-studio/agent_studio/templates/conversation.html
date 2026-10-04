@@ -3,71 +3,92 @@
 {% set detail = true %}
 {% set back = "/conversas" %}
 {% set crumbs = [("Conversas", "/conversas"), (id, none)] %}
-{% from "_macros.html" import cost, log_table %}
+{% from "_macros.html" import cost, log_table, badge, tile, icon, span_icon %}
 {% set c = conversation %}
 {% set u = c.usage %}
 {% block title %}{{ id }} · agent-studio{% endblock %}
 {% block main %}
-<p><a href="/conversas">← Conversas</a></p>
-<h1>Conversa <code>{{ id }}</code></h1>
-<dl class="resumo" data-resumo data-calls="{{ u.calls }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
-    data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
-    data-unpriced-calls="{{ u.cost.unpriced_calls }}">
-  <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
-  <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>
-  {% if c.task_id %}<dt>Sessão</dt><dd><a href="/sessao?id={{ c.task_id|urlencode }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
-  <dt>Início ({{ tzl() }})</dt><dd>{{ c.start_ns|ts }}</dd>
-  <dt>Duração</dt><dd>{{ c.duration_ns|dur }}</dd>
-  <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>
-  <dt>Tokens</dt><dd>entrada {{ u.tokens.input|num }} · saída {{ u.tokens.output|num }} · cache {{ u.tokens.cache_read|num }} lidos / {{ u.tokens.cache_creation|num }} escritos</dd>
-  <dt>Custo</dt><dd class="custo">{{ cost(u.cost) }}</dd>
-  <dt>Erros</dt><dd>{{ u.errors.spans|num }} spans · {{ u.errors.logs|num }} logs</dd>
-</dl>
-
-<h2>Spans ({{ c.spans|num }})</h2>
-{% if spans_truncated %}<p class="aviso">Mostrando os primeiros {{ span_limit|num }} spans, pela hora do fato.</p>{% endif %}
-{% if spans %}
-<p class="nota">Tokens e custo aparecem só nas chamadas ao modelo (o que entra nas somas). O nome do span abre o conteúdo.</p>
-<table class="spans">
-  <thead><tr>
-    <th>Span</th><th class="n" title="desde o início da conversa">Início</th><th class="n">Duração</th><th>Modelo</th>
-    <th class="n">Entrada</th><th class="n">Saída</th><th class="n" title="tokens de cache: leitura / escrita">Cache</th>
-    <th class="n">Custo</th><th>Status</th>
-  </tr></thead>
-  <tbody>
-  {% for s in spans %}
-  {% set url = "/conversa/span?trace=" ~ (s.trace_id|urlencode) ~ "&span=" ~ (s.span_id|urlencode) %}
-  <tr data-span="{{ s.span_id }}" data-trace="{{ s.trace_id }}" data-parent="{{ s.parent_span_id or '' }}" data-depth="{{ s.depth }}"
-      data-name="{{ s.name or '' }}" data-orphan="{{ 1 if s.orphan else 0 }}" data-cost-kind="{{ s.cost_kind or '' }}"
-      data-cost="{{ '' if s.cost is none else s.cost }}" data-status="{{ 'erro' if s.error else 'ok' }}"{% if s.error %} class="erro"{% endif %}>
-    <td class="nome d{{ [s.depth, 12]|min }}">
-      <a href="{{ url }}" hx-get="{{ url }}" hx-target="next .conteudo" hx-swap="innerHTML">{{ s.name or "(sem nome)" }}</a>
-      {% if s.orphan %}<span class="orfao" title="o span pai ({{ s.parent_span_id }}) não está nesta conversa">pai ausente</span>{% endif %}
-    </td>
-    <td class="n" title="{{ s.time_unix_nano|ts }} {{ tzl() }}">+{{ (s.time_unix_nano - c.start_ns)|dur }}</td>
-    <td class="n">{{ s.duration_ns|dur }}</td>
-    <td>{{ s.model or "—" }}</td>
-    {% if s.is_call %}
-    <td class="n">{{ s.input_tokens|num }}</td>
-    <td class="n">{{ s.output_tokens|num }}</td>
-    <td class="n">{{ s.cache_read_tokens|num }} / {{ s.cache_creation_tokens|num }}</td>
-    <td class="n custo">
-      {% if s.cost_kind == "real" %}<span class="real" title="custo real, informado pela fonte">{{ s.cost|usd }}</span>
-      {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
-      {% else %}<span class="semp" title="sem custo real e sem preço na tabela">sem preço</span>{% endif %}
-    </td>
-    {% else %}
-    <td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td>
-    {% endif %}
-    <td>{% if s.error %}erro{% elif s.status_code == 1 %}ok{% else %}—{% endif %}</td>
-  </tr>
-  <tr class="conteudo-linha"><td class="conteudo" colspan="9"></td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="aviso">Esta conversa não tem spans.</p>
-{% endif %}
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha">
+    <h1>Conversa <code>{{ id }}</code></h1>
+    <a class="botao" href="/conversas">{{ icon("arrow-left", 14) }}Conversas</a>
+  </div>
+</div>
+<div class="tiles">
+  {% call tile("Chamadas ao modelo", "activity") %}{{ u.calls|num }}{% endcall %}
+  {% call tile("Tokens ent / saí", "arrow-left-right") %}{{ u.tokens.input|num }} / {{ u.tokens.output|num }}{% endcall %}
+  {% call tile("Custo", "receipt") %}<span class="custo">{{ cost(u.cost) }}</span>{% endcall %}
+  {% call tile("Duração", "timer") %}{{ c.duration_ns|dur }}{% endcall %}
+</div>
+<div class="duas">
+<div class="cartao">
+  <div class="cartao-topo">
+    <div><h2>Spans ({{ c.spans|num }})</h2><p>Tokens e custo aparecem só nas chamadas ao modelo (o que entra nas somas). O nome do span abre o conteúdo.</p></div>
+    {% if u.errors.spans %}{{ badge(u.errors.spans|num ~ " com erro", "destrutivo") }}{% endif %}
+  </div>
+  {% if spans_truncated %}<p class="aviso">Mostrando os primeiros {{ span_limit|num }} spans, pela hora do fato.</p>{% endif %}
+  {% if spans %}
+  <div class="rolagem">
+  <table class="spans empilha">
+    <thead><tr>
+      <th>Span</th><th class="n" title="desde o início da conversa">Início</th><th class="n">Duração</th><th>Modelo</th>
+      <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
+      <th class="n">Custo</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+    {% for s in spans %}
+    {% set url = "/conversa/span?trace=" ~ (s.trace_id|urlencode) ~ "&span=" ~ (s.span_id|urlencode) %}
+    <tr data-span="{{ s.span_id }}" data-trace="{{ s.trace_id }}" data-parent="{{ s.parent_span_id or '' }}" data-depth="{{ s.depth }}"
+        data-name="{{ s.name or '' }}" data-orphan="{{ 1 if s.orphan else 0 }}" data-cost-kind="{{ s.cost_kind or '' }}"
+        data-cost="{{ '' if s.cost is none else s.cost }}" data-status="{{ 'erro' if s.error else 'ok' }}">
+      <td class="nome prim d{{ [s.depth, 12]|min }}">
+        <a href="{{ url }}" hx-get="{{ url }}" hx-target="next .conteudo" hx-swap="innerHTML">{{ span_icon(s.name, s.is_call) }}{{ s.name or "(sem nome)" }}</a>
+        {% if s.orphan %}{{ badge("pai ausente", "contorno") }}{% endif %}
+      </td>
+      <td class="n sec" title="{{ s.time_unix_nano|ts }} {{ tzl() }}">+{{ (s.time_unix_nano - c.start_ns)|dur }}</td>
+      <td class="n sec">{{ s.duration_ns|dur }}</td>
+      <td class="sec">{{ s.model or "—" }}</td>
+      {% if s.is_call %}
+      <td class="n sec">{{ s.input_tokens|num }} / {{ s.output_tokens|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ s.cache_read_tokens|num }} / {{ s.cache_creation_tokens|num }}</span></td>
+      <td class="n custo">
+        {% if s.cost_kind == "real" %}<span class="real" title="custo real, informado pela fonte">{{ s.cost|usd }}</span>
+        {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
+        {% else %}<span class="semp" title="sem custo real e sem preço na tabela">sem preço</span>{% endif %}
+      </td>
+      {% else %}
+      <td class="n sec">—</td><td class="n sec">—</td>
+      {% endif %}
+      <td>{% if s.error %}{{ badge("erro", "destrutivo") }}{% elif s.status_code == 1 %}ok{% else %}—{% endif %}</td>
+    </tr>
+    <tr class="conteudo-linha"><td class="conteudo" colspan="7"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="aviso">Esta conversa não tem spans.</p>
+  {% endif %}
+</div>
+<div class="pilha">
+  <div class="cartao bloco">
+    <h2>Resumo</h2>
+    <dl class="resumo" data-resumo data-calls="{{ u.calls }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
+        data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
+        data-unpriced-calls="{{ u.cost.unpriced_calls }}">
+      <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
+      <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>
+      {% if c.task_id %}<dt>Sessão</dt><dd><a href="/sessao?id={{ c.task_id|urlencode }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
+      <dt>Início ({{ tzl() }})</dt><dd>{{ c.start_ns|ts }}</dd>
+      <dt>Duração</dt><dd>{{ c.duration_ns|dur }}</dd>
+      <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>
+      <dt>Tokens</dt><dd>entrada {{ u.tokens.input|num }} · saída {{ u.tokens.output|num }} · cache {{ u.tokens.cache_read|num }} lidos / {{ u.tokens.cache_creation|num }} escritos</dd>
+      <dt>Custo</dt><dd class="custo">{{ cost(u.cost) }}</dd>
+      <dt>Erros</dt><dd>{{ u.errors.spans|num }} spans · {{ u.errors.logs|num }} logs</dd>
+    </dl>
+  </div>
+</div>
+</div>
 
 <h2>Logs ({{ c.logs|num }})</h2>
 {% if logs %}
@@ -75,4 +96,5 @@
 {% else %}
 <p class="aviso">Esta conversa não tem logs.</p>
 {% endif %}
+</div>
 {% endblock %}

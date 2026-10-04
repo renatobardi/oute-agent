@@ -273,4 +273,27 @@ sed -e 's/^docker volume rm oute-x$/echo rm oute-x/' "$EX" > "$TMP/canal-a.sh"
 grep -v -e '^# RESUMO' -e '^# CUIDADO:' -e '^# Faz:' "$TMP/canal-a.sh" > "$TMP/canal-b.sh"
 check "canal: com e sem os blocos o script dá a mesma saída (#480)" bash -c '[ "$(bash "$1" 2>&1)" == "$(bash "$2" 2>&1)" ] && [ -n "$(bash "$1" 2>&1)" ]' _ "$TMP/canal-a.sh" "$TMP/canal-b.sh"
 check "canal: bash -n no script com os blocos (#480)"             bash -n "$TMP/canal-a.sh"
+
+# qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
+A="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
+check "audit: relatório abre com ação e decisão, antes do head (#482)" bash -c 'r=$(sed -n "/^<!-- oute-aidlc-qa-pr-audit -->/,/^### Gates/p" "$1" | head -12); a=$(grep -n "^\*\*Ação recomendada:\*\*" <<<"$r" | head -1 | cut -d: -f1); d=$(grep -n "^\*\*Decisão do Bardi:\*\*" <<<"$r" | head -1 | cut -d: -f1); h=$(grep -n "^\*\*Head auditado:\*\*" <<<"$r" | head -1 | cut -d: -f1); [ -n "$a" ] && [ -n "$d" ] && [ -n "$h" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$h" ]' _ "$A"
+check "audit: decisão com opções numeradas e rótulo do autor (#482)" grep -qF '"recomendação do autor": opção N' "$A"
+check "audit: sem decisão escreve 'Decisão do Bardi: nenhuma' (#482)" grep -qF 'Sem escolha para ele: escreva "Decisão do Bardi: nenhuma"' "$A"
+check "audit: relatório não repete a ação no fim (#482)"   bash -c '! grep -qF "### Ação recomendada" "$1"' _ "$A"
+check "audit: forma curta só com 5 contadores 0 e merge como está (#482)" grep -qF 'Vale só quando os cinco contadores dos achados são 0' "$A"
+check "audit: forma curta mantém head, gates e Closes × Refs (#482)" bash -c 'sed -n "/^\*\*Forma curta\.\*\*/,/^Forma completa:/p" "$1" > "$2"; grep -qF "o head auditado (e a base)" "$2" && grep -qF "a tabela de gates, o CI no head, o SonarCloud" "$2" && grep -qF "a linha \`Closes × Refs\`" "$2"' _ "$A" "$TMP/curta.txt"
+check "audit: forma curta lista cada seção conferida (#482)" grep -qF '**Conferido, sem achado:** superfície sensível e supply chain:' "$A"
+check "audit: achado ou gate não rodado leva a forma completa (#482)" grep -qF 'Qualquer achado, ou um gate que não rodou, leva a forma completa.' "$A"
+check "audit: forma completa mantém todas as seções (#482)" bash -c 'for t in "### Gates" "### Achados" "### Eixo Spec" "### Superfície sensível e supply chain" "### Eixo Standards" "### Registro de alegações" "### Checklist funcional" "### Prós e contras" "### Correção sugerida e limites"; do [ "$(grep -cF "$t" "$1")" -ge 1 ] || exit 1; done' _ "$A"
+check "audit: cita o doc de PT controlado (#482)"          bash -c 'sed -n "/^\*\*Ordem do relatório/p" "$1" | grep -qF docs/pt-controlado.md' _ "$A"
+
+# pedido de merge com a decisão no topo (#479)
+check "merge: pedido abre com a decisão e as opções numeradas (#479)" grep -qF 'o pedido abre com a decisão e as opções numeradas; o detalhe vem depois, ou por link' "$D"
+check "merge: primeira linha diz o que o Bardi decide (#479)" grep -qF 'ex.: `Decisão: fazer merge do #75?`' "$D"
+check "merge: cada achado traz a decisão que pede (#479)" grep -qF '`<achado> → decisão: <o que o Bardi escolhe>`' "$D"
+check "merge: sem recomendação que a auditoria não fez (#479)" grep -qF '**Nenhuma recomendação que a auditoria não fez.**' "$D"
+check "merge: recomendação do dispatcher é rotulada (#479)" grep -qF 'escreva `recomendação do dispatcher:` antes' "$D"
+check "merge: condição da auditoria aparece inteira (#479)" grep -qF '**A condição da auditoria aparece inteira.**' "$D"
+check "merge: condição copiada sem encurtar (#479)"     grep -qF 'sem encurtar nem tirar o "só se", o "pelo menos" ou o "antes de"' "$D"
+check "merge: regras ficam no §3 (#479)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -qF "Formato do pedido de merge (#479)"' _ "$D"
 check_end

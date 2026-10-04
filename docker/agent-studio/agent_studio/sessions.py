@@ -11,6 +11,8 @@ resource das conversas e nos eventos `oute.task.*` (ADR-04, #128). **Conversa** 
 Chamadas, tokens, custo e p95 saem do `usage.aggregate` (#203) com a chave `session`; o modelo de cada sessão e de
 cada conversa é o das chamadas ao modelo (a mesma agregação, com a chave `model`). Nenhuma regra de custo mora aqui.
 """
+import json
+
 from . import usage as usage_mod
 from .conversations import LIST_LIMIT, _dicts, _first, _pretty
 
@@ -141,6 +143,16 @@ def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT
             "hosts": hosts, "agents": agents}
 
 
+def _phase(raw):
+    """Fase do AI-DLC que o seletor escolheu (`oute.task.phase`, no `oute.task.opened`); `None` se o evento não a traz."""
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    phase = value.get("oute.task.phase") if isinstance(value, dict) else None
+    return phase if isinstance(phase, str) and phase else None
+
+
 def detail(con, session_id, prices, event_limit=EVENT_LIMIT):
     """Uma sessão com todas as conversas e os eventos dela (logs com o `oute.task.id` e sem conversa: `oute.task.*`
     e o que mais levar a identidade da sessão); `None` se o DuckDB não tem fato nenhum dela."""
@@ -154,9 +166,11 @@ def detail(con, session_id, prices, event_limit=EVENT_LIMIT):
         [session_id, event_limit + 1]))
     truncated = len(events) > event_limit
     events = events[:event_limit]
+    phase = None
     for e in events:
+        phase = phase or _phase(e["attributes"])
         e["attributes"] = _pretty(e["attributes"])
-    return {"session": sessions[0], "events": events, "events_truncated": truncated}
+    return {"session": sessions[0], "events": events, "events_truncated": truncated, "phase": phase}
 
 
 def with_state(surreal, sessions):
