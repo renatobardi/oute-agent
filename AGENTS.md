@@ -1,6 +1,6 @@
 # AGENTS.md — repositório oute-agent
 
-Instruções para agentes (Claude Code, Codex) trabalhando **neste repositório**. As regras gerais (worktree por sessão, canal de aprovação, escopo de memória, issues) vêm das notas globais do container; aqui só o que é específico do oute-agent. Contexto e decisões: `CONTEXT.md`.
+Instruções para agentes (Claude Code, Codex) trabalhando **neste repositório**. As regras gerais (worktree por sessão, canal de aprovação, escopo de memória, issues) vêm das notas globais do container; aqui só o que é específico do oute-agent. Contexto e decisões: `CONTEXT.md`. Texto que o agente escreve ao Bardi segue `docs/pt-controlado.md` (pt-BR, fonte que ele abre, recomendação rotulada; #478).
 
 ## O que é
 Runtime em container para agentes de código (herdr + Claude Code, o principal, + Codex, a reserva; os dois por assinatura, com o modelo da sessão escolhido pela fase, ADR-02), memória compartilhada (ai-memory), storage no OCI e observabilidade (bucket OCI + agent-studio, ADR-08). Roda no `oute-server` (Oracle Cloud, arm64) e no Mac (Apple Silicon).

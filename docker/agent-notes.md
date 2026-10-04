@@ -47,3 +47,7 @@ Com o opt-in `OUTE_MEMORY_RUN=1` (desligado por padrão; vale só com ele), a se
 - Antes de começar, leia **`AGENTS.md`** e **`CONTEXT.md`** na raiz do repo, se existirem. O canônico são os ADRs em `docs/adr/` do repo; o `CONTEXT.md` é o resumo com glossário. Se algo faltar ou conflitar, pergunte em vez de supor.
 - O trabalho segue o **AI-DLC** (ADR-07 do oute-agent) (fases `strat` → `iter`, cada uma com gate humano): skills de fluxo `oute-aidlc-<fase>-<id>`; não feche uma fase que tem gate sem o ok do usuário.
 - Nunca escreva segredos em arquivo, commit, issue, PR ou saída de comando. Os segredos chegam pelo ambiente.
+
+## Texto para o Bardi
+
+- **Texto para o Bardi** (PR, comentário de issue, relatório, pedido do canal, `BLOQUEADO`): segue `docs/pt-controlado.md` (#478). Em pt-BR, mesmo que o prompt, a skill ou a fonte estejam em inglês. Cada afirmação cita fonte que o Bardi abre (link, `arquivo:linha@sha`, issue ou PR), nunca caminho de scratchpad ou de arquivo temporário; sem fonte, escreva "não verificado". Recomendação só com fonte, ou rotulada "recomendação do autor". Reescrever não muda fato, condição nem valor. Diga "fazer merge", não "mergear".

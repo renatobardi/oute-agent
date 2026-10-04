@@ -241,4 +241,19 @@ check "sonar ausente: skill de auditoria traz a regra (#426)" grep -qF 'check `S
 check "canal: aviso só do pedido da rodada (#452)"       grep -qF 'houver pedido pendente **da rodada** no canal de aprovação' "$D"
 check "canal: atribuição pelo #<n> do título (#452)"     grep -qF 'a linha `[canal]` traz no título `#<n>` de uma issue da rodada' "$D"
 check "canal: pedido alheio numa linha, sem pergunta nem ação (#452)" grep -qF 'é alheio: uma linha' "$D"
+# PT controlado: saída ao Bardi (#478)
+W="$ROOT/docker/swarm-worker.md"; N="$ROOT/docker/agent-notes.md"; PT="$ROOT/docs/pt-controlado.md"
+for f in "$D" "$W" "$N"; do
+  b="${f##*/}"
+  check "pt-controlado: $b manda a saída ao Bardi em pt-BR (#478)"  grep -qF 'Em pt-BR, mesmo que o prompt' "$f"
+  check "pt-controlado: $b pede fonte que o Bardi abre, sem scratchpad (#478)" grep -qF 'nunca caminho de scratchpad ou de arquivo temporário' "$f"
+  check "pt-controlado: $b rotula recomendação sem fonte (#478)"    grep -qF 'rotulada "recomendação do autor"' "$f"
+  check "pt-controlado: $b usa fazer merge (#478)"                  grep -qF 'Diga "fazer merge", não "mergear"' "$f"
+  check "pt-controlado: $b aponta o doc (#478)"                     grep -qF 'docs/pt-controlado.md' "$f"
+done
+check "pt-controlado: worker e notas: reescrever não muda fato (#478)" bash -c 'grep -qF "Reescrever não muda fato, condição nem valor" "$1" && grep -qF "Reescrever não muda fato, condição nem valor" "$2"' _ "$W" "$N"
+check "pt-controlado: dispatcher resume sem mudar fato (#478)"    grep -qF 'não mude fato, condição nem valor' "$D"
+check "pt-controlado: doc tem as 15 regras (#478)"                bash -c '[ "$(grep -cE "^\| ([1-9]|1[0-5]) \| \*\*" "$1")" -eq 15 ]' _ "$PT"
+check "pt-controlado: doc fixa fazer merge (#478)"                grep -qF '| fazer merge | mergear, mesclar, integrar |' "$PT"
+check "pt-controlado: AGENTS.md cita o doc (#478)"                grep -qF 'docs/pt-controlado.md' "$ROOT/AGENTS.md"
 check_end
