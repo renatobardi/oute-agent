@@ -256,4 +256,21 @@ check "pt-controlado: dispatcher resume sem mudar fato (#478)"    grep -qF 'não
 check "pt-controlado: doc tem as 15 regras (#478)"                bash -c '[ "$(grep -cE "^\| ([1-9]|1[0-5]) \| \*\*" "$1")" -eq 15 ]' _ "$PT"
 check "pt-controlado: doc fixa fazer merge (#478)"                grep -qF '| fazer merge | mergear, mesclar, integrar |' "$PT"
 check "pt-controlado: AGENTS.md cita o doc (#478)"                grep -qF 'docs/pt-controlado.md' "$ROOT/AGENTS.md"
+# 480. canal de aprovação: # RESUMO e # CUIDADO: no script proposto
+SV="$ROOT/addons/skills/oute-aidlc-ship-verify/SKILL.md"; OB="$ROOT/addons/skills/oute-aidlc-ops-observe/SKILL.md"
+check "canal: notas pedem bloco # RESUMO (#480)"                  grep -qF 'abre com um bloco `# RESUMO` (comentário)' "$N"
+check "canal: RESUMO lista faz, host, altera, não toca, reinicia (#480)" grep -qF 'o que faz, em que host, o que altera, o que **não** toca e se reinicia algo' "$N"
+check "canal: CUIDADO antes de passo que remove, recria, para ou não se desfaz (#480)" grep -qF '`# CUIDADO: <o que o passo faz>. <o que se perde>.`, com o comando primeiro e o risco depois' "$N"
+check "canal: aviso não exagera nem tranquiliza (#480)"           grep -qF 'não exagera e não tranquiliza' "$N"
+check "canal: afirmação de segurança só se o script garante (#480)" grep -qF 'Só escreva "não toca em X" se o script garante isso' "$N"
+check "canal: ship-verify abre o pedido com # RESUMO (#480)"      grep -qF "'# RESUMO'" "$SV"
+check "canal: ops-observe cita a regra (#480)"                    grep -qF 'abre com `# RESUMO` e traz `# CUIDADO:`' "$OB"
+# o exemplo das notas, extraído e rodado com e sem os blocos, dá a mesma saída: são comentário
+EX="$TMP/canal-exemplo.sh"
+awk '/^   ```bash$/{n++; next} /^   ```$/{if(n>=2)exit; next} n>=2 && /^   /{sub(/^   /,""); print}' "$N" > "$EX"
+check "canal: exemplo extraído das notas tem # RESUMO e # CUIDADO: (#480)" bash -c 'grep -q "^# RESUMO" "$1" && grep -q "^# CUIDADO: " "$1"' _ "$EX"
+sed -e 's/^docker volume rm oute-x$/echo rm oute-x/' "$EX" > "$TMP/canal-a.sh"
+grep -v -e '^# RESUMO' -e '^# CUIDADO:' -e '^# Faz:' "$TMP/canal-a.sh" > "$TMP/canal-b.sh"
+check "canal: com e sem os blocos o script dá a mesma saída (#480)" bash -c '[ "$(bash "$1" 2>&1)" == "$(bash "$2" 2>&1)" ] && [ -n "$(bash "$1" 2>&1)" ]' _ "$TMP/canal-a.sh" "$TMP/canal-b.sh"
+check "canal: bash -n no script com os blocos (#480)"             bash -n "$TMP/canal-a.sh"
 check_end

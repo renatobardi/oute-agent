@@ -17,6 +17,17 @@ Quando algo precisar rodar no host como o usuário dele ou com **sudo/root**:
 3. Espere e leia o resultado (saída + código de saída): `oute-inbox --wait <id>`. Saída 3 = ainda pendente/expirou.
 
 Regras do script: bash, `set -euo pipefail`, idempotente, um objetivo por pedido, `echo` antes de cada passo, sem segredos no texto, nada interativo. Leia o estado antes (via `ssh oute-server`) e proponha só o necessário.
+**Resumo e aviso no próprio script (#480).** Todo script proposto abre com um bloco `# RESUMO` (comentário), nesta ordem: o que faz, em que host, o que altera, o que **não** toca e se reinicia algo. Antes de cada passo que **remove, recria, para ou não se desfaz**, o script traz uma linha `# CUIDADO: <o que o passo faz>. <o que se perde>.`, com o comando primeiro e o risco depois ("não se desfaz" quando for o caso). O aviso descreve o efeito real: não exagera e não tranquiliza. Só escreva "não toca em X" se o script garante isso (por exemplo, com uma checagem antes do passo). Os dois blocos são comentário: o script roda igual sem eles. Exemplo:
+   ```bash
+   set -euo pipefail
+   # RESUMO
+   # Faz: troca o volume `oute-x`. Host: oute-server. Altera: o volume `oute-x`. Não toca: `oute-memory` (o passo 1 para se achar outro dependente). Reinicia: o container `oute-x`.
+   echo "1/2: confere os dependentes"
+   # comandos de leitura
+   # CUIDADO: `docker volume rm oute-x` apaga o volume. Os dados dele se perdem e não se desfaz.
+   echo "2/2: remove o volume"
+   docker volume rm oute-x
+   ```
 Pedido que **remove, recria ou para** recurso do host (volume, container, arquivo, serviço) lista antes, no próprio script, quem depende dele e **para sem alterar nada** se achar dependente fora do esperado; ou vem precedido de um pedido de ensaio (`--dry-run`/só leitura).
 Pedido pendente que ficou **obsoleto** (o anterior falhou, o plano mudou): avise o usuário para **recusá-lo antes** de propor o substituto, e o título do substituto diz que ele **substitui** o anterior (ex.: "substitui <id>: …").
 
