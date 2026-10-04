@@ -108,7 +108,7 @@ check "lista: recusado sem rc"                         jqe '.[4] | .decision == 
 check "lista: pedido sem o proposed aparece pelo id"   jqe --arg p4 "$P4" '.[2] | .decision == "executado" and .rc == "0" and (.text | test($p4))' <<<"$L"
 check "lista: link da página do pedido (URL estável por id)" grep -qF "<a href=\"/pedido?id=$P1\">" "$TMP/list.html"
 check "lista: id escapado na página e codificado no link" bash -c '! grep -q "<b>5</b>" "$1" && ! grep -q "<b>nginx</b>" "$1" && grep -qF "href=\"/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9\"" "$1"' _ "$TMP/list.html"
-check "lista: menu com os pedidos"                     grep -q '<a href="/pedidos">Pedidos</a>' "$TMP/list.html"
+check "lista: menu com os pedidos"                     grep -qE '<a class="nav-item" href="/pedidos"[^>]*>.*<span>Pedidos</span></a>' "$TMP/list.html"
 check "lista: a saída do host não aparece"             bash -c '! grep -q SAIDA-DO-HOST-CANARIO "$1"' _ "$TMP/list.html"
 
 # ---------------------------------------------------------------- 3. página do pedido ("ver script")
@@ -173,8 +173,8 @@ check "o mesmo proposed repetido (outro oute.event.id) não é versão nova" bas
 check "POST /pedido e /pedidos: 405 (só leitura)"      test "$(code -X POST "${C[@]}" "$STUDIO_URL$U1")$(code -X POST "${C[@]}" "$STUDIO_URL/pedidos")" = 405405
 check "PUT e DELETE no pedido: 405"                    test "$(code -X PUT "${C[@]}" "$STUDIO_URL$U1")$(code -X DELETE "${C[@]}" "$STUDIO_URL$U1")" = 405405
 check "páginas dos pedidos: o único formulário é o de sair" test "$(grep -ho '<form[^>]*>' "$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" | sort -u)" = '<form method="post" action="/logout">'
-check "páginas dos pedidos: o único botão é o de sair" test "$(grep -ho '<button[^>]*>[^<]*' "$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" | sort -u)" = '<button type="submit">Sair'
-check "páginas dos pedidos: nenhum campo de entrada"   bash -c '! grep -hiE "<(input|select|textarea)" "$@"' _ "$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html"
+check "páginas dos pedidos: o único botão é o de sair (um por formulário, todos com Sair)" bash -c 'for f in "$@"; do b=$(grep -o "<button" "$f" | wc -l); [ "$b" -ge 1 ] && [ "$b" = "$(grep -o "<form" "$f" | wc -l)" ] && [ "$b" = "$(grep -o "<button type=\"submit\"" "$f" | wc -l)" ] && [ "$(grep -o "<button[^>]*>.*</button>" "$f" | grep -vc Sair)" = 0 ] || exit 1; done' _ "$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html"
+check "páginas dos pedidos: nenhum campo de entrada"   bash -c '! grep -hiE "<(input|select|textarea)" "$@" | grep -v "class=\"menu-interruptor\""' _ "$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html"
 check "templates: nenhum pedido do htmx que não seja leitura" bash -c '! grep -rqiE "hx-(post|put|patch|delete)" "$1/templates"' _ "$PKG"
 check "pendente: a página não monta comando com o id (dado não confiável)" bash -c '! grep -q "oute approve $2" "$1"' _ "$TMP/p1.html" "$P1"
 
@@ -187,20 +187,26 @@ check "sem alerta ativo: nenhum alerta na página"      bash -c 'grep -q "id=\"a
 check "ingestão: fila a 80% = 200"                     test "$(post metrics "$TMP/metrics-high.json")" = 200
 API="$(api)"
 check "/v1/alerts: fila acima de 50%"                  jqe 'length == 1 and .[0].type == "queue" and .[0].host == "oute-server" and .[0].value == 0.8' <<<"$API"
-for path in /conversas /sessoes /pedidos "$U1" "/pedido?id=nao-existe" "/conversa?id=nao-existe" "/sessao?id=nao-existe" "/conversa/logs?id=x"; do
+for path in /conversas /sessoes /pedidos "/pedido?id=nao-existe" "/conversa?id=nao-existe" "/sessao?id=nao-existe"; do
   check "alerta visível no topo de $path, igual ao do /v1/alerts" jqe --argjson api "$API" \
     'map({type: .alerta, host, value: (.value | tonumber), since}) == $api' <<<"$(alerts_of "$path")"
 done
-page "$U1" > "$TMP/alert.html"
+# nos detalhes (pedido, conversa e os logs dela) as faixas somem (#467)
+for path in "$U1" "/conversa/logs?id=x"; do
+  check "faixa de alertas some no detalhe $path" bash -c '! grep -q "id=\"alertas\"" <<<"$1"' _ "$(page "$path")"
+done
+page "$U1" > "$TMP/alert-pedido.html"
+page /pedidos > "$TMP/alert.html"
 check "alerta: texto com host, exporter, valor e limite" jqe '.[0].text | test("^Fila do collector acima do limite · oute-server \\(oute-agent\\) · exporter otlp_http/studio_logs ?: 80% da fila \\(limite 50%\\) · desde 20[0-9-]+ [0-9:]+ GMT-3$")' <<<"$(data < "$TMP/alert.html" | jq -c '[.[] | select(.alerta)]')"
 check "alerta: antes do conteúdo, fora do que o htmx troca" bash -c 'a="$(grep -n "id=\"alertas\"" "$1" | cut -d: -f1)"; m="$(grep -n "<main id=\"conteudo\">" "$1" | cut -d: -f1)"; test -n "$a" && test "$a" -lt "$m"' _ "$TMP/alert.html"
-check "alerta: a página do pedido segue inteira"       cmp -s "$TMP/p1.sh" <(script_of < "$TMP/alert.html")
+check "alerta: faixa sob o cabeçalho, com o ícone siren (#467)" bash -c 'h="$(grep -n "</header>" "$1" | head -1 | cut -d: -f1)"; a="$(grep -n "id=\"alertas\"" "$1" | cut -d: -f1)"; test -n "$h" && test "$h" -lt "$a" && sed -n "${a},$((a+2))p" "$1" | grep -q "lucide.svg#siren"' _ "$TMP/alert.html"
+check "alerta: a página do pedido segue inteira"       cmp -s "$TMP/p1.sh" <(script_of < "$TMP/alert-pedido.html")
 check "trecho do htmx não leva os alertas"             bash -c '! grep -q "alertas" <<<"$1"' _ "$(curl -s "${C[@]}" "${HX[@]}" "$STUDIO_URL/conversa/logs?id=x")"
 check "ingestão: fila a 10% = 200"                     test "$(post metrics "$TMP/metrics-low.json")" = 200
 check "alerta desliga sozinho com o dado seguinte"     test "$(api)$(alerts_of "$U1")" = "[][]"
 
 # ---------------------------------------------------------------- 7. sem CDN, sem script inline, mesma CSP
-PAGES=("$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" "$TMP/p4.html" "$TMP/alert.html" "$TMP/p6.html" "$TMP/p1-forjado.html")
+PAGES=("$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" "$TMP/p4.html" "$TMP/alert.html" "$TMP/alert-pedido.html" "$TMP/p6.html" "$TMP/p1-forjado.html")
 check "páginas: nenhum script, estilo ou link de fora" bash -c '! grep -hoiE "(src|href|action|hx-get)=\"[^\"]*\"" "$@" | grep -qE "=\"([a-z]+:)?//"' _ "${PAGES[@]}"
 check "páginas: sem script nem estilo inline"          bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@"' _ "${PAGES[@]}"
 check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "${PAGES[@]}" | sort -u)" = '<script src="/static/htmx.min.js" defer>'
@@ -318,14 +324,20 @@ Store.calls = 0
 status, body = get(app, "/conversa/logs", "id=x", headers=[("HX-Request", "true")])
 check("trecho do htmx: sem cálculo de alertas", status == 200 and Store.calls == 0 and "alertas" not in body)
 status, body = get(app, "/conversa/logs", "id=x")
-check("página inteira: um cálculo de alertas", status == 200 and Store.calls == 1 and 'id="alertas"' in body)
+check("página de detalhe inteira: um cálculo de alertas, e a faixa não aparece (#467)", status == 200 and Store.calls == 1 and 'id="alertas"' not in body)
+Store.calls = 0
+status, body = get(app, "/pedidos")
+check("página de lista inteira: um cálculo de alertas, e a faixa aparece", status == 503 and Store.calls == 1 and 'id="alertas"' in body)
 class NoAlerts(Store):
     def alerts(self, *a):
         raise RuntimeError("segredo-da-falha")
+status, body = get(create_app(NoAlerts(), TOKEN), "/pedidos")
+check("alertas que falham: a página sai com o aviso, sem a causa",
+      status == 503 and "Os alertas do pipeline não puderam ser calculados" in body and 'data-alertas=""' in body
+      and "segredo-da-falha" not in body)
 status, body = get(create_app(NoAlerts(), TOKEN), "/pedido", f"id={P1}")
-check("alertas que falham: página 200 com o aviso, sem a causa",
-      status == 200 and "Os alertas do pipeline não puderam ser calculados" in body and 'data-alertas=""' in body
-      and "segredo-da-falha" not in body and "data-script" in body)
+check("alertas que falham: o detalhe do pedido sai inteiro e sem a faixa",
+      status == 200 and "segredo-da-falha" not in body and "data-script" in body and "data-alertas" not in body)
 class Broken(Store):
     def proposal(self, pid):
         raise RuntimeError("segredo-da-falha")
@@ -373,7 +385,7 @@ check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o a
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^AttributeError\|^$\|tela: .* falhou' "$TMP/py.out" || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 34 casos rodaram"          test "$((n_ok + n_fail))" = 34
+check "lógica em Python: os 36 casos rodaram"          test "$((n_ok + n_fail))" = 36
 
 # ---------------------------------------------------------------- 10. imagem
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"

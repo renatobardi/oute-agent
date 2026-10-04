@@ -1,13 +1,51 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon, logo %}
 {% block title %}Entrar · agent-studio{% endblock %}
-{% block nav %}{% endblock %}
-{% block main %}
-<form class="login" method="post" action="/login">
-  <h1>Entrar</h1>
-  {% if failed %}<p class="aviso erro" role="alert">Token errado.</p>{% endif %}
-  <label for="token">Token do agent-studio (item <code>agent-studio</code> do vault)</label>
-  <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
-  <input type="hidden" name="next" value="{{ next }}">
-  <button type="submit">Entrar</button>
-</form>
+{% block head %}<script src="/static/login.js" defer></script>{% endblock %}
+{# a tela Entrar (#467): sem o casco. Duas colunas no desktop (painel --primary e formulário); uma só no celular #}
+{% block body %}
+<div class="entrar">
+  <section class="entrar-painel">
+    <div class="entrar-marca">{{ logo(24) }}<span>agent-studio</span></div>
+    <div class="entrar-texto">
+      <span class="entrar-logo-grande">{{ logo(72) }}</span>
+      <h1>Telemetria e estado dos agentes do oute.</h1>
+      <p>Conversas, sessões, uso por fase e pedidos do canal de aprovação, sem perda e com conteúdo.</p>
+      <ul class="entrar-fatos">
+        <li>{{ icon("shield-check") }}<span><strong>Só leitura</strong><span>Aprovar e recusar continuam no host.</span></span></li>
+        <li>{{ icon("network") }}<span><strong>Só na tailnet</strong><span>agent-studio.oute.pro, fora da internet.</span></span></li>
+        <li>{{ icon("database") }}<span><strong>Tudo guardado</strong><span>DuckDB para telemetria, SurrealDB para estado.</span></span></li>
+      </ul>
+      <ul class="entrar-selos">
+        <li>{{ icon("shield-check", 12) }}Só leitura</li>
+        <li>{{ icon("network", 12) }}Só na tailnet</li>
+        <li>{{ icon("database", 12) }}Sem perda</li>
+      </ul>
+    </div>
+    <span class="entrar-rodape">oute-agent · oute-server</span>
+  </section>
+  <main id="conteudo" class="entrar-form">
+    <form class="login" method="post" action="/login">
+      <div class="login-titulo">
+        <h1>Entrar</h1>
+        <p>Cole o token do agent-studio. Ele fica no item <code>agent-studio</code> do vault.</p>
+      </div>
+      {% if failed %}
+      <div class="aviso erro login-erro" role="alert">{{ icon("triangle-alert") }}<span><strong>Token errado.</strong><span>Confira se copiou o item agent-studio inteiro, sem espaço no fim.</span></span></div>
+      {% endif %}
+      <div class="campo">
+        <div class="campo-rotulo"><label for="token">Token</label><span>Vaultwarden · pasta oute-services</span></div>
+        <div class="campo-entrada">
+          <input id="token" name="token" type="password" autocomplete="current-password" placeholder="Cole o token aqui" required autofocus{% if failed %} aria-invalid="true"{% endif %}>
+          <button type="button" class="botao icone-botao" id="token-ver" hidden aria-controls="token" aria-label="Mostrar token" data-mostrar="Mostrar token" data-esconder="Esconder token">
+            <span data-estado="oculto">{{ icon("eye") }}</span><span data-estado="visivel" hidden>{{ icon("eye-off") }}</span>
+          </button>
+        </div>
+      </div>
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" class="botao primario grande">Entrar{{ icon("arrow-right") }}</button>
+      <p class="login-dica">{{ icon("info", 14) }}<span>A sessão vale até você sair. A tela só mostra dados: aprovar pedidos continua no host, com o <code>oute approve</code>.</span></p>
+    </form>
+  </main>
+</div>
 {% endblock %}

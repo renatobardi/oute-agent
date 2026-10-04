@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% set nav = "pedidos" %}
+{% set detail = true %}
+{% set back = "/pedidos" %}
+{% set crumbs = [("Pedidos", "/pedidos"), (p.id, none)] %}
 {% block title %}{{ p.title or p.id }} · agent-studio{% endblock %}
 {% block main %}
 <p><a href="/pedidos">← Pedidos</a></p>

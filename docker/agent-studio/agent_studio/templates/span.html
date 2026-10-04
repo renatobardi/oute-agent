@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% set nav = "conversas" %}
+{% set detail = true %}
+{% set crumbs = [("Conversas", "/conversas"), ("Span", none)] %}
+{% if span.session_id %}{% set back = "/conversa?id=" ~ (span.session_id|urlencode) %}{% endif %}
 {% from "_macros.html" import span_detail %}
 {% block title %}{{ span.name or span.span_id }} · agent-studio{% endblock %}
 {% block main %}

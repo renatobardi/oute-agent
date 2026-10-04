@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% set nav = "conversas" %}
+{% set detail = true %}
+{% set back = "/conversa?id=" ~ (id|urlencode) %}
+{% set crumbs = [("Conversas", "/conversas"), (id, back), ("Logs", none)] %}
 {% from "_macros.html" import log_table %}
 {% block title %}Logs · {{ id }} · agent-studio{% endblock %}
 {% block main %}

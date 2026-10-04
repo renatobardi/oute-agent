@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% set nav = "precos" %}
+{% set crumbs = [("Análise", none), ("Preços", none)] %}
 {% block title %}Preços · agent-studio{% endblock %}
 {% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
 {% block main %}
