@@ -969,7 +969,7 @@ step_check_secrets() {
 }
 
 # step_check_long_token <texto sem quebras>: sai 0 se há hex de 32 ou mais caracteres (fora o git sha-1 de 40 e o sha256 de
-# 64, que os textos citam) ou base64 de 40 ou mais que não seja só caminho em minúsculas; 1 se não há
+# 64, que os textos citam) ou base64 de 32 ou mais que não seja só caminho em minúsculas; 1 se não há
 step_check_long_token() {
   local text="$1" run
   while IFS= read -r run; do
@@ -1083,7 +1083,10 @@ cmd_step_review() {
   # pasta de trabalho própria (mktemp -d, modo 700) que sai no fim ou se o processo morrer: o prompt não fica em disco. O texto
   # é copiado uma vez e tudo (checagem, sha256, prompt) sai da cópia, não do arquivo da rodada
   REV_WD="$(mktemp -d "$S_STATE/.revisor.XXXXXX")" || die "não criei a pasta de trabalho do revisor em $S_STATE"
-  trap 'rm -rf "${REV_WD:?}"' EXIT INT TERM
+  # INT e TERM saem (130 e 143) e o EXIT limpa a pasta: sem o `exit`, o script seguiria e gravaria `sem-revisor/erro` como se o revisor tivesse falhado
+  trap 'rm -rf "${REV_WD:?}"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   text="$REV_WD/texto.md"; cp "$S_FILE" "$text"
   step_check_text "$text"
   sha="$(step_sha "$text")"

@@ -41,7 +41,7 @@ def step(t, rnd, eid, kind, rev, review, text, key=None, writer="claude-sonnet-5
     return event(t, "oute.swarm.step.published", eid, attrs, text)
 T1 = ("## Decisão\n1. aprovar o fechamento da rodada **swarm-1004-1306** <b>negrito falso</b>\n2. pedir ajuste\n\n"
       "## Ações\n- rodar `oute update` no host\n- ler o PR [#600](https://github.com/renatobardi/oute-agent/pull/600), [mau](javascript:alert(1)) e [http](http://x.invalid/a)\n\n"
-      "## Detalhe\nParágrafo com <script>alert('detalhe')</script> e &amp; literal e uma marca\u202e de direção.\nVeja [https://github.com/renatobardi/oute-agent](https://evil.example/phishing).\n\n### Subtítulo\n```\nbloco <b>cru</b> & mais\n```\n")
+      "## Detalhe\nParágrafo com <script>alert('detalhe')</script> e &amp; literal e uma marca\u202e de direção.\nVeja [https://github.com/renatobardi/oute-agent](https://evil.example/phishing) e [malformado](https://[abc).\n\n### Subtítulo\n```\nbloco <b>cru</b> & mais\n```\n")
 T1R1 = "## Decisão\n1. versão antiga r1, sem revisor\n"
 TMERGE = "## Decisão\n1. fazer merge do #12?\n\n## Detalhe\nCI verde.\n"
 TKAIZEN = "## Decisão\n1. aplicar a lição <script>alert('kaizen')</script>\n\n## Ações\n- nada\n\n## Detalhe\nSem fonte para o número 42.\n"
@@ -103,7 +103,7 @@ check "lista: veredito em Badge (aprovado, reprovado)"  bash -c 'grep -q "badge 
 
 # ---------------------------------------------------------------- 4. /rodada: a R1
 page "/rodada?id=$R1" > "$TMP/r1.html"
-check "R1: 200"                                        test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = 200
+check "R1: 200 (o texto da etapa tem link de host inválido, https://[abc)"  test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = 200
 S="$(steps_of < "$TMP/r1.html")"
 check "R1: três etapas, na ordem da rodada (merge, kaizen, fechamento)" jqe 'map(.etapa) == ["merge", "kaizen", "fechamento"]' <<<"$S"
 check "R1: fechamento = r2 aprovado (a revisão mais alta, não a mais recente a chegar)" jqe '.[2] | .rev == "2" and .review == "aprovado" and (.sha256 | length == 64)' <<<"$S"
@@ -217,6 +217,8 @@ check("inline: texto, código, negrito e link", [t["t"] for t in inl] == ["text"
 for bad in ("[x](javascript:alert(1))", "[x](http://a.example)", "[x](data:text/html;base64,AAAA)", "[x](//a.example)", "[x](https://a.example/ b)", "[x](https://a.example/\")"):
     check(f"inline: link recusado fica texto ({bad})", all(t["t"] == "text" for t in etapas.inline(bad)))
 check("inline: o host do link sai do destino, não do texto (e userinfo não engana)", [t["host"] for t in etapas.inline("[a.com](https://b.example/x) [c](https://github.com@evil.example/y) [d](https://Sub.Exemplo.COM:8443/z?q=1)") if t["t"] == "a"] == ["b.example", "evil.example", "sub.exemplo.com"])
+check("inline: link com host que o urlsplit recusa (https://[abc) não derruba: host vazio", [t["host"] for t in etapas.inline("[x](https://[abc) e [y](https://[::1)") if t["t"] == "a"] == ["", ""])
+check("parse: texto com link de host inválido monta os blocos", etapas.parse("## Decisão\n[x](https://[abc)\n")["sections"][0]["blocks"][0]["inl"][0]["t"] == "a")
 check("inline: HTML cru e entidade ficam texto, para o template escapar", etapas.inline("<b>x</b> &amp;") == [{"t": "text", "s": "<b>x</b> &amp;"}])
 check("inline: negrito sem fechar e crase sem fechar ficam texto", [t["t"] for t in etapas.inline("**a e `b")] == ["text"])
 check("fence: bloco não fechado vai até o fim, sem perder texto", flat(etapas.parse("```\nlinha\nlinha 2")) == [(None, "pre")] and etapas.parse("```\nlinha\nlinha 2")["sections"][0]["blocks"][0]["s"] == "linha\nlinha 2")

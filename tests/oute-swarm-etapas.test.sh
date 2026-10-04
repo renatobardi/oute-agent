@@ -313,13 +313,34 @@ check "review: o prompt leva o texto copiado antes (o arquivo trocado no meio n�
 check "review: o veredito vale para o sha256 do texto copiado, não do trocado" bash -c '[ "$(jq -r .sha256 "$1")" = "$2" ]' _ "$STATE/etapas/fechamento.r23.review.json" "$(printf '%s' "$TXT" | sha256sum | cut -d" " -f1)"
 swr step publish fechamento --rev 23
 check "publish do arquivo trocado depois do review: recusa (outro sha256)" bash -c '[ "$1" -eq 1 ] && grep -qF "sem veredito do revisor para o sha256" <<<"$2"' _ "$RC" "$ERR"
-# o processo morto no meio do review: o prompt não fica em disco
-etapa fechamento.r24 "$TXT"; echo 6 > "$FAKE/rev/sleep"
-env PATH="$RBIN:$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" OUTE_SWARM_ID=swarm-test "$SWARM" step review fechamento --writer $WR --rev 24 >/dev/null 2>&1 &
-RP=$!; /bin/sleep 1.5
-check "review em andamento: existe a pasta de trabalho com o prompt" bash -c 'ls -d "$1"/.revisor.*/prompt >/dev/null 2>&1' _ "$STATE"
-kill -TERM "$RP" 2>/dev/null; wait "$RP" 2>/dev/null; /bin/sleep 0.5; rm -f "$FAKE/rev/sleep"
-check "review morto por TERM: a pasta de trabalho e o prompt não sobram" bash -c '! ls -A "$1" | grep -q "^\.revisor"' _ "$STATE"
+# o processo interrompido no meio do review (TERM e INT): sai com 143 e 130, não grava veredito e o prompt não fica em disco.
+# O driver em Python liga o processo com os sinais no padrão (um job em segundo plano do bash ignora o INT) e manda o sinal
+drive_signal() {
+  local sig="$1" rev="$2"
+  echo 6 > "$FAKE/rev/sleep"
+  OUT="$(python3 - "$sig" "$STATE" "$RBIN:$BIN:$PATH" "$H" "$FAKE" "$ROOT/docker" "$SWARM" "$WR" "$rev" <<'PYD'
+import os, signal, subprocess, sys, time, glob
+sig, state, path, home, fake, lib, swarm, writer, rev = sys.argv[1:]
+env = dict(os.environ, PATH=path, HOME=home, FAKE=fake, OUTE_LIB=lib, OUTE_SWARM_ID="swarm-test")
+p = subprocess.Popen([swarm, "step", "review", "fechamento", "--writer", writer, "--rev", rev], env=env,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+time.sleep(1.5)
+during = len(glob.glob(os.path.join(state, ".revisor.*", "prompt")))
+p.send_signal(getattr(signal, sig))
+rc = p.wait()
+time.sleep(0.5)
+print(f"{rc} {during}")
+PYD
+)"
+  rm -f "$FAKE/rev/sleep"
+  return 0
+}
+etapa fechamento.r24 "$TXT"; drive_signal SIGTERM 24
+check "review interrompido por TERM: sai com 143, estava em andamento (pasta com o prompt)" [ "$OUT" = "143 1" ]
+check "review interrompido por TERM: nenhum veredito gravado e a pasta de trabalho não sobra" bash -c '[ ! -e "$1/etapas/fechamento.r24.review.json" ] && ! ls -A "$1" | grep -q "^\.revisor"' _ "$STATE"
+etapa fechamento.r25 "$TXT"; drive_signal SIGINT 25
+check "review interrompido por INT (Ctrl-C): sai com 130, estava em andamento" [ "$OUT" = "130 1" ]
+check "review interrompido por INT: nenhum veredito gravado e a pasta de trabalho não sobra" bash -c '[ ! -e "$1/etapas/fechamento.r25.review.json" ] && ! ls -A "$1" | grep -q "^\.revisor"' _ "$STATE"
 check "review concluído: nenhuma sobra na rodada"       bash -c '! ls -A "$1" | grep -q "^\.revisor"' _ "$STATE"
 rcv_stop 2>/dev/null || true
 

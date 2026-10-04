@@ -194,6 +194,14 @@ _ORDERED = re.compile(r"^\d{1,3}[.)] ")
 _CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
 
 
+def _host(url):
+    """Host do destino do link; vazio se a URL não tem host que o `urlsplit` aceite (ex.: `https://[abc` lança ValueError)."""
+    try:
+        return urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
+
+
 def inline(text):
     """Texto de uma linha -> peças `{"t": "text"|"code"|"b"|"a", "s": …, "href": …}`. Nada é HTML: o template escapa. Link só
     `https://`, sem espaço nem aspas; o resto do que parece Markdown fica como texto."""
@@ -208,7 +216,7 @@ def inline(text):
             out.append({"t": "b", "s": tok[2:-2]})
         else:
             link = _LINK.match(tok)
-            out.append({"t": "a", "s": link.group(1), "href": link.group(2), "host": urlsplit(link.group(2)).hostname or ""})
+            out.append({"t": "a", "s": link.group(1), "href": link.group(2), "host": _host(link.group(2))})
         pos = m.end()
     if pos < len(text):
         out.append({"t": "text", "s": text[pos:]})
