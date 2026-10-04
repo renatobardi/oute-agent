@@ -2,7 +2,7 @@
 # Coleta da fase learn (#109, ADR-07 adendo "ciclo learn → iter"): fatos e contagens de um ciclo, só
 # metadados. Fontes: GitHub (issues e PRs dos repos do /workspace), rodadas do swarm e canal de aprovação
 # (só deste host) e telemetria (via observe.sh da oute-aidlc-ops-observe). Só leitura. Nenhum conteúdo sai
-# daqui: do canal, só o cabeçalho (id, rc, como, recusado); dos PRs, o corpo só vira sim/não ("parcial").
+# daqui: do canal, só o cabeçalho (id, rc, como, recusado); dos PRs, o corpo só vira classificação ("so_ship", "parcial") e números de issue.
 #
 # Uso: collect.sh [all|ciclo|github|rodadas|canal|telemetria] [--desde DATA] [--content-hours N]
 #   --desde DATA       início da janela (padrão: fechamento da última issue de ciclo; sem ciclo, 7 dias)
@@ -94,10 +94,20 @@ github() {
     gh issue list --repo "$r" --state all --limit 1000 --json number,title,state,createdAt,closedAt,updatedAt,labels 2>/dev/null \
       | jq -c --arg r "$r" '.[] | {repo: $r, n: .number, title, state, c: .createdAt, x: .closedAt, u: .updatedAt, l: [.labels[].name]}' >>"$TMP/iss" \
       || { echo "ERRO	issues de $r ilegíveis (gh)"; rc=1; continue; }
-    # corpo do PR: só vira parcial sim/não, nunca é impresso
+    # corpo do PR: só vira classificação (tipo: so_ship, parcial ou nulo) e números de issue, nunca é impresso
     gh pr list --repo "$r" --state all --limit 300 --search "updated:>=${W_FROM%%T*}" --json number,title,state,createdAt,mergedAt,closedAt,body 2>/dev/null \
-      | jq -c --arg r "$r" '.[] | {repo: $r, n: .number, title, state, c: .createdAt, m: .mergedAt, x: .closedAt,
-          parcial: ((.body // "") | test("(?m)^## Falta") or (test("(?i)\\brefs #[0-9]") and (test("(?i)\\b(closes|fixes|resolves) #[0-9]") | not)))}' >>"$TMP/prs" \
+      | jq -c --arg r "$r" '
+          def falta: ((.body // "") | gsub("\r"; "") | split("\n")) as $l
+            | ($l | map(test("^## Falta")) | index(true)) as $i
+            | if $i == null then null
+              else ($l[$i + 1:]) as $rest | ($rest | map(test("^## ")) | index(true)) as $e
+                | (if $e == null then $rest else $rest[:$e] end) | map(select(test("^\\s*[-*] +\\S"))) end;
+          .[] | (.body // "") as $b | falta as $f
+          | {repo: $r, n: .number, title, state, c: .createdAt, m: .mergedAt, x: .closedAt,
+             refs: [$b | scan("(?i)\\b(?:closes|fixes|resolves|refs) #([0-9]+)") | .[0] | tonumber] | unique,
+             tipo: (if $f != null then (if ($f | length) > 0 and ($f | all(test("\\(ship\\)"))) then "so_ship" else "parcial" end)
+                    elif ($b | test("(?i)\\brefs #[0-9]") and (test("(?i)\\b(closes|fixes|resolves) #[0-9]") | not)) then "parcial"
+                    else null end)}' >>"$TMP/prs" \
       || { echo "ERRO	PRs de $r ilegíveis (gh)"; rc=1; }
   done < <(repos)
   [[ "$n" -gt 0 ]] || { echo "ERRO	nenhum repo com remote do GitHub em $WS"; return 1; }
@@ -122,14 +132,28 @@ github() {
       (.[] | select((.l | index("kaizen") or index("bug")) and ((.c | ts) >= $from or (.x | ts) >= $from))
        | [.repo, "#\(.n)", .state, (.l | join(",")), .c, (.x // "-"), .title] | @tsv)' "$TMP/iss"
   echo "### PRs por repo"
-  printf 'repo\tabertos_janela\tmergeados_janela\tfechados_sem_merge\tparciais_mergeados\n'
+  printf 'repo\tabertos_janela\tmergeados_janela\tfechados_sem_merge\tso_ship\tparciais\n'
   jq -rs --arg f "$W_FROM" "$q"'
     ($f | fromdateiso8601) as $from | group_by(.repo)[]
     | [.[0].repo, (map(select(.c | ts >= $from)) | length), (map(select(.m | ts >= $from)) | length),
-       (map(select(.m == null and (.x | ts) >= $from)) | length), (map(select(.parcial and (.m | ts) >= $from)) | length)] | @tsv' "$TMP/prs"
+       (map(select(.m == null and (.x | ts) >= $from)) | length),
+       (map(select(.tipo == "so_ship" and (.m | ts) >= $from)) | length),
+       (map(select(.tipo == "parcial" and (.m | ts) >= $from)) | length)] | @tsv' "$TMP/prs"
   echo "### PRs parciais (Refs / ## Falta) mergeados na janela"
+  printf 'repo\tpr\tmergeado\ttipo\ttítulo\n'
   jq -rs --arg f "$W_FROM" "$q"'($f | fromdateiso8601) as $from
-    | .[] | select(.parcial and (.m | ts) >= $from) | [.repo, "#\(.n)", .m, .title] | @tsv' "$TMP/prs"
+    | .[] | select(.tipo != null and (.m | ts) >= $from) | [.repo, "#\(.n)", .m, .tipo, .title] | @tsv' "$TMP/prs"
+  echo "### issues abertas com PR mergeado na janela"
+  # pendente: so_ship = só falta o (ship); nada = órfã (PR mergeado, issue aberta, nenhum item pendente).
+  # Issue com algum PR da janela parcial de verdade tem pendência real e fica fora.
+  printf 'repo\tissue\tpr\tpendente\n'
+  jq -rs --arg f "$W_FROM" --slurpfile iss "$TMP/iss" "$q"'($f | fromdateiso8601) as $from
+    | [.[] | select((.m | ts) >= $from)] as $m
+    | [$iss[] | select(.state == "OPEN") | {repo, n}] as $open
+    | $m[] as $p | $p.refs[] as $n
+    | select($open | any(.repo == $p.repo and .n == $n))
+    | select([$m[] | select(.repo == $p.repo and (.refs | index($n)) != null and .tipo == "parcial")] | length == 0)
+    | [$p.repo, "#\($n)", "#\($p.n)", ($p.tipo // "nada")] | @tsv' "$TMP/prs"
   return "$rc"
 }
 

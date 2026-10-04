@@ -37,11 +37,14 @@ case "\$1 \$2" in
     else
       echo '[{"number":1,"title":"kaizen novo","state":"OPEN","createdAt":"$(d '1 day ago')","closedAt":null,"updatedAt":"$(d '1 day ago')","labels":[{"name":"kaizen"},{"name":"aidlc:spec"}]},
              {"number":2,"title":"parada","state":"OPEN","createdAt":"$(d '90 days ago')","closedAt":null,"updatedAt":"$(d '60 days ago')","labels":[{"name":"aidlc:intent"}]},
-             {"number":3,"title":"bug velho","state":"CLOSED","createdAt":"$(d '90 days ago')","closedAt":"$(d '80 days ago')","updatedAt":"$(d '80 days ago')","labels":[{"name":"bug"}]}]'
+             {"number":3,"title":"bug velho","state":"CLOSED","createdAt":"$(d '90 days ago')","closedAt":"$(d '80 days ago')","updatedAt":"$(d '80 days ago')","labels":[{"name":"bug"}]},
+             {"number":4,"title":"com PR so ship","state":"OPEN","createdAt":"$(d '90 days ago')","closedAt":null,"updatedAt":"$(d '1 day ago')","labels":[{"name":"aidlc:build"}]}]'
     fi ;;
   "pr list")
     echo '[{"number":7,"title":"parcial","state":"MERGED","createdAt":"$(d '2 days ago')","mergedAt":"$(d '1 day ago')","closedAt":"$(d '1 day ago')","body":"Refs #1\n\n## Falta\n- $CANARIO"},
-           {"number":8,"title":"inteiro","state":"MERGED","createdAt":"$(d '2 days ago')","mergedAt":"$(d '1 day ago')","closedAt":"$(d '1 day ago')","body":"Closes #1 $CANARIO"}]' ;;
+           {"number":8,"title":"inteiro","state":"MERGED","createdAt":"$(d '2 days ago')","mergedAt":"$(d '1 day ago')","closedAt":"$(d '1 day ago')","body":"Closes #2 $CANARIO"},
+           {"number":9,"title":"so ship","state":"MERGED","createdAt":"$(d '2 days ago')","mergedAt":"$(d '1 day ago')","closedAt":"$(d '1 day ago')","body":"Refs #4\n\n## Falta\n- (ship) pós-deploy $CANARIO\n\n## Outro\n- sem marca"},
+           {"number":10,"title":"misto","state":"MERGED","createdAt":"$(d '2 days ago')","mergedAt":"$(d '1 day ago')","closedAt":"$(d '1 day ago')","body":"Refs #1\n\n## Falta\n- (ship) x\n- outro $CANARIO"}]' ;;
   *) exit 9 ;;
 esac
 SH
@@ -78,13 +81,16 @@ check "all: código 0"                          [ "$RC" -eq 0 ]
 check "janela padrão de 7 dias sem ciclo"      has 'origem	padrão de 7 dias'
 check "sem ciclo aberto: learn abre retroativa" has 'ciclo_aberto	nenhum'
 check "só repos com remote do GitHub"          hasnt 'solto'
-check "issues por repo"                        has 'dono/alvo	1	0	2	1'
+check "issues por repo"                        has 'dono/alvo	1	0	3	1'
 check "fase com parada há 30 dias"             has 'aidlc:intent	1	1'
 check "repo sem aidlc fora da tabela de fases" bash -c '! grep -q "^(sem fase)" <<<"$0" && grep -q "^fora_da_tabela	dono/outro" <<<"$0"' "$OUT"
 check "kaizen da janela listado"               has 'dono/alvo	#1	OPEN	kaizen,aidlc:spec'
 check "bug fora da janela não entra"           hasnt '#3	CLOSED'
-check "PRs: parcial contado"                   has 'dono/alvo	2	2	0	1'
-check "PR parcial listado, inteiro não"        bash -c 'grep -q "#7	.*	parcial" <<<"$0" && ! grep -q "#8	" <<<"$0"' "$OUT"
+check "PRs: so_ship e parciais contados"       has 'dono/alvo	4	4	0	1	2'
+check "PR listado com tipo, inteiro não"       bash -c 'grep -q "#7	.*	parcial	parcial" <<<"$0" && grep -q "#9	.*	so_ship	so ship" <<<"$0" && grep -q "#10	.*	parcial	misto" <<<"$0" && ! grep -q "#8	.*	parcial" <<<"$0"' "$OUT"
+check "issue com PR so_ship: pendente so_ship" has_line 'dono/alvo	#4	#9	so_ship'
+check "issue órfã: pendente nada"              has_line 'dono/alvo	#2	#8	nada'
+check "issue com parcial de verdade fora"      hasnt 'dono/alvo	#1	#'
 check "rodada da janela com contagens"         has 'swarm-nova	alvo	ready	.*	2	1	1	1	1'
 check "rodada antiga fora"                     hasnt 'swarm-velha'
 check "lacuna das rodadas (host local)"        has 'LACUNA	rodadas	só o host h1'
