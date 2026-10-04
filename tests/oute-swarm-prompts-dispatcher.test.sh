@@ -185,4 +185,9 @@ check "fechamento: reprovado ou sem-revisor deixa o texto fechado (#507)" grep -
 check "fechamento: na aba só decisão, opções e link (#507)" grep -qF '**Na aba, só isto:** a linha de decisão, as opções numeradas e o link `https://agent-studio.oute.pro/rodada?id='"$(nova)"'`' "$D"
 check "fechamento: nunca cola o resumo na aba (#507)"    grep -qF 'nunca cole o resumo na aba no lugar da página' "$D"
 check "fechamento: Claude usa run_in_background, Codex nohup com saída em arquivo (#507)" bash -c 'grep -qF "em segundo plano (\`run_in_background\`): chama outro modelo" "$1" && ! grep -qF "nohup oute-swarm step review" "$1" && grep -qF "@@CX@@(\`nohup oute-swarm step review … > ~/.oute/swarm/{{ID}}/etapas/review.out 2>&1 &\`" "$2"' _ "$D" "$ROOT/docker/swarm.md"
+# 538. PR da rodada mergeado por outra via: registrar no PR e pedir a auditoria pós-merge do delta não auditado
+check "538: dispatcher registra no PR que o merge não foi dele" grep -qF 'registre no PR (`gh pr comment <n>`) que o merge não foi do dispatcher da rodada' "$D"
+check "538: dispatcher compara o head mergeado com o auditado e pede o delta" grep -qF 'a auditoria pós-merge do delta não auditado (`<head auditado>..<head mergeado>`)' "$D"
+check "538: dispatcher não atribui a uma sessão o que não sabe" grep -qF 'sem atribuir a uma sessão o que você não sabe' "$D"
+check "538: dispatcher cita a trava (código 77) e o limite" bash -c 'grep -qF "já é recusado (código 77)" "$1" && grep -qF "protege contra engano, não contra contorno" "$1"' _ "$D"
 check_end

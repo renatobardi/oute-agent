@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Shim do `gh` (vem antes do binário real no PATH, #538): `gh pr merge` de PR de rodada aberta do swarm só passa quando
+# quem chama é o dispatcher dela (OUTE_SWARM_ID igual ao da rodada, ou worktree sessao/<rodada>). O resto do `gh` passa
+# direto, com os mesmos argumentos. Recusa com o código 77 e mensagem em stderr.
+# Limite: protege contra ENGANO (sessão avulsa que faz merge do PR de outra rodada), não contra quem contorna (API do gh,
+# binário real, token direto) nem contra o merge feito pelo Bardi no site. Sem resolver o PR (gh sem rede, PR inexistente),
+# passa ao gh real, que dá o erro dele.
+set -uo pipefail
+shims="$(cd "$(dirname "$0")" && pwd)"
+clean_path="$(printf '%s' ":$PATH:" | sed "s#:$shims:#:#g; s#^:##; s#:\$##")"
+real="$(PATH="$clean_path" command -v gh)" || { echo "oute: gh não encontrado" >&2; exit 127; }
+STATE_ROOT="${OUTE_SWARM_STATE:-$HOME/.oute/swarm}"
+pass() { exec "$real" "$@"; }
+
+# só `gh pr merge …` (aceita -R/--repo antes do subcomando)
+args=("$@"); i=0; pos=()
+while (( i < ${#args[@]} )); do
+  case "${args[$i]}" in
+    -R|--repo) i=$((i + 2)); continue ;;
+    --repo=*|-R?*) i=$((i + 1)); continue ;;
+    -*) i=$((i + 1)); continue ;;
+  esac
+  pos+=("${args[$i]}"); i=$((i + 1))
+  (( ${#pos[@]} < 2 )) || break
+done
+[[ "${pos[0]:-}" == pr && "${pos[1]:-}" == merge ]] || pass "$@"
+
+# seletor (número, URL ou branch; vazio = branch atual) e -R/--repo, depois de `merge`
+sel=""; repo=""; seen=0; i=0
+while (( i < ${#args[@]} )); do
+  a="${args[$i]}"
+  if (( ! seen )); then [[ "$a" != merge ]] || seen=1; i=$((i + 1)); continue; fi
+  case "$a" in
+    -R|--repo) repo="${args[$((i + 1))]:-}"; i=$((i + 2)); continue ;;
+    --repo=*) repo="${a#--repo=}" ;;
+    -b|--body|-F|--body-file|-t|--subject|-A|--author-email|--match-head-commit) i=$((i + 2)); continue ;;
+    -*) ;;
+    *) [[ -n "$sel" ]] || sel="$a" ;;
+  esac
+  i=$((i + 1))
+done
+
+command -v jq >/dev/null 2>&1 || pass "$@"
+rargs=(); [[ -z "$repo" ]] || rargs=(-R "$repo")
+info="$("$real" pr view ${sel:+"$sel"} ${rargs[@]+"${rargs[@]}"} --json number,headRefName,url 2>/dev/null)" || pass "$@"
+IFS=$'\t' read -r num head url < <(jq -r '[.number, .headRefName, .url] | map(tostring) | join("\t")' <<<"$info" 2>/dev/null) || pass "$@"
+[[ -n "${num:-}" && -n "${url:-}" ]] || pass "$@"
+issue="$(printf '%s' "${head##*/}" | sed -n 's/^\([0-9][0-9]*\)-.*/\1/p')"
+[[ -n "$issue" ]] || pass "$@"
+prrepo="$(printf '%s' "$url" | sed -n 's#^https\?://[^/]*/[^/]*/\([^/]*\)/pull/.*#\1#p')"
+
+# rodada aberta (sem `fechada`) que abriu a sessão dessa issue, no repo do PR
+mine=""; cur_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+for d in "$STATE_ROOT"/*/; do
+  d="${d%/}"; r="$(basename "$d")"
+  [[ -f "$d/spawned" && ! -f "$d/fechada" ]] || continue
+  mrepo="$(sed -n 's/^repo=//p' "$d/meta" 2>/dev/null | head -1)"
+  hit="$(awk -v n="$issue" -v m="$mrepo" -v pr="$prrepo" '
+    { split($1, a, "-"); rp = ($6 == "" ? m : $6); sub(".*/", "", rp); if (a[1] == n && rp == pr) { print $1; exit } }' "$d/spawned")"
+  [[ -n "$hit" ]] || continue
+  # dispatcher da rodada: OUTE_SWARM_ID ou, com ele reiniciado sem a variável, a worktree sessao/<rodada>
+  if [[ "${OUTE_SWARM_ID:-}" == "$r" || "$cur_branch" == "sessao/$r" ]]; then pass "$@"; fi
+  mine="$r $hit"
+done
+[[ -n "$mine" ]] || pass "$@"
+rround="${mine%% *}"; rslug="${mine#* }"
+audit="$("$real" pr view "$num" ${rargs[@]+"${rargs[@]}"} --json comments --jq '[.comments[] | select(.body | contains("<!-- oute-aidlc-qa-pr-audit -->"))] | last | .url // empty' 2>/dev/null || true)"
+{
+  echo "oute: merge recusado: o PR #$num é da rodada aberta $rround (sessão $rslug) e quem chama não é o dispatcher dela."
+  echo "oute: o merge sai pelo dispatcher da rodada (worktree sessao/$rround). Diga ao Bardi de quem é o PR e o estado da auditoria:"
+  echo "oute: última auditoria: ${audit:-nenhuma encontrada}. Confira com: gh pr view $num --comments"
+  echo "oute: esta trava protege contra engano, não contra contorno; o Bardi faz merge pelo site quando decidir."
+} >&2
+exit 77

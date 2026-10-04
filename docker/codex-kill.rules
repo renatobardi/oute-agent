@@ -1,0 +1,5 @@
+# Gerenciado pelo entrypoint do oute-agent (#538): o Codex recusa comando que mata processo por nome.
+# Todas as sessões do container são o mesmo usuário: pkill/killall atingem processo de outras sessões.
+# Protege contra engano, não contra contorno.
+prefix_rule(pattern=[["pkill", "killall"]], decision="forbidden", justification="pkill/killall matam por nome e atingem processo de outras sessões. Encerre só o que você abriu: kill <PID> (o que você guardou) ou o id da tarefa.")
+prefix_rule(pattern=["sudo", ["pkill", "killall"]], decision="forbidden", justification="pkill/killall matam por nome e atingem processo de outras sessões. Encerre só o que você abriu: kill <PID> (o que você guardou) ou o id da tarefa.")

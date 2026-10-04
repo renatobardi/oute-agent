@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Hook PreToolUse do Claude Code (Bash) (#538): recusa o comando digitado pelo agente que mata processo por nome
+# (`pkill`, `killall`; com `sudo`, depois de `;`, `&&`, `|`, `$(`…). Todas as sessões do container são o mesmo usuário:
+# o padrão casa com processo de outra sessão. Script chamado pelo agente que usa `pkill` por dentro não passa por aqui.
+# Limite: protege contra engano, não contra contorno (bash -c "…", eval, outro binário).
+# Entrada: JSON do hook em stdin. Saída 2 + mensagem em stderr = recusa; qualquer outra coisa = deixa passar.
+set -uo pipefail
+command -v jq >/dev/null 2>&1 || exit 0
+cmd="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || exit 0
+[[ -n "$cmd" ]] || exit 0
+if printf '%s' "$cmd" | grep -Eq '(^|[;&|(`]|\$\()[[:space:]]*(sudo[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?(command[[:space:]]+)?(pkill|killall)([[:space:]]|$)'; then
+  echo "oute: pkill/killall recusado: matam por nome e atingem processo de outras sessões (o container é um só). Encerre só o que você abriu: kill <PID> (o que você guardou) ou o id da tarefa." >&2
+  exit 2
+fi
+exit 0

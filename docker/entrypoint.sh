@@ -130,6 +130,17 @@ setup_agents() {
     jq 'del(.permissions.defaultMode) | del(.skipDangerousModePermissionPrompt)' "$cs" > "$cs.tmp"
   fi
   mv "$cs.tmp" "$cs"
+  # trava de processo por nome (#538): pkill/killall digitados pelo agente são recusados (as sessões do container são o
+  # mesmo usuário). Claude: hook PreToolUse (Bash) no settings.json, via jq, uma entrada só (idempotente). Codex: arquivo de
+  # regras próprio (~/.codex/rules/oute-guard-kill.rules), gerenciado por inteiro, copiado de forma atômica. Script que o
+  # agente chama e usa pkill por dentro não passa por aqui.
+  local gk="/usr/local/lib/oute/oute-guard-kill"
+  jq --arg c "$gk" '.hooks.PreToolUse = ((.hooks.PreToolUse // []) | map(select(any(.hooks[]?; .command == $c) | not))
+      + [{matcher: "Bash", hooks: [{type: "command", command: $c}]}])' "$cs" > "$cs.tmp" && mv "$cs.tmp" "$cs"
+  mkdir -p "$HOME/.codex/rules"
+  cp /usr/local/lib/oute/codex-kill.rules "$HOME/.codex/rules/oute-guard-kill.rules.tmp" \
+    && mv "$HOME/.codex/rules/oute-guard-kill.rules.tmp" "$HOME/.codex/rules/oute-guard-kill.rules" \
+    || log "AVISO: falha ao gravar as regras do Codex (pkill/killall)"
   # memória única = ai-memory (Bardi, 2026-09-26): auto memory nativa do Claude desligada (também via env no compose).
   # Arquivos já gravados em ~/.claude/projects/*/memory ficam onde estão (não são apagados, só deixam de ser usados).
   jq '.autoMemoryEnabled = false' "$cs" > "$cs.tmp" && mv "$cs.tmp" "$cs"
