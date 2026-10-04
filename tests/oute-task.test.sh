@@ -56,6 +56,8 @@ l="$(awk -v id="${3:-}" '$1 == id {sub(/^[^ ]* /, ""); print; exit}' "$FAKE/spac
 jq -cn --arg id "$3" --arg l "$l" '{id: "cli:workspace:get", result: {type: "workspace_info", workspace: {label: $l, workspace_id: $id}}}'
 SH
 chmod +x "$BIN/herdr"
+# ai-memory falso (#435): o clean lista handoffs pelo ai-memory, e o de verdade (se houver no PATH de quem roda) nunca é chamado
+. "$ROOT/tests/lib/fake-ai-memory.sh"; fake_ai_memory_install "$BIN"; fake_ai_memory_install "$NOEMIT"
 ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 ln -s "$TASK" "$BIN/oute-task"; ln -s "$TASK" "$NOEMIT/oute-task"   # o shim chama `oute-task --mark`
 for a in claude codex; do ln -s "$ROOT/docker/shims/oute-agent-shim" "$SHIMS/$a"; done
@@ -64,7 +66,7 @@ ORIGIN="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-
 unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKER OUTE_SWARM_MAX OUTE_SWARM_REPO \
       OUTE_NO_WORKTREE OUTE_EMIT_DEBUG CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION CLAUDE_CONFIG_DIR CODEX_HOME FAKE_RC FAKE_CLAUDE_AUTH_RC FAKE_CODEX_LOGIN_RC FAKE_AUTH_HANG \
       HERDR_ENV HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_PANE_ID HERDR_SOCKET_PATH OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
-unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT OUTE_MEMORY_RUN AI_MEMORY_RUN_ID FAKE_AI_MEMORY_LOG
+unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT OUTE_MEMORY_RUN AI_MEMORY_RUN_ID FAKE_AI_MEMORY_LOG FAKE_AI_MEMORY_HANDOFFS FAKE_AI_MEMORY_RC FAKE_AI_MEMORY_SLEEP OUTE_HANDOFFS_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 10k sobe a falsa
 . "$ROOT/tests/lib/typesafe.sh"; ts_off
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
@@ -802,6 +804,53 @@ kill "$agpid" 2>/dev/null; wait "$agpid" 2>/dev/null
 t clean --force-in-use --bogus
 check "opção desconhecida: código diferente de 0"           [ "$RC" -ne 0 ]
 check "opção desconhecida: o uso cita --force-in-use"       grep -qF -- '[--force-in-use]' <<<"$ERR"
+
+# ---------------------------------------------------------------- 12b. clean: handoffs abertos das worktrees removidas (#435)
+# O clean só LISTA (uma linha por handoff, formato estável); cancelar é do agente (memory_handoff_cancel). Nunca --expire-all.
+HFL="$TMP/handoffs.log"; export FAKE_AI_MEMORY_LOG="$HFL"; : > "$HFL"
+HF="$TMP/handoffs.json"; export FAKE_AI_MEMORY_HANDOFFS="$HF"
+for s in hf1 hf-det hf-fica; do t "$s" claude; done
+echo x > "$SP/proj-hf-fica/novo.txt"                                   # mudança local: o clean a pula
+git -C "$SP/proj-hf-det" checkout -q --detach origin/main
+jq -n --arg a "$SP/proj-hf1" --arg d "$SP/proj-hf-det" --arg f "$SP/proj-hf-fica" --arg x "$SP/proj-hf1/sub" --arg o "$TMP/ws/outro-repo-wt" \
+  '[{id:"h-hf1",cwd:$a},{id:"h-det",cwd:$d},{id:"h-fica",cwd:$f},{id:"h-outro",cwd:$o},{id:"h-semcwd"},{id:"h-nulo",cwd:null},
+    {id:"h-prefixo",cwd:$x},{id:"h bad;id",cwd:$a},{id:"h-hf1-dup",cwd:$a}]' > "$HF"
+t clean
+check "handoffs, simulação: lista o da worktree a remover, formato estável" grep -qxF "handoff id=h-hf1 workspace=default project=proj cwd=$SP/proj-hf1" <<<"$OUT"
+check "handoffs, simulação: lista o da detached"        grep -qxF "handoff id=h-det workspace=default project=proj cwd=$SP/proj-hf-det" <<<"$OUT"
+check "handoffs, simulação: todos os da mesma worktree, uma linha cada" [ "$(grep -c "^handoff .* cwd=$SP/proj-hf1\$" <<<"$OUT")" -eq 2 ]
+check "handoffs: worktree pulada, outro repo, sem cwd, cwd nulo, prefixo e id inválido ficam de fora" bash -c '[ "$(grep -c "^handoff " <<<"$1")" -eq 3 ] && ! grep -qE "h-fica|h-outro|h-semcwd|h-nulo|h-prefixo|bad" <<<"$1"' _ "$OUT"
+check "handoffs, simulação: não remove e consulta com workspace e project explícitos" bash -c '[ -d "$1" ] && grep -qxF -- "handoffs --workspace default --project proj --limit 500 --json" "$2"' _ "$SP/proj-hf1" "$HFL"
+check "handoffs, simulação: código 0, stderr vazio"     [ "$RC" -eq 0 -a -z "$ERR" ]
+t clean --yes
+check "handoffs, --yes: lista o da worktree removida e a remove" bash -c '[ ! -e "$1" ] && grep -qxF "handoff id=h-hf1 workspace=default project=proj cwd=$1" <<<"$2" && grep -qxF "handoff id=h-det workspace=default project=proj cwd=$3" <<<"$2"' _ "$SP/proj-hf1" "$OUT" "$SP/proj-hf-det"
+check "handoffs, --yes: a pulada fica e não é listada"  bash -c '[ -d "$1" ] && ! grep -q "h-fica" <<<"$2"' _ "$SP/proj-hf-fica" "$OUT"
+check "handoffs: o clean nunca cancela (nenhuma chamada além de handoffs … --json)" bash -c '! grep -qE "expire|cancel|confirm" "$1" && [ "$(grep -vc "^handoffs .* --json\$" "$1")" -eq 0 ]' _ "$HFL"
+: > "$HFL"; t clean --yes
+check "handoffs: nada a remover, ai-memory não é consultado" [ "$RC" -eq 0 -a ! -s "$HFL" ] 
+check "handoffs: nada a remover, nenhuma linha handoff/aviso" bash -c '! grep -qE "^(handoff|aviso)" <<<"$1"' _ "$OUT"
+# escopo do .ai-memory.toml do repo
+printf 'workspace = "ws-x"\nproject = "proj-x"\n' > "$WS/proj/.ai-memory.toml"
+t toml1 claude; jq -n --arg a "$SP/proj-toml1" '[{id:"h-toml",cwd:$a}]' > "$HF"; : > "$HFL"
+t clean --yes
+check "handoffs: workspace e project do .ai-memory.toml do repo" bash -c 'grep -qxF "handoff id=h-toml workspace=ws-x project=proj-x cwd=$1" <<<"$2" && grep -qxF -- "handoffs --workspace ws-x --project proj-x --limit 500 --json" "$3"' _ "$SP/proj-toml1" "$OUT" "$HFL"
+rm -f "${WS:?}/proj/.ai-memory.toml"
+# ai-memory com erro, com lixo, sem resposta e ausente: avisa numa linha e segue
+t err1 claude; jq -n --arg a "$SP/proj-err1" '[{id:"h-err",cwd:$a}]' > "$HF"
+FAKE_AI_MEMORY_RC=1 t clean
+check "ai-memory com erro: avisa numa linha, código 0, sem handoff" bash -c '[ "$1" -eq 0 ] && [ "$(grep -c "^aviso: " <<<"$2")" -eq 1 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && ! grep -q "^handoff " <<<"$2"' _ "$RC" "$OUT"
+echo 'isto não é JSON' > "$HF"
+t clean
+check "ai-memory com lixo: avisa e segue"               bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2"' _ "$RC" "$OUT"
+jq -n --arg a "$SP/proj-err1" '[{id:"h-err",cwd:$a}]' > "$HF"
+t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=6 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes
+check "ai-memory sem resposta: avisa, segue e remove, dentro do prazo" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && [ ! -e "$3" ] && [ $(( $(date +%s) - $4 )) -le 4 ]' _ "$RC" "$OUT" "$SP/proj-err1" "$t0"
+t abs1 claude
+NOAM="$TMP/bin-noam"; mkdir -p "$NOAM"
+for d in "$BIN" ${PATH//:/ }; do for f in "$d"/*; do [[ -x "$f" && "${f##*/}" != ai-memory ]] && ln -s "$f" "$NOAM/${f##*/}" 2>/dev/null; done; done
+OUT="$(cd "$WS/proj" && PATH="$NOAM" "$TASK" clean --yes 2>"$TMP/err" </dev/null)"; RC=$?
+check "ai-memory ausente: avisa numa linha, código 0, remove" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: ai-memory ou jq ausente; handoffs de proj não listados" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$OUT" "$SP/proj-abs1"
+unset FAKE_AI_MEMORY_LOG FAKE_AI_MEMORY_HANDOFFS
 
 # ---------------------------------------------------------------- 12. shim: sessão interativa sob `ai-memory run` (opt-in, #367)
 # ai-memory falso (tests/lib/fake-ai-memory.sh): `run` grava a linha no log e executa o --executable com AI_MEMORY_RUN_ID.

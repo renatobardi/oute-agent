@@ -310,6 +310,32 @@ sync_main() {
   else echo "mantém  $r ($base não avança só com fast-forward)"; fi
 }
 
+# handoffs abertos (ai-memory) das worktrees que o clean removeu ou removeria (#435). SÓ LISTA: cancelar é do agente, pela
+# ferramenta MCP memory_handoff_cancel (o CLI só cancela com --expire-all, sem filtro, e nunca é chamado aqui). Uma linha por
+# handoff, formato estável: `handoff id=<id> workspace=<W> project=<P> cwd=<worktree>`. Escopo: o .ai-memory.toml do repo
+# ou default/<nome do repo>. ai-memory ausente, com erro ou sem resposta: uma linha de aviso, e o clean segue (return 0)
+handoffs_of() {   # <repo principal> <worktree>…
+  local r="$1" ws proj out n toml="$1/.ai-memory.toml"; shift
+  (( $# )) || return 0
+  ws=""; proj=""
+  if [[ -f "$toml" ]]; then
+    ws="$(sed -n 's/^[[:space:]]*workspace[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
+    proj="$(sed -n 's/^[[:space:]]*project[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
+  fi
+  [[ -n "$ws" ]] || ws=default; [[ -n "$proj" ]] || proj="$(basename "$r")"
+  if ! command -v ai-memory >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "aviso: ai-memory ou jq ausente; handoffs de $proj não listados"; return 0
+  fi
+  if ! out="$(timeout "${OUTE_HANDOFFS_TIMEOUT:-20}" ai-memory handoffs --workspace "$ws" --project "$proj" --limit 500 --json 2>/dev/null </dev/null)" \
+     || ! out="$(printf '%s\n' "$out" | jq -r --arg ws "$ws" --arg proj "$proj" --arg wts "$(printf '%s\n' "$@")" \
+        '($wts | split("\n")) as $w | .[] | select((.cwd | type) == "string" and (.id | type) == "string" and (.id | test("^[A-Za-z0-9._-]+$")) and (.cwd as $c | any($w[]; . == $c)))
+         | "handoff id=\(.id) workspace=\($ws) project=\($proj) cwd=\(.cwd)"' 2>/dev/null)"; then
+    echo "aviso: não consegui listar os handoffs do ai-memory ($ws/$proj); nada listado"; return 0
+  fi
+  [[ -z "$out" ]] || printf '%s\n' "$out"
+  return 0
+}
+
 cmd_clean() {
   local yes=0 all=0 sp="" flags="" root force=0
   while [[ $# -gt 0 ]]; do
@@ -327,7 +353,7 @@ cmd_clean() {
   # escopo: o space atual (ou o do --space) ou, com --all, tudo sob $WT_ROOT (como antes da #277)
   if (( all )); then root="$WT_ROOT"; echo "todos os spaces ($WT_ROOT)"
   else [[ -n "$sp" ]] || sp="$(current_space)"; root="$WT_ROOT/$sp"; echo "space $sp ($root)"; fi
-  local r wt br ahead why reason todo=0 list legacy=0
+  local r wt br ahead why reason todo=0 list legacy=0 gone
   who_called || true
   for r in $(all_repos); do
     list="$(task_worktrees "$r" "$root")"
@@ -337,6 +363,7 @@ cmd_clean() {
     fi
     local base; base="$(default_branch "$r")"; base="${base:-main}"
     gitnet -C "$r" fetch -q origin --prune 2>/dev/null || true
+    gone=()
     while read -r wt br; do
       [[ -n "$wt" ]] || continue
       if (( ! force )) && in_use "$wt"; then echo "em uso  $wt ($IN_USE)"; continue; fi
@@ -346,8 +373,8 @@ cmd_clean() {
         else ahead="$(git -C "$wt" rev-list --count "origin/$base..HEAD" 2>/dev/null || echo '?')"
              echo "mantém  $wt (detached com $ahead commit(s) fora de origin/$base)"; continue; fi
         todo=1
-        if (( yes )); then task_of "$r" "$wt" || true; git -C "$r" worktree remove "$wt" && echo "removida $wt ($why)" && removed "$base" detached
-        else echo "remover $wt ($why)"; fi
+        if (( yes )); then task_of "$r" "$wt" || true; git -C "$r" worktree remove "$wt" && echo "removida $wt ($why)" && removed "$base" detached && gone+=("$wt")
+        else echo "remover $wt ($why)"; gone+=("$wt"); fi
         continue
       fi
       ahead="$(git -C "$r" rev-list --count "origin/$base..$br" 2>/dev/null || echo 1)"
@@ -359,9 +386,10 @@ cmd_clean() {
       todo=1
       # o evento sai com a worktree removida, mesmo que o branch não apague
       if (( yes )); then task_of "$r" "$wt" || true
-        git -C "$r" worktree remove "$wt" && { removed "$base" "$reason"; git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"; }
-      else echo "remover $wt ($why)"; fi
+        git -C "$r" worktree remove "$wt" && { removed "$base" "$reason"; gone+=("$wt"); git -C "$r" branch -D "$br" >/dev/null && echo "removida $wt ($why)"; }
+      else echo "remover $wt ($why)"; gone+=("$wt"); fi
     done <<<"$list"
+    handoffs_of "$r" ${gone[@]+"${gone[@]}"} || true
     sync_main "$r" "$base" "$yes" || todo=1
   done
   (( ! legacy )) || echo "formato antigo: $legacy worktree(s) direto em $WT_ROOT, fora do escopo; só o 'oute-task clean --all' as considera"
