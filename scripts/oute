@@ -1039,7 +1039,7 @@ tray_install() {
   [[ -x "$bin" ]] || die "binário do tray não encontrado em $bin"
   echo "parando o tray, se estiver aberto…"
   tray_stop
-  echo "montando $TRAY_APP…"
+  echo "montando ${TRAY_APP}…"
   rm -rf "$TRAY_APP"; mkdir -p "$TRAY_APP/Contents/MacOS"
   cp "$bin" "$TRAY_APP/Contents/MacOS/OuteTray"
   cat > "$TRAY_APP/Contents/Info.plist" <<EOF
