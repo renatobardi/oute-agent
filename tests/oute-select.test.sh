@@ -3,7 +3,7 @@
 # (config/select/models.toml), um `gh` falso (tests/lib/fake-gh-issue.sh) e uma TypeSafe falsa (tests/lib/typesafe.sh)
 # (com TLS: o seletor só fala https, #313) no lugar do Jev. Bash puro + python3/jq/openssl, sem rede: a chave e o endereço da TypeSafe de verdade saem do ambiente.
 # Só comportamento externo: o JSON no stdout, o aviso no stderr e o código de saída.
-# O que o oute-task e o oute-swarm fazem com a escolha está em tests/oute-task.test.sh e tests/oute-swarm.test.sh.
+# O que o oute-task e o oute-swarm fazem com a escolha está em tests/oute-task.test.sh e tests/oute-swarm-*.test.sh.
 # Uso: tests/oute-select.test.sh   (sai != 0 se algo falhar)
 set -uo pipefail
 
