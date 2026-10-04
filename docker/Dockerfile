@@ -114,9 +114,10 @@ ARG FIREFOX_VERSION=140.17.0esr
 ARG FIREFOX_SHA256_ARM64=dd579f48405a7065f0f643ddb71a8de0f48a9d984c2783dee2ca173081850084
 ARG FIREFOX_SHA256_AMD64=86d049070ad80b74d8e674793e22d28923b4a7a1da06b4d65402f91c67a10314
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      poppler-utils xz-utils fonts-dejavu-core fonts-liberation \
-      libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libxtst6 libxt6t64 libxcomposite1 libxdamage1 \
-      libxrandr2 libxcursor1 libxi6 libpci3 \
+      fonts-dejavu-core fonts-liberation libasound2t64 libdbus-glib-1-2 \
+      libgtk-3-0t64 libpci3 libx11-xcb1 libxcomposite1 \
+      libxcursor1 libxdamage1 libxi6 libxrandr2 \
+      libxt6t64 libxtst6 poppler-utils xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && case "$TARGETARCH" in \
          arm64) arch=aarch64; sum="$FIREFOX_SHA256_ARM64" ;; \
@@ -187,7 +188,8 @@ RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
-      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-shot /usr/local/bin/oute-regression /usr/local/bin/oute-swarm /usr/local/bin/oute
+      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression \
+      /usr/local/bin/oute-shot /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
