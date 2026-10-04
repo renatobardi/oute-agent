@@ -76,16 +76,24 @@
         <form method="post" action="/logout"><button type="submit" class="botao">{{ icon("log-out") }}Sair</button></form>
       </div>
     </header>
-{% macro alerta_item(a) %}
+{% macro alerta_lista(items) %}
+    <ul>
+      {% for a in items %}
       <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
         <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
         {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} {{ tzl() }}{% endif %}
       </li>
+      {% endfor %}
+    </ul>
 {% endmacro %}
-{% macro decisao_item(d) %}
+{% macro decisao_lista(items) %}
+    <ul>
+      {% for d in items %}
       <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
         <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }} (perguntada em {{ d.asked_at|when }} {{ tzl() }})
       </li>
+      {% endfor %}
+    </ul>
 {% endmacro %}
 {# faixas sob o cabeçalho (#467): só nas listas; nos detalhes (conversa, sessão, pedido) somem #}
 {# alertas do pipeline (#204) no topo de toda página de quem entrou; fora do #conteudo, que o htmx troca #}
@@ -101,16 +109,12 @@
   <div class="faixa-corpo">
     {% if alerts %}
     <h2>{{ alerts|length }} {{ "alerta" if alerts|length == 1 else "alertas" }} do pipeline</h2>
-    <ul>
-      {% for a in alerts %}{{ alerta_item(a) }}{% endfor %}
-    </ul>
+    {{ alerta_lista(alerts) }}
     {% endif %}
     {% if alerts_old %}
     <details class="antigos" id="alertas-antigos">
       <summary>antigos ({{ alerts_old|length }})</summary>
-      <ul>
-        {% for a in alerts_old %}{{ alerta_item(a) }}{% endfor %}
-      </ul>
+      {{ alerta_lista(alerts_old) }}
     </details>
     {% endif %}
   </div>
@@ -126,16 +130,12 @@
   <div class="faixa-corpo">
     {% if decisions %}
     <h2>{{ decisions|length }} {{ "decisão pendente" if decisions|length == 1 else "decisões pendentes" }}</h2>
-    <ul>
-      {% for d in decisions %}{{ decisao_item(d) }}{% endfor %}
-    </ul>
+    {{ decisao_lista(decisions) }}
     {% endif %}
     {% if decisions_old %}
     <details class="antigos" id="decisoes-antigas">
       <summary>antigos ({{ decisions_old|length }})</summary>
-      <ul>
-        {% for d in decisions_old %}{{ decisao_item(d) }}{% endfor %}
-      </ul>
+      {{ decisao_lista(decisions_old) }}
     </details>
     {% endif %}
   </div>

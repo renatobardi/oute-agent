@@ -236,10 +236,13 @@ json.dump(queue_metrics("oute-server", NOW - 10800, 800, exporter="otlp_http/stu
 json.dump(queue_metrics("oute-server", NOW - 5, 800, exporter="otlp_http/studio_metrics"), open(f"{tmp}/band-q-now.json", "w"))
 PY
 for f in band-logs band-q-old band-q-now; do
-  check "faixas: ingestão de $f = 200" test "$(post "$([ "$f" = band-logs ] && echo logs || echo metrics)" "$TMP/$f.json")" = 200
+  kind=metrics; [[ "$f" = band-logs ]] && kind=logs
+  check "faixas: ingestão de $f = 200" test "$(post "$kind" "$TMP/$f.json")" = 200
 done
 # a faixa como a página a entrega: o que está aberto e o que está dentro do <details> "antigos"
-band() { python3 -c 'import json, re, sys
+band() {
+  local section="$1"
+  python3 -c 'import json, re, sys
 h = sys.stdin.read(); i = sys.argv[1]
 m = re.search(r"<section [^>]*id=\"" + i + r"\"[^>]*>(.*?)</section>", h, re.S)
 b = m.group(1) if m else ""
@@ -247,7 +250,9 @@ d = re.search(r"<details class=\"antigos\".*?</details>", b, re.S)
 old = d.group(0) if d else ""; op = b.replace(old, "")
 pick = lambda t: re.findall(r"data-(?:alerta|decisao)=\"([^\"]*)\"", t)
 print(json.dumps({"abertos": pick(op), "antigos": pick(old), "contador": re.findall(r"antigos \((\d+)\)", old),
-                  "attrs": re.findall(r"data-(?:alertas|decisoes)(?:-antigas?|-antigos)?=\"(\d+)\"", m.group(0)) if m else []}))' "$1"; }
+                  "attrs": re.findall(r"data-(?:alertas|decisoes)(?:-antigas?|-antigos)?=\"(\d+)\"", m.group(0)) if m else []}))' "$section"
+  return $?
+}
 for path in /conversas /sessoes /pedidos; do
   B="$(page "$path" | band alertas)"
   check "faixas: alertas em $path, a fila de 3 h aberta e as rodadas paradas em antigos (2)" jqe '.abertos == ["queue"] and (.antigos | sort) == ["round_stalled", "round_stalled"] and .contador == ["2"] and .attrs == ["1", "2"]' <<<"$B"
