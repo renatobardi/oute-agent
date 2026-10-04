@@ -246,6 +246,20 @@ ${pair#*|}
   check "segredo (${pair%%|*}): o review também recusa, antes do modelo" bash -c '[ "$1" -eq 1 ] && grep -qF "parece ter segredo" <<<"$2" && [ "$(cat "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/rev/n" "$t0"
   i=$((i + 1))
 done
+# o prompt do revisor (texto e fontes) vai ao bucket pela telemetria: o arquivo de --fontes passa pela mesma checagem de segredo
+etapa fechamento.r30 "$TXT"; n30="$(cat "$FAKE/rev/n")"
+printf 'fato: o PR #600\nAuthorization: Bearer %s\n' "$a36" > "$FAKE/fonte-segredo.txt"
+swr step review fechamento --writer $WR --rev 30 --fontes "$FAKE/fonte-segredo.txt"
+check "fonte com segredo (cabeçalho de credencial): recusa, nomeia o padrão e a fonte, não repete o trecho, o modelo não é chamado" bash -c '[ "$1" -eq 1 ] && grep -qF "a fonte fonte-segredo.txt parece ter segredo (cabecalho-de-credencial)" <<<"$2" && ! grep -qF "$3" <<<"$2" && [ "$(cat "$4")" -eq "$5" ]' _ "$RC" "$ERR" "$a36" "$FAKE/rev/n" "$n30"
+check "fonte com segredo: nenhum veredito gravado"       [ ! -e "$STATE/etapas/fechamento.r30.review.json" ]
+printf 'fato: o PR #600\n' > "$FAKE/fonte-ok.txt"; printf 'token ghp_%s\n' "$a36" > "$FAKE/fonte-segredo2.txt"
+swr step review fechamento --writer $WR --rev 30 --fontes "$FAKE/fonte-ok.txt" --fontes "$FAKE/fonte-segredo2.txt"
+check "duas fontes, só a segunda com segredo (token do GitHub): recusa pela segunda" bash -c '[ "$1" -eq 1 ] && grep -qF "a fonte fonte-segredo2.txt parece ter segredo (token-github)" <<<"$2" && [ "$(cat "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/rev/n" "$n30"
+printf 'ol\xe1 fonte' > "$FAKE/fonte-latin.txt"
+swr step review fechamento --writer $WR --rev 30 --fontes "$FAKE/fonte-latin.txt"
+check "fonte que não é UTF-8: recusa, o modelo não é chamado" bash -c '[ "$1" -eq 1 ] && grep -qF "a fonte fonte-latin.txt não é UTF-8 válido" <<<"$2" && [ "$(cat "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/rev/n" "$n30"
+swr step review fechamento --writer $WR --rev 30 --fontes "$FAKE/fonte-ok.txt"
+check "fonte sem segredo segue normal (aprovado)"        bash -c '[ "$1" -eq 0 ] && [ "$(jq -r .verdict "$2")" = aprovado ]' _ "$RC" "$STATE/etapas/fechamento.r30.review.json"
 check "segredo: nada novo no log além da etapa publicada" [ "$(nlog)" -eq 1 ]
 etapa fechamento.r20 "Palavras como risk-adjusted-assessment-framework-completo e disk-usage-statistics-report não são segredo."
 swr step review fechamento --writer $WR --rev 20

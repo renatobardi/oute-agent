@@ -935,16 +935,24 @@ step_resolve() {
 
 # step_check_text <arquivo>: tamanho, texto UTF-8 sem NUL e sem segredo conhecido; recusa com die, sem cortar nada
 step_check_text() {
-  local f="$1" size spec name pat
+  local f="$1" size
   size="$(wc -c < "$f")"
   (( size > 0 )) || die "texto da etapa vazio"
   (( size <= STEP_MAX )) || die "texto de $size bytes, acima do teto de $STEP_MAX: recusado, não corto; encurte o arquivo"
   [[ "$(tr -d '\0' < "$f" | wc -c)" -eq "$size" ]] || die "o texto da etapa tem byte nulo: recusado"
   iconv -f UTF-8 -t UTF-8 "$f" >/dev/null 2>&1 || die "o texto da etapa não é UTF-8 válido: recusado"
+  step_check_secrets "$f" "o texto"
+  return 0
+}
+
+# step_check_secrets <arquivo> <o que é, para a mensagem>: recusa (die) arquivo com padrão de segredo conhecido. Vale para o
+# texto da etapa e para cada arquivo de --fontes: o prompt do revisor (texto e fontes) vai ao bucket pela telemetria
+step_check_secrets() {
+  local f="$1" what="$2" spec name pat
   for spec in "${STEP_SECRETS[@]}"; do
     name="${spec%%=*}"; pat="${spec#*=}"
     if grep -Eq -e "$pat" "$f"; then
-      die "o texto parece ter segredo ($name): recusado; o texto vai ao bucket, que nunca é apagado. Tire o trecho e rode de novo"
+      die "$what parece ter segredo ($name): recusado; o que vai ao revisor vai ao bucket, que nunca é apagado. Tire o trecho e rode de novo"
     fi
   done
   return 0
@@ -1051,6 +1059,8 @@ cmd_step_review() {
   files=0
   for src in ${srcs[@]+"${srcs[@]}"}; do
     [[ -f "$src" ]] || die "fonte não existe: $src"
+    iconv -f UTF-8 -t UTF-8 "$src" >/dev/null 2>&1 || die "a fonte $(basename "$src") não é UTF-8 válido: recusada"
+    step_check_secrets "$src" "a fonte $(basename "$src")"
     files=$((files + $(wc -c < "$src")))
   done
   (( files <= STEP_SOURCES_MAX )) || die "fontes somam $files bytes, acima do teto de $STEP_SOURCES_MAX"
