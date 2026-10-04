@@ -51,6 +51,15 @@ check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex
 check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
 check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 
+# 539. regra do rm com variável aparece na lista de conferência antes de rodar comando
+CASE=539-rmvariavel; round "$CASE"
+sw spawn 539-rmvariavel "instrução"
+P="$STATE/539-rmvariavel.prompt"
+check "worker 539: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker 539: regra do rm antes de rodar comando (#539)" grep -qF 'Antes de rodar um comando que use `rm` com variável, confira a regra da linha 14' "$P"
+check "worker 539: regra vale também na aba (#539)" grep -qF 'A regra vale também para comando que você roda na aba, não só para o que vai no arquivo de teste.' "$P"
+check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+
 # 11i. sessão sem ação manual do Bardi (#373): diálogo de pergunta, esc do dispatcher, blocked na retrospectiva
 CASE=sem-acao-manual; round "$CASE"
 sw spawn 373-semacao "instrução"
@@ -58,8 +67,8 @@ P="$STATE/373-semacao.prompt"
 check "worker sem ação manual: código 0, com o prompt"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
 check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF 'Não use o diálogo interativo de pergunta do harness' "$P"
 check "worker sem ação manual: dúvida em texto BLOQUEADO (#373)" grep -qF 'termina o turno com texto: `BLOQUEADO #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
-check "worker sem ação manual: regra se prompt aparecer mesmo assim (#373)" grep -qF 'Se um prompt de permissão aparecer mesmo assim (o `rm` com variável sem proteção, acima, é o caso conhecido)' "$P"
-check "worker sem ação manual: rm com variável sem proteção é caso conhecido (#373)" grep -qF '`rm` com variável sem proteção' "$P"
+check "worker sem ação manual: regra se prompt aparecer mesmo assim (#373)" grep -qF 'Se um prompt de permissão aparecer mesmo assim, a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
+check "worker sem ação manual: rm com variável é caso mais comum (#373)" grep -qF 'a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
 check "worker spike: escopo de teste em serviço compartilhado (#378)" grep -qF 'use um escopo de teste fixo, com `workspace` e `project` próprios e `oute.task.slug` identificável' "$P"
 check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
 opn --max 2
