@@ -19,7 +19,7 @@
 {# custo real e estimado sempre separados; o estimado vai marcado (#203) #}
 {% macro cost(c) %}
 {% if c.real_usd is not none %}<span class="real" title="custo real, informado pela fonte">{{ c.real_usd|usd }}</span>{% endif %}
-{% if c.estimated_usd is not none %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
+{% if c.estimated_usd is not none %}<span class="est" title="estimado pela tabela de preços (config.toml). Preço de lista, não gasto: os agentes rodam por assinatura">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
 {% if c.unpriced_calls %}<span class="semp" title="chamadas sem custo real e sem preço na tabela: fora das somas">{{ c.unpriced_calls|num }} sem preço</span>{% endif %}
 {% if c.real_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
 {% endmacro %}

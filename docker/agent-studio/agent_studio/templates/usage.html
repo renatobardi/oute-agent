@@ -6,7 +6,7 @@
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}">
   <thead><tr>
-    <th>{{ label }}</th><th class="n">Chamadas</th>
+    <th{% if kind == "role" %} title="dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora de rodada (e a conversa sem sessão)"{% else %} title="o aidlc:&lt;fase&gt; que o seletor usou; sessão sem fase registrada fica em desconhecida"{% endif %}>{{ label }}</th><th class="n">Chamadas</th>
     <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th><th class="n">Custo</th>
   </tr></thead>
   <tbody>
@@ -24,7 +24,7 @@
 </table>
 </div>
 {% endmacro %}
-{% block title %}Uso · agent-studio{% endblock %}
+{% block title %}Uso · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
@@ -43,10 +43,7 @@
   {% endif %}
   <button type="submit">Aplicar</button>
 </form></div>
-<p class="nota">Chamadas ao modelo entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}). Preço de lista, não gasto: os agentes
-  rodam por assinatura. <strong>Papel</strong>: dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora
-  de rodada (e a conversa sem sessão). <strong>Fase</strong>: o <code>aidlc:&lt;fase&gt;</code> que o seletor usou; sessão sem
-  fase registrada fica em <code>desconhecida</code>. Cada tabela soma o total da janela.</p>
+<p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 <p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
   Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span></p>

@@ -119,7 +119,7 @@ def _kpi_cost(cur, prev, before):
     note = before if est_share is None else f"{_pct(est_share)} estimado"
     rel = _rel(total, ptotal)
     return _kpi("cost", "Custo (lista)", "receipt", total, ptotal, rel, _delta_badge(rel), "secundario", note,
-                real_usd=cur["real_usd"], estimated_usd=cur["estimated_usd"], estimated_share=est_share,
+                hint="Preço de lista, não gasto: os agentes rodam por assinatura.", real_usd=cur["real_usd"], estimated_usd=cur["estimated_usd"], estimated_share=est_share,
                 unpriced_calls=cur["unpriced_calls"])
 
 

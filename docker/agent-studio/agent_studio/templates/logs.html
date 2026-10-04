@@ -4,7 +4,7 @@
 {% set back = "/conversa?id=" ~ (id|urlencode) ~ ("&erros=1" if errors_only else "") %}
 {% set crumbs = [("Conversas", "/conversas"), (id|nome, back), ("Logs", none)] %}
 {% from "_macros.html" import log_table, icon, conv_name %}
-{% block title %}Logs · {{ id }} · agent-studio{% endblock %}
+{% block title %}Logs · {{ id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo"><div class="titulo-linha"><h1>Logs a partir do {{ offset + 1 }}º</h1>

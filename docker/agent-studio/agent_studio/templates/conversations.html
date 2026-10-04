@@ -2,14 +2,12 @@
 {% set nav = "conversas" %}
 {% set crumbs = [("Telemetria", none), ("Conversas", none)] %}
 {% from "_macros.html" import cost, filter, badge, conv_name %}
-{% block title %}Conversas · agent-studio{% endblock %}
+{% block title %}Conversas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
   <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}</div>
-  <p class="nota">Conversas com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), da mais recente
-    para a mais antiga. Os números são da conversa inteira.
-    {% if total > conversations|length %}Mostrando as {{ conversations|length }} mais recentes de {{ total }}.{% endif %}</p>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > conversations|length %} · Mostrando as {{ conversations|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
 {% if conversations %}
 <div class="cartao rolagem">

@@ -4,7 +4,7 @@
 {% set crumbs = [("Conversas", "/conversas"), ("Span", none)] %}
 {% if span.session_id %}{% set back = "/conversa?id=" ~ (span.session_id|urlencode) %}{% endif %}
 {% from "_macros.html" import span_detail, icon %}
-{% block title %}{{ span.name or span.span_id }} · agent-studio{% endblock %}
+{% block title %}{{ span.name or span.span_id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo"><div class="titulo-linha"><h1>Span <code>{{ span.name or "(sem nome)" }}</code></h1>

@@ -4,7 +4,7 @@
 {% set back = "/rodadas" %}
 {% set crumbs = [("Rodadas", "/rodadas"), (r.id, none)] %}
 {% from "_macros.html" import badge, icon %}
-{% block title %}Rodada {{ r.id }} · agent-studio{% endblock %}
+{% block title %}Rodada {{ r.id }} · Agent Studio{% endblock %}
 {# o texto da etapa é dado não confiável (ADR-08): o parser (etapas.py) devolve só dados, nunca HTML, e tudo aqui sai escapado #}
 {% macro inl(tokens) %}{% for t in tokens %}{% if t.t == "code" %}<code>{{ t.s }}</code>{% elif t.t == "b" %}<strong>{{ t.s }}</strong>{% elif t.t == "a" %}<a href="{{ t.href }}" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer" title="{{ t.href }}">{{ t.s }}</a> <span class="link-host">({{ t.host }})</span>{% else %}{{ t.s }}{% endif %}{% endfor %}{% endmacro %}
 {% macro doc(d) %}

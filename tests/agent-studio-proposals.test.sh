@@ -295,7 +295,7 @@ check "título com dois-pontos: ingestão 200"           test "$(post logs "$TMP
 check "título com dois-pontos: SurrealDB guarda string, inteiro" jqe --arg t "$T337" '.[0].title == $t and .[0].ty == "string"' <<<"$(surreal_q "SELECT title, type::of(title) AS ty FROM type::record('pedido', '$P337')")"
 check "título com data ou hora no começo: segue string" jqe '[.[] | select(.id | test("-[bc]`?$"))] | length == 2 and all(.ty == "string") and (map(.title) | sort == ["12:30 reunião: é só texto", "2026-10-03T10:00:00Z"])' <<<"$(surreal_q "SELECT record::id(id) AS id, title, type::of(title) AS ty FROM pedido WHERE record::id(id) IN ['$P337-b', '$P337-c']")"
 page "/pedido?id=$P337" > "$TMP/p337.html"
-check "/pedido: título inteiro na tela e no <title>"   bash -c 'grep -qF "<dd>$2</dd>" "$1" && grep -qF "<title>$2 · agent-studio</title>" "$1"' _ "$TMP/p337.html" "$T337"
+check "/pedido: título inteiro na tela e no <title>"   bash -c 'grep -qF "<dd>$2</dd>" "$1" && grep -qF "<title>$2 · Agent Studio</title>" "$1"' _ "$TMP/p337.html" "$T337"
 check "/pedidos: título inteiro no link"               bash -c 'grep -qF "\">$2</a> <span class=\"sub\">$3</span>" "$1"' _ <(page /pedidos) "$T337" "$P337"
 check "/v1/tray: título inteiro"                       jqe --arg t "$T337" --arg id "$P337" '.proposals.pending | map(select(.id == $id)) | length == 1 and .[0].title == $t' <<<"$(page /v1/tray)"
 post logs "$TMP/t337.json" >/dev/null

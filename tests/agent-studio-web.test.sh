@@ -134,12 +134,13 @@ check "o token cru como cookie: 303"                   test "$(code -H "Cookie: 
 check "cookie forjado na API: 401"                     test "$(code -H "Cookie: ${COOKIE}0" "$STUDIO_URL/v1/usage")" = 401
 check "ingestão só com o cookie: 401 (só Bearer)"      test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "${C[@]}" -H 'Content-Type: application/json' --data-binary "@$TMP/logs.json" "$STUDIO_URL/v1/logs")" = 401
 check "com o cookie: / é o Dashboard (200, sem redirecionar)" bash -c 'test "$(curl -s -o "$2" -w "%{http_code}" "${@:3}" "$1/")" = 200 && grep -q "<h1>Dashboard</h1>" "$2"' _ "$STUDIO_URL" "$TMP/dash.html" "${C[@]}"
-check "já entrou: /login leva às conversas"            test "$(hdr location "${C[@]}" "$STUDIO_URL/login")" = "/conversas"
+check "já entrou: /login leva ao Dashboard (#523)"     test "$(hdr location "${C[@]}" "$STUDIO_URL/login")" = "/"
+check "sem next, o login leva a / (#523)"              bash -c 'curl -s -o /dev/null -D "$2" -X POST --data-urlencode "token=$3" "$1/login" && tr -d "\r" < "$2" | grep -qi "^location: /$"' _ "$STUDIO_URL" "$TMP/h2" "$STUDIO_TOKEN"
 for n in 'https://evil.example/' '//evil.example/x' '/\evil.example' 'conversas'; do
   login --data-urlencode "token=$STUDIO_TOKEN" --data-urlencode "next=$n" >/dev/null
-  check "next de fora ($n): volta às conversas"        grep -qi '^location: /conversas$' <(tr -d '\r' < "$TMP/h")
+  check "next de fora ($n): volta ao Dashboard (#523)" grep -qi '^location: /$' <(tr -d '\r' < "$TMP/h")
 done
-check "next de fora no GET /login: descartado"         grep -q 'name="next" value="/conversas"' <(curl -s "$STUDIO_URL/login?next=https://evil.example/")
+check "next de fora no GET /login: descartado"         grep -q 'name="next" value="/"' <(curl -s "$STUDIO_URL/login?next=https://evil.example/")
 SAIR="$(curl -s -o /dev/null -D - -X POST "${C[@]}" "$STUDIO_URL/logout" | tr -d '\r')"
 check "sair: 303 para o /login"                        bash -c 'grep -q "^HTTP/[0-9.]* 303" <<<"$1" && grep -qi "^location: /login$" <<<"$1"' _ "$SAIR"
 check "sair: apaga o cookie (vazio, Max-Age=0)"        grep -qiE "^set-cookie: ${COOKIE%%=*}=(\"\")?;.*Max-Age=0" <<<"$SAIR"
@@ -179,6 +180,10 @@ check "sem build de front-end no repo"                 bash -c '! ls "$1"/packag
 
 # ---------------------------------------------------------------- 2b. casco: sidebar, header, sprite e Entrar (#467)
 echo "$LOGIN" > "$TMP/login.html"
+check "casco: o logo leva a / (#523)"                  grep -q '<a class="marca" href="/">' "$TMP/list.html"
+check "casco: nome Agent Studio e a frase nova (#523)" bash -c 'grep -q "<strong>Agent Studio</strong><span>O painel de controle dos seus agentes de código.</span>" "$1" && ! grep -q "telemetria dos agentes" "$1"' _ "$TMP/list.html"
+check "casco: <title> e login dizem Agent Studio (#523)" bash -c 'grep -q "<title>Conversas · Agent Studio</title>" "$1" && grep -q "<title>Entrar · Agent Studio</title>" "$2" && grep -q "<span>Agent Studio</span></div>" "$2"' _ "$TMP/list.html" "$TMP/login.html"
+check "lista: sem o parágrafo, a janela e o fuso ficam junto do filtro (#523)" bash -c '! grep -q "Chamadas ao modelo entre\|Conversas com atividade entre" "$1" && grep -q "data-janela>[^<]* · [A-Z]" "$1"' _ "$TMP/list.html"
 GLIFOS="layout-dashboard message-square layers chart-column receipt shield-check siren hand panel-left log-out moon sun chevron-right chevron-left chevron-down chevron-up info triangle-alert copy check x server terminal sparkles wrench workflow corner-down-right circle-dot repeat archive loader user shield-alert lock eye eye-off arrow-left arrow-right menu network database sakura activity timer tag circle-alert arrow-left-right trending-up trending-down minus chart-pie database-zap"
 check "sprite /static/lucide.svg: 200 sem login, como svg" test "$(code "$STUDIO_URL/static/lucide.svg")$(hdr content-type "$STUDIO_URL/static/lucide.svg" | cut -d';' -f1)" = "200image/svg+xml"
 curl -s "$STUDIO_URL/static/lucide.svg" > "$TMP/lucide.svg"
@@ -447,7 +452,7 @@ except ValueError:
     check("token vazio recusado", True)
 check("safe_next: só caminho deste servidor", [web.safe_next(x) for x in
       ("/conversa?id=a", "", None, "http://x/", "//x", "/\\x", "/a\nb", "x")]
-      == ["/conversa?id=a"] + ["/conversas"] * 7)
+      == ["/conversa?id=a"] + ["/"] * 7)
 
 # leitura que falha: página 500, sem a causa
 app = create_app(Broken(), TOKEN)

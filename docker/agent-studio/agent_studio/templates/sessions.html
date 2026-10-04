@@ -2,15 +2,12 @@
 {% set nav = "sessoes" %}
 {% set crumbs = [("Telemetria", none), ("Sessões", none)] %}
 {% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
-{% block title %}Sessões · agent-studio{% endblock %}
+{% block title %}Sessões · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
   <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}</div>
-  <p class="nota">Sessões do <code>oute-task</code> (<code>oute.task.id</code>) com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }}
-    (hora do fato, em {{ tzl() }}), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
-    inteira.
-    {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > sessions|length %} · Mostrando as {{ sessions|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
 {{ state_warning(state_read) }}
 {% if sessions %}

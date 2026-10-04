@@ -2,12 +2,11 @@
 {% set nav = "rodadas" %}
 {% set crumbs = [("Governança", none), ("Rodadas", none)] %}
 {% from "_macros.html" import badge, icon %}
-{% block title %}Rodadas · agent-studio{% endblock %}
+{% block title %}Rodadas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
   <h1>Rodadas</h1>
-  <p class="nota">Rodadas do swarm com etapa publicada para o Bardi, da mais recente para a mais antiga. Esta tela só mostra.</p>
 </div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido: repositório e estado podem faltar. A causa está no log do agent-studio.</p>{% endif %}
 {% if rounds %}
