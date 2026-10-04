@@ -39,6 +39,8 @@ When a spec lists a criterion that **asserts the behavior of existing code or an
   - Reword it to match the actual behavior, or
   - If uncertain, turn it into a question to the Bardi in the spec body — never let a false claim pass as-is.
 
+When a criterion depends on a subcommand or flag of an external tool, the spec records the command checked (`<cli> --help`, in the version installed in the container) before the Bardi's gate (#461).
+
 **Evidence goes in the spec**: a line reference (e.g., `docker/codex_config.py:26`), a `--help` snippet, or a link to the ADR that contradicts it.
 
 <criterion-verification-example>
