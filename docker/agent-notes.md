@@ -17,6 +17,9 @@ Quando algo precisar rodar no host como o usuário dele ou com **sudo/root**:
 3. Espere e leia o resultado (saída + código de saída): `oute-inbox --wait <id>`. Saída 3 = ainda pendente/expirou.
 
 Regras do script: bash, `set -euo pipefail`, idempotente, um objetivo por pedido, `echo` antes de cada passo, sem segredos no texto, nada interativo. Leia o estado antes (via `ssh oute-server`) e proponha só o necessário.
+Pedido que **remove, recria ou para** recurso do host (volume, container, arquivo, serviço) lista antes, no próprio script, quem depende dele e **para sem alterar nada** se achar dependente fora do esperado; ou vem precedido de um pedido de ensaio (`--dry-run`/só leitura).
+Pedido pendente que ficou **obsoleto** (o anterior falhou, o plano mudou): avise o usuário para **recusá-lo antes** de propor o substituto, e o título do substituto diz que ele **substitui** o anterior (ex.: "substitui <id>: …").
+
 Mudança **permanente** na configuração do oute-server segue o fluxo do repositório `lab` (issue → inventário → script → PR). O canal de aprovação serve para diagnóstico, ajustes pontuais e para rodar o deploy de um PR já mergeado.
 
 ## Memória (ai-memory) — sempre com escopo explícito
