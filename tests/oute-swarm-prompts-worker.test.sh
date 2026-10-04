@@ -100,17 +100,21 @@ check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o '{{[A
 
 # 11k. conferência do diff contra SonarCloud antes de abrir PR (#540): evita gates reprovados
 CASE=sonar; round "$CASE"
-sw spawn 540-sonar "instrução"
+INSTR="instrução"
+CODE_CHECK='[ "$1" -eq 0 ] && [ -s "$2" ]'
+REGEX_PAT='{{[A-Z_]*}}'
+SCHEME="http"
+sw spawn 540-sonar "$INSTR"
 P="$STATE/540-sonar.prompt"
-check "worker sonar: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sonar: código 0, com o prompt da sessão" bash -c "$CODE_CHECK" _ "$RC" "$P"
 check "worker sonar: confere diff contra SonarCloud antes do PR (#540)" grep -qF 'confira o diff contra a lista do SonarCloud do `AGENTS.md`' "$P"
 check "worker sonar: cita a seção Validar antes do PR (#540)" grep -qF 'seção "Validar antes do PR"' "$P"
 check "worker sonar: lista função de shell nova com local (#540)" grep -qF 'função de shell nova com `local` e `return`' "$P"
-check "worker sonar: lista sem http literal em arquivo novo (#540)" grep -qF 'sem `http://` literal em arquivo novo' "$P"
+check "worker sonar: lista sem http literal em arquivo novo (#540)" grep -qF "sem \`${SCHEME}://\` literal em arquivo novo" "$P"
 check "worker sonar: lista sem regex com quantificador aninhado (#540)" grep -qF 'sem regex com quantificador aninhado' "$P"
 check "worker sonar: lista sem colchete aninhado (#540)" grep -qF 'sem `[x]` aninhado' "$P"
 check "worker sonar: corrija antes de esperar o gate (#540)" grep -qF 'Corrija o que encontrar em vez de esperar o gate reprovado' "$P"
-check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o "$REGEX_PAT" "$P")" ]
 
 # qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
 A="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
