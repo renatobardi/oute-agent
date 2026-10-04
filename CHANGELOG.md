@@ -4,6 +4,19 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.38] - 2026-10-04
+
+### Added
+- **`oute-shot`: screenshot de UI e leitura de PDF no container** (#472). `oute-shot <url|arquivo> [--mobile] [--dark] [-o <png>]` gera PNG (desktop 1280, mobile 390, light e dark; `--all` gera os quatro) com o Firefox ESR 140.17.0 headless da imagem, de versão e sha256 fixos no `Dockerfile` (arm64 e amd64). Só aceita arquivo local ou loopback e roda sem segredo, em perfil descartável. A imagem ganha também o `poppler-utils` (`pdftotext`, `pdftoppm`) para ler PDF de referência. **Precisa de release** (o `Dockerfile` e o `oute-shot` vão na imagem).
+
+### Changed
+- **ADR-08: adendo da página da rodada e do ciclo** (#506, fatia 0 da #489). Registra a arquitetura aprovada no gate de `arch` (D1=1, D2=1, D3=1, D4=1, D5=1, D6=1, D7=2): evento operacional `oute.swarm.step.published` (linha nova no catálogo do ADR-04, atributos provisórios), revisor, estado derivado, quatro fatias e a exceção ao §10 só para `POST /rodada/acao`. Os termos etapa, barra de etapas, credencial de marcação e revisor entram no `CONTEXT.md`. Só documentação: **não precisa de release**.
+
+### Fixed
+- agent-studio: `mem_limit` sobe de 2g para 6g (`OUTE_AGENT_STUDIO_MEM`). Com o DuckDB em 1,2 GB, o limite de 2g esgotava a memória (`OutOfMemoryException`): a ingestão respondia 503 e as telas não abriam (#504). Entra com `git pull` + `oute up`, sem release.
+- agent-studio: `OUTE_SURREALDB_MEM` sobe de 1g para 2g, pela mesma folga (#504). Os demais serviços (agent, ai-memory, collector) não têm `mem_limit`.
+- agent-studio: `/uso` e `/conversas` deixam de levar ~30 s em janelas de 7 dias (#504). A junção dos spans com os logs `api_request` de custo (`cost.spans_with_cost`) comparava cada span com cada log (laço aninhado, quadrático) e agora é por igualdade (hash join), com o mesmo resultado; o `/v1/usage` também lê o DuckDB uma vez só e reagrupa os cortes em memória (eram cinco leituras). Muda código da imagem do agent-studio: **precisa de release**.
+
 ## [0.7.37] - 2026-10-04
 
 ### Added
