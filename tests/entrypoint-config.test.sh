@@ -111,6 +111,27 @@ check "config do usuário: [otel] com o host novo e sem marcador antigo" bash -c
   [ "$(python3 -c "import sys,tomllib; print(tomllib.load(open(sys.argv[1],\"rb\"))[\"otel\"][\"environment\"])" "$1")" = oute-mac ] && ! grep -q ">>> oute" "$1"' _ "$H/.codex/config.toml"
 check "config do usuário: mcp_servers do dublê junto com o do usuário" test "$(tget "$H/.codex/config.toml" mcp_servers ai-memory command)" = ai-memory
 
+# ---------------------------------------------------------------- 2b. trava de pkill/killall (#538)
+GK="$LIB_DIR/oute-guard-kill"
+H="$TMP/h2b"; mkdir -p "$H/.claude"
+echo '{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"/x/do-usuario"}]}]}}' > "$H/.claude/settings.json"
+run "$H" setup_agents; run "$H" setup_agents
+S="$H/.claude/settings.json"
+check "kill: 2 execuções saem 0"                        test "$RC" -eq 0
+check "kill: hook do guard no PreToolUse (Bash), uma vez só" jqe --arg c "$GK" '[.hooks.PreToolUse[] | select(any(.hooks[]; .command == $c))] | length == 1 and .[0].matcher == "Bash"' "$S"
+check "kill: hook do usuário no PreToolUse preservado"  jqe 'any(.hooks.PreToolUse[]; any(.hooks[]; .command == "/x/do-usuario"))' "$S"
+check "kill: regras do Codex gravadas, iguais às da imagem" cmp -s "$LIB_DIR/codex-kill.rules" "$H/.codex/rules/oute-guard-kill.rules"
+check "kill: nenhum .tmp sobrando em ~/.codex/rules"    bash -c '! ls "$1"/.codex/rules/*.tmp >/dev/null 2>&1' _ "$H"
+if command -v codex >/dev/null 2>&1; then
+  check "kill: o Codex recusa pkill -f e killall pelas regras gravadas" bash -c '
+    codex execpolicy check --rules "$1" -- pkill -f x | grep -q forbidden && codex execpolicy check --rules "$1" -- killall x | grep -q forbidden \
+      && ! codex execpolicy check --rules "$1" -- kill 123 | grep -q forbidden' _ "$H/.codex/rules/oute-guard-kill.rules"
+fi
+echo 'regra velha' > "$H/.codex/rules/oute-guard-kill.rules"; run "$H" setup_agents
+check "kill: regras alteradas voltam ao texto da imagem" cmp -s "$LIB_DIR/codex-kill.rules" "$H/.codex/rules/oute-guard-kill.rules"
+run "$H" setup_agents OUTE_AGENT_YOLO=0
+check "kill: yolo=0 mantém o hook"                      jqe --arg c "$GK" '[.hooks.PreToolUse[] | select(any(.hooks[]; .command == $c))] | length == 1' "$S"
+
 # ---------------------------------------------------------------- 3. OUTE_AGENT_YOLO=0
 # O codex_config.py grava sandbox_mode = danger-full-access sempre (bwrap sem userns no container, #5, ADR-01):
 # só approval_policy e o yolo do Claude dependem do OUTE_AGENT_YOLO.

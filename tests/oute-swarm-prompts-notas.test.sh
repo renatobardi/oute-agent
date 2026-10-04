@@ -51,4 +51,12 @@ for f in "$W" "$N"; do b="$(basename "$f")"
   check "haiku: $b trata id desconhecido como Haiku (#481)"         grep -qF 'Se o id não aparecer, trate a sessão como Haiku' "$f"
   check "haiku: $b sem subagente publica e avisa (#481)"            grep -qF 'avisa, na primeira linha do texto, que ele saiu do Haiku' "$f"
 done
+# 538. sessões no mesmo container: merge de PR de rodada, processo, "o que está rodando", comentário de merge, limites
+check "538: notas recusam o merge de PR de rodada aberta e dizem o que responder ao Bardi" bash -c 'grep -qF "Merge de PR de rodada aberta não é seu" "$1" && grep -qF "estado da última auditoria" "$1" && grep -qF "o merge sai pelo dispatcher dela" "$1"' _ "$N"
+check "538: notas só deixam encerrar processo pelo PID ou id da tarefa" grep -qF 'Só encerre processo que você abriu' "$N"
+check "538: notas dizem que pkill e killall são recusados" grep -qF '`pkill` e `killall` (e `pkill -f`) são recusados' "$N"
+check "538: notas mandam listar primeiro o que a sessão abriu" grep -qF 'liste primeiro o que você abriu' "$N"
+check "538: notas proíbem chamar de desta sessão o que veio de ps/pgrep" grep -qF 'Nunca chame de "desta sessão" o que veio de `ps` ou `pgrep`' "$N"
+check "538: notas pedem o comentário de merge (sessão, a pedido de quem, head)" grep -qF 'a sessão (worktree e id), "a pedido do Bardi" ou a autorização usada, e o head mergeado' "$N"
+check "538: notas declaram os limites (engano, não contorno; merge no site)" bash -c 'grep -qF "protegem contra engano, não contra quem contorna" "$1" && grep -qF "Não valem para merge feito pelo Bardi no site" "$1"' _ "$N"
 check_end
