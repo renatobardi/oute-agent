@@ -12,3 +12,6 @@ __pycache__/
 # manual ops scripts (local only)
 scripts/ops/
 .DS_Store
+
+# swift (tray/)
+.build/
