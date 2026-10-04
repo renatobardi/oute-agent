@@ -1,0 +1,2 @@
+### Fixed
+- **Dashboard: taxa de erro e rótulo do cache** (#525). A taxa de erro divide os spans com erro por todos os spans da janela (antes, pelas chamadas ao modelo), a mesma população do `errors.spans` e `spans` do `/v1/usage`. O indicador "Cache de entrada" passa a "Leitura de cache", com dica que diz a conta (leitura ÷ entrada nova + leitura + escrita de cache). **Precisa de release** (o agent-studio vai na imagem).

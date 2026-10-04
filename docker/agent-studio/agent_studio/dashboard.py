@@ -77,7 +77,8 @@ def _cache_share(a):
 
 
 def _error_rate(a):
-    return _div(a["span_errors"], a["calls"]) if a["calls"] else None
+    """Spans com erro ÷ todos os spans da janela: a mesma população do `errors.spans` e `spans` do `/v1/usage` (#525)."""
+    return _div(a["span_errors"], a["spans"]) if a["spans"] else None
 
 
 def _span_label(span_ns):
@@ -146,7 +147,7 @@ def _kpi_errors(cur, prev, before):
     worse = n >= TOOL_MIN_ERRORS and rel is not None and rel > P95_WORSE
     return _kpi("errors", "Taxa de erro", "circle-alert", rate, prate, rel,
                 f"{alert_text.num(n)} {'erro' if n == 1 else 'erros'}", "destrutivo" if worse else "contorno", before,
-                errors=n, prev_errors=prev["span_errors"])
+                hint="Spans com erro ÷ todos os spans da janela (chamadas ao modelo, ferramentas e o resto).", errors=n, prev_errors=prev["span_errors"])
 
 
 def _pp_badge(pp):
@@ -159,8 +160,10 @@ def _pp_badge(pp):
 def _kpi_cache(cur, prev, _before):
     share, pshare = _cache_share(cur), _cache_share(prev)
     pp = None if share is None or pshare is None else (share - pshare) * 100
-    kpi = _kpi("cache", "Cache de entrada", "database-zap", share, pshare, None if pp is None else pp / 100,
-               _pp_badge(pp), "secundario", "dos tokens de entrada")
+    kpi = _kpi("cache", "Leitura de cache", "database-zap", share, pshare, None if pp is None else pp / 100,
+               _pp_badge(pp), "secundario", "do contexto vem do cache",
+               hint="Tokens lidos do cache ÷ (entrada nova + leitura de cache + escrita de cache). O agente relê o contexto "
+                    "do cache a cada chamada, então o valor alto é o normal; não mede economia.")
     kpi["trend"] = _trend(pp, 0.5)
     return kpi
 

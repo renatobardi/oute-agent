@@ -142,11 +142,16 @@ check("KPI custo: real, estimado, % estimado e sem preço", abs(float(KP["cost"]
 check("KPI custo: ≈ no valor e a nota do % estimado", "≈ US$ 16,00" in kpi(html, "cost") and "38% estimado" in kpi(html, "cost"))
 check("KPI p95: 10,8 s (o opus de 12 s entra) e Badge destrutivo (piorou > 25%)", abs(float(KP["p95"]["value"]) - 10800) < 1 and 'class="badge destrutivo"' in kpi(html, "p95")
       and "piorou" in kpi(html, "p95"))
-check("KPI erros: 3 spans de erro sobre 27 chamadas", KP["errors"]["errors"] == "3" and KP["errors"]["prev-errors"] == "0"
-      and abs(float(KP["errors"]["value"]) - 3 / 27) < 1e-9 and "11,11%" in kpi(html, "errors") and "3 erros" in kpi(html, "errors"))
+# os 3 erros estão em spans de ferramenta (não são chamadas ao modelo): 27 chamadas + 3 desses = 30 spans, taxa 3/30 e não 3/27
+check("KPI erros: 3 spans de erro sobre 30 spans (erro em span que não é chamada ao modelo)", KP["errors"]["errors"] == "3"
+      and KP["errors"]["prev-errors"] == "0" and abs(float(KP["errors"]["value"]) - 3 / 30) < 1e-9 and "10,00%" in kpi(html, "errors")
+      and "3 erros" in kpi(html, "errors"))
 # cache: 20 × 100000 de leitura / (entrada 20×10000 + 2×100 + 2e6 + 3×500 + leitura 2e6 + criação 0)
 tin = 20 * 10_000 + 2 * 100 + 2 * 1_000_000 + 3 * 500
 check("KPI cache: leitura sobre a entrada total", abs(float(KP["cache"]["value"]) - 2_000_000 / (tin + 2_000_000)) < 1e-9)
+check("KPI cache: rótulo e dica dizem o que entra na conta", "Leitura de cache" in kpi(html, "cache") and "Cache de entrada" not in html
+      and 'title="Tokens lidos do cache ÷ (entrada nova + leitura de cache + escrita de cache)' in html)
+check("KPI erros: a dica diz o denominador", 'title="Spans com erro ÷ todos os spans da janela' in html)
 
 # ------------------------------------------------------------------------------ totais batendo com /uso e /v1/usage
 _, uso = get(app, "/uso", Q)
@@ -349,5 +354,5 @@ ST.dash_mod.snapshot = real_snapshot
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 74
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 76
 check_end
