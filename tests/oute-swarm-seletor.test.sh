@@ -11,6 +11,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
+trap 'rcv_stop; rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------- #219: seletor de modelo (ADR-02)
 # 11. spawn: fase da issue, exceção, sem label, gh fora
