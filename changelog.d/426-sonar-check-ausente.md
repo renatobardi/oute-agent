@@ -1,0 +1,2 @@
+### Changed
+- **Check `SonarCloud Code Analysis` ausente no head** (#426). O §3 do `docker/swarm.md` e a `oute-aidlc-qa-pr-audit` mandam, depois de 5 minutos sem o check, ler `oute-sonar pr <n> --json`: com `commit` = head e gate `OK`, pedir ao worker um push novo para a análise republicar o check; com `commit` diferente ou gate falho, tratar como pendente ou reprovado. Nunca dispensa o check. **Precisa de release** (o `swarm.md` vai na imagem).
