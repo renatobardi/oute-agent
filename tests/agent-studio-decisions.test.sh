@@ -92,7 +92,8 @@ check "tray: round_stalled só de r-velha, junto da decisão" jqe '[.alerts[] | 
 
 # ---------------------------------------------------------------- 3. topo das telas
 PAGE="$(curl -s "${A[@]}" "$STUDIO_URL/conversas")"
-check "tela: bloco de decisões no topo, com 5 pendentes" bash -c 'grep -qF "id=\"decisoes\" data-decisoes=\"5\"" <<<"$1"' _ "$PAGE"
+# r-velha tem 120 min, no limite das 2 h da faixa (#524): aberta ou em "antigos", conforme o segundo; o que vale aqui é estar no bloco
+check "tela: bloco de decisões no topo, com 5 pendentes (abertas e em antigos)" bash -c 'grep -qF "id=\"decisoes\"" <<<"$1" && test "$(grep -cF "data-decisao=\"" <<<"$1")" = 5' _ "$PAGE"
 check "tela: r-pend com a pergunta e o host"           bash -c 'grep -A1 -F "data-decisao=\"r-pend\" data-host=\"oute-server\"" <<<"$1" | grep -qF "1. aprovar a triagem  2. cortar a #387"' _ "$PAGE"
 check "tela: respondida e fechada fora do bloco"       bash -c '! grep -qF "data-decisao=\"r-resp\"" <<<"$1" && ! grep -qF "data-decisao=\"r-fechada\"" <<<"$1"' _ "$PAGE"
 check "tela: texto 'Decisão pendente na rodada'"       bash -c 'grep -qF "Decisão pendente na rodada r-velha" <<<"$1"' _ "$PAGE"
