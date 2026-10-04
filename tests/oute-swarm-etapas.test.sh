@@ -324,11 +324,13 @@ sig, state, path, home, fake, lib, swarm, writer, rev = sys.argv[1:]
 env = dict(os.environ, PATH=path, HOME=home, FAKE=fake, OUTE_LIB=lib, OUTE_SWARM_ID="swarm-test")
 p = subprocess.Popen([swarm, "step", "review", "fechamento", "--writer", writer, "--rev", rev], env=env,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
-time.sleep(1.5)
-during = len(glob.glob(os.path.join(state, ".revisor.*", "prompt")))
+pat = os.path.join(state, ".revisor.*", "prompt")
+prazo = time.monotonic() + 30
+while not glob.glob(pat) and p.poll() is None and time.monotonic() < prazo:
+    time.sleep(0.05)
+during = len(glob.glob(pat))
 p.send_signal(getattr(signal, sig))
 rc = p.wait()
-time.sleep(0.5)
 print(f"{rc} {during}")
 PYD
 )"
