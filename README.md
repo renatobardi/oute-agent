@@ -173,6 +173,7 @@ oute tray uninstall   # desfaz (a tabela ~/.oute/tray-hosts editada fica)
 - Leitura que falha (rede, 401, 500) mantém o último menu e mostra "sem leitura há X".
 - Pedido novo vira notificação do macOS (nenhuma na primeira leitura).
 - `~/.oute/tray-hosts` diz como chegar a cada máquina, uma linha `<host>=local` ou `<host>=<alias ssh>`. Pedido de host `local` abre `oute approve <id>`; de outro host, `ssh -t <alias> 'bash -lc "oute approve <id>"'`. O alias sai só dessa tabela, nunca do texto da API; host fora dela ou id fora do formato `AAAAMMDD-HHMMSS-slug` deixa o item desabilitado.
+- Visual (Kubo, #473): símbolos SF Symbols sem cor, pintados pelo sistema. O âmbar do Gate aparece só no pedido pendente e na decisão pendente do swarm; erro e alerta usam o mesmo símbolo, sem cor. A regra fica em `tray/Sources/TrayCore/MenuSymbol.swift`.
 - Testes: `swift test` em `tray/` (o `TrayCore`) e `tests/oute-tray.test.sh` (o `oute tray`, com `swift` e `launchctl` falsos).
 
 ## Segurança

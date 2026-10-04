@@ -3,17 +3,29 @@ import SwiftUI
 import TrayCore
 
 /// O menu: máquinas, pedidos, decisões do swarm, custo de hoje, erros da última hora e alertas. Os textos são do
-/// `MenuText`; o que vem da API entra como texto puro.
+/// `MenuText`; o que vem da API entra como texto puro. Os símbolos são do `MenuSymbol` (#473, Kubo): sem cor, com
+/// o âmbar só no pedido e na decisão pendentes.
 struct TrayMenu: View {
     @ObservedObject var model: TrayModel
 
     var body: some View {
+        // no menu do macOS o `Label` mostra só o título, a não ser com este estilo
+        Group { content }.labelStyle(.titleAndIcon)
+    }
+
+    /// Linha só de leitura com símbolo: botão desabilitado, que o menu desenha com a imagem.
+    private func row(_ text: String, _ symbol: MenuSymbol) -> some View {
+        Button {} label: { MenuLabel(text, symbol) }.disabled(true)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let error = model.configError {
-            Text(error)
+            row(error, .notice)
             Divider()
         }
         if let notice = model.reading.notice(now: Date()) {
-            Text(notice)
+            row(notice, .notice)
             Divider()
         }
         if let snapshot = model.reading.snapshot {
@@ -23,15 +35,15 @@ struct TrayMenu: View {
             cost(snapshot)
             errorsAndAlerts(snapshot)
         }
-        Button("Abrir o agent-studio") { model.openStudio() }
-        Button("Atualizar agora") { Task { await model.refresh() } }
+        Button { model.openStudio() } label: { MenuLabel("Abrir o agent-studio", .openStudio) }
+        Button { Task { await model.refresh() } } label: { MenuLabel("Atualizar agora", .refresh) }
         Divider()
-        Button("Sair do tray") { NSApplication.shared.terminate(nil) }
+        Button { NSApplication.shared.terminate(nil) } label: { MenuLabel("Sair do tray", .quit) }
     }
 
     @ViewBuilder
     private func machines(_ snapshot: TraySnapshot) -> some View {
-        Text("Máquinas")
+        row("Máquinas", .machines)
         ForEach(Array(snapshot.machines.enumerated()), id: \.offset) { _, machine in
             Text(MenuText.machine(machine))
         }
@@ -40,16 +52,18 @@ struct TrayMenu: View {
 
     @ViewBuilder
     private func proposals(_ snapshot: TraySnapshot) -> some View {
-        Text(MenuText.proposalsHeader(snapshot.proposals))
+        row(MenuText.proposalsHeader(snapshot.proposals), .proposals)
         ForEach(Array(snapshot.proposals.pending.enumerated()), id: \.offset) { _, proposal in
-            Menu(MenuText.proposal(proposal)) {
-                Button("Ver script") { model.openScript(proposal) }
+            Menu {
+                Button { model.openScript(proposal) } label: { MenuLabel("Ver script", .viewScript) }
                     .disabled(model.scriptURL(proposal) == nil)
                 // os dois abrem o mesmo `oute approve <id>`: é lá que o Bardi lê o script e decide
-                Button("Aprovar…") { model.openApprove(proposal) }
+                Button { model.openApprove(proposal) } label: { MenuLabel("Aprovar…", .approve) }
                     .disabled(model.approveCommand(proposal) == nil)
-                Button("Recusar…") { model.openApprove(proposal) }
+                Button { model.openApprove(proposal) } label: { MenuLabel("Recusar…", .refuse) }
                     .disabled(model.approveCommand(proposal) == nil)
+            } label: {
+                MenuLabel(MenuText.proposal(proposal), .pendingProposal)
             }
         }
         Divider()
@@ -58,9 +72,9 @@ struct TrayMenu: View {
     @ViewBuilder
     private func decisions(_ snapshot: TraySnapshot) -> some View {
         if let decisions = snapshot.decisions, !decisions.pending.isEmpty {
-            Text("Decisões pendentes do swarm: \(decisions.pending.count)")
+            row("Decisões pendentes do swarm: \(decisions.pending.count)", .decisions)
             ForEach(Array(decisions.pending.enumerated()), id: \.offset) { _, decision in
-                Text(MenuText.decision(decision))
+                row(MenuText.decision(decision), .pendingDecision)
             }
             Divider()
         }
@@ -68,7 +82,7 @@ struct TrayMenu: View {
 
     @ViewBuilder
     private func cost(_ snapshot: TraySnapshot) -> some View {
-        Text(MenuText.cost(snapshot.costToday))
+        row(MenuText.cost(snapshot.costToday), .cost)
         ForEach(Array(snapshot.costToday.agents.enumerated()), id: \.offset) { _, agent in
             Text(MenuText.agentCost(agent))
         }
@@ -77,12 +91,12 @@ struct TrayMenu: View {
 
     @ViewBuilder
     private func errorsAndAlerts(_ snapshot: TraySnapshot) -> some View {
-        Text(MenuText.errors(snapshot.errorsLastHour))
+        row(MenuText.errors(snapshot.errorsLastHour), .errors)
         ForEach(Array(snapshot.errorsLastHour.rows.enumerated()), id: \.offset) { _, row in
             Text(MenuText.errorRow(row))
         }
         Divider()
-        Text("Alertas: \(snapshot.alerts.count)")
+        row("Alertas: \(snapshot.alerts.count)", .alerts)
         ForEach(Array(snapshot.alerts.enumerated()), id: \.offset) { _, alert in
             Text(MenuText.alert(alert))
         }
