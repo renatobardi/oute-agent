@@ -252,6 +252,9 @@ meter::-moz-meter-bar { background: var(--primary); border-radius: 0 3px 3px 0; 
 pre.script { max-height: none; padding: 16px; border-radius: 0; background: transparent; box-shadow: none; font-size: 12.5px; line-height: 1.65; }
 .comando { padding: 10px 12px; border-radius: var(--radius-xl); background: var(--muted); overflow-wrap: anywhere; }
 .copiar.copiado { color: var(--primary); }
+.decididos > summary { cursor: pointer; margin-bottom: 8px; font-size: 16px; font-weight: 600; }
+.decididos:not([open]) > summary { margin-bottom: 0; }
+table.pedidos td.acao { white-space: normal; }
 .root { color: var(--destructive); font-weight: 600; }
 dd.erro { color: var(--destructive); }
 .so-celular-linha { display: none; }

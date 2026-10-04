@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% set nav = "pedidos" %}
 {% set crumbs = [("Governança", none), ("Pedidos", none)] %}
-{% from "_macros.html" import badge, icon %}
+{% from "_macros.html" import badge, icon, copy_button %}
+{% block head %}<script src="/static/copiar.js" defer></script>{% endblock %}
 {% block title %}Pedidos · agent-studio{% endblock %}
 {% macro proposal_data(p) %}data-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}" data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}" data-rc="{{ '' if p.rc is none else p.rc }}"{% endmacro %}
 {% macro proposal_link(p) %}<a href="{{ p.id|proposal_path }}">{{ p.title or p.id }}</a>{% if p.title %} <span class="sub">{{ p.id }}</span>{% endif %}{% endmacro %}
@@ -13,14 +14,13 @@
   <p class="nota">Pedidos do canal de aprovação (<code>oute-propose</code>). Esta tela só mostra: aprovar e recusar continuam
     no host, com o <code>oute approve</code>.</p>
 </div>
-<div class="metades">
 <div class="pilha">
 <h2 class="secao">Pendentes ({{ pending_total|num }})</h2>
 {% if pending_total > pending|length %}<p class="aviso">Mostrando os {{ pending|length|num }} mais recentes de {{ pending_total|num }}.</p>{% endif %}
 {% if pending %}
 <div class="cartao rolagem">
 <table class="pedidos empilha">
-  <thead><tr><th class="n">Idade</th><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th><th>Proposto em ({{ tzl() }})</th></tr></thead>
+  <thead><tr><th class="n">Idade</th><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th><th>Proposto em ({{ tzl() }})</th><th>Comando</th></tr></thead>
   <tbody>
   {% for p in pending %}
   <tr {{ proposal_data(p) }}>
@@ -30,6 +30,7 @@
     <td class="sec">{{ p.agent or "—" }}</td>
     <td class="sec">{{ p.host or "—" }}</td>
     <td class="hora sec">{{ p.proposed_at|when }}</td>
+    <td class="acao">{% if p.id is safe_cmd_id %}<code class="comando" id="cmd-{{ p.id }}">oute approve {{ p.id }}</code> {{ copy_button("cmd-" ~ p.id, "Copiar comando") }}{% else %}<span class="sub">id fora do padrão: use o <code>oute approve</code> no host</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>
@@ -40,8 +41,8 @@
 {% endif %}
 </div>
 
-<div class="pilha">
-<h2 class="secao">Decididos recentes</h2>
+<details class="pilha decididos" id="decididos">
+<summary class="secao">Decididos recentes ({{ recent|length|num }})</summary>
 {% if recent %}
 <div class="cartao rolagem">
 <table class="pedidos empilha">
@@ -67,7 +68,6 @@
 {% else %}
 <p class="aviso" id="sem-decididos">Nenhum pedido decidido.</p>
 {% endif %}
-</div>
-</div>
+</details>
 </div>
 {% endblock %}
