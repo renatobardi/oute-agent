@@ -26,6 +26,7 @@ config/ssh/      sshd_config
 tests/           *.test.sh (bash puro; rodam no CI de PR); lib/ = apoio compartilhado entre os testes
 scripts/         oute (CLI do host), oute-secrets.sh (Vaultwarden -> env), oci-bootstrap.sh, release
 secrets/         README com a convenção do vault (sem valores)
+tray/            tray do Mac (ADR-08 §10): pacote SwiftPM com o TrayCore (lógica sem tela, `swift test`) e o app de barra de menu; é do host, não da imagem
 ```
 
 ## Pré-requisitos (fora do repo)
@@ -90,6 +91,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
 | `oute watch [host]` | atalho de `approve --watch`; com host (ex.: `oute watch oute-server`), abre a espera naquele host via ssh |
 | `oute approve [--watch]` | revisa e executa (ou recusa) os scripts propostos pelos agentes — ver **Canal de aprovação** |
+| `oute tray install` / `uninstall` | **só no macOS**: compila o tray (`tray/`), monta `~/Applications/OuteTray.app` (sem ícone no Dock), cria `~/.oute/tray-hosts` se não houver e abre no login por um LaunchAgent; `uninstall` desfaz — ver **Tray no Mac** |
 | `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
 | `oute logs [svc]` / `follow [svc]` | logs |
@@ -155,6 +157,23 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 - O que roda é exatamente o que foi mostrado (o script é copiado para o host antes de exibir). Registro em `~/.oute/approve/approve.log` e cópia de cada script/saída em `~/.oute/approve/runs/`.
 - Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (o resto desses arquivos não é tocado).
 - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal é para diagnóstico, ajuste pontual e rodar o deploy de PR mergeado.
+
+
+## Tray no Mac
+
+App de barra de menu (Swift, `MenuBarExtra`; ADR-08 §10) que mostra, sem abrir o terminal, o que o `GET /v1/tray` do agent-studio devolve: máquinas, pedidos pendentes, decisões pendentes do swarm, custo de hoje (estimado marcado), erros da última hora e alertas. Na barra ficam dois números: pedidos pendentes e alertas (`?` quando o agent-studio não sabe dizer). **Não age:** "Aprovar…" e "Recusar…" abrem o Terminal no `oute approve <id>`, onde você lê o script e decide como sempre.
+
+```bash
+oute tray install     # compila, monta ~/Applications/OuteTray.app e abre no login
+oute tray uninstall   # desfaz (a tabela ~/.oute/tray-hosts editada fica)
+```
+
+- Precisa do Swift no Mac (`xcode-select --install`) e do macOS 13 ou mais novo. Sem App Store nem assinatura de desenvolvedor.
+- Lê a cada 15 s, só `GET`, com a credencial de leitura (`AGENT_STUDIO_READ_TOKEN`) lida do `~/.oute/agent.env` a cada início; o tray não copia nem registra o valor. Endereço: `OUTE_AGENT_STUDIO_URL` do `.env` (lido no `install`) ou `https://agent-studio.oute.pro`; só `https`.
+- Leitura que falha (rede, 401, 500) mantém o último menu e mostra "sem leitura há X".
+- Pedido novo vira notificação do macOS (nenhuma na primeira leitura).
+- `~/.oute/tray-hosts` diz como chegar a cada máquina, uma linha `<host>=local` ou `<host>=<alias ssh>`. Pedido de host `local` abre `oute approve <id>`; de outro host, `ssh -t <alias> 'bash -lc "oute approve <id>"'`. O alias sai só dessa tabela, nunca do texto da API; host fora dela ou id fora do formato `AAAAMMDD-HHMMSS-slug` deixa o item desabilitado.
+- Testes: `swift test` em `tray/` (o `TrayCore`) e `tests/oute-tray.test.sh` (o `oute tray`, com `swift` e `launchctl` falsos).
 
 ## Segurança
 
