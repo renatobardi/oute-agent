@@ -303,7 +303,7 @@ check("janela inválida: 400", get(app4, "/", "hours=abc")[0] == 400 and get(app
       and get(app4, "/", "hours=0")[0] == 400)
 check("HX-Request não leva o casco nem os alertas, mas a rota responde", get(app4, "/", "hours=24", headers=(("HX-Request", "true"),))[0] == 200)
 check("nome de sessão com HTML sai escapado nos links e no texto", "T-LENTA" in html and "<b>x</b>" not in html)
-# a consulta do Dashboard não segura a trava do escritor (#475): outras leituras e a ingestão seguem enquanto ela roda
+# a consulta do Dashboard não segura a trava do escritor (#504): outras leituras e a ingestão seguem enquanto ela roda
 import threading
 db9 = DB("trava").flush()
 calls = []
