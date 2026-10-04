@@ -137,6 +137,10 @@ spool_max_bytes = 41943040
 spool_dropped_window_minutes = 60
 # Até onde a consulta olha para trás (spool, "desde quando").
 lookback_hours = 24
+# Faixas da tela (#524): rodada parada, rodada antiga, alerta de preço e decisão pendente com mais de tantas horas saem da
+# faixa e entram no contador "antigos" (abre por clique). Fila, destino recusando, host sem dado, spool e cota nunca recolhem.
+# Só a tela: o `GET /v1/alerts` e o `GET /v1/tray` não mudam.
+band_recent_hours = 2
 # Cota das assinaturas (#55, #347): o oute-swarm (spawn e close) e o oute-task (abertura) mandam um snapshot, sem coleta
 # periódica. Alerta quando o último ponto de quota_metric, por host, agente e janela (5h, 7d), chega a quota_max_pct.
 # O ponto só vale até o reset da janela (quota_reset_metric, mesma hora): passou, o alerta some. Exceção só da janela

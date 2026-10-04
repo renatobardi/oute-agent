@@ -47,6 +47,8 @@ TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD)
 PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
                "price_fixed_differs")
 ALL_TYPES = TYPES + PRICE_TYPES
+# só estes recolhem por tempo na faixa da tela (#524); os outros ficam abertos enquanto durarem
+BAND_AGING_TYPES = (ROUND_STALLED, ROUND_OLD) + PRICE_TYPES
 
 # métricas do próprio collector (#162), nomes da versão fixada no compose
 QUEUE_SIZE = "otelcol_exporter_queue_size"
@@ -76,6 +78,7 @@ class AlertConfig:
     quota_reset_metric: str = "oute.quota.reset_in_seconds"
     quota_reset_grace_minutes: float = 20
     round_stalled_minutes: float = 30
+    band_recent_hours: float = 2
 
     @classmethod
     def parse(cls, raw):

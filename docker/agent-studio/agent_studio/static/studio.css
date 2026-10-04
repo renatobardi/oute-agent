@@ -292,6 +292,7 @@ dd.erro { color: var(--destructive); }
 .alertas p { margin: 0; flex: 1; }
 .alertas ul, .decisoes ul { margin: 0; padding: 0; list-style: none; }
 .faixa-link { flex-shrink: 0; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+.faixa-corpo details.antigos > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
 @media (max-width: 640px) { .alertas, .decisoes { padding: 10px 16px; } }
 /* tela Entrar (#467): painel --primary à esquerda e formulário à direita; uma coluna só no celular */
 .entrar { display: flex; flex-wrap: wrap; min-height: 100vh; }
