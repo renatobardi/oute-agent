@@ -364,18 +364,45 @@ def _p95_regression(con, latency, prev_latency, from_ns, to_ns):
     worst["session"] = _worst_session(con, worst["model"], from_ns, to_ns)
     return worst
 
+FINE = ("session", "agent", "model", "phase")
+
+
+def _merge(into, a):
+    """Soma o acumulador `a` em `into` (o `p95` não soma: quem precisa dele o lê à parte)."""
+    for k in ("calls", "real_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
+        into[k] += a[k]
+    for t in into["tokens"]:
+        into["tokens"][t] += a["tokens"][t]
+    for k in ("real_usd", "estimated_usd"):
+        if a[k] is not None:
+            into[k] = a[k] if into[k] is None else into[k] + a[k]
+    into["unpriced_models"] |= a["unpriced_models"]
+    return into
+
+
+def _regroup(fine, keys):
+    """O resultado de `usage.aggregate(FINE)` reagrupado por `keys` (subconjunto de FINE): uma leitura só do DuckDB serve
+    todos os cortes do Dashboard (#504: eram cinco leituras, cada uma refazendo a junção com os logs de custo)."""
+    idx = [FINE.index(k) for k in keys]
+    out = {} if keys else {(): usage_mod._empty()}
+    for key, a in fine.items():
+        _merge(out.setdefault(tuple(key[i] for i in idx), usage_mod._empty()), a)
+    return out
+
 
 def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
     """Tudo o que a tela mostra, do DuckDB, na janela [from_ns, to_ns) e na anterior de mesmo tamanho."""
     span = to_ns - from_ns
     prev_from = from_ns - span
-    cur = usage_mod.aggregate(con, from_ns, to_ns, prices, (), tz)[()]
+    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz)
+    cur = _regroup(fine, ())[()]
+    cur["p95"] = usage_mod.aggregate_p95(con, from_ns, to_ns, tz)
     prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz)[()]
-    by_model = usage_mod.aggregate(con, from_ns, to_ns, prices, ("model",), tz)
+    by_model = _regroup(fine, ("model",))
     total_cost = _cost(cur) or 0.0
     models = _models(by_model, total_cost, cur["calls"])
     latency = _model_latency(con, from_ns, to_ns)
-    by_session = usage_mod.aggregate(con, from_ns, to_ns, prices, ("session", "agent", "model"), tz)
+    by_session = _regroup(fine, ("session", "agent", "model"))
     return {
         "from_ns": from_ns, "to_ns": to_ns, "span_ns": span, "prev_from_ns": prev_from,
         "totals": usage_mod.render((), cur, ()), "prev_totals": usage_mod.render((), prev, ()),
@@ -384,7 +411,7 @@ def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
         "composition": {"real_usd": cur["real_usd"], "estimated_usd": cur["estimated_usd"], "total": total_cost,
                         "unpriced_calls": cur["unpriced_calls"]},
         "latency": _latency_rows(latency)[:MODELS_SHOWN],
-        "phases": _phases(usage_mod.aggregate(con, from_ns, to_ns, prices, ("phase",), tz)),
+        "phases": _phases(_regroup(fine, ("phase",))),
         "heat": _heat(con, to_ns, tz),
         "top_sessions": _top_sessions(by_session),
         "rules": {"p95": _p95_regression(con, latency, _model_latency(con, prev_from, from_ns), from_ns, to_ns),
