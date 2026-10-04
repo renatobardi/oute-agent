@@ -194,4 +194,7 @@ check "538: dispatcher cita a trava (código 77) e o limite" bash -c 'grep -qF "
 check "541: tell com comentário usa o URL da saída do gh pr comment, em variável, nunca digitado" grep -qF 'usa o URL copiado da saída do `gh pr comment`, guardado numa variável' "$D"
 check "541: auditoria e reauditoria gravam a saída do gate e só tiram a worktree depois de copiar a falha" grep -qF 'a saída de cada gate vai para um arquivo' "$D"
 check "541: worktree só sai depois de a falha ser lida e copiada para o relatório" grep -qF 'a worktree só sai depois de a falha ser lida e copiada para o relatório' "$D"
+# 485. refcheck antes do pedido de merge
+check "485: dispatcher roda oute-refcheck sobre o pedido de merge antes de mostrá-lo ao Bardi" grep -qF 'antes de mostrar o pedido de merge ao Bardi, grave o texto num arquivo e rode `oute-refcheck <arquivo>`' "$D"
+check "485: skill de auditoria roda oute-refcheck sobre o relatório antes de publicar" grep -qF 'Antes de publicar, rode `oute-refcheck <arquivo do relatório>`' "$A"
 check_end

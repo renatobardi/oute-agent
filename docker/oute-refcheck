@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""oute-refcheck — confere que cada referência citada num texto EXISTE e o Bardi consegue abrir (#485).
+
+uso:  oute-refcheck [arquivo]     sem arquivo (ou com `-`), lê o stdin
+      oute-refcheck -h|--help
+Referências conferidas:
+  #N                       issue ou PR que existe no repo (gh api, só GET)
+  SHA (7 a 40 hex)         commit que existe (git cat-file)
+  arquivo:linha[-linha]    o arquivo e a linha existem em algum dos refs (padrão: HEAD e origin/main)
+  arquivo:linha@sha        o arquivo e a linha existem nesse commit
+  link de comentário       https://github.com/<dono>/<repo>/(issues|pull)/N#issuecomment-ID responde 200
+  /tmp/… e …/scratchpad/…  caminho que o Bardi não abre: sempre `nao-abre`
+Saída: uma linha por referência distinta: `<resultado>\t<tipo>\t<referência>[\t<motivo>]`, e por último o resumo
+(`# <n> referências: …`). Resultado: `ok`, `quebrada`, `nao-abre` ou `nao-conferido` (gh fora do ar ou sem resposta).
+Código: 0 todas ok | 1 há quebrada ou que não abre | 2 uso | 3 só há não conferidas (nada quebrado).
+Ambiente: OUTE_REFCHECK_REPO (padrão: <dono>/<repo> do remoto origin), OUTE_REFCHECK_REFS (refs do arquivo:linha sem
+@sha; padrão `HEAD origin/main`), OUTE_REFCHECK_TIMEOUT (segundos por chamada do gh; padrão 20).
+Só leitura: só `gh api` (GET) e `git cat-file`/`git show`.
+LIMITE: confere que a referência EXISTE, não que ela SUSTENTA a frase. Isso é do revisor."""
+import os, re, subprocess, sys
+
+DOC = __doc__
+
+
+def sh(args, timeout):
+    """Roda o comando; devolve (código, stdout, stderr). Tempo esgotado ou comando ausente = código -1."""
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return -1, "", str(e)
+    return r.returncode, r.stdout, r.stderr
+
+
+def repo_slug():
+    env = os.environ.get("OUTE_REFCHECK_REPO")
+    if env:
+        return env
+    rc, out, _ = sh(["git", "remote", "get-url", "origin"], 10)
+    m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?\s*$", out) if rc == 0 else None
+    return m.group(1) if m else "renatobardi/oute-agent"
+
+
+def gh_get(path, jq, timeout):
+    """GET na API. Devolve ('ok', saída), ('nao-existe', '') para 404/410 ou ('nao-conferido', motivo)."""
+    rc, out, err = sh(["gh", "api", path, "-q", jq], timeout)
+    if rc == 0:
+        return "ok", out.strip()
+    if re.search(r"HTTP (404|410)|Not Found", err):
+        return "nao-existe", ""
+    return "nao-conferido", "gh sem resposta" if rc == -1 else "gh fora do ar"
+
+
+def check_issue(repo, n, timeout):
+    st, why = gh_get(f"repos/{repo}/issues/{n}", ".number", timeout)
+    if st == "ok":
+        return "ok", ""
+    return ("quebrada", "issue ou PR não existe") if st == "nao-existe" else ("nao-conferido", why)
+
+
+def check_comment(repo, owner_repo, kind_n, cid, timeout):
+    st, out = gh_get(f"repos/{owner_repo}/issues/comments/{cid}", ".issue_url", timeout)
+    if st == "nao-conferido":
+        return "nao-conferido", out
+    if st == "nao-existe":
+        return "quebrada", "comentário não existe"
+    if not out.endswith(f"/issues/{kind_n}"):
+        return "quebrada", "comentário é de outra issue ou PR"
+    return "ok", ""
+
+
+def check_sha(sha, timeout):
+    rc, _, _ = sh(["git", "cat-file", "-e", sha + "^{commit}"], timeout)
+    return ("ok", "") if rc == 0 else ("quebrada", "commit não existe")
+
+
+def check_file_line(path, first, last, sha, refs, timeout):
+    reason = "arquivo não existe"
+    for ref in ([sha] if sha else refs):
+        rc, out, _ = sh(["git", "show", f"{ref}:{path}"], timeout)
+        if rc != 0:
+            continue
+        total = len(out.splitlines())
+        if first >= 1 and max(first, last) <= total:
+            return "ok", ref
+        reason = f"arquivo tem {total} linhas"
+    return "quebrada", reason
+
+
+def scan(txt, repo, refs, timeout):
+    out, seen = [], set()
+
+    def add(kind, ref, res):
+        if (kind, ref) not in seen:
+            seen.add((kind, ref))
+            out.append((res[0], kind, ref, res[1]))
+
+    for m in re.finditer(r"(?<![\w/.-])(/tmp/[^\s`'\")\]>]+|[^\s`'\"(\[<]*/scratchpad/[^\s`'\")\]>]*)", txt):
+        add("caminho", m.group(1).rstrip(".,;:"), ("nao-abre", "caminho de scratchpad ou /tmp: o Bardi não abre"))
+    for m in re.finditer(r"https://github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)", txt):
+        add("comentario", m.group(0), check_comment(repo, m.group(1), m.group(2), m.group(3), timeout))
+    for m in re.finditer(r"(?<![\w/&#.-])#(\d{1,5})\b", txt):
+        add("#N", "#" + m.group(1), check_issue(repo, m.group(1), timeout))
+    for m in re.finditer(r"(?<![\w/#.-])([0-9a-f]{7,40})\b", txt):
+        s = m.group(1)
+        if re.search(r"[a-f]", s) and re.search(r"\d", s):   # evita número puro e palavra
+            add("sha", s, check_sha(s, timeout))
+    pat = r"`?((?:(?:docker|scripts|addons|tests|config|docs|tray|changelog\.d|\.github)/[\w./-]*[\w-]|(?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)):(\d+)(?:-(\d+))?`?(?:@([0-9a-f]{7,40}))?"
+    for m in re.finditer(r"(?<![\w/.-])" + pat, txt):
+        path, a, b, sha = m.group(1), int(m.group(2)), int(m.group(3) or m.group(2)), m.group(4)
+        if path.startswith("/tmp/") or "/scratchpad/" in path:
+            continue
+        st, why = check_file_line(path, a, b, sha, refs, timeout)
+        add("arquivo:linha", m.group(0).strip("`"), (st, f"em {why}" if st == "ok" else why))
+    return out
+
+
+def main(argv):
+    if len(argv) > 1 or (argv and argv[0] in ("-h", "--help")):
+        print(DOC, file=sys.stderr if argv and argv[0] not in ("-h", "--help") else sys.stdout)
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    try:
+        timeout = float(os.environ.get("OUTE_REFCHECK_TIMEOUT", "20"))
+    except ValueError:
+        print("oute-refcheck: OUTE_REFCHECK_TIMEOUT inválido", file=sys.stderr)
+        return 2
+    try:
+        txt = sys.stdin.read() if not argv or argv[0] == "-" else open(argv[0], encoding="utf-8", errors="replace").read()
+    except OSError as e:
+        print(f"oute-refcheck: não abri {argv[0]}: {e.strerror}", file=sys.stderr)
+        return 2
+    refs = os.environ.get("OUTE_REFCHECK_REFS", "HEAD origin/main").split()
+    rows = scan(txt, repo_slug(), refs, timeout)
+    for res, kind, ref, why in rows:
+        print("\t".join([res, kind, ref] + ([why] if why else [])))
+    n = {k: sum(1 for r in rows if r[0] == k) for k in ("ok", "quebrada", "nao-abre", "nao-conferido")}
+    print(f"# {len(rows)} referências: {n['ok']} ok, {n['quebrada']} quebrada, {n['nao-abre']} nao-abre, "
+          f"{n['nao-conferido']} nao-conferido. Confere que existe, não que sustenta a frase.")
+    if n["quebrada"] or n["nao-abre"]:
+        return 1
+    return 3 if n["nao-conferido"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

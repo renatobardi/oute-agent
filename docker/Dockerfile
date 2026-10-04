@@ -172,6 +172,8 @@ COPY docker/oute-sonar /usr/local/bin/
 COPY docker/oute-quota /usr/local/bin/
 # screenshot de UI (#472): bash; o Firefox fica em /opt/oute/firefox
 COPY docker/oute-shot /usr/local/bin/
+# conferência de referência de um texto (#485): python3 stdlib, só `gh api` (GET) e `git`
+COPY docker/oute-refcheck /usr/local/bin/
 # regressão dos agentes, nível 1 (#366): bash + jq, tarefas headless em Haiku; as tarefas ficam em /usr/local/lib/oute/regression
 COPY docker/oute-regression /usr/local/bin/
 COPY docker/regression/ /usr/local/lib/oute/regression/
@@ -192,7 +194,7 @@ RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh && chmod 755 /u
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
       /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression \
-      /usr/local/bin/oute-shot /usr/local/bin/oute-swarm /usr/local/bin/oute
+      /usr/local/bin/oute-shot /usr/local/bin/oute-refcheck /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
