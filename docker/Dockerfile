@@ -107,6 +107,27 @@ RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm || echo x86_64) \
     && ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud \
     && ln -s /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil \
     && rm -rf /opt/google-cloud-sdk/.install/.backup
+# screenshot de UI e leitura de PDF (#472): Firefox ESR com versão e sha256 fixos (SHA256SUMS da release em
+# ftp.mozilla.org; conferir na release junto dos outros pins) + libs de execução + poppler-utils (pdftotext/pdftoppm).
+# O chromium do Ubuntu 24.04 é um shim de snap, e o Chrome for Testing não publica linux-arm64: por isso o Firefox.
+ARG FIREFOX_VERSION=140.17.0esr
+ARG FIREFOX_SHA256_ARM64=dd579f48405a7065f0f643ddb71a8de0f48a9d984c2783dee2ca173081850084
+ARG FIREFOX_SHA256_AMD64=86d049070ad80b74d8e674793e22d28923b4a7a1da06b4d65402f91c67a10314
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      poppler-utils xz-utils fonts-dejavu-core fonts-liberation \
+      libgtk-3-0t64 libdbus-glib-1-2 libasound2t64 libx11-xcb1 libxtst6 libxt6t64 libxcomposite1 libxdamage1 \
+      libxrandr2 libxcursor1 libxi6 libpci3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$TARGETARCH" in \
+         arm64) arch=aarch64; sum="$FIREFOX_SHA256_ARM64" ;; \
+         amd64) arch=x86_64; sum="$FIREFOX_SHA256_AMD64" ;; \
+         *) echo "TARGETARCH sem sha256 do firefox: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL --proto '=https' -o /tmp/firefox.tar.xz \
+         "https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-${arch}/en-US/firefox-${FIREFOX_VERSION}.tar.xz" \
+    && echo "$sum  /tmp/firefox.tar.xz" | sha256sum -c - \
+    && mkdir -p /opt/oute && tar -xJf /tmp/firefox.tar.xz -C /opt/oute && rm -f /tmp/firefox.tar.xz \
+    && /opt/oute/firefox/firefox --version
 # oci cli
 RUN --mount=type=cache,target=/root/.cache \
     pipx install --global oci-cli 2>/dev/null || PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install oci-cli
@@ -148,6 +169,8 @@ COPY docker/oute-select /usr/local/bin/
 COPY docker/oute-sonar /usr/local/bin/
 # cota das assinaturas Claude e Codex (#346): bash + curl + jq, só GET, nunca escreve nem renova credencial
 COPY docker/oute-quota /usr/local/bin/
+# screenshot de UI (#472): bash; o Firefox fica em /opt/oute/firefox
+COPY docker/oute-shot /usr/local/bin/
 # regressão dos agentes, nível 1 (#366): bash + jq, tarefas headless em Haiku; as tarefas ficam em /usr/local/lib/oute/regression
 COPY docker/oute-regression /usr/local/bin/
 COPY docker/regression/ /usr/local/lib/oute/regression/
@@ -164,7 +187,7 @@ RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
-      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression /usr/local/bin/oute-swarm /usr/local/bin/oute
+      /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-shot /usr/local/bin/oute-regression /usr/local/bin/oute-swarm /usr/local/bin/oute
 
 USER ${OUTE_USER}
 WORKDIR /workspace
