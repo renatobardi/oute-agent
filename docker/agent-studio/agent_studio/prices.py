@@ -336,3 +336,57 @@ def view(con, fixed, at_ns):
         sources.append({"source": s, "last_run": run and iso(run["checked_unix_nano"]), "ok": run and run["ok"],
                         "reason": run and run["reason"], "last_ok": iso(ok)})
     return {"at": iso(at_ns), "unit": "USD por 1M tokens", "models": out, "sources": sources}
+
+
+# ---------------------------------------------------------------- tendência e gráfico da tela (#534)
+TREND_DAYS = 30
+CHART_W, CHART_H = 300, 80
+
+
+def _parse_iso(s):
+    return int(time.mktime(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))) - time.timezone
+
+
+def _trend(history):
+    """Selo do último degrau: sobe ou cai (entrada; se a entrada não mudou, a saída), variação sobre o preço anterior
+    e a data da troca. `None` com uma linha só ou sem mudança em entrada nem saída."""
+    for prev, cur in zip(reversed(history[:-1]), reversed(history[1:])):
+        for axis, label in (("input", "Entrada"), ("output", "Saída")):
+            a, b = prev[axis] or 0, cur[axis] or 0
+            if abs(a - b) > 1e-9 * max(1.0, abs(a), abs(b)):
+                pct = None if a == 0 else (b - a) / a * 100
+                return {"dir": "up" if b > a else "down", "axis": label, "pct": pct, "since": cur["since"]}
+    return None
+
+
+def _steps(points, x_of, y_of, end_x):
+    d = f"M{x_of(points[0][0]):.1f} {y_of(points[0][1]):.1f}"
+    for t, v in points[1:]:
+        d += f" H{x_of(t):.1f} V{y_of(v):.1f}"
+    return d + f" H{end_x:.1f}"
+
+
+def _chart(history, at_ns):
+    """Caminhos SVG em degrau do preço de entrada e do de saída (só números, nada vindo do dado em texto)."""
+    pts = [(_parse_iso(h["since"]), h["input"] or 0, h["output"] or 0) for h in history]
+    t0, t1 = pts[0][0], max(at_ns // 10**9, pts[-1][0])
+    top = max(max(p[1], p[2]) for p in pts) or 1
+    x_of = lambda t: (t - t0) / (t1 - t0) * CHART_W if t1 > t0 else 0.0
+    y_of = lambda v: CHART_H - 4 - v / top * (CHART_H - 8)
+    return {"input": _steps([(p[0], p[1]) for p in pts], x_of, y_of, CHART_W),
+            "output": _steps([(p[0], p[2]) for p in pts], x_of, y_of, CHART_W),
+            "w": CHART_W, "h": CHART_H, "top": top}
+
+
+def decorate(data, at_ns):
+    """Acrescenta ao `view` o que a tela precisa: por modelo `trend` e `chart`; no topo `summary` (quantos modelos
+    subiram e quantos caíram no último degrau, se ele foi nos últimos `TREND_DAYS` dias). O `GET /v1/prices` não muda."""
+    since_s = at_ns // 10**9 - TREND_DAYS * 86400
+    up = down = 0
+    for m in data["models"]:
+        m["trend"] = _trend(m["history"])
+        m["chart"] = _chart(m["history"], at_ns)
+        if m["trend"] and _parse_iso(m["trend"]["since"]) >= since_s:
+            up += m["trend"]["dir"] == "up"
+            down += m["trend"]["dir"] == "down"
+    return {**data, "summary": {"up": up, "down": down, "days": TREND_DAYS}}
