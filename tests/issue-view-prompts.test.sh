@@ -18,6 +18,14 @@ check "detector: pega a forma antiga" bash -c '[ "$(grep -c -E "$1" "$2")" -eq 2
 printf '%s\n' 'leia com `gh issue view 12 --json title,body,comments --jq .title`' > "$TMP/novo.md"
 check "detector: não pega a forma nova" bash -c '! grep -q -E "$1" "$2"' _ "$OLD" "$TMP/novo.md"
 
+# o comando novo fica inteiro dentro de uma crase (fecha logo depois do jq), em toda ocorrência
+BADTICK='gh issue view [^`]*`[^`]*--json title,body,comments'
+check "comando novo não sai da crase (crase entre 'gh issue view' e '--json')" \
+  bash -c '! git grep -n -E "$1" -- docker addons docs ":!docker/agent-studio" ":!tests"' _ "$BADTICK"
+printf '%s\n' '`gh issue view <n> --repo a/b`. --json title,body,comments --jq .x' > "$TMP/quebrado.md"
+check "detector: pega o comando quebrado pela crase" bash -c 'grep -q -E "$1" "$2"' _ "$BADTICK" "$TMP/quebrado.md"
+check "detector: não pega o comando inteiro na crase" bash -c '! grep -q -E "$1" "$2"' _ "$BADTICK" "$TMP/novo.md"
+
 for f in docker/agent-notes.md docker/swarm.md docker/swarm-worker.md docs/agents/issue-tracker.md \
          addons/skills/oute-aidlc-qa-pr-audit/SKILL.md addons/skills/oute-aidlc-learn-insights/SKILL.md \
          addons/skills/oute-aidlc-ctx-setup/issue-tracker-github.md; do
