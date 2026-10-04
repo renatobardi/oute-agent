@@ -305,4 +305,10 @@ for f in "$W" "$N"; do b="$(basename "$f")"
   check "haiku: $b trata id desconhecido como Haiku (#481)"         grep -qF 'Se o id não aparecer, trate a sessão como Haiku' "$f"
   check "haiku: $b sem subagente publica e avisa (#481)"            grep -qF 'avisa, na primeira linha do texto, que ele saiu do Haiku' "$f"
 done
+
+# trechos ambíguos reescritos (#488)
+check "swarm.md: spike sem a frase truncada (#488)"      bash -c '! grep -qF "uma linha claro" "$1"' _ "$D"
+check "swarm.md: cada issue recomendada numa linha clara (#488)" grep -qF 'cada uma descrita numa linha clara, sem código de produção' "$D"
+check "audit: Refs troca para Closes e o Falta só de (ship) fica (#488)" grep -qF 'A correção é trocar para `Closes`; o `## Falta` com itens só de `(ship)` fica como está, com a marca, e sem item nenhum a seção sai.' "$A"
+check "audit: sem o 'remover a seção ou manter como está' (#488)" bash -c '! grep -qF "remover a seção ou manter como está" "$1"' _ "$A"
 check_end

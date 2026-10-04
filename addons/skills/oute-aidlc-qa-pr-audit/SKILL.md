@@ -250,7 +250,7 @@ Pergunta: o PR entrega o que a issue pediu, nem mais, nem menos, e declara isso 
    - `Closes #n` só vale se **todos** os critérios estão `atendido`, exceto o critério de pós-deploy (fase `ship`: só se verifica depois da release e do deploy nos hosts): ele **não conta para `Closes` × `Refs`** (#133), desde que esteja no `## Falta` do PR com a marca `(ship)`;
    - com qualquer outro critério não `atendido`, o certo é `Refs #n` e uma seção `## Falta` no corpo do PR que liste cada um deles;
    - `Closes` com critério pendente que não é de pós-deploy, ou `## Falta` que omite um critério pendente (inclusive o de pós-deploy), é divergência BLOCKING: a correção é trocar para `Refs` (ou, se só falta pós-deploy, manter `Closes`) e completar o `## Falta`;
-   - **`Refs` (ou nenhuma palavra-chave) com todos os critérios de build atendidos** (#387): BLOCKING. O PR deveria usar `Closes` (se só falta critério de pós-deploy, deve estar no `## Falta` com marca `(ship)`, ou não ter `## Falta` se nada falta). A correção é trocar para `Closes` ou, se há `## Falta` só de `(ship)`, remover a seção ou manter como está com a marca.
+   - **`Refs` (ou nenhuma palavra-chave) com todos os critérios de build atendidos** (#387): BLOCKING. O PR deveria usar `Closes` (se só falta critério de pós-deploy, deve estar no `## Falta` com marca `(ship)`, ou não ter `## Falta` se nada falta). A correção é trocar para `Closes`; o `## Falta` com itens só de `(ship)` fica como está, com a marca, e sem item nenhum a seção sai.
 
 ## 8. Eixo Standards
 

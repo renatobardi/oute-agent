@@ -1,0 +1,2 @@
+### Fixed
+- **Dois trechos ambíguos dos prompts reescritos, sem mudar a regra** (#488). `docker/swarm.md` (spike com critério que pede abrir issue: a frase truncada "cada uma uma linha claro" virou "cada uma descrita numa linha clara") e `qa-pr-audit` (correção do `Refs` com todos os critérios de build atendidos: troca para `Closes`; o `## Falta` só de `(ship)` fica com a marca, e sem item a seção sai). **Precisa de release** (`swarm.md` vai na imagem).
