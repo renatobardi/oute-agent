@@ -1,0 +1,2 @@
+### Changed
+- **Checagem de função de shell nova e critério de ship em `docker/swarm-worker.md`** (#501). A checagem antes do PR acrescenta a regra: função de shell nova, inclusive em teste, deve levar `local` nos parâmetros e `return` explícito no fim. A regra de `Closes` × `Refs` esclarece que critério de `ship` (com "depois de entrar", "depois do deploy" ou "medida após a release") vai no `## Falta` com a marca `(ship)`, e o PR usa `Closes`. Precisa de release (`docker/swarm-worker.md` vai na imagem).

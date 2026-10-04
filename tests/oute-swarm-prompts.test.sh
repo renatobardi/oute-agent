@@ -311,4 +311,12 @@ check "swarm.md: spike sem a frase truncada (#488)"      bash -c '! grep -qF "um
 check "swarm.md: cada issue recomendada numa linha clara (#488)" grep -qF 'cada uma descrita numa linha clara, sem código de produção' "$D"
 check "audit: Refs troca para Closes e o Falta só de (ship) fica (#488)" grep -qF 'A correção é trocar para `Closes`; o `## Falta` com itens só de `(ship)` fica como está, com a marca, e sem item nenhum a seção sai.' "$A"
 check "audit: sem o 'remover a seção ou manter como está' (#488)" bash -c '! grep -qF "remover a seção ou manter como está" "$1"' _ "$A"
+# 501. função de shell nova com local e return (#501)
+check "worker: função de shell nova leva local nos parâmetros (#501)" grep -qF -- '- **Função de shell nova** (em `docker/`, `scripts/` e `tests/`): parâmetro posicional vai para uma variável `local` (`local x="$1"`)' "$W"
+check "worker: função de shell nova leva return explícito no fim (#501)" grep -qF 'e a função termina com `return` explícito' "$W"
+# 501. Closes x Refs: critério de ship vai no Falta com marca (ship) (#501)
+check "worker: Closes se cumpre todos menos os de ship (#501)" grep -qF 'se o PR cumpre todos os critérios de aceite da issue, exceto os de `ship`' "$W"
+check "worker: Refs se algum critério de build, qa ou design faltar (#501)" grep -qF 'se algum critério de `build`, `qa` ou `design` ficar de fora' "$W"
+check "worker: ship no Falta com marca (ship) (#501)"        grep -qF 'vai no `## Falta` com a marca `(ship)`, e o PR usa `Closes`' "$W"
+check "worker: critério de ship é depois de entrar ou deploy ou release (#501)" grep -qF 'Critério de `ship` (com "depois de entrar", "depois do deploy" ou "medida após a release")' "$W"
 check_end
