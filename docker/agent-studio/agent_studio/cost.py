@@ -3,8 +3,9 @@
 Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas (#204), o tray e a tela (#205 a
 #207), que reusam este módulo e o `usage.aggregate`. O SQL sai daqui montado, com os valores sempre em parâmetro.
 
-- **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex) ou
-  `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
+- **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex),
+  `ai_memory.llm_request` (o oute-llm-proxy, LLM do ai-memory, #459; agente `ai-memory`, custo real no `oute.cost_usd`)
+  ou `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
 - **Histórico até 2026-09-30 (#218):** o jev-router (LiteLLM + OpenRouter) saiu do stack e ninguém mais emite
   `jev.decision` nem `oute.agent=router`. As regras desses registros ficam só para o que já está gravado, para o
   custo passado não sumir do `/v1/usage`:
@@ -25,7 +26,7 @@ Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas
 from dataclasses import dataclass
 
 # nomes exatos dos spans que representam uma chamada ao modelo
-MODEL_CALL_SPANS = ("claude_code.llm_request", "session_task.turn", "jev.decision")
+MODEL_CALL_SPANS = ("claude_code.llm_request", "session_task.turn", "ai_memory.llm_request", "jev.decision")
 # histórico até 2026-09-30 (#218): só existem em registro já gravado, ninguém mais emite
 ROUTER_AGENT = "router"
 DECISION_SPAN = "jev.decision"

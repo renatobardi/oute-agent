@@ -159,6 +159,8 @@ COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
 # eventos operacionais do swarm e do canal (ADR-04, #124): emissor único, python3 stdlib, ao bucket e ao agent-studio (ADR-08)
 COPY docker/oute-emit /usr/local/bin/
+# proxy do LLM do ai-memory (#459, ADR-08): python3 stdlib, serviço llm-proxy do compose; consumo ao collector
+COPY docker/oute-llm-proxy /usr/local/bin/
 # agentes no home pelo instalador oficial de cada um (#195)
 COPY docker/oute-agents-install /usr/local/bin/
 COPY docker/agent-notes.md /usr/local/lib/oute/agent-notes.md

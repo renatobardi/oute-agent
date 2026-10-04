@@ -5,7 +5,7 @@ Nenhum valor real vive neste repo. Três pastas no vault, cada uma com um destin
 | pasta | vai para | quem recebe |
 |---|---|---|
 | `oute-agent` | `~/.oute/agent.env` → `/run/secrets/agent_env` | o container `agent` (agentes em yolo) |
-| `oute-services` | `~/.oute/services.env` | só os serviços do compose (`agent-studio`, `surrealdb`, `otel-collector`); **nunca o `agent`** |
+| `oute-services` | `~/.oute/services.env` | só os serviços do compose (`agent-studio`, `surrealdb`, `otel-collector`, `llm-proxy`); **nunca o `agent`** |
 | `oute-admin` | nada em disco | só o `oute oci-bootstrap` |
 
 **Segredo novo: em que pasta?** (ADR-01, adendo #256) Pergunte "o agente usa?". Se só um serviço usa, ou se o valor dá **escrita** em algo que o Bardi lê para decidir (telemetria, estado de pedido), é `oute-services`. Na dúvida, `oute-services`. Nome que existe na `oute-services` nunca entra no `agent.env`, mesmo repetido na `oute-agent`.
@@ -30,6 +30,7 @@ Pasta **`oute-services`** (#256; nunca vai ao `agent`):
 | item         | tipo | campos (custom fields) |
 |--------------|------|------------------------|
 | agent-studio | Note | AGENT_STUDIO_INGEST_TOKEN (credencial de ingestão: só o collector manda com ela, nos dois hosts); AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, só no oute-server) |
+| openrouter-memoria | Note | OPENROUTER_MEMORY_API_KEY (#459): chave **nova** do OpenRouter, só para o LLM do ai-memory, com teto de gasto definido no OpenRouter. Só o serviço `llm-proxy` a recebe (profile `llm-proxy`, nos dois hosts): nem o `agent`, nem o `ai-memory`, nem o collector. Não confundir com `OPENROUTER_API_KEY`, que segue no `agent` e no `agent-studio`. Sem ela o `oute up` sobe igual, sem o proxy, e o ai-memory segue sem LLM. Nunca em argumento, log, span ou saída de erro |
 
 Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
 

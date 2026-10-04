@@ -24,6 +24,12 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
   A pergunta ao Bardi (`oute.swarm.round.asked`, #386) também é evento `oute.swarm.*`: rodada com a pergunta de menos de
   `round_stalled_minutes` não conta como parada. A decisão pendente em si não é alerta (`decisions.py`).
 
+- **Proxy do LLM do ai-memory fora** (`llm_proxy_down`, #459): o `oute-llm-proxy` manda um ponto de `oute.llm_proxy.up`
+  por minuto; o último ponto de um host com heartbeat nas últimas `lookback_hours` tem mais de `llm_proxy_stale_minutes`.
+  Sem proxy o ai-memory fica sem LLM (modo por regra): o alerta é a linha que torna isso visível. Host que nunca mandou
+  heartbeat no período (proxy não ligado, ou parado há mais de `lookback_hours`) não alerta; desliga sozinho quando o
+  heartbeat volta.
+
 **Host parado** = sem nenhum registro há mais de `no_data_minutes`. Host parado não liga fila, recusa, spool nem cota
 (o último valor dele é velho): o Mac fechado não alerta; o host sempre ligado parado alerta só "host sem dado".
 
@@ -42,7 +48,8 @@ MIN_NS = 60 * 1_000_000_000
 
 QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA = "queue", "destination_refusing", "host_no_data", "spool", "quota"
 ROUND_STALLED, ROUND_OLD = "round_stalled", "round_old"
-TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD)
+LLM_PROXY = "llm_proxy_down"
+TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD, LLM_PROXY)
 # alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
 PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
                "price_fixed_differs")
@@ -78,6 +85,7 @@ class AlertConfig:
     quota_reset_metric: str = "oute.quota.reset_in_seconds"
     quota_reset_grace_minutes: float = 20
     round_stalled_minutes: float = 30
+    llm_proxy_stale_minutes: float = 5
     band_recent_hours: float = 2
 
     @classmethod
@@ -429,6 +437,20 @@ def _rounds(con, at, cfg):
     return out
 
 
+LLM_PROXY_METRIC = "oute.llm_proxy.up"
+
+
+def _llm_proxy(con, lo, at, cfg):
+    rows = _rows(con, """
+        SELECT host_name AS host, oute_instance AS instance, max(time_unix_nano) AS t FROM metrics
+        WHERE metric_name = ? AND time_unix_nano BETWEEN ? AND ? GROUP BY host_name, oute_instance
+        ORDER BY host, instance""", [LLM_PROXY_METRIC, lo, at])
+    limit = cfg.llm_proxy_stale_minutes * 60
+    return [_alert(LLM_PROXY, r["host"], r["instance"], (at - r["t"]) // 1_000_000_000, "seconds", limit, r["t"],
+                   {"attribute": LLM_PROXY_METRIC, "last_heartbeat": iso(r["t"])})
+            for r in rows if at - r["t"] > limit * 1_000_000_000]
+
+
 def enabled(cfg):
     return {t: (cfg.quota_enabled if t == QUOTA else True) for t in ALL_TYPES}
 
@@ -446,6 +468,7 @@ def evaluate(con, at_ns, cfg):
     except Exception:  # noqa: BLE001 — o cálculo da rodada parada não derruba os outros alertas (#364)
         logging.getLogger(__name__).exception("alerta de rodada parada falhou; os outros seguem")
     from . import price_alerts  # aqui e não no topo: o `price_alerts` importa este módulo
+    alerts += _llm_proxy(con, lo, at_ns, cfg)
     alerts += price_alerts.evaluate(con, at_ns)
     idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
     alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]

@@ -119,6 +119,13 @@ output = 50.0
 cache_read = 0.25
 cache_creation = 12.5
 
+# LLM do ai-memory via OpenRouter (#459): o oute-llm-proxy manda o custo real (usage.cost) em cada chamada; este preço
+# (USD por 1M tokens, OpenRouter /api/v1/models, lido no spike #429) só estima a chamada que chegar sem custo e põe o modelo
+# na conferência diária. Modelo novo do ai-memory entra aqui; sem entrada ele aparece em `unpriced_models`.
+[prices."openai/gpt-oss-120b"]
+input = 0.037
+output = 0.17
+
 # Alertas do pipeline (ADR-08 §8, #204), devolvidos pelo `GET /v1/alerts`. Chave ausente = o valor abaixo (que é
 # também o padrão do código); chave desconhecida ou valor inválido = o padrão, com o motivo em `config.errors`.
 [alerts]
@@ -137,6 +144,9 @@ spool_max_bytes = 41943040
 spool_dropped_window_minutes = 60
 # Até onde a consulta olha para trás (spool, "desde quando").
 lookback_hours = 24
+# Proxy do LLM do ai-memory (#459): o oute-llm-proxy manda um heartbeat (oute.llm_proxy.up) por minuto; sem ele por tantos
+# minutos o alerta liga (o ai-memory fica sem LLM, no modo por regra). Só host que mandou heartbeat em lookback_hours.
+llm_proxy_stale_minutes = 5
 # Faixas da tela (#524): rodada parada, rodada antiga, alerta de preço e decisão pendente com mais de tantas horas saem da
 # faixa e entram no contador "antigos" (abre por clique). Fila, destino recusando, host sem dado, spool e cota nunca recolhem.
 # Só a tela: o `GET /v1/alerts` e o `GET /v1/tray` não mudam.

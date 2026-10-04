@@ -105,7 +105,7 @@ check "compose: collector sem a de leitura e sem a senha" bash -c '! grep -qE "R
 check "compose: agent só na rede oute"                  bash -c 'grep -q "^      oute:$" <<<"$0" && ! grep -q "studio" <<<"$(sed -n "/^    networks:/,/^    [a-z]/p" <<<"$0")"' "$AGENT"
 check "compose: surrealdb só na rede studio"            grep -qx '    networks: \[studio\]' <<<"$SURREAL"
 check "compose: agent-studio nas redes oute e studio"   grep -qx '    networks: \[oute, studio\]' <<<"$STUDIO"
-check "compose: collector fora da rede studio"          grep -qx '    networks: \[oute\]' <<<"$COL"
+check "compose: collector fora da rede studio (oute e llm, #459)" grep -qx '    networks: \[oute, llm\]' <<<"$COL"
 check "compose: rede studio interna"                    bash -c 'sed -n "/^  studio:/,/^  [a-z]/p" "$0" | grep -qx "    internal: true"' "$COMPOSE"
 check "compose: surrealdb sem porta publicada"          bash -c '! grep -qE "^    ports:" <<<"$0"' "$SURREAL"
 # compose resolvido, quando o host tem `docker compose` (o CI de PR não tem a garantia; sem ele, só o texto acima)

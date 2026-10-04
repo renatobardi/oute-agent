@@ -100,12 +100,51 @@ services:
       AI_MEMORY_AUTH_TOKEN: ${AI_MEMORY_AUTH_TOKEN:-}
       AI_MEMORY_LLM_PROVIDER: ${AI_MEMORY_LLM_PROVIDER:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # #459 (ADR-08, adendo): o ai-memory só fala com o OpenRouter pelo llm-proxy, que põe a chave da memória e emite o
+      # consumo. Sem chave aqui (ela é só do proxy); o LLM segue desligado até a #460.
+      AI_MEMORY_LLM_BASE_URL: ${AI_MEMORY_LLM_BASE_URL:-http://llm-proxy:8440/api/v1}
     volumes:
       - oute-memory:/data
     depends_on:
       volume-init:
         condition: service_completed_successfully
-    networks: [oute]
+    # llm: só para alcançar o llm-proxy (o agent não está nessa rede)
+    networks: [oute, llm]
+
+  llm-proxy:
+    # #459, ADR-08 (adendo): proxy do LLM do ai-memory ao OpenRouter. Repassa a chamada com a chave da memória
+    # (OPENROUTER_MEMORY_API_KEY, pasta oute-services: só este serviço a recebe), lê o `usage` e manda o consumo ao
+    # collector (agente ai-memory). Nos dois hosts, quando o `oute up` acha a chave no services.env (profile llm-proxy).
+    # Mesma imagem do agent, outro comando; python3 stdlib.
+    profiles: [llm-proxy]
+    image: ghcr.io/renatobardi/oute-agent:${OUTE_VERSION:-latest}
+    container_name: oute-llm-proxy
+    logging: *logging
+    restart: unless-stopped
+    user: "10001:10001"
+    entrypoint: ["/usr/bin/python3", "/usr/local/bin/oute-llm-proxy"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      LLM_PROXY_API_KEY: ${OPENROUTER_MEMORY_API_KEY:-}
+      LLM_PROXY_BIND: 0.0.0.0
+      LLM_PROXY_PORT: "8440"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OUTE_HOST: ${OUTE_HOST:-oute}
+      OUTE_INSTANCE: ${OUTE_INSTANCE:-oute-agent}
+    # sem porta publicada: só o ai-memory, pela rede llm
+    healthcheck:
+      test: ["CMD", "/usr/bin/python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8440/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      otel-collector:
+        condition: service_started
+    # #459: rede llm, que o agent (yolo) não enxerga: ele não alcança o proxy, que usa a chave da memória. Sai à internet
+    # (OpenRouter) pela própria rede e fala com o collector, que também está nela.
+    networks: [llm]
 
   volume-init:
     # lab#181: migração one-shot do uid antigo (1001 = ubuntu do host) para o 10001 do container.
@@ -262,7 +301,8 @@ services:
     depends_on:
       volume-init:
         condition: service_completed_successfully
-    networks: [oute]
+    # llm: para o llm-proxy entregar o consumo do ai-memory (#459)
+    networks: [oute, llm]
 
 secrets:
   agent_env:
@@ -293,3 +333,7 @@ networks:
   studio:
     driver: bridge
     internal: true
+  # #459: rede do llm-proxy com o ai-memory e o collector. Não é internal (o proxy precisa chegar ao OpenRouter); o agent
+  # não está nela, então não alcança o proxy nem a chave da memória.
+  llm:
+    driver: bridge
