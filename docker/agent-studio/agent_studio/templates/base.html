@@ -34,7 +34,7 @@
     </div>
     <div class="barra-nav">
       <nav class="nav-grupo" aria-label="Principal">
-        <a class="nav-item" href="/conversas">{{ icon("layout-dashboard") }}<span>Dashboard</span></a>
+        <a class="nav-item" href="/"{% if _nav == "dashboard" %} aria-current="page"{% endif %}>{{ icon("layout-dashboard") }}<span>Dashboard</span></a>
       </nav>
       {% for label, items in _groups %}
       <div class="nav-bloco">

@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% set nav = "dashboard" %}
+{% set crumbs = [("Dashboard", none)] %}
+{% from "_macros.html" import icon, badge %}
+{# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem estilo na tag: a escala vem
+   do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
+   distingue real de estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
+{% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
+{% macro money(c) %}{% if c.real_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
+{% block title %}Dashboard · agent-studio{% endblock %}
+{% block main %}
+{% set W = 600 %}{% set H = 180 %}
+<div class="pagina dashboard">
+<div class="pagina-topo">
+<div class="titulo-linha">
+  <div><h1>Dashboard</h1>
+  <p>Chamadas ao modelo entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}), comparadas com a janela anterior de mesmo tamanho. Preço de lista, não gasto: os agentes rodam por assinatura.</p></div>
+  <nav class="janelas" aria-label="Janela">
+    {% for value, label in windows %}<a href="/?hours={{ value }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+  </nav>
+</div>
+</div>
+
+<section class="kpis" id="kpis" aria-label="Indicadores">
+  {% for k in snap.kpis %}
+  <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"
+       {% if k.key == "cost" %}data-real-usd="{{ raw(k.real_usd) }}" data-estimated-usd="{{ raw(k.estimated_usd) }}" data-estimated-share="{{ raw(k.estimated_share) }}" data-unpriced-calls="{{ k.unpriced_calls }}"{% endif %}
+       {% if k.key == "errors" %}data-errors="{{ k.errors }}" data-prev-errors="{{ k.prev_errors }}"{% endif %}>
+    <div class="kpi-topo"><span class="kpi-rotulo">{{ k.label }}</span><span class="kpi-icone">{{ icon(k.icon, 14) }}</span></div>
+    <strong class="kpi-valor">
+      {%- if k.key == "calls" %}{{ k.value|num }}
+      {%- elif k.key == "cost" %}{{ money(k) }}
+      {%- elif k.key == "p95" %}{{ k.value|ms }}
+      {%- elif k.key == "errors" %}{{ k.value|pct(2) }}
+      {%- else %}{{ k.value|pct }}{% endif -%}
+    </strong>
+    <div class="kpi-nota">{{ badge(k.badge, k.variant, "trending-up" if k.trend == "up" else "trending-down" if k.trend == "down" else "minus") }}<span>{{ k.note }}</span></div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="cartao bloco" id="insights" data-insights="{{ insights|length }}">
+  <div class="grafico-topo"><h2>{{ icon("sparkles") }} Insights</h2><span class="nota">regras fixas sobre a janela, sem LLM</span></div>
+  {% if gates_read is not true %}
+  <p class="aviso" data-gate-nao-lido>{% if gates_read is none %}Este agent-studio está sem SurrealDB: os pedidos pendentes não entraram na regra do Gate.{% else %}O estado dos pedidos (SurrealDB) não pôde ser lido: os pedidos pendentes não entraram na regra do Gate. A causa está no log do agent-studio.{% endif %}</p>
+  {% endif %}
+  {% if insights %}
+  <ul class="insights">
+    {% for n in insights %}
+    <li data-insight="{{ n.key }}" data-tone="{{ n.tone }}">
+      <span class="insight-icone {{ n.tone }}">{{ icon(n.icon) }}</span>
+      <div class="insight-corpo">
+        <strong>{{ n.title }}</strong>
+        <span>{{ n.text }}</span>
+        <a class="insight-link" href="{{ n.href }}">{{ n.action }} →</a>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="nota" data-sem-insights>Nenhuma regra disparou nesta janela.</p>
+  {% endif %}
+</section>
+
+<div class="graficos">
+
+{# 1) chamadas por hora ou dia: linha + área #}
+{% set s = snap.series %}
+{% set n = s.points|length %}
+<section class="cartao bloco grafico" data-grafico="chamadas" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
+  <div class="grafico-topo"><h2>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">total {{ s.total|num }}</span></div>
+  <div class="linha-grafico">
+    <div class="eixo-y"><span>{{ s.max|num }}</span><span>{{ s.mid|num }}</span><span>0</span></div>
+    <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Chamadas ao modelo por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
+      <title>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</title>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
+      <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
+      <path class="area" d="M{{ '%.1f'|format(s.points[0].x * W) }} {{ H }}{% for p in s.points %} L{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %} L{{ '%.1f'|format(s.points[-1].x * W) }} {{ H }} Z"/>
+      <path class="linha" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %}"/>
+      {% for p in s.points %}
+      <g class="ponto" data-bucket="{{ p.key }}" data-calls="{{ p.calls }}">
+        <rect class="alvo" x="{{ '%.1f'|format((p.x - 0.5 / n) * W) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
+        <line class="guia" x1="{{ '%.1f'|format(p.x * W) }}" x2="{{ '%.1f'|format(p.x * W) }}" y1="0" y2="{{ H }}"/>
+        <title>{{ p.label }} · {{ p.calls|calls }} · p95 {{ p.p95|ms }}</title>
+      </g>
+      {% endfor %}
+    </svg>
+    <span></span>
+    <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
+  </div>
+</section>
+
+{# 2) custo por modelo: barras empilhadas, real (cheio) × estimado (tracejado) #}
+{% set comp = snap.composition %}
+<section class="cartao bloco grafico" data-grafico="custo-modelo" data-models="{{ snap.models_total }}">
+  <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">preço de lista · ≈ estimado</span></div>
+  {% for m in snap.models %}
+  <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
+       title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'custo real informado pela fonte' }}">
+    <span class="rotulo mono">{{ m.model }}</span>
+    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
+      <title>{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}</title>
+      {% if m.real_frac %}<rect class="real" x="0" y="0" width="{{ '%.2f'|format([m.real_frac * 100, 1]|max) }}" height="14"/>{% endif %}
+      {% if m.est_frac %}<rect class="estimado" x="{{ '%.2f'|format([m.real_frac * 100, 0]|max) }}" y="0" width="{{ '%.2f'|format([m.est_frac * 100, 1]|max) }}" height="14"/>{% endif %}
+    </svg>
+    <span class="valor{% if m.estimated_usd is not none %} est{% endif %}">{% if m.cost is none %}sem preço{% else %}{{ money(m) }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
+  {% endfor %}
+  <div class="composicao" data-composicao data-real-usd="{{ raw(comp.real_usd) }}" data-estimated-usd="{{ raw(comp.estimated_usd) }}" data-unpriced-calls="{{ comp.unpriced_calls }}">
+    <span class="nota">Composição do custo</span>
+    {% set real_f = (comp.real_usd or 0) / comp.total if comp.total else 0 %}
+    {% set est_f = (comp.estimated_usd or 0) / comp.total if comp.total else 0 %}
+    <svg class="composicao-svg" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
+      <rect class="real" x="0" y="0" width="{{ '%.2f'|format(real_f * 100) }}" height="10"/>
+      <rect class="estimado" x="{{ '%.2f'|format(real_f * 100) }}" y="0" width="{{ '%.2f'|format(est_f * 100) }}" height="10"/>
+    </svg>
+    <div class="legenda">
+      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>Real {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
+      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
+      {% if comp.unpriced_calls %}<span class="nota">{{ comp.unpriced_calls|num }} {{ "chamada sem preço" if comp.unpriced_calls == 1 else "chamadas sem preço" }}, fora da soma</span>{% endif %}
+    </div>
+  </div>
+</section>
+
+{# 3) latência por modelo: percentis em tabela, mini-barra no p95 #}
+<section class="cartao bloco grafico" data-grafico="latencia">
+  <div class="grafico-topo"><h2>Latência das chamadas por modelo</h2><span class="nota">percentis</span></div>
+  <div class="rolagem">
+  <table class="compacta" data-latencia>
+    <thead><tr><th>Modelo</th><th class="n">Chamadas</th><th class="n">p50</th><th class="n">p90</th><th class="n">p95</th><th class="n">p99</th></tr></thead>
+    <tbody>
+    {% for l in snap.latency %}
+    <tr data-modelo="{{ l.model }}" data-calls="{{ l.n }}" data-p50-ms="{{ l.p50 }}" data-p90-ms="{{ l.p90 }}" data-p95-ms="{{ l.p95 }}" data-p99-ms="{{ l.p99 }}">
+      <td class="mono">{{ l.model }}</td><td class="n">{{ l.n|num }}</td><td class="n sec">{{ l.p50|ms }}</td><td class="n sec">{{ l.p90|ms }}</td>
+      <td class="n p95"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>p95 {{ l.p95|ms }}</title><rect x="0" y="0" width="{{ '%.2f'|format([l.frac * 100, 2]|max) }}" height="6"/></svg>{{ l.p95|ms }}</td>
+      <td class="n sec">{{ l.p99|ms }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">Nenhuma chamada com duração nesta janela.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+{# 4) tokens por fase AI-DLC #}
+<section class="cartao bloco grafico" data-grafico="fases">
+  <div class="grafico-topo"><h2>Tokens por fase AI-DLC</h2><a class="nota" href="/uso?{{ window_qs }}">ver Uso</a></div>
+  {% for f in snap.phases %}
+  <div class="barra-linha fase" data-fase="{{ f.phase }}" data-tokens="{{ f.tokens }}" title="{{ f.phase }}: {{ f.tokens|num }} tokens em {{ f.calls|calls }}">
+    <code>{{ f.phase }}</code>
+    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ f.phase }} · {{ f.tokens|num }} tokens</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([f.frac * 100, 1]|max) }}" height="14"/></svg>
+    <span class="valor">{{ f.tokens|compact }}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhum token nesta janela.</p>
+  {% endfor %}
+  <span class="nota">Entrada + saída; cache fora. Fase pelo label <code>aidlc</code> da sessão.</span>
+</section>
+
+{# 5) atividade por dia da semana × hora: 5 degraus de --primary, sempre os 7 dias até agora #}
+{% set heat = snap.heat %}
+<section class="cartao bloco grafico" data-grafico="atividade" data-peak="{{ heat.peak }}" data-total="{{ heat.total }}">
+  <div class="grafico-topo"><h2>Atividade por dia e hora</h2><span class="nota">últimos 7 dias, {{ tzl() }}</span></div>
+  <div class="rolagem">
+  <div class="calor" role="group" aria-label="Chamadas ao modelo por dia da semana e hora, nos últimos 7 dias">
+    {% for row in heat.rows %}
+    <div class="calor-linha" data-dia="{{ row.day }}"><span class="calor-dia">{{ row.day }}</span>{% for c in row.cells %}<span class="calor-celula n{{ c.level }}" data-hora="{{ c.hour }}" data-calls="{{ c.calls }}" data-nivel="{{ c.level }}" title="{{ row.day }} {{ '%02d'|format(c.hour) }}h · {{ c.calls|calls }}"></span>{% endfor %}</div>
+    {% endfor %}
+    <div class="calor-linha calor-horas"><span class="calor-dia"></span>{% for c in heat.rows[0].cells %}<span>{{ '%02dh'|format(c.hour) if c.hour % 6 == 0 else '' }}</span>{% endfor %}</div>
+  </div>
+  </div>
+  <div class="escala"><span>menos</span>{% for i in (0, 1, 2, 3, 4) %}<span class="calor-celula n{{ i }}"></span>{% endfor %}<span>mais chamadas</span></div>
+</section>
+
+{# 6) sessões que mais custaram #}
+<section class="cartao bloco grafico" data-grafico="sessoes">
+  <div class="grafico-topo"><h2>Sessões que mais custaram</h2><a class="nota" href="/sessoes?{{ window_qs }}">ver Sessões</a></div>
+  {% for t in snap.top_sessions %}
+  <a class="top-sessao" href="/sessao?id={{ t.id|urlencode }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
+    <span class="top-linha"><span class="mono">{{ t.id }}</span><span class="valor{% if t.estimated %} est{% endif %}">{{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</span></span>
+    <span class="top-linha"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</title><rect x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 2]|max) }}" height="6"/></svg>
+      <span class="nota">{{ t.agents|join(", ") or "—" }} · {{ t.model or "—" }} · {{ t.calls|calls }}</span></span>
+  </a>
+  {% else %}
+  <p class="nota">Nenhuma sessão com custo nesta janela.</p>
+  {% endfor %}
+</section>
+
+</div>
+</div>
+{% endblock %}
