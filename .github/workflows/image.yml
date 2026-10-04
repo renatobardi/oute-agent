@@ -46,7 +46,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v7
+      - name: build (carrega no daemon, sem push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/arm64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          build-args: |
+            OUTE_VERSION=${{ steps.v.outputs.version }}
+          tags: oute-agent-smoke:${{ steps.v.outputs.version }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-cache:buildcache
+
+      - name: fumaça da imagem (#430)
+        run: bash tests/image-smoke.sh "oute-agent-smoke:${{ steps.v.outputs.version }}"
+
+      - name: push (camadas já em cache do build acima)
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
