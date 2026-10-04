@@ -27,12 +27,13 @@ cache_read = 0.125
 TOML
 
 PYTHONPATH="$ROOT/tests/lib:$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP" "$ROOT" > "$TMP/py.out" 2>&1 <<'PY'
-import json, re, sys, time
+import functools, json, re, sys, time
 from datetime import datetime, timedelta, timezone
 from agent_studio import config as CF, store as ST
 from agent_studio.app import create_app
 from pycheck import check
 from studio_asgi import TOKEN, Broken, get
+from studio_db import StudioDB
 
 tmp, root = sys.argv[1], sys.argv[2]
 CSS = open(f"{root}/docker/agent-studio/agent_studio/static/studio.css").read()
@@ -45,33 +46,7 @@ def ts(s):
     return int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp()) * SEC
 
 
-class DB:
-    """Spans e logs de exemplo escritos direto no DuckDB; a hora do fato é a que o teste dá."""
-
-    def __init__(self, name):
-        self.st = ST.Store(f"{tmp}/{name}.duckdb")
-        self.n = 0
-        self.spans, self.logs = [], []
-
-    def span(self, at_ns, dur_s, name="claude_code.llm_request", model=None, task=None, conv=None, host="oute-server",
-             agent="claude", err=False, attrs=None, **tok):
-        self.n += 1
-        row = {"dedupe_key": f"s:{self.n}", "time_unix_nano": at_ns, "end_unix_nano": at_ns + int(dur_s * SEC),
-               "duration_ns": int(dur_s * SEC), "host_name": host, "oute_agent": agent, "session_id": conv, "oute_task_id": task,
-               "trace_id": f"{self.n:032x}", "span_id": f"{self.n:016x}", "name": name, "status_code": 2 if err else 0,
-               "model": model, "received_unix_nano": at_ns, "attributes": json.dumps(attrs or {}), "resource_attributes": "{}"}
-        row.update({f"{k}_tokens" if k != "cost_usd" else k: v for k, v in tok.items()})
-        self.spans.append(row)
-
-    def log(self, at_ns, name, attrs, body="", task=None, rnd=None, host="oute-server"):
-        self.n += 1
-        self.logs.append({"dedupe_key": f"l:{self.n}", "time_unix_nano": at_ns, "host_name": host, "oute_task_id": task,
-                          "oute_swarm_round": rnd, "event_name": name, "severity_number": 9, "body": body,
-                          "attributes": json.dumps(attrs), "resource_attributes": "{}", "received_unix_nano": at_ns})
-
-    def flush(self):
-        self.st.write({"spans": self.spans, "logs": self.logs})
-        return self.st
+DB = functools.partial(StudioDB, tmp)  # tests/lib/studio_db.py
 
 
 class Surreal:
@@ -237,7 +212,7 @@ check("sem style= em lugar nenhum da página", "style=" not in html)
 check("nenhum script além do htmx", re.findall(r"<script[^>]*>", html) == ['<script src="/static/htmx.min.js" defer>'])
 check("nenhum recurso externo (http/https, @import, url())", not re.search(r"https?://|@import|url\(", body))
 check("o JS de gráfico não existe: só <svg>, <path>, <rect>, <line> e <title>", not re.search(r"<(canvas|iframe|object|embed)", html))
-check("só leitura: a tela não tem formulário de ação além do Sair", body.count("<form") == 0 and body.count("<button") == 0)
+check("só leitura: o único formulário é o do período, por GET (#527)", body.count("<form") == 1 and '<form class="filtro" method="get" action="/"' in body and body.count("<button") == 1)
 check("hover em CSS e <title>, nada de onmouse*/onclick", not re.search(r"\son\w+=", html))
 
 # ------------------------------------------------------------------------------ 24 h e 7 d (relativas a agora)
@@ -255,10 +230,10 @@ check("24 h: 3 chamadas, a anterior tem 1; série por hora", k24["value"] == "3"
 check("7 d: 5 chamadas; série por dia com 7 ou 8 baldes", k7["value"] == "5" and 'data-unit="day"' in h7
       and 7 <= len(re.findall(r'<g class="ponto"', h7)) <= 8)
 check("a série de 7 d soma as chamadas da janela", sum(int(c) for c in re.findall(r'<g class="ponto" data-bucket="[^"]*" data-calls="(\d+)"', h7)) == 5)
-check("seletor de janela: links 24 h e 7 dias, o atual marcado", '<a href="/?hours=24" aria-current="true">24 h</a>' in h24
+check("seletor de janela: links 24 horas e 7 dias, o atual marcado", '<a href="/?hours=24" aria-current="true">24 horas</a>' in h24
       and '<a href="/?hours=168" aria-current="true">7 dias</a>' in h7 and '<a href="/?hours=168">7 dias</a>' in h24)
 check("7 d bate com /uso (hours=168)", attrs(re.search(r'<p class="cartao bloco" id="total"[^>]*>', get(app2, "/uso", "hours=168")[1]).group(0))["calls"] == "5")
-check("sem a janela, o padrão é 24 h", get(app2, "/")[1].count('aria-current="true">24 h') == 1)
+check("sem a janela, o padrão é 24 h", get(app2, "/")[1].count('aria-current="true">24 horas') == 1)
 check("sem Gate nem erro: insights que dependem deles não aparecem", "data-insight=\"gate\"" not in h24 and "data-insight=\"tool_errors\"" not in h24)
 check("janela anterior de 24 h sem Gate: sem SurrealDB o aviso diz isso", "data-gate-nao-lido" in h24 and "sem SurrealDB" in h24)
 

@@ -477,3 +477,7 @@ a.erros-link { text-decoration: none; }
 .degrau-svg .saida, .leg.saida::before { stroke: var(--muted-foreground); background: var(--muted-foreground); stroke-dasharray: 5 3; }
 .grafico-preco figcaption { color: var(--muted-foreground); font-size: 12px; }
 .leg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 4px; vertical-align: middle; }
+
+/* controle de período (#527): janelas prontas + De/Até com dia e hora; quebra em linhas no celular */
+.filtro input[type="datetime-local"] { min-width: 13rem; }
+@media (max-width: 640px) { .filtro { gap: .75rem; } .filtro label, .filtro input[type="datetime-local"] { width: 100%; } }

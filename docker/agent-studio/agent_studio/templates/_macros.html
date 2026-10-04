@@ -94,20 +94,21 @@
 {% endmacro %}
 
 {# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
-{% macro filter(action, windows, hours, range, hosts, host, agents, agent) %}
-<form class="filtro" method="get" action="{{ action }}" hx-get="{{ action }}" hx-trigger="change" hx-target="#conteudo"
-      hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true">
-  {% if range.from %}
-  <label>De <input name="from" value="{{ range.from }}"></label>
-  <label>Até <input name="to" value="{{ range.to }}"></label>
-  {% else %}
-  <label>Janela
-    <select name="hours">
-      {% for value, label in windows %}<option value="{{ value }}"{% if value == hours %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      {% if hours not in windows|map("first") %}<option value="{{ hours }}" selected>{{ hours }} h</option>{% endif %}
-    </select>
-  </label>
-  {% endif %}
+{# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela e, nas
+   listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam host e agente; o intervalo vai em `de`/`ate`. #}
+{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="") %}
+<form class="filtro" method="get" action="{{ action }}"{% if hosts is not none %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
+      hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true"{% endif %}>
+  <nav class="janelas" aria-label="Janela">
+    {% for value, label in windows %}
+    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}
+    <a href="{{ action }}?{{ keep|urlencode }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% if not range.from %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
+  <label>De ({{ tzl() }})<input type="datetime-local" name="de" value="{{ range.from }}"></label>
+  <label>Até ({{ tzl() }})<input type="datetime-local" name="ate" value="{{ range.to }}"></label>
+  {% if hosts is not none %}
   <label>Host
     <select name="host">
       <option value="">todos</option>
@@ -122,6 +123,7 @@
       {% if agent and agent not in agents %}<option value="{{ agent }}" selected>{{ agent }}</option>{% endif %}
     </select>
   </label>
+  {% endif %}
   <button type="submit">Aplicar</button>
 </form>
 {% endmacro %}

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "uso" %}
 {% set crumbs = [("Análise", none), ("Uso", none)] %}
-{% from "_macros.html" import cost %}
+{% from "_macros.html" import cost, filter %}
 {% macro usage_table(kind, label, rows) %}
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}">
@@ -29,20 +29,7 @@
 <div class="pagina">
 <div class="pagina-topo">
 <div class="titulo-linha"><h1>Uso por papel e por fase</h1>
-<form class="filtro" method="get" action="/uso">
-  {% if range.from %}
-  <label>De <input name="from" value="{{ range.from }}"></label>
-  <label>Até <input name="to" value="{{ range.to }}"></label>
-  {% else %}
-  <label>Janela
-    <select name="hours">
-      {% for value, label in windows %}<option value="{{ value }}"{% if value == hours %} selected{% endif %}>{{ label }}</option>{% endfor %}
-      {% if hours not in windows|map("first") %}<option value="{{ hours }}" selected>{{ hours }} h</option>{% endif %}
-    </select>
-  </label>
-  {% endif %}
-  <button type="submit">Aplicar</button>
-</form></div>
+{{ filter("/uso", windows, hours, range) }}</div>
 <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 <p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
