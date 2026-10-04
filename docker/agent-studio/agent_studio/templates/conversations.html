@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "conversas" %}
 {% set crumbs = [("Telemetria", none), ("Conversas", none)] %}
-{% from "_macros.html" import cost, filter, badge %}
+{% from "_macros.html" import cost, filter, badge, conv_name %}
 {% block title %}Conversas · agent-studio{% endblock %}
 {% block main %}
 <div class="pagina">
@@ -31,13 +31,13 @@
     <td class="hora sec">{{ c.start_ns|ts }}</td>
     <td class="sec">{{ c.host or "—" }}</td>
     <td class="sec">{{ c.agent or "—" }}</td>
-    <td class="prim"><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a>
+    <td class="prim">{{ conv_name(c.id, "/conversa?id=" ~ (c.id|urlencode)) }}
       <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ u.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
     <td class="n sec">{{ c.duration_ns|dur }}</td>
     <td class="n sec">{{ u.calls|num }}</td>
     <td class="n sec">{{ u.tokens.input|num }} / {{ u.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</span></td>
     <td class="n custo">{{ cost(u.cost) }}</td>
-    <td class="n">{% if u.errors.total %}{{ badge(u.errors.total|num, "destrutivo") }}{% else %}{{ u.errors.total|num }}{% endif %}</td>
+    <td class="n">{% if u.errors.total %}<a class="erros-link" href="/conversa?id={{ c.id|urlencode }}&amp;erros=1" title="só os erros desta conversa">{{ badge(u.errors.total|num, "destrutivo") }}</a>{% else %}{{ u.errors.total|num }}{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

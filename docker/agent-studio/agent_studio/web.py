@@ -32,7 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
+from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
                tz as tz_mod)
 from . import alerts as alerts_mod
 
@@ -121,7 +121,7 @@ def _env(zone=tz_mod.UTC):
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
     env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago, usd2=_usd2, pct=_pct_in, compact=_compact, calls=_calls,
-                       alert_title=alert_text.title, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
+                       alert_title=alert_text.title, nome=names_mod.friendly, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     env.tests["safe_cmd_id"] = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v) is not None  # id que cabe num comando sem aspas
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
@@ -303,12 +303,13 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         session_id = request.query_params.get("id", "")
         if not session_id:
             return error(request, 400, "Falta o id da conversa.")
-        data, failed = await read(request, "conversa", store.conversation, session_id, config.prices)
+        errors_only = request.query_params.get("erros") == "1"
+        data, failed = await read(request, "conversa", store.conversation, session_id, config.prices, errors_only)
         if failed:
             return failed
         if data is None:
             return error(request, 404, "Conversa não encontrada.")
-        return page(request, "conversation.html", **data, id=session_id, span_limit=conv_mod.SPAN_LIMIT)
+        return page(request, "conversation.html", **data, id=session_id, span_limit=conv_mod.SPAN_LIMIT, errors_only=errors_only)
 
     @app.get("/conversa/logs")
     async def conversation_logs(request: Request):
@@ -322,10 +323,12 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             offset = -1
         if not session_id or not 0 <= offset < 2**31:
             return error(request, 400, "Parâmetros inválidos (id e offset).")
-        data, failed = await read(request, "logs da conversa", store.conversation_logs, session_id, offset)
+        errors_only = request.query_params.get("erros") == "1"
+        data, failed = await read(request, "logs da conversa", store.conversation_logs, session_id, offset, errors_only)
         if failed:
             return failed
-        return page(request, "log_rows.html" if is_htmx(request) else "logs.html", **data, id=session_id, offset=offset)
+        return page(request, "log_rows.html" if is_htmx(request) else "logs.html", **data, id=session_id, offset=offset,
+                    errors_only=errors_only)
 
     @app.get("/conversa/span")
     async def conversation_span(request: Request):

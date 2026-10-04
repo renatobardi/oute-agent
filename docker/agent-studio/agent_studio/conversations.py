@@ -7,7 +7,7 @@ fato** (`time_unix_nano`), nunca pela de chegada. Chamadas, tokens e custo (real
 import json
 
 from . import usage as usage_mod
-from .cost import MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, spans_with_cost
+from .cost import LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, spans_with_cost
 
 LIST_LIMIT = 200    # conversas por página da lista (as mais recentes)
 SPAN_LIMIT = 5000   # spans na árvore de uma conversa (os primeiros, pela hora do fato)
@@ -115,8 +115,11 @@ def tree(spans):
     return out
 
 
-def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE):
-    """Cabeçalho, somas, árvore de spans e a primeira página de logs de uma conversa; `None` se ela não existe."""
+def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False):
+    """Cabeçalho, somas, árvore de spans e a primeira página de logs de uma conversa; `None` se ela não existe.
+
+    `errors_only` (#530): só spans com status de erro e logs ERROR ou acima (o que o contador de erros soma); o
+    cabeçalho e as somas seguem sendo os da conversa inteira."""
     head = _dicts(con.execute(
         f"WITH facts AS ({_FACTS.format(where=' AND session_id = ?')}) {_HEAD} FROM facts GROUP BY session_id",
         [session_id, session_id]))
@@ -129,8 +132,8 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE):
     spans = _dicts(con.execute(
         "SELECT trace_id, span_id, parent_span_id, name, time_unix_nano, duration_ns, model, input_tokens, "
         f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, ({MODEL_CALL_SQL}) AS is_call "
-        f"FROM {table} ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
-        [*MODEL_CALL_PARAMS, *params, span_limit]))
+        f"FROM {table}{' WHERE status_code = ?' if errors_only else ''} ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
+        [*MODEL_CALL_PARAMS, *params, *([SPAN_STATUS_ERROR] if errors_only else []), span_limit]))
     for s in spans:
         s["error"] = s["status_code"] == SPAN_STATUS_ERROR
         # tokens e custo só nas chamadas ao modelo: o que aparece na coluna é o que entra na soma (#203)
@@ -139,16 +142,25 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE):
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
                 s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]))
-    return {"conversation": conv, "spans": tree(spans), "spans_truncated": conv["spans"] > len(spans),
-            **logs(con, session_id, 0, log_limit)}
+    if errors_only:
+        # sem os pais a árvore não vale: uma lista plana, pela hora do fato
+        for s in spans:
+            s["depth"], s["orphan"] = 0, False
+        shown, total = spans, conv["usage"]["errors"]["spans"]
+    else:
+        shown, total = tree(spans), conv["spans"]
+    return {"conversation": conv, "spans": shown, "spans_truncated": total > len(spans),
+            **logs(con, session_id, 0, log_limit, errors_only)}
 
 
-def logs(con, session_id, offset=0, limit=LOG_PAGE):
-    """Uma página dos logs da conversa, em ordem da hora do fato. `next_offset` = há mais (senão `None`)."""
+def logs(con, session_id, offset=0, limit=LOG_PAGE, errors_only=False):
+    """Uma página dos logs da conversa, em ordem da hora do fato. `next_offset` = há mais (senão `None`).
+    `errors_only`: só os de severidade ERROR ou acima (#530)."""
     rows = _dicts(con.execute(
         "SELECT time_unix_nano, severity_number, severity_text, event_name, body, trace_id, span_id, attributes "
-        "FROM logs WHERE session_id = ? ORDER BY time_unix_nano, dedupe_key LIMIT ? OFFSET ?",
-        [session_id, limit + 1, offset]))
+        f"FROM logs WHERE session_id = ?{' AND severity_number >= ?' if errors_only else ''} "
+        "ORDER BY time_unix_nano, dedupe_key LIMIT ? OFFSET ?",
+        [session_id, *([LOG_SEVERITY_ERROR] if errors_only else []), limit + 1, offset]))
     more = len(rows) > limit
     rows = rows[:limit]
     for r in rows:

@@ -461,6 +461,12 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .etapa-fechada { margin: 0 20px 16px; }
 .etapa-fechada > summary { cursor: pointer; color: var(--muted-foreground); font-size: 13px; padding: 4px 0; }
 .etapa-fechada > .etapa-texto { padding: 12px 0 0; }
+
+/* nome amigável da conversa e link do selo de erros (#530) */
+.conv-nome { font-weight: 500; }
+.conv-id { word-break: break-all; }
+a.erros-link { text-decoration: none; }
+
 .resumo-preco { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; margin-bottom: 12px; }
 .selo-tendencia { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 9999px; font-size: 12px; background: var(--muted); color: var(--foreground); }
 .selo-tendencia.alta { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
