@@ -1004,6 +1004,13 @@ install_link() {
   ln -sfn "$target" "$dest/oute" && echo "instalado: $dest/oute -> $target"
 }
 
+# --- tray (#260): app de barra de menu do Mac (pacote SwiftPM em tray/). É do host, não da imagem.
+tray_cmd() {
+  local sub="${1:-}"
+  [[ "$(uname -s)" == Darwin ]] || die "o tray é só no macOS (este host é $(uname -s))"
+  return 0
+}
+
 case "${1:-}" in
   "")      # sem argumento: abre o herdr; se a stack não estiver de pé, sobe antes
            docker ps -q -f name='^oute-agent$' -f status=running | grep -q . || "$0" up
@@ -1014,6 +1021,7 @@ case "${1:-}" in
            exec "$ROOT/scripts/oute" _update2 ;;
   _update2) oute_pull && "$0" down && "$0" up && "$0" version ;;   # 2ª etapa já com o script novo
   approve) approve "${@:2}" ;;
+  tray)    tray_cmd "${@:2}" ;;
   watch)   # atalho: aprovação em modo espera. Com host: roda no host remoto via ssh (ex.: oute watch oute-server)
            if [[ -n "${2:-}" ]]; then exec ssh -t "$2" 'bash -lc "oute approve --watch"'
            else approve --watch; fi ;;
