@@ -482,4 +482,4 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         data, failed = await read(request, "preços", store.read, lambda con: prices_mod.view(con, config.fixed, at_ns))
         if failed:
             return failed
-        return page(request, "prices.html", **data)
+        return page(request, "prices.html", **prices_mod.decorate(data, at_ns))

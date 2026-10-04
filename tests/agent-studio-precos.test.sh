@@ -48,13 +48,17 @@ ins("claude-sonnet-5", (3, 15, 0.3, 3.75), "config", OLD)
 ins("gpt-5-codex", (1.25, 10, 0.125, 0), "config", OLD)
 ins("gpt-5-codex", (1.5, 10, 0.125, 0), "fontes", RECENT)
 ins("m<b>x</b>&y", (2, 4, 0, 0), "config", OLD)
+ins("modelo-barato", (1, 5, 0, 0), "config", OLD)
+ins("modelo-barato", (0.8, 5, 0, 0), "fontes", RECENT - DAY)
+ins("modelo-velho", (1, 5, 0, 0), "config", OLD)
+ins("modelo-velho", (2, 5, 0, 0), "fontes", OLD + DAY)
 app = create_app(st, TOKEN, config=cfg)
 status, html = get(app, "/precos")
 section = lambda m: re.search(rf'<section data-modelo="{re.escape(m)}".*?</section>', html, re.S).group(0)
 
 check("200 com HTML", status == 200 and html.startswith("<!doctype html>"))
 check("um bloco por modelo, em ordem de nome", re.findall(r'<section data-modelo="([^"]*)"', html) ==
-      ["claude-sonnet-5", "gpt-5-codex", "m&lt;b&gt;x&lt;/b&gt;&amp;y"])
+      ["claude-sonnet-5", "gpt-5-codex", "m&lt;b&gt;x&lt;/b&gt;&amp;y", "modelo-barato", "modelo-velho"])
 cod = section("gpt-5-codex")
 vig = re.search(r"<tr data-vigente.*?</tr>", cod, re.S).group(0)
 check("vigente: os 4 campos do preço mais novo, a origem e o desde", 'data-origin="fontes"' in vig and
@@ -94,6 +98,21 @@ check("o aviso 'preço trocado' no topo leva à página",
       and "US$ 1,25 → US$ 1,5 por 1M tokens" in html)
 check("o link do menu também está nas outras telas", re.search(r'<a class="nav-item" href="/precos"[^>]*>.*<span>Preços</span></a>', get(app, "/conversas")[1]) is not None)
 
+# tendência e gráfico (#534)
+alta, queda, sem, velho = section("gpt-5-codex"), section("modelo-barato"), section("claude-sonnet-5"), section("modelo-velho")
+check("alta: selo com a direção, a variação sobre o preço anterior e a data da troca",
+      'data-tendencia="up"' in alta and "Entrada subiu +20,0%" in alta
+      and time.strftime("%Y-%m-%d", time.gmtime(RECENT // 10**9)) in re.search(r'data-tendencia="up".*?</span>', alta, re.S).group(0))
+check("queda: selo de queda com a variação negativa", 'data-tendencia="down"' in queda and "Entrada caiu -20,0%" in queda)
+check("modelo com uma linha só: 'sem troca' e nenhum selo de tendência", "data-sem-troca" in sem and "data-tendencia" not in sem)
+check("cada modelo tem o gráfico em degrau, com a entrada e a saída",
+      all(s.count("data-grafico") == 1 and 'class="entrada"' in s and 'class="saida"' in s for s in (alta, queda, sem)))
+check("gráfico em degrau: o modelo com troca tem um salto vertical (V), o sem troca não",
+      re.search(r'class="entrada" d="[^"]* V', alta) is not None and re.search(r'class="entrada" d="[^"]* V', sem) is None)
+check("topo: 1 subiu e 1 caiu nos últimos 30 dias (a troca antiga não conta)",
+      '<strong data-subiram>1</strong>' in html and '<strong data-cairam>1</strong>' in html and "data-tendencia=\"up\"" in velho)
+check("a CSP não muda: o gráfico não usa style= nem script", "style=" not in html.split("<main", 1)[1] and "<script" not in html.split("<main", 1)[1])
+
 # só mostra: nenhuma ação
 check("sem formulário nem botão além do Sair", re.findall(r"<form[^>]*>", html) == ['<form method="post" action="/logout">'] * 2
       and html.count("<button") == 2 and html.count('title="Sair"') + html.count(">Sair</button>") == 2
@@ -101,7 +120,7 @@ check("sem formulário nem botão além do Sair", re.findall(r"<form[^>]*>", htm
 check("nenhuma rota de /precos além do GET", [sorted(r.methods) for r in app.routes if "preco" in getattr(r, "path", "")] == [["GET"]])
 check("POST /precos = 405", get(app, "/precos", method="POST")[0] == 405)
 rows_after = st.read(P.history_rows)
-check("abrir a página não escreve no histórico", len(rows_after) == 4)
+check("abrir a página não escreve no histórico", len(rows_after) == 8)
 
 # acesso e CSP
 st_login, _ = get(create_app(st, "outro-token", config=cfg), "/precos")
@@ -118,5 +137,5 @@ check("leitura que falha: 500, sem a causa na página", s == 500 and "segredo-da
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 28
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 35
 check_end

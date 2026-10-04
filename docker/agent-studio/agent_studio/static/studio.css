@@ -462,3 +462,14 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .conv-nome { font-weight: 500; }
 .conv-id { word-break: break-all; }
 a.erros-link { text-decoration: none; }
+
+.resumo-preco { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; margin-bottom: 12px; }
+.selo-tendencia { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 9999px; font-size: 12px; background: var(--muted); color: var(--foreground); }
+.selo-tendencia.alta { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
+.grafico-preco { margin: 0; padding: 0 20px 8px; }
+.degrau-svg { display: block; width: 100%; height: 80px; }
+.degrau-svg path { fill: none; stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.degrau-svg .entrada, .leg.entrada::before { stroke: var(--primary); background: var(--primary); }
+.degrau-svg .saida, .leg.saida::before { stroke: var(--muted-foreground); background: var(--muted-foreground); stroke-dasharray: 5 3; }
+.grafico-preco figcaption { color: var(--muted-foreground); font-size: 12px; }
+.leg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 4px; vertical-align: middle; }
