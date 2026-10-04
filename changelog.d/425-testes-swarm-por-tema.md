@@ -1,2 +1,0 @@
-### Changed
-- **Testes do `oute-swarm` divididos por tema** (#425). O `tests/oute-swarm.test.sh` (1278 linhas, com todo PR do swarm acrescentando casos no fim e conflitando com os outros) vira `tests/oute-swarm-<tema>.test.sh` (`watch`, `sessoes`, `eventos`, `agente`, `seletor`, `prompts`), com o apoio comum em `tests/lib/swarm.sh` e `tests/lib/swarm-otlp.sh`; o laço `tests/*.test.sh` do workflow `pr` pega os arquivos sem mudança. Os mesmos 476 casos (465 `check`). Regra no `AGENTS.md`. Só testes: não precisa de release.

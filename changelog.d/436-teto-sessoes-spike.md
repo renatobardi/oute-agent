@@ -1,2 +1,0 @@
-### Changed
-- **`done_sem_pr` não conta spike, e a triagem do swarm avisa o teto de sessões** (#436). O `collect.sh` da `oute-aidlc-learn-insights` deixa de contar como `done_sem_pr` a sessão de issue com label `spike` (a entrega é o relatório, sem PR); sem resposta do `gh`, conta todas. O §1 do `docker/swarm.md` manda a triagem dizer quantas sessões a rodada terá e avisar quando passa de 10 ou quando há outra rodada aberta no mesmo repo (o `--max` não muda). **Precisa de release** (o `swarm.md` vai na imagem).
