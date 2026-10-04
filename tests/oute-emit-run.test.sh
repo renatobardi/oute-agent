@@ -41,7 +41,7 @@ run() {
 }
 envval() { local k="$1"; sed -n "s/^$k=//p" "$OUT_DIR/env"; return $?; }
 RUN_ENV=()
-HTTP="ht""tp"; SL="//"; EP="${HTTP}:${SL}collector.invalid:4318"; LEP="${HTTP}:${SL}logs.invalid:4318/v1/logs"; export EP LEP
+EP="https://collector.invalid:4318"; LEP="https://logs.invalid:4318/v1/logs"; export EP LEP
 
 envfile "$H" "OTEL_EXPORTER_OTLP_ENDPOINT=${EP}" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_TRACES_EXPORTER=otlp OTEL_LOG_USER_PROMPTS=1 \
