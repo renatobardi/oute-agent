@@ -4,6 +4,21 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.37] - 2026-10-04
+
+### Added
+- **Resumo e aviso nos scripts do canal de aprovação** (#480). `docker/agent-notes.md` ganha a regra: todo script proposto abre com um bloco `# RESUMO` (o que faz, em que host, o que altera, o que não toca, se reinicia algo) e traz `# CUIDADO:` antes de cada passo que remove, recria, para ou não se desfaz, com o comando primeiro e o risco depois. O aviso descreve o efeito real, e "não toca em X" só vale se o script garante. Os dois blocos são comentário. A skill `oute-aidlc-ship-verify` abre o pedido com `# RESUMO`, e a `oute-aidlc-ops-observe` cita a regra. A tela do `oute watch` não muda. Precisa de release (`docker/agent-notes.md`).
+- **Sessão em Haiku entrega a redação final a um subagente em Sonnet** (#481). `docker/agent-notes.md` e `docker/swarm-worker.md` ganham a regra: texto com decisão ou risco para o Bardi (corpo de PR, relatório, proposta, script do canal, resumo com opções) vai para um subagente em Sonnet, com os fatos e as fontes, e a sessão confere o resultado contra os fatos antes de publicar. A regra diz como a sessão sabe o próprio modelo e o que fazer sem subagente (publica e avisa que o texto saiu do Haiku). A tabela do seletor não muda. Precisa de release (`docker/agent-notes.md`, `docker/swarm-worker.md`).
+
+### Changed
+- **`oute-swarm watch` emite uma linha `[ci]` quando o CI do head fica verde** (#487). Com todos os checks do head passando (inclusive o `SonarCloud Code Analysis`), sai `[ci] PR #<n> · verde (head <sha7>): <checks>` em vez de uma linha por check; falha continua uma linha por check, e enquanto um check roda não sai linha. O `swarm.md` explica a linha única ao dispatcher. **Precisa de release** (`oute-swarm` e `swarm.md` vão na imagem).
+- **Testes:** dividir `tests/oute-swarm-prompts.test.sh` por arquivo de prompt em três arquivos tema-específicos (`tests/oute-swarm-prompts-dispatcher.test.sh` para swarm.md, `-worker.test.sh` para swarm-worker.md, `-notas.test.sh` para agent-notes.md) para reduzir conflitos de merge quando múltiplos PRs acrescentam casos de temas diferentes (#500). Criar apoio comum em `tests/lib/oute-swarm-prompts.sh` para caminhos de arquivos compartilhados. Atualizar mapa de testes do `AGENTS.md` com a nova estrutura.
+- **Checagem de função de shell nova e critério de ship em `docker/swarm-worker.md`** (#501). A checagem antes do PR acrescenta a regra: função de shell nova, inclusive em teste, deve levar `local` nos parâmetros e `return` explícito no fim. A regra de `Closes` × `Refs` esclarece que critério de `ship` (com "depois de entrar", "depois do deploy" ou "medida após a release") vai no `## Falta` com a marca `(ship)`, e o PR usa `Closes`. Precisa de release (`docker/swarm-worker.md` vai na imagem).
+
+### Fixed
+- **Dois trechos ambíguos dos prompts reescritos, sem mudar a regra** (#488). `docker/swarm.md` (spike com critério que pede abrir issue: a frase truncada "cada uma uma linha claro" virou "cada uma descrita numa linha clara") e `qa-pr-audit` (correção do `Refs` com todos os critérios de build atendidos: troca para `Closes`; o `## Falta` só de `(ship)` fica com a marca, e sem item a seção sai). **Precisa de release** (`swarm.md` vai na imagem).
+- agent-studio: o Dashboard (`/`) segurava a trava do DuckDB durante toda a consulta e parava as outras telas e a ingestão (504 no `agent-studio.oute.pro`, #504). Agora roda num cursor próprio, uma consulta por vez, com prazo de 50 s e cache de 60 s por janela (vencida, a tela recebe a última e a conta se refaz em segundo plano), e o `snapshot` lê o DuckDB uma vez em vez de cinco.
+
 ## [0.7.36] - 2026-10-04
 
 ### Added

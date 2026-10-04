@@ -1,2 +1,0 @@
-### Changed
-- **`oute-swarm watch` emite uma linha `[ci]` quando o CI do head fica verde** (#487). Com todos os checks do head passando (inclusive o `SonarCloud Code Analysis`), sai `[ci] PR #<n> · verde (head <sha7>): <checks>` em vez de uma linha por check; falha continua uma linha por check, e enquanto um check roda não sai linha. O `swarm.md` explica a linha única ao dispatcher. **Precisa de release** (`oute-swarm` e `swarm.md` vão na imagem).
