@@ -1,0 +1,2 @@
+### Changed
+- **agent-studio no Kubo, 1/4: tokens, fonte e CSP** (#466, épico #465). O `studio.css` passa a usar as variáveis OKLCH do Kubo (claro e escuro por `prefers-color-scheme`), com o âmbar `--gate`/`--gate-tint` só na faixa de decisões; link sem cor própria, custo real sem cor e estimado em cinza itálico. A Inter Variable é servida em `/static/fonts/InterVariable.woff2` e a CSP ganha `font-src 'self'`. Nenhum template muda. **Precisa de release** (o pacote vai na imagem).

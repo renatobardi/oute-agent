@@ -158,6 +158,20 @@ check "páginas: sem script nem estilo inline"          bash -c '! grep -hiE "<s
 check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "$TMP/list.html" "$TMP/a.html" | sort -u)" = '<script src="/static/htmx.min.js" defer>'
 CSP="$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/conversa?id=conv-a")"
 check "CSP: script e estilo só deste servidor"         bash -c 'grep -q "default-src .none." <<<"$1" && grep -q "script-src .self.;" <<<"$1" && grep -q "style-src .self.;" <<<"$1"' _ "$CSP"
+check "CSP: font-src só deste servidor, e o resto da política igual" bash -c 'grep -q "img-src .self.; font-src .self.; connect-src .self.; form-action .self.; base-uri .none.; frame-ancestors .none." <<<"$1"' _ "$CSP"
+FONT_SHA=$(sha256sum "$PKG/static/fonts/InterVariable.woff2" | cut -d' ' -f1)
+check "fonte Inter Variable servida sem login (woff2)"  test "$(code "$STUDIO_URL/static/fonts/InterVariable.woff2")" = 200
+check "fonte: o servidor entrega o arquivo do repo"     test "$(curl -s "$STUDIO_URL/static/fonts/InterVariable.woff2" | sha256sum | cut -d' ' -f1)" = "$FONT_SHA"
+check "fonte: é woff2 de verdade (magic wOF2)"          test "$(head -c4 "$PKG/static/fonts/InterVariable.woff2")" = wOF2
+curl -s "$STUDIO_URL/static/studio.css" > "$TMP/studio.css"
+check "CSS: @font-face Inter Variable 100-900 com local('Inter') e a url de /static" bash -c 'grep -q "font-family: .Inter Variable.;" "$1" && grep -q "font-weight: 100 900;" "$1" && grep -q "src: local(.Inter.), url(./static/fonts/InterVariable.woff2.) format(.woff2.);" "$1"' _ "$TMP/studio.css"
+check "CSS: nenhum hex de cor nem variável antiga"      bash -c '! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | grep -qE "#[0-9a-fA-F]{3,8}\b|--(fundo|painel|texto|fraco|linha|link|erro|est|real)\b"' _ "$TMP/studio.css"
+check "CSS: tokens Kubo no claro e no escuro (OKLCH)"   bash -c 'for v in background foreground card muted muted-foreground border primary destructive gate gate-tint; do [ "$(grep -c -- "^ *--$v: oklch(" "$1")" = 2 ] || exit 1; done' _ "$TMP/studio.css"
+check "CSS: dark por prefers-color-scheme"              grep -q "@media (prefers-color-scheme: dark)" "$TMP/studio.css"
+check "CSS: âmbar (--gate) só em .decisoes"             bash -c '[ "$(grep -c "var(--gate" "$1")" -ge 1 ] && ! grep "var(--gate" "$1" | grep -vqE "^ +(border-bottom: 1px solid var\(--gate\)|color: var\(--gate\);)|border-bottom: 1px solid var\(--gate\); background: var\(--gate-tint\);" ' _ "$TMP/studio.css"
+check "CSS: body Inter 14px, h1 20px/600/-0.025em, h2 16px/500, mono 12px" bash -c 'grep -q "font: 14px/1.5 var(--font-sans)" "$1" && grep -q "^h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.025em;" "$1" && grep -q "^h2 { font-size: 16px; font-weight: 500;" "$1" && grep -q "font-family: var(--font-mono); font-size: 12px;" "$1"' _ "$TMP/studio.css"
+check "CSS: .real sem cor; .est muted itálico"          bash -c '! grep -E "^\.real \{.*color" "$1" && grep -q "^\.est { color: var(--muted-foreground); font-style: italic; }" "$1"' _ "$TMP/studio.css"
+check "CSS: .aviso.erro e tr.erro com --destructive tingido" bash -c 'grep -E "^\.aviso\.erro" "$1" | grep -q "color-mix(in oklch, var(--destructive)" && grep -q "^tr\.erro > td:first-child { box-shadow: inset 3px 0 var(--destructive); }" "$1"' _ "$TMP/studio.css"
 check "páginas não vão para cache"                     test "$(hdr cache-control "${C[@]}" "$STUDIO_URL/conversas")" = no-store
 check "sem build de front-end no repo"                 bash -c '! ls "$1"/package.json "$1"/../package.json "$1"/node_modules 2>/dev/null | grep -q .' _ "$PKG"
 
