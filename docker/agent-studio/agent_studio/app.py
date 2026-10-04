@@ -282,7 +282,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     return app
 
 
-MAX_HOURS = 24 * 366
+MAX_HOURS = web.MAX_HOURS
 
 
 def _parse_time(value, name):

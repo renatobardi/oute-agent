@@ -41,8 +41,10 @@ detail_log = logging.getLogger("agent_studio_detail")
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOME = "/"
 MAX_LOGIN_BODY = 4096
-# janelas oferecidas na lista (horas -> rótulo); a URL aceita também from/to, como o /v1/usage
+# janelas prontas das quatro telas com período (#527; horas -> rótulo); a URL aceita também from/to, como o /v1/usage, e de/ate no fuso da tela
 WINDOWS = (("24", "24 horas"), ("168", "7 dias"), ("720", "30 dias"), ("8784", "366 dias"))
+MAX_HOURS = 24 * 366  # janela máxima (ADR-08); app.py usa o mesmo valor em `hours`
+INPUT_FORMATS = ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S")  # o que o <input type="datetime-local"> manda
 HEADERS = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
                                "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
@@ -127,6 +129,38 @@ def _env(zone=tz_mod.UTC):
     return env
 
 
+def local_input(ns, zone):
+    """ns -> `2026-10-04T09:30` no fuso da tela, o valor de um <input type="datetime-local">."""
+    return tz_mod.local(ns, zone).strftime("%Y-%m-%dT%H:%M")
+
+
+def parse_local(value, name, zone):
+    """`2026-10-04T09:30` (hora local no fuso da tela) -> ns UTC. ValueError = 400, com a mensagem para a tela."""
+    for fmt in INPUT_FORMATS:
+        try:
+            dt = datetime.strptime((value or "").strip(), fmt)
+        except ValueError:
+            continue
+        return int(dt.replace(tzinfo=zone).timestamp()) * 1_000_000_000
+    raise ValueError(f"{name} inválido: informe dia e hora (ex.: 2026-10-04T09:30)")
+
+
+def has_range(q):
+    """`de`/`ate` preenchidos: o intervalo no fuso da tela. Os dois em branco (formulário com a janela pronta) não contam."""
+    return bool(q.get("de") or q.get("ate"))
+
+
+def period(q, from_ns, to_ns, zone):
+    """Contexto do controle de período (#527): janela pronta ativa ou o intervalo, já no fuso da tela."""
+    custom = "from" in q or has_range(q)
+    return {"hours": q.get("hours", "" if custom else "24"),
+            "range": {"from": local_input(from_ns, zone) if custom else "", "to": local_input(to_ns, zone) if custom else ""}}
+
+
+def iso_utc(ns):
+    return datetime.fromtimestamp(ns // 1_000_000_000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def safe_next(target):
     """Destino depois do login: só caminho deste servidor (`/…`). Qualquer outra coisa (outro site, `//host`,
     barra invertida, caractere de controle) vira a página inicial."""
@@ -141,6 +175,24 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     `surreal` = cliente do SurrealDB para o estado das sessões (`None` = sem ele: a tela mostra só o DuckDB)."""
     env = _env(config.tz)
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+
+    def screen_window(q):
+        """Janela da tela: a do `/v1/usage` (`window`) mais `de`/`ate`, o intervalo no fuso da tela (#527), e o teto de
+        8784 h também para from/to. ValueError = 400 com a mensagem na tela. O contrato do `/v1/usage` não muda."""
+        if has_range(q):
+            # `hours` junto é o do formulário (a janela pronta que estava ativa): de/ate preenchidos valem mais
+            if "from" in q or "to" in q:
+                raise ValueError("use de/ate ou from/to, só um deles")
+            if not q.get("de") or not q.get("ate"):
+                raise ValueError("informe o início e o fim do período")
+            from_ns, to_ns = parse_local(q["de"], "início", config.tz), parse_local(q["ate"], "fim", config.tz)
+            if from_ns >= to_ns:
+                raise ValueError("o fim precisa ser depois do início")
+        else:
+            from_ns, to_ns = window({k: v for k, v in q.items() if k not in ("de", "ate")})
+        if to_ns - from_ns > MAX_HOURS * 3_600_000_000_000:
+            raise ValueError(f"o período passa do máximo de {MAX_HOURS} h (366 dias)")
+        return from_ns, to_ns
 
     def alert_age(a, now):
         """Idade em segundos do alerta que recolhe por tempo (#524); `None` = nunca recolhe."""
@@ -229,7 +281,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return denied
         q = request.query_params
         try:
-            from_ns, to_ns = window(q)
+            from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
         snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz)
@@ -241,11 +293,15 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         ages = [a for a in (prop_mod.age_seconds(p.get("proposed_at"), now) for p in (records or {}).get("pending", []))
                 if a is not None]
         ages += [d["age_seconds"] for d in getattr(request.state, "decisions", None) or []]
-        hours = q.get("hours", "" if "from" in q else "24")
-        qs = f"from={quote(q['from'], safe='')}&to={quote(q.get('to', ''), safe='')}" if "from" in q else f"hours={quote(hours, safe='')}"
+        per = period(q, from_ns, to_ns, config.tz)
+        if "from" in q:
+            qs = f"from={quote(q['from'], safe='')}&to={quote(q.get('to', ''), safe='')}"
+        elif has_range(q):  # o intervalo digitado no fuso da tela vai adiante em UTC, exato
+            qs = f"from={quote(iso_utc(from_ns), safe='')}&to={quote(iso_utc(to_ns), safe='')}"
+        else:
+            qs = f"hours={quote(per['hours'], safe='')}"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
-                    gates=len(ages), window_qs=qs, hours=hours, from_ns=from_ns, to_ns=to_ns,
-                    windows=(("24", "24 h"), ("168", "7 dias")), range={"from": q.get("from", ""), "to": q.get("to", "")})
+                    gates=len(ages), window_qs=qs, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
     # ------------------------------------------------ login
     @app.get("/login")
@@ -284,7 +340,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return denied
         q = request.query_params
         try:
-            from_ns, to_ns = window(q)
+            from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
         host, agent = q.get("host", ""), q.get("agent", "")
@@ -293,8 +349,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if failed:
             return failed
         return page(request, "conversations.html", **data, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent,
-                    windows=WINDOWS, hours=q.get("hours", "" if "from" in q else "24"),
-                    range={"from": q.get("from", ""), "to": q.get("to", "")}, limit=conv_mod.LIST_LIMIT)
+                    windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
 
     @app.get("/conversa")
     async def conversation(request: Request):
@@ -366,7 +421,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return denied
         q = request.query_params
         try:
-            from_ns, to_ns = window(q)
+            from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
         host, agent = q.get("host", ""), q.get("agent", "")
@@ -376,8 +431,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return failed
         state = await with_state(data["sessions"])
         return page(request, "sessions.html", **data, state_read=state, from_ns=from_ns, to_ns=to_ns, host=host,
-                    agent=agent, windows=WINDOWS, hours=q.get("hours", "" if "from" in q else "24"),
-                    range={"from": q.get("from", ""), "to": q.get("to", "")}, limit=conv_mod.LIST_LIMIT)
+                    agent=agent, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
 
     @app.get("/sessao")
     async def session(request: Request):
@@ -403,7 +457,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return denied
         q = request.query_params
         try:
-            from_ns, to_ns = window(q)
+            from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
         data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz)
@@ -415,8 +469,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
         return page(request, "usage.html", totals=data["totals"], by_role=by_cost(data["by_role"]),
                     by_phase=by_cost(data["by_phase"]), from_ns=from_ns, to_ns=to_ns, windows=WINDOWS,
-                    hours=q.get("hours", "" if "from" in q else "24"),
-                    range={"from": q.get("from", ""), "to": q.get("to", "")})
+                    **period(q, from_ns, to_ns, config.tz))
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura
     async def proposal_state(what, fn, *args):
