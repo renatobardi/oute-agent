@@ -4,6 +4,18 @@
 {# o logo do Kubo (flor de cerejeira), do mesmo sprite; as cores vêm do CSS (.sakura) #}
 {% macro logo(size=30) %}<svg class="sakura" width="{{ size }}" height="{{ size }}" viewBox="0 0 100 100" aria-hidden="true"><use href="/static/lucide.svg#sakura"/></svg>{% endmacro %}
 
+{# Badge do Kubo: `variant` = "" (padrão), contorno, secundario, destrutivo ou gate (âmbar, só decisão e pedido pendentes) #}
+{% macro badge(text, variant="", glyph="") %}<span class="badge{% if variant %} {{ variant }}{% endif %}">{% if glyph %}{{ icon(glyph, 12) }}{% endif %}{{ text }}</span>{% endmacro %}
+
+{# StatTile: o rótulo com ícone e, embaixo, o valor (o que vier no `call`) #}
+{% macro tile(label, glyph) %}<div class="tile"><span class="tile-rotulo">{{ icon(glyph, 14) }}{{ label }}</span><strong class="tile-valor">{{ caller() }}</strong></div>{% endmacro %}
+
+{# ícone do tipo do span: chamada ao modelo, tool, execução da tool ou interação #}
+{% macro span_icon(name, is_call) %}{% set n = name or "" %}{% if is_call or "llm_request" in n %}{{ icon("sparkles", 14) }}{% elif "execution" in n %}{{ icon("terminal", 14) }}{% elif "tool" in n %}{{ icon("wrench", 14) }}{% elif "interaction" in n %}{{ icon("workflow", 14) }}{% else %}{{ icon("circle-dot", 14) }}{% endif %}{% endmacro %}
+
+{# botão Copiar: nasce escondido e o /static/copiar.js o mostra; copia o texto do elemento `target` e só isso (nenhuma outra ação) #}
+{% macro copy_button(target, label="Copiar") %}<button type="button" class="botao copiar" aria-controls="{{ target }}" hidden>{{ icon("copy", 14) }}<span>{{ label }}</span></button>{% endmacro %}
+
 {# custo real e estimado sempre separados; o estimado vai marcado (#203) #}
 {% macro cost(c) %}
 {% if c.real_usd is not none %}<span class="real" title="custo real, informado pela fonte">{{ c.real_usd|usd }}</span>{% endif %}
@@ -14,9 +26,9 @@
 
 {% macro log_rows(logs, id, next_offset) %}
 {% for l in logs %}
-<tr data-log="{{ l.time_unix_nano }}"{% if l.severity_number and l.severity_number >= 17 %} class="erro"{% endif %}>
+<tr data-log="{{ l.time_unix_nano }}">
   <td class="hora">{{ l.time_unix_nano|ts }}</td>
-  <td>{{ l.severity_text or l.severity_number or "—" }}</td>
+  <td>{% if l.severity_number and l.severity_number >= 17 %}{{ badge(l.severity_text or l.severity_number, "destrutivo") }}{% elif l.severity_text or l.severity_number %}{{ badge(l.severity_text or l.severity_number, "contorno") }}{% else %}—{% endif %}</td>
   <td>{{ l.event_name or "—" }}</td>
   <td class="corpo">
     {% if l.body %}<pre>{{ l.body }}</pre>{% endif %}
@@ -31,12 +43,34 @@
 {% endmacro %}
 
 {% macro log_table(logs, id, next_offset) %}
-<table class="logs">
+<div class="cartao rolagem">
+<table class="logs empilha">
   <thead><tr><th>Hora ({{ tzl() }})</th><th>Nível</th><th>Evento</th><th>Conteúdo</th></tr></thead>
   <tbody>
   {{ log_rows(logs, id, next_offset) }}
   </tbody>
 </table>
+</div>
+{% endmacro %}
+
+{# linha do tempo dos eventos da sessão, pela hora do fato; ponto âmbar nos eventos de Gate (pedido ao Bardi, pergunta da rodada) #}
+{% macro timeline(events) %}
+<ol class="tempo">
+{% for e in events %}
+{% set name = e.event_name or "" %}
+{% set gate = name == "oute.canal.proposed" or name.endswith(".asked") or ".gate" in name %}
+<li data-log="{{ e.time_unix_nano }}">
+  <div class="trilho"><span class="ponto{% if gate %} gate{% endif %}"></span><span class="linha"></span></div>
+  <div class="tempo-corpo">
+    <div class="tempo-titulo"><code>{{ name or "(sem nome)" }}</code><span class="hora">{{ e.time_unix_nano|ts }}</span>
+      {% if gate %}{{ badge("Gate", "gate") }}{% endif %}
+      {% if e.severity_number and e.severity_number >= 17 %}{{ badge(e.severity_text or e.severity_number, "destrutivo") }}{% endif %}</div>
+    {% if e.body and e.body != name %}<pre>{{ e.body }}</pre>{% endif %}
+    {% if e.attributes %}<details><summary>atributos</summary><pre>{{ e.attributes }}</pre></details>{% endif %}
+  </div>
+</li>
+{% endfor %}
+</ol>
 {% endmacro %}
 
 {% macro span_detail(span) %}
@@ -92,14 +126,13 @@
 {# ---- sessões (#207): as mesmas colunas para a linha da sessão e para a linha de cada conversa ---- #}
 {% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
 
+{# calls, tokens (ent / saí, o cache numa segunda linha menor), custo, p95 e erros; no celular só o custo e os erros ficam à vista #}
 {% macro usage_cells(u) %}
-<td class="n">{{ u.calls|num }}</td>
-<td class="n">{{ u.tokens.input|num }}</td>
-<td class="n">{{ u.tokens.output|num }}</td>
-<td class="n">{{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</td>
+<td class="n sec">{{ u.calls|num }}</td>
+<td class="n sec">{{ u.tokens.input|num }} / {{ u.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</span></td>
 <td class="n custo">{{ cost(u.cost) }}</td>
-<td class="n">{{ u.latency_p95_ms|ms }}</td>
-<td class="n{% if u.errors.total %} erro{% endif %}">{{ u.errors.total|num }}</td>
+<td class="n sec">{{ u.latency_p95_ms|ms }}</td>
+<td class="n">{% if u.errors.total %}{{ badge(u.errors.total|num, "destrutivo") }}{% else %}{{ u.errors.total|num }}{% endif %}</td>
 {% endmacro %}
 
 {# modelos das chamadas ao modelo; com mais de um, quantas chamadas cada #}
@@ -107,41 +140,44 @@
 {% for m in models %}<span class="modelo">{{ m.model or "(sem modelo)" }}{% if models|length > 1 %} ×{{ m.calls|num }}{% endif %}</span>{% else %}—{% endfor %}
 {% endmacro %}
 
-{# a tabela das sessões e das conversas, com o cabeçalho; as linhas vêm de quem chama (`call`) #}
+{# a tabela das sessões e das conversas, com o cabeçalho, dentro do cartão; as linhas vêm de quem chama (`call`) #}
 {% macro session_table() %}
-<table class="sessoes">
+<div class="cartao rolagem">
+<table class="sessoes empilha">
   <thead><tr>
-    <th>Início ({{ tzl() }})</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
-    <th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
-    <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
-    <th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
+    <th>Início ({{ tzl() }})</th><th>Sessão / conversa</th><th>Host</th><th>Agente · modelo</th><th class="n">Duração</th>
+    <th class="n">Chamadas</th><th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
+    <th class="n">Custo</th><th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
   </tr></thead>
   {{ caller() }}
 </table>
+</div>
 {% endmacro %}
 
 {% macro conversation_row(c) %}
-<tr data-conversa="{{ c.id }}" data-da-sessao="{{ c.session or '' }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}"
+<tr class="conversa" data-conversa="{{ c.id }}" data-da-sessao="{{ c.session or '' }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}"
     data-models="{{ c.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-start-ns="{{ c.start_ns }}"
     data-duration-ns="{{ c.duration_ns }}" {{ usage_data(c.usage) }}>
-  <td class="hora">{{ c.start_ns|ts }}</td>
-  <td{% if c.session %} class="da-sessao"{% endif %}><a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a></td>
-  <td>{{ c.host or "—" }}</td>
-  <td>{{ c.agent or "—" }}</td>
-  <td>{{ model_list(c.models) }}</td>
-  <td class="n">{{ c.duration_ns|dur }}</td>
+  <td class="hora sec">{{ c.start_ns|ts }}</td>
+  <td class="prim{% if c.session %} da-sessao{% endif %}">{% if c.session %}{{ icon("corner-down-right", 14) }}{% endif %}<a href="/conversa?id={{ c.id|urlencode }}">{{ c.id }}</a>
+    <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ c.usage.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
+  <td class="sec">{{ c.host or "—" }}</td>
+  <td class="sec">{{ c.agent or "—" }} {{ model_list(c.models) }}</td>
+  <td class="n sec">{{ c.duration_ns|dur }}</td>
   {{ usage_cells(c.usage) }}
 </tr>
 {% endmacro %}
 
-{# repo, estado, rodada e issue da sessão: o que o SurrealDB souber dela #}
+{# repo, estado, rodada e issue da sessão: o que o SurrealDB souber dela; o estado em Badge padrão, o resto em contorno #}
 {% macro session_tags(s) %}
 {% set st = s.state %}
 {% if st and (st.repo or st.slug) %}<span class="sub">{{ st.repo or "—" }} · {{ st.slug or "—" }}</span>{% endif %}
-{% if st and st.state %}<span class="etiqueta">{{ st.state }}</span>{% endif %}
-{% if s.swarm_round %}<span class="etiqueta">rodada {{ s.swarm_round }}{% if s.round and s.round.label %} ({{ s.round.label }}){% endif %}</span>
-{% else %}<span class="etiqueta">avulsa</span>{% endif %}
-{% if st and st.issue is not none %}<span class="etiqueta">issue #{{ st.issue }}</span>{% endif %}
+<span class="badges">
+{% if st and st.state %}{{ badge(st.state, "", "loader" if st.state == "aberta" else "") }}{% endif %}
+{% if s.swarm_round %}{{ badge("rodada " ~ s.swarm_round ~ ((" (" ~ s.round.label ~ ")") if s.round and s.round.label else ""), "contorno", "repeat") }}
+{% else %}{{ badge("avulsa", "contorno") }}{% endif %}
+{% if st and st.issue is not none %}{{ badge("issue #" ~ st.issue, "contorno", "circle-dot") }}{% endif %}
+</span>
 {% endmacro %}
 
 {% macro session_row(s) %}
@@ -150,12 +186,12 @@
     data-state="{{ s.state.state or '' if s.state else '' }}" data-conversations="{{ s.conversation_count }}"
     data-start-ns="{{ '' if s.start_ns is none else s.start_ns }}" data-duration-ns="{{ '' if s.duration_ns is none else s.duration_ns }}"
     {{ usage_data(s.usage) }}>
-  <td class="hora">{{ s.start_ns|ts }}</td>
-  <td><a href="/sessao?id={{ s.id|urlencode }}">{{ s.id }}</a> {{ session_tags(s) }}</td>
-  <td>{{ s.host or "—" }}</td>
-  <td>{{ s.agents|join(", ") or (s.state.agent if s.state and s.state.agent else "—") }}</td>
-  <td>{{ model_list(s.models) }}</td>
-  <td class="n">{{ s.duration_ns|dur }}</td>
+  <td class="hora sec">{{ s.start_ns|ts }}</td>
+  <td class="prim"><a href="/sessao?id={{ s.id|urlencode }}">{{ s.id }}</a> {{ session_tags(s) }}
+    <span class="so-celular-linha">{{ s.start_ns|ts }} · {{ s.host or "—" }} · {{ s.agents|join(", ") or "—" }} · {{ s.usage.calls|num }} chamadas · {{ s.duration_ns|dur }}</span></td>
+  <td class="sec">{{ s.host or "—" }}</td>
+  <td class="sec">{{ s.agents|join(", ") or (s.state.agent if s.state and s.state.agent else "—") }} {{ model_list(s.models) }}</td>
+  <td class="n sec">{{ s.duration_ns|dur }}</td>
   {{ usage_cells(s.usage) }}
 </tr>
 {% endmacro %}

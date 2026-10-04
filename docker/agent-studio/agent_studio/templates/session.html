@@ -3,16 +3,61 @@
 {% set detail = true %}
 {% set back = "/sessoes" %}
 {% set crumbs = [("Sessões", "/sessoes"), (id, none)] %}
-{% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, log_table, state_warning %}
+{% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, timeline, state_warning, badge, tile, icon %}
 {% set s = session %}
 {% set st = s.state %}
 {% set u = s.usage %}
 {% block title %}{{ id }} · agent-studio{% endblock %}
 {% block main %}
-<p><a href="/sessoes">← Sessões</a></p>
-<h1>Sessão <code>{{ id }}</code></h1>
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha">
+    <div>
+      <h1>Sessão <code>{{ id }}</code></h1>
+      <div class="badges">
+        {% if st and st.state %}{{ badge(st.state, "", "loader" if st.state == "aberta" else "") }}{% endif %}
+        {% if s.swarm_round %}{{ badge("rodada " ~ s.swarm_round ~ ((" · worker " ~ st.worker) if st and st.worker else ""), "contorno", "repeat") }}{% else %}{{ badge("avulsa", "contorno") }}{% endif %}
+        {% if st and st.issue is not none %}{{ badge("issue #" ~ st.issue, "contorno", "circle-dot") }}{% endif %}
+        {% if phase %}{{ badge("aidlc:" ~ phase, "contorno", "tag") }}{% endif %}
+      </div>
+    </div>
+    <a class="botao" href="/sessoes">{{ icon("arrow-left", 14) }}Sessões</a>
+  </div>
+</div>
 {{ state_warning(state_read) }}
-<dl class="resumo" data-resumo-sessao="{{ id }}" data-agents="{{ s.agents|join(',') }}"
+<div class="tiles">
+  {% call tile("Conversas", "message-square") %}{{ s.conversation_count|num }}{% endcall %}
+  {% call tile("Chamadas", "activity") %}{{ u.calls|num }}{% endcall %}
+  {% call tile("Custo", "receipt") %}<span class="custo">{{ cost(u.cost) }}</span>{% endcall %}
+  {% call tile("p95", "timer") %}{{ u.latency_p95_ms|ms }}{% endcall %}
+</div>
+<div class="duas">
+<div class="pilha">
+  <h2 class="secao">Conversas ({{ s.conversation_count|num }})</h2>
+  {% if s.conversations %}
+  {% call session_table() %}
+    <tbody>
+    {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
+    </tbody>
+  {% endcall %}
+  {% else %}
+  <p class="aviso">Esta sessão não tem conversas.</p>
+  {% endif %}
+  <div class="cartao">
+    <div class="cartao-topo"><div><h2>Eventos da sessão</h2>
+      <p>Eventos com o <code>oute.task.id</code> desta sessão e sem conversa (<code>oute.task.*</code> e o que mais
+      levar a identidade da sessão), pela hora do fato.</p></div></div>
+    {% if events_truncated %}<p class="aviso">Mostrando os primeiros {{ event_limit|num }} eventos.</p>{% endif %}
+    {% if events %}
+    {{ timeline(events) }}
+    {% else %}
+    <p class="aviso">Esta sessão não tem eventos.</p>
+    {% endif %}
+  </div>
+</div>
+<div class="cartao bloco">
+  <h2>Resumo</h2>
+  <dl class="resumo" data-resumo-sessao="{{ id }}" data-agents="{{ s.agents|join(',') }}"
     data-models="{{ s.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-round="{{ s.swarm_round or '' }}"
     data-state="{{ st.state or '' if st else '' }}" data-conversations="{{ s.conversation_count }}" {{ usage_data(u) }}>
   {% if st %}
@@ -37,25 +82,7 @@
   <dt>p95 das chamadas</dt><dd>{{ u.latency_p95_ms|ms }}</dd>
   <dt>Erros</dt><dd>{{ u.errors.spans|num }} spans · {{ u.errors.logs|num }} logs</dd>
 </dl>
-
-<h2>Conversas ({{ s.conversation_count|num }})</h2>
-{% if s.conversations %}
-{% call session_table() %}
-  <tbody>
-  {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
-  </tbody>
-{% endcall %}
-{% else %}
-<p class="aviso">Esta sessão não tem conversas.</p>
-{% endif %}
-
-<h2>Eventos da sessão</h2>
-<p class="nota">Eventos com o <code>oute.task.id</code> desta sessão e sem conversa (<code>oute.task.*</code> e o que mais
-  levar a identidade da sessão), pela hora do fato.</p>
-{% if events_truncated %}<p class="aviso">Mostrando os primeiros {{ event_limit|num }} eventos.</p>{% endif %}
-{% if events %}
-{{ log_table(events, id, none) }}
-{% else %}
-<p class="aviso">Esta sessão não tem eventos.</p>
-{% endif %}
+</div>
+</div>
+</div>
 {% endblock %}

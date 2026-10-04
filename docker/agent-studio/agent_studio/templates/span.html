@@ -3,10 +3,12 @@
 {% set detail = true %}
 {% set crumbs = [("Conversas", "/conversas"), ("Span", none)] %}
 {% if span.session_id %}{% set back = "/conversa?id=" ~ (span.session_id|urlencode) %}{% endif %}
-{% from "_macros.html" import span_detail %}
+{% from "_macros.html" import span_detail, icon %}
 {% block title %}{{ span.name or span.span_id }} · agent-studio{% endblock %}
 {% block main %}
-{% if span.session_id %}<p><a href="/conversa?id={{ span.session_id|urlencode }}">← Conversa <code>{{ span.session_id }}</code></a></p>{% endif %}
-<h1>Span <code>{{ span.name or "(sem nome)" }}</code></h1>
-{{ span_detail(span) }}
+<div class="pagina">
+<div class="pagina-topo"><div class="titulo-linha"><h1>Span <code>{{ span.name or "(sem nome)" }}</code></h1>
+  {% if span.session_id %}<a class="botao" href="/conversa?id={{ span.session_id|urlencode }}">{{ icon("arrow-left", 14) }}Conversa <code>{{ span.session_id }}</code></a>{% endif %}</div></div>
+<div class="cartao bloco">{{ span_detail(span) }}</div>
+</div>
 {% endblock %}
