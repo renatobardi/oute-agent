@@ -9,7 +9,6 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-nome() { PYTHONPATH="$ROOT/docker/agent-studio" python3 -c 'import sys; from agent_studio.names import friendly; print(friendly(sys.argv[1]))' "$1"; }
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"

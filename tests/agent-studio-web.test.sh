@@ -13,7 +13,6 @@ TMP="$(mktemp -d)"
 trap 'studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
-nome() { PYTHONPATH="$ROOT/docker/agent-studio" python3 -c 'import sys; from agent_studio.names import friendly; print(friendly(sys.argv[1]))' "$1"; }
 
 
 # ---------------------------------------------------------------- DuckDB de exemplo

@@ -88,6 +88,12 @@ output = 10.0
 cache_read = 0.125
 EOF
 }
+# nome <id>: o nome amigável da conversa (#530), pela mesma função do agent-studio
+nome() {
+  local id="$1"
+  PYTHONPATH="$STUDIO_ROOT/docker/agent-studio" python3 -c 'import sys; from agent_studio.names import friendly; print(friendly(sys.argv[1]))' "$id"
+  return $?
+}
 compose_service() { awk -v s="  $1:" '$0 == s {on=1; print; next} on && /^  [a-z]/ {exit} on {print}' "$STUDIO_ROOT/docker/compose.yaml"; }
 studio_oute_funcs() { sed -n '/^# --- agent-studio (ADR-08/,/^legacy_cleanup()/p' "$STUDIO_ROOT/scripts/oute" | sed '$d'; }
 studio_oute_up() {
