@@ -25,9 +25,23 @@
 </div>
 
 {% if models %}
+<div class="cartao resumo-preco" id="resumo-tendencia">
+  <span class="selo-tendencia alta">{{ icon("trending-up", 14) }}<strong data-subiram>{{ summary.up }}</strong> {{ "modelo subiu" if summary.up == 1 else "modelos subiram" }}</span>
+  <span class="selo-tendencia queda">{{ icon("trending-down", 14) }}<strong data-cairam>{{ summary.down }}</strong> {{ "modelo caiu" if summary.down == 1 else "modelos caíram" }}</span>
+  <span class="nota">nos últimos {{ summary.days }} dias (último preço de lista de cada modelo)</span>
+</div>
 {% for m in models %}
 <section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}" class="cartao">
-  <div class="modelo-topo"><h2>{{ m.model }}</h2>{% if m.fixed %}<span class="badge contorno" data-fixo>{{ icon("lock", 12) }}fixo no config.toml</span>{% endif %}</div>
+  <div class="modelo-topo"><h2>{{ m.model }}</h2>
+    {% if m.trend %}<span class="selo-tendencia {{ 'alta' if m.trend.dir == 'up' else 'queda' }}" data-tendencia="{{ m.trend.dir }}">{{ icon("trending-up" if m.trend.dir == "up" else "trending-down", 14) }}{{ m.trend.axis }} {{ "subiu" if m.trend.dir == "up" else "caiu" }}{% if m.trend.pct is not none %} {{ "%+.1f"|format(m.trend.pct)|replace(".", ",") }}%{% endif %} · {{ m.trend.since|when }}</span>
+    {% else %}<span class="badge secundario" data-sem-troca>sem troca</span>{% endif %}
+    {% if m.fixed %}<span class="badge contorno" data-fixo>{{ icon("lock", 12) }}fixo no config.toml</span>{% endif %}</div>
+  <figure class="grafico-preco" data-grafico>
+    <svg class="degrau-svg" viewBox="0 0 {{ m.chart.w }} {{ m.chart.h }}" preserveAspectRatio="none" role="img" aria-label="Preço de entrada e de saída ao longo do tempo, em degraus">
+      <path class="saida" d="{{ m.chart.output }}"/><path class="entrada" d="{{ m.chart.input }}"/>
+    </svg>
+    <figcaption><span class="leg entrada">entrada</span> <span class="leg saida">saída</span> · escala até {{ m.chart.top|usdm }}</figcaption>
+  </figure>
   <div class="rolagem">
   <table class="precos">
     <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde ({{ tzl() }})</th><th>Última conferência</th></tr></thead>
