@@ -226,6 +226,10 @@ check("fence: dentro do bloco `## Decisão` é código, não seção", [s["title
 check("controle: CRLF, TAB e controles não quebram nem entram", etapas.parse("## Decisão\r\nlinha\x00\x1b com \tTAB\r\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "linha com     TAB")
 for cp in (0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2060, 0x2066, 0x2069, 0xfeff):
     check(f"direção: U+{cp:04X} sai do texto antes de montar os blocos", etapas.parse("## Decisão\na" + chr(cp) + "b\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "ab")
+fam = "\U0001F468\u200d\U0001F469\u200d\U0001F467"
+def inl0(t): return etapas.parse("## Decisão\n" + t + "\n")["sections"][0]["blocks"][0]["inl"][0]["s"]
+check("ZWJ: emoji composto (família, coração em chamas) fica inteiro", inl0("a" + fam + "b") == "a" + fam + "b" and inl0("\u2764\ufe0f\u200d\U0001F525") == "\u2764\ufe0f\u200d\U0001F525")
+check("ZWJ: solto, entre letras, no começo e no fim do pictograma sai", inl0("a\u200db") == "ab" and inl0("\u200d\U0001F468") == "\U0001F468" and inl0("\U0001F468\u200d") == "\U0001F468")
 check("direção: acento e emoji ficam", etapas.parse("ação ✓\n")["sections"][0]["blocks"][0]["inl"][0]["s"] == "ação ✓")
 check("grande: 32 KiB de uma linha só passam sem erro", flat(etapas.parse("a" * 32768)) == [(None, "p")])
 check("grande: 4000 itens de lista passam", len(etapas.parse("\n".join("- i" for _ in range(4000)))["sections"][0]["blocks"][0]["items"]) == 4000)

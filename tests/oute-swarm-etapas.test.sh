@@ -344,6 +344,55 @@ check "review interrompido por INT: nenhum veredito gravado e a pasta de trabalh
 check "review concluído: nenhuma sobra na rodada"       bash -c '! ls -A "$1" | grep -q "^\.revisor"' _ "$STATE"
 rcv_stop 2>/dev/null || true
 
+# C: credencial em URL (://usuário:senha@host); sem falso positivo em URL com porta ou com @ depois de espaço
+CASE=urlcred; round "$CASE"; mkdir -p "$FAKE/rev"; echo 0 > "$FAKE/rev/n"; ok_json
+scheme="postgres"; etapa fechamento.r1 "## Decisão
+a base fica em ${scheme}://app:s3nha-curta@db.interno:5432/x
+"
+t0="$(cat "$FAKE/rev/n")"
+swr step review fechamento --writer $WR --rev 1
+check "credencial em URL: o review recusa e nomeia o padrão, antes do modelo" bash -c '[ "$1" -eq 1 ] && grep -qF "(credencial-em-url)" <<<"$2" && [ "$(cat "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/rev/n" "$t0"
+swr step publish fechamento --rev 1
+check "credencial em URL: o publish também recusa" bash -c '[ "$1" -eq 1 ] && grep -qF "(credencial-em-url)" <<<"$2"' _ "$RC" "$ERR"
+etapa fechamento.r2 "## Decisão
+1. o painel abre em https://painel.exemplo:8430/rodada e o aviso vai a ops@exemplo.org; o usuário:valor fica fora de URL.
+"
+swr step review fechamento --writer $WR --rev 2
+check "credencial em URL: URL com porta e e-mail na frase não é falso positivo" bash -c "$APROVADO_RC" _ "$RC" "$STATE/etapas/fechamento.r2.review.json"
+
+# E: ZWJ (U+200D) entre pictogramas passa no shell; solto continua recusado
+CASE=zwj; round "$CASE"; mkdir -p "$FAKE/rev"; echo 0 > "$FAKE/rev/n"; ok_json
+etapa fechamento.r1 "$(printf '## Decisão\n1. a equipe \xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x91\xa7 e o \xe2\x9d\xa4\xef\xb8\x8f\xe2\x80\x8d\xf0\x9f\x94\xa5 aprovam\n')"
+swr step review fechamento --writer $WR --rev 1
+check "ZWJ entre pictogramas (família, coração em chamas): o review passa" bash -c "$APROVADO_RC" _ "$RC" "$STATE/etapas/fechamento.r1.review.json"
+for pair in "entre letras|a\xe2\x80\x8db" "no começo do pictograma|\xe2\x80\x8d\xf0\x9f\x91\xa8" "no fim do pictograma|\xf0\x9f\x91\xa8\xe2\x80\x8d x" "com outra marca|\xf0\x9f\x91\xa8\xe2\x80\x8d\xe2\x80\xae\xf0\x9f\x91\xa9"; do
+  etapa fechamento.r2 "$(printf '## Decisão\n1. %b\n' "${pair#*|}")"
+  rm -f "$STATE/etapas/fechamento.r2.review.json"; t0="$(cat "$FAKE/rev/n")"
+  swr step review fechamento --writer $WR --rev 2
+  check "ZWJ solto (${pair%%|*}): recusa, o modelo não é chamado" bash -c '[ "$1" -eq 1 ] && grep -qF "marca de direção ou separador Unicode" <<<"$2" && [ "$(cat "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/rev/n" "$t0"
+done
+
+# F: sobra de SIGKILL: .revisor.* com mais de 1 dia sai no começo do review; a pasta recente e outros arquivos ficam
+CASE=sobra; round "$CASE"; mkdir -p "$FAKE/rev"; ok_json
+mkdir -p "$STATE/.revisor.velha" "$STATE/.revisor.recente" "$STATE/.outra-pasta"; echo x > "$STATE/.revisor.velha/prompt"
+touch -d '3 days ago' "$STATE/.revisor.velha" "$STATE/.outra-pasta"
+etapa fechamento.r1 "$TXT"
+swr step review fechamento --writer $WR
+check "sobra de SIGKILL: a pasta .revisor.* de 3 dias sai" bash -c '[ "$1" -eq 0 ] && [ ! -e "$2/.revisor.velha" ]' _ "$RC" "$STATE"
+check "sobra de SIGKILL: a pasta recente e a de outro nome ficam" bash -c '[ -d "$1/.revisor.recente" ] && [ -d "$1/.outra-pasta" ]' _ "$STATE"
+check "sobra de SIGKILL: a pasta da própria execução não sobra" bash -c '[ "$(ls -A "$1" | grep -c "^\.revisor")" -eq 1 ]' _ "$STATE"
+
+# G: link com texto e destino divergentes: o prompt do revisor manda reprovar, e o texto com o link chega ao revisor; a
+# reprovação do modelo vira veredito reprovado (código 4)
+CASE=link; round "$CASE"; mkdir -p "$FAKE/rev"; echo 0 > "$FAKE/rev/n"; bad_json
+etapa fechamento.r1 "## Decisão
+1. veja [github.com/x](https://outro.host/)
+"
+swr step review fechamento --writer $WR
+k="$(cat "$FAKE/rev/n")"
+check "link divergente: o prompt do revisor traz a regra do texto que esconde o destino" bash -c 'grep -qF "o texto esconde o destino" "$1" && grep -qF "[github.com/x](https://outro.host/)" "$1"' _ "$FAKE/rev/stdin.$k"
+check "link divergente: o veredito reprovado do revisor vira código 4" bash -c '[ "$1" -eq 4 ] && [ "$(jq -r .verdict "$2")" = reprovado ]' _ "$RC" "$STATE/etapas/fechamento.r1.review.json"
+
 # limite conhecido da trava do publish (ADR-08): o veredito é arquivo local, sem assinatura. Quem grava um .review.json com o
 # sha256 certo e um revisor diferente do autor publica como aprovado; a trava é contra erro do dispatcher, não contra dispatcher comprometido
 CASE=limite; round "$CASE"; mkdir -p "$FAKE/rev"

@@ -191,7 +191,15 @@ _ITEM = re.compile(r"^(?:[-*]|\d{1,3}[.)]) (.*)$")
 _ORDERED = re.compile(r"^\d{1,3}[.)] ")
 # controles e as marcas de direção e separadores Unicode (U+200B-200F, U+2028-202E, U+2060-2069, U+FEFF): não aparecem na
 # tela, mas trocam a ordem do texto ou quebram a linha de quem lê
-_CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
+# exceção: o ZWJ (U+200D) entre pictogramas (emoji composto, ex.: família) fica; ZWJ solto, no começo ou no fim, sai
+_PIC = "\U0001F300-\U0001FAFF\u2600-\u27bf"
+_ZWJ_SOLTO = re.compile(f"(?<![{_PIC}\ufe0f])\u200d|\u200d(?![{_PIC}])")
+_CTRL = re.compile("[\x00-\x08\x0b-\x1f\x7f\u200b\u200c\u200e\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
+
+
+def _limpa(text):
+    """Tira os controles e as marcas de direção; o ZWJ só fica entre pictogramas."""
+    return _CTRL.sub("", _ZWJ_SOLTO.sub("", text))
 
 
 def _host(url):
@@ -298,7 +306,7 @@ def parse(text):
     `### …` é subtítulo; parágrafo; lista com `- ` ou `1. ` (linha seguinte indentada continua o item); bloco entre cercas
     ``` ; `**negrito**`, `` `código` `` e `[texto](https://…)` dentro da linha (o link mostra o host do destino ao lado do texto, para o texto não esconder o destino). HTML, tabela e imagem não existem: viram texto."""
     p = _Parser()
-    for line in _CTRL.sub("", text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")).split("\n"):
+    for line in _limpa(text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")).split("\n"):
         p.line(line)
     return p.finish()
 
