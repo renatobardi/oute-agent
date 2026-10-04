@@ -174,7 +174,7 @@ services:
     ports:
       # só loopback, nunca 0.0.0.0: o Mac chega pelo vhost agent-studio.oute.pro na tailnet (nginx, repo lab)
       - "127.0.0.1:${OUTE_AGENT_STUDIO_PORT:-8430}:8430"
-    mem_limit: ${OUTE_AGENT_STUDIO_MEM:-2g}
+    mem_limit: ${OUTE_AGENT_STUDIO_MEM:-6g}
     volumes:
       # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
       - oute-agent-studio:/data/agent-studio

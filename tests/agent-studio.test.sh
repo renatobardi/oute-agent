@@ -231,7 +231,7 @@ check "compose: serviço agent-studio existe"           test -n "$SVC"
 check "compose: só com o profile agent-studio"         svc_has '^    profiles: \[agent-studio\]$'
 check "compose: publicado só em 127.0.0.1"             svc_has '^      - "127\.0\.0\.1:\$\{OUTE_AGENT_STUDIO_PORT:-8430\}:8430"$'
 check "compose: nunca 0.0.0.0"                         bash -c '! grep -q "0\.0\.0\.0" <<<"$0"' "$(grep -v '^ *#' <<<"$SVC")"
-check "compose: mem_limit"                             svc_has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-2g\}$'
+check "compose: mem_limit"                             svc_has '^    mem_limit: \$\{OUTE_AGENT_STUDIO_MEM:-6g\}$'
 check "compose: volume nomeado para o DuckDB"          svc_has '^      - oute-agent-studio:/data/agent-studio$'
 check "compose: volume declarado"                      grep -qx '  oute-agent-studio:' "$ROOT/docker/compose.yaml"
 check "compose: mesma imagem do agent"                 svc_has 'image: ghcr\.io/renatobardi/oute-agent:\$\{OUTE_VERSION:-latest\}'
