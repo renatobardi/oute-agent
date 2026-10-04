@@ -1004,11 +1004,105 @@ install_link() {
   ln -sfn "$target" "$dest/oute" && echo "instalado: $dest/oute -> $target"
 }
 
-# --- tray (#260): app de barra de menu do Mac (pacote SwiftPM em tray/). É do host, não da imagem.
+# --- tray (#260, ADR-08 §10): app de barra de menu do Mac (pacote SwiftPM em tray/). É do host, não da imagem:
+# compila aqui, monta o .app sem ícone no Dock (LSUIElement) e abre no login por um LaunchAgent. Sem App Store nem
+# assinatura de desenvolvedor (só a ad-hoc, local). O app só lê o agent-studio; aprovar abre o Terminal no `oute approve`.
+TRAY_LABEL="pro.oute.tray"
+TRAY_APP="$HOME/Applications/OuteTray.app"
+TRAY_PLIST="$HOME/Library/LaunchAgents/$TRAY_LABEL.plist"
+TRAY_HOSTS="$OUTE_HOME/tray-hosts"
+tray_usage() { echo "uso: oute tray install | oute tray uninstall   (só no macOS)" >&2; }
+# texto para dentro de um plist (XML)
+tray_xml() {
+  local text="$1"
+  # sed, e não ${var//…}: o `&` na troca muda de sentido entre o bash 3.2 do Mac e o 5.2
+  printf '%s' "$text" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+  return 0
+}
+# a tabela que o install grava quando não há uma: este host = local; o oute-server pelo alias ssh de mesmo nome
+tray_hosts_default() {
+  printf '# tray do oute (#260): <host da telemetria>=local | <alias ssh>. Host fora daqui = aprovar desabilitado.\n'
+  printf '%s=local\n' "$OUTE_HOST"
+  [[ "$OUTE_HOST" == oute-server ]] || printf 'oute-server=oute-server\n'
+  return 0
+}
+tray_stop() {
+  launchctl bootout "gui/$(id -u)/$TRAY_LABEL" 2>/dev/null || true
+  return 0
+}
+tray_install() {
+  local bin url env_block=""
+  need swift
+  echo "compilando o tray (swift build -c release)…"
+  swift build -c release --package-path "$ROOT/tray" --product OuteTray || die "o tray não compilou"
+  bin="$(swift build -c release --package-path "$ROOT/tray" --show-bin-path)/OuteTray"
+  [[ -x "$bin" ]] || die "binário do tray não encontrado em $bin"
+  echo "parando o tray, se estiver aberto…"
+  tray_stop
+  echo "montando $TRAY_APP…"
+  rm -rf "$TRAY_APP"; mkdir -p "$TRAY_APP/Contents/MacOS"
+  cp "$bin" "$TRAY_APP/Contents/MacOS/OuteTray"
+  cat > "$TRAY_APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>$TRAY_LABEL</string>
+  <key>CFBundleName</key><string>OuteTray</string>
+  <key>CFBundleExecutable</key><string>OuteTray</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$(tray_xml "$VERSION")</string>
+  <key>CFBundleVersion</key><string>$(tray_xml "$VERSION")</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+EOF
+  # assinatura ad-hoc do pacote inteiro: sem ela o macOS não entrega as notificações de um .app montado à mão
+  codesign --force --sign - "$TRAY_APP" >/dev/null 2>&1 || echo "aviso: codesign ad-hoc falhou; as notificações podem não aparecer" >&2
+  mkdir -p "$OUTE_HOME"
+  if [[ -e "$TRAY_HOSTS" ]]; then echo "mantido: $TRAY_HOSTS"
+  else tray_hosts_default > "$TRAY_HOSTS"; echo "criado: $TRAY_HOSTS"; fi
+  # o endereço do agent-studio, se o .env troca o padrão, vai no ambiente do app (o token ele lê do agent.env)
+  url="${OUTE_AGENT_STUDIO_URL:-$(env_get OUTE_AGENT_STUDIO_URL || true)}"
+  [[ -z "$url" ]] || env_block="
+  <key>EnvironmentVariables</key><dict><key>OUTE_AGENT_STUDIO_URL</key><string>$(tray_xml "$url")</string></dict>"
+  echo "registrando para abrir no login ($TRAY_PLIST)…"
+  mkdir -p "$(dirname "$TRAY_PLIST")"
+  cat > "$TRAY_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$TRAY_LABEL</string>
+  <key>ProgramArguments</key><array><string>$(tray_xml "$TRAY_APP/Contents/MacOS/OuteTray")</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ProcessType</key><string>Interactive</string>$env_block
+</dict>
+</plist>
+EOF
+  launchctl bootstrap "gui/$(id -u)" "$TRAY_PLIST" || die "launchctl não carregou $TRAY_PLIST"
+  [[ -s "$AGENT_ENV_FILE" ]] || echo "aviso: $AGENT_ENV_FILE ausente; o tray fica sem leitura até o oute secrets refresh" >&2
+  echo "tray instalado e aberto (barra de menu). Remover: oute tray uninstall"
+  return 0
+}
+tray_uninstall() {
+  echo "parando o tray…"
+  tray_stop
+  rm -f "$TRAY_PLIST"; rm -rf "$TRAY_APP"
+  echo "removidos: $TRAY_PLIST e $TRAY_APP"
+  # a tabela só sai se ninguém a editou
+  if [[ -e "$TRAY_HOSTS" ]]; then
+    if [[ "$(cat "$TRAY_HOSTS")" == "$(tray_hosts_default)" ]]; then rm -f "$TRAY_HOSTS"; echo "removido: $TRAY_HOSTS"
+    else echo "mantido (editado): $TRAY_HOSTS"; fi
+  fi
+  return 0
+}
 tray_cmd() {
   local sub="${1:-}"
+  [[ $# == 1 && ( "$sub" == install || "$sub" == uninstall ) ]] || { tray_usage; exit 2; }
   [[ "$(uname -s)" == Darwin ]] || die "o tray é só no macOS (este host é $(uname -s))"
-  return 0
+  "tray_$sub"
+  return $?
 }
 
 case "${1:-}" in
@@ -1104,6 +1198,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
   approve <id>       decide só aquele pedido (id do oute-propose); não pendente = rc 1, id inválido = rc 2
+  tray install|uninstall  só no macOS: compila o tray (barra de menu, lê o agent-studio), monta o .app e abre no login; uninstall desfaz
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
