@@ -4,12 +4,14 @@
 {% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
 {% block title %}Sessões · agent-studio{% endblock %}
 {% block main %}
-<h1>Sessões</h1>
-{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}
-<p class="nota">Sessões do <code>oute-task</code> (<code>oute.task.id</code>) com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }}
-  (hora do fato, em {{ tzl() }}), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
-  inteira.
-  {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}</div>
+  <p class="nota">Sessões do <code>oute-task</code> (<code>oute.task.id</code>) com atividade entre {{ from_ns|ts }} e {{ to_ns|ts }}
+    (hora do fato, em {{ tzl() }}), da mais recente para a mais antiga, cada uma com as suas conversas. Os números são da sessão
+    inteira.
+    {% if total > sessions|length %}Mostrando as {{ sessions|length }} mais recentes de {{ total }}.{% endif %}</p>
+</div>
 {{ state_warning(state_read) }}
 {% if sessions %}
 {% call session_table() %}
@@ -17,7 +19,7 @@
   <tbody>
   {{ session_row(s) }}
   {% if s.hidden %}
-  <tr class="mais"><td colspan="13"><a href="/sessao?id={{ s.id|urlencode }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
+  <tr class="mais"><td colspan="10"><a href="/sessao?id={{ s.id|urlencode }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
   {% endif %}
   {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
@@ -40,4 +42,5 @@
 {% else %}
 <p class="aviso" id="vazio-sem-sessao">Nenhuma conversa sem sessão nessa janela.</p>
 {% endif %}
+</div>
 {% endblock %}
