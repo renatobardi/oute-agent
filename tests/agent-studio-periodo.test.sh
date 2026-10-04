@@ -91,11 +91,49 @@ check("de sem ate: 400", erro(f"de={DE}", "informe o início e o fim"))
 check("ate sem de: 400", erro(f"ate={ATE}", "informe o início e o fim"))
 check("formato que não é dia e hora: 400", erro("de=ontem&ate=hoje", "início inválido"))
 check("hora de depois de 2262 não derruba: 400, não 500", get(app, "/uso", "de=2025-10-01T09:00&ate=9999-12-31T23:59")[0] == 400)
-check("de/ate com hours: 400", erro(f"{Q}&hours=24", "só um deles"))
 check("de/ate com from/to: 400", erro(f"{Q}&from=2025-10-01&to=2025-10-02", "só um deles"))
 check("from/to acima do máximo na tela: 400 (o teto vale em toda janela da tela)", erro("from=2024-01-01&to=2025-10-01", "máximo de 8784 h"))
 check("exatamente 366 dias passa", get(app, "/uso", "de=2024-10-01T00:00&ate=2025-10-02T00:00")[0] == 200)
 check("hours inválido segue 400", get(app, "/uso", "hours=x")[0] == 400)
+
+# o formulário renderizado, enviado como o navegador envia (#527, auditoria): janela pronta ativa + De/Até preenchidos
+from html.parser import HTMLParser
+from urllib.parse import urlencode
+
+
+class Fields(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.inputs, self.in_form = [], False
+
+    def handle_starttag(self, tag, a):
+        a = dict(a)
+        if tag == "form" and "filtro" in (a.get("class") or ""):
+            self.in_form = True
+        elif tag == "input" and self.in_form and a.get("name"):
+            self.inputs.append((a["name"], a.get("value") or ""))
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.in_form = False
+
+
+def submit(path, query, **fill):
+    """Renderiza `path?query`, preenche os campos do formulário do período e devolve a resposta ao GET do envio."""
+    f = Fields()
+    f.feed(get(app, path, query)[1])
+    sent = [(k, fill.get(k, v)) for k, v in f.inputs]
+    return get(app, path, urlencode(sent)), sent
+
+
+for p in PAGES:
+    (st, html), sent = submit(p, "hours=168", de=DE, ate=ATE)
+    check(f"{p}: formulário da janela pronta enviado com De/Até: 200, não 400 (o hours do formulário não atrapalha)",
+          st == 200 and ("hours", "168") in sent and f"2025-10-01 09:00:00 a 2025-10-01 18:00:00 · GMT-3" in html)
+(st, html), sent = submit("/uso", "hours=168")
+check("formulário enviado sem preencher De/Até: segue na janela pronta (7 dias marcada)", st == 200 and '<a href="/uso?hours=168" aria-current="true">7 dias</a>' in html)
+(st, html), sent = submit("/conversas", Q, de="2025-10-01T10:00")
+check("formulário do intervalo ativo, De alterado: sem hours no envio e período novo na tela", st == 200 and not any(k == "hours" for k, _ in sent) and "2025-10-01 10:00:00 a" in html)
 
 # o contrato do /v1/usage não muda: sem `de`/`ate` e sem teto em from/to
 st, body = get(app, "/v1/usage", "from=2024-01-01&to=2025-10-01")
@@ -117,5 +155,5 @@ check("outro fuso: o link leva o UTC certo (04:00Z a 16:00Z)", 'from=2025-07-01T
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 47
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 52
 check_end

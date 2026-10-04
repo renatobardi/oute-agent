@@ -180,8 +180,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         """Janela da tela: a do `/v1/usage` (`window`) mais `de`/`ate`, o intervalo no fuso da tela (#527), e o teto de
         8784 h também para from/to. ValueError = 400 com a mensagem na tela. O contrato do `/v1/usage` não muda."""
         if has_range(q):
-            if "from" in q or "to" in q or ("hours" in q and q["hours"]):
-                raise ValueError("use de/ate, from/to ou hours, só um deles")
+            # `hours` junto é o do formulário (a janela pronta que estava ativa): de/ate preenchidos valem mais
+            if "from" in q or "to" in q:
+                raise ValueError("use de/ate ou from/to, só um deles")
             if not q.get("de") or not q.get("ate"):
                 raise ValueError("informe o início e o fim do período")
             from_ns, to_ns = parse_local(q["de"], "início", config.tz), parse_local(q["ate"], "fim", config.tz)
