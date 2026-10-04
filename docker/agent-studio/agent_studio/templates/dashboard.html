@@ -2,7 +2,7 @@
 {% set nav = "dashboard" %}
 {% set crumbs = [("Dashboard", none)] %}
 {% from "_macros.html" import icon, badge %}
-{# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem style=: a escala vem
+{# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem estilo na tag: a escala vem
    do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
    distingue real de estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
 {% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
