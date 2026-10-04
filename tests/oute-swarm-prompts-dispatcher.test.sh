@@ -190,4 +190,8 @@ check "538: dispatcher registra no PR que o merge não foi dele" grep -qF 'regis
 check "538: dispatcher compara o head mergeado com o auditado e pede o delta" grep -qF 'a auditoria pós-merge do delta não auditado (`<head auditado>..<head mergeado>`)' "$D"
 check "538: dispatcher não atribui a uma sessão o que não sabe" grep -qF 'sem atribuir a uma sessão o que você não sabe' "$D"
 check "538: dispatcher cita a trava (código 77) e o limite" bash -c 'grep -qF "já é recusado (código 77)" "$1" && grep -qF "protege contra engano, não contra contorno" "$1"' _ "$D"
+# 541. kaizen: link de comentário copiado da saída do gh e saída dos gates em arquivo
+check "541: tell com comentário usa o URL da saída do gh pr comment, em variável, nunca digitado" grep -qF 'usa o URL copiado da saída do `gh pr comment`, guardado numa variável' "$D"
+check "541: auditoria e reauditoria gravam a saída do gate e só tiram a worktree depois de copiar a falha" grep -qF 'a saída de cada gate vai para um arquivo' "$D"
+check "541: worktree só sai depois de a falha ser lida e copiada para o relatório" grep -qF 'a worktree só sai depois de a falha ser lida e copiada para o relatório' "$D"
 check_end
