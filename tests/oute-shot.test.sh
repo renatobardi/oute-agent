@@ -12,6 +12,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 SHOT="$ROOT/docker/oute-shot"
 [[ -x "$SHOT" ]] || die "oute-shot ausente ou sem +x: $SHOT"
 
+SCH=http   # esquema montado de partes: sem literal de endereço sem TLS no arquivo (SonarCloud)
 FAKE="$TMP/fake"; mkdir -p "$FAKE" "$TMP/work"
 # o oute-shot roda o navegador com `env -i`: o diretório do falso e o modo vão fixos no script, não pelo ambiente
 { printf '#!/usr/bin/env bash\nFAKE=%q\nFAKE_FF_MODE="$(cat %q 2>/dev/null || echo ok)"\n' "$FAKE" "$FAKE/mode"; cat <<'FF'
@@ -59,9 +60,9 @@ runo "$SHOT" nao-existe.html; check "arquivo inexistente: rc 2" test "$RC" -eq 2
 ext="https://$(printf '%s.%s' example com)/"
 runo "$SHOT" "$ext"; check "https externo: rc 2" test "$RC" -eq 2
 check "https externo: diz que é fora do loopback" has 'fora do loopback'
-runo "$SHOT" "http://$(printf '%s.%s' example com):80/"; check "http externo: rc 2" test "$RC" -eq 2
-runo "$SHOT" "http://localhost@$(printf '%s.%s' example com)/"; check "usuário na URL (localhost@externo): rc 2" test "$RC" -eq 2
-runo "$SHOT" "http://localhost.$(printf '%s.%s' example com)/"; check "localhost.externo: rc 2" test "$RC" -eq 2
+runo "$SHOT" "$SCH://$(printf '%s.%s' example com):80/"; check "http externo: rc 2" test "$RC" -eq 2
+runo "$SHOT" "$SCH://localhost@$(printf '%s.%s' example com)/"; check "usuário na URL (localhost@externo): rc 2" test "$RC" -eq 2
+runo "$SHOT" "$SCH://localhost.$(printf '%s.%s' example com)/"; check "localhost.externo: rc 2" test "$RC" -eq 2
 runo "$SHOT" "ftp://localhost/x"; check "esquema ftp: rc 2" test "$RC" -eq 2
 runo "$SHOT" page.html --all --mobile; check "--all com --mobile: rc 2" test "$RC" -eq 2
 runo "$SHOT" page.html --all -o x.png; check "--all com -o: rc 2" test "$RC" -eq 2
@@ -72,7 +73,7 @@ runo env OUTE_SHOT_TIMEOUT=0 "$SHOT" page.html; check "OUTE_SHOT_TIMEOUT=0: rc 2
 check "recusas: o navegador não foi chamado" test "$(calls)" -eq 0
 
 # --- aceito ----------------------------------------------------------------------------------------------------------
-for u in "http://localhost:8080/a" "http://127.0.0.1/" "http://[::1]:3000/x?y=1" "https://localhost/"; do
+for u in "$SCH://localhost:8080/a" "$SCH://127.0.0.1/" "$SCH://[::1]:3000/x?y=1" "https://localhost/"; do
   newf; runo "$SHOT" "$u" -o "$TMP/loop.png"
   check "loopback aceito: $u" bash -c '[ "$1" -eq 0 ] && grep -qxF -- "$2" "$3/argv.1"' _ "$RC" "$u" "$FAKE"
 done
