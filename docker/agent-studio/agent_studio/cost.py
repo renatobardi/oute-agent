@@ -182,13 +182,17 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     """(SQL, parâmetros) de uma subconsulta com as colunas de `spans` filtradas por `span_where`, em que `cost_usd` é
     o **custo efetivo**: o do span ou, sem ele, o do log `api_request` de mesmo `request_id` (só no span da chamada
     do Claude). Os logs lidos são os de `log_where`; vários logs do mesmo `request_id` dão um custo só."""
-    sql = ("(SELECT s.* REPLACE (COALESCE(s.cost_usd, l.cost_usd) AS cost_usd) FROM spans s LEFT JOIN ("
+    # junção só por igualdade (hash join): a condição `s.name = ?` dentro do ON, ou a chave como expressão sobre o
+    # span, fazia o DuckDB comparar cada span com cada log (quadrático, ~30 s em /uso de 7 d, #504). A chave
+    # `_rid` é calculada antes e é nula fora do span da chamada do Claude (nulo não junta).
+    sql = ("(SELECT t.* EXCLUDE (_rid) REPLACE (COALESCE(t.cost_usd, l.cost_usd) AS cost_usd) FROM ("
+           "SELECT s.*, CASE WHEN s.name = ? THEN json_extract_string(s.attributes, '$.request_id') END AS _rid "
+           f"FROM spans s WHERE {span_where}) t LEFT JOIN ("
            "SELECT json_extract_string(attributes, '$.request_id') AS request_id, "
            "max(TRY_CAST(json_extract_string(attributes, '$.cost_usd') AS DOUBLE)) AS cost_usd FROM logs "
            f"WHERE event_name IN ({', '.join('?' * len(API_REQUEST_EVENTS))}) AND {log_where} GROUP BY ALL) l "
-           "ON s.name = ? AND l.request_id = json_extract_string(s.attributes, '$.request_id') "
-           f"WHERE {span_where})")
-    return sql, [*API_REQUEST_EVENTS, *log_params, CLAUDE_CALL_SPAN, *span_params]
+           "ON l.request_id = t._rid)")
+    return sql, [CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
 
 
 def window_spans_with_cost(from_ns, to_ns):

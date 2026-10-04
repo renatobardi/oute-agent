@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# oute-shot — tira screenshot (PNG) de uma página local no container, com o Firefox headless da imagem (#472).
+# Sem rede externa: só aceita arquivo local, file:// ou endereço de loopback (localhost, 127.0.0.1, [::1]); e o
+# navegador sobe com proxy morto para qualquer outro destino (o que a página pedir fora do loopback não sai).
+# Sem segredo: o Firefox roda com `env -i` (só PATH, LANG e o HOME do perfil temporário), em perfil descartável.
+#
+# uso:  oute-shot <url|arquivo> [--mobile] [--dark] [-o <png>] [--height <px>]
+#       oute-shot <url|arquivo> --all [-d <pasta>]     os quatro: desktop e mobile, light e dark
+#   desktop = 1280 de largura, --mobile = 390; light por padrão, --dark liga prefers-color-scheme: dark
+#   saída padrão: ./shot-<desktop|mobile>-<light|dark>.png; --height padrão 800
+#   PDF de referência: use `pdftotext` (texto) ou `pdftoppm -png` (imagem), do poppler-utils
+# ambiente: OUTE_SHOT_FIREFOX (padrão /opt/oute/firefox/firefox), OUTE_SHOT_TIMEOUT (segundos por imagem, padrão 60)
+# saída: 0 ok | 2 uso ou destino recusado | 3 sem navegador | 4 falha do navegador, prazo ou PNG não gerado
+set -uo pipefail
+
+FIREFOX="${OUTE_SHOT_FIREFOX:-/opt/oute/firefox/firefox}"
+LIMIT="${OUTE_SHOT_TIMEOUT:-60}"
+
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; return 0; }
+die2() { local msg="$1"; printf 'oute-shot: %s\n' "$msg" >&2; exit 2; }
+die4() { local msg="$1"; printf 'oute-shot: %s\n' "$msg" >&2; exit 4; }
+
+TARGET=""; MOBILE=0; DARK=0; ALL=0; OUT=""; OUTDIR=""; HEIGHT=800
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --mobile) MOBILE=1 ;;
+    --dark) DARK=1 ;;
+    --all) ALL=1 ;;
+    -o) [[ $# -gt 1 ]] || die2 "-o pede o arquivo de saída"; OUT="$2"; shift ;;
+    -d) [[ $# -gt 1 ]] || die2 "-d pede a pasta de saída"; OUTDIR="$2"; shift ;;
+    --height) [[ $# -gt 1 ]] || die2 "--height pede um número"; HEIGHT="$2"; shift ;;
+    -*) die2 "opção desconhecida: $1" ;;
+    *) [[ -z "$TARGET" ]] || die2 "mais de um destino"; TARGET="$1" ;;
+  esac
+  shift
+done
+[[ -n "$TARGET" ]] || { usage; die2 "falta <url|arquivo>"; }
+[[ "$HEIGHT" =~ ^[0-9]+$ ]] && (( HEIGHT >= 200 && HEIGHT <= 8000 )) || die2 "--height entre 200 e 8000"
+[[ "$LIMIT" =~ ^[0-9]+$ ]] && (( LIMIT >= 1 )) || die2 "OUTE_SHOT_TIMEOUT só com dígitos"
+if (( ALL )); then
+  (( MOBILE == 0 && DARK == 0 )) || die2 "--all não combina com --mobile nem --dark"
+  [[ -z "$OUT" ]] || die2 "--all usa -d (pasta), não -o"
+elif [[ -n "$OUTDIR" ]]; then
+  die2 "-d só com --all"
+fi
+
+# destino: arquivo local, file:// ou loopback
+if [[ "$TARGET" == *://* ]]; then
+  scheme="${TARGET%%://*}"; rest="${TARGET#*://}"
+  case "$scheme" in
+    file) URL="$TARGET" ;;
+    http|https)
+      hostport="${rest%%[/?#]*}"
+      [[ "$hostport" != *@* ]] || die2 "destino com usuário na URL recusado"
+      case "$hostport" in
+        localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) URL="$TARGET" ;;
+        *) die2 "destino fora do loopback recusado: só localhost, 127.0.0.1 ou [::1] (sem rede externa)" ;;
+      esac ;;
+    *) die2 "esquema recusado: $scheme" ;;
+  esac
+else
+  [[ -f "$TARGET" ]] || die2 "arquivo não existe: $TARGET"
+  abs="$(cd "$(dirname "$TARGET")" && pwd -P)/$(basename "$TARGET")"
+  URL="file://$abs"
+fi
+
+[[ -x "$FIREFOX" ]] || { printf 'oute-shot: navegador ausente: %s (a imagem leva o Firefox em /opt/oute/firefox)\n' "$FIREFOX" >&2; exit 3; }
+
+TMP="$(mktemp -d)"
+cleanup() { rm -rf "${TMP:?}"; return 0; }
+trap cleanup EXIT
+
+# shot <largura> <altura> <dark 0|1> <saída>: uma imagem, com perfil novo
+shot() {
+  local width="$1" height="$2" dark="$3" dest="$4" prof rc png abs
+  prof="$(mktemp -d "$TMP/prof.XXXXXX")"
+  {
+    printf 'user_pref("ui.systemUsesDarkTheme", %s);\n' "$dark"
+    printf 'user_pref("layout.css.prefers-color-scheme.content-override", %s);\n' "$(( dark ? 0 : 1 ))"
+    # tudo que não é loopback vai para um proxy que não existe (porta 9, discard); loopback sai direto
+    echo 'user_pref("network.proxy.type", 1);'
+    for k in http ssl ftp socks; do
+      printf 'user_pref("network.proxy.%s", "127.0.0.1");\n' "$k"
+      printf 'user_pref("network.proxy.%s_port", 9);\n' "$k"
+    done
+    echo 'user_pref("network.proxy.no_proxies_on", "localhost,127.0.0.1,[::1]");'
+    echo 'user_pref("network.proxy.allow_hijacking_localhost", false);'
+    echo 'user_pref("network.dns.disablePrefetch", true);'
+    echo 'user_pref("network.prefetch-next", false);'
+    echo 'user_pref("network.http.speculative-parallel-limit", 0);'
+    echo 'user_pref("browser.shell.checkDefaultBrowser", false);'
+    echo 'user_pref("app.update.auto", false);'
+    echo 'user_pref("app.update.enabled", false);'
+    echo 'user_pref("datareporting.policy.dataSubmissionEnabled", false);'
+    echo 'user_pref("toolkit.telemetry.enabled", false);'
+    echo 'user_pref("browser.safebrowsing.malware.enabled", false);'
+    echo 'user_pref("browser.safebrowsing.phishing.enabled", false);'
+    echo 'user_pref("extensions.update.enabled", false);'
+    echo 'user_pref("signon.rememberSignons", false);'
+  } > "$prof/user.js"
+  mkdir -p "$(dirname "$dest")" || die2 "não deu para criar a pasta de $dest"
+  rm -f "$dest"
+  # o Firefox grava caminho relativo fora de onde se espera: passa sempre o absoluto
+  abs="$(cd "$(dirname "$dest")" && pwd -P)/$(basename "$dest")"
+  env -i PATH="$PATH" LANG="${LANG:-C.UTF-8}" HOME="$prof" MOZ_HEADLESS=1 MOZ_CRASHREPORTER_DISABLE=1 \
+    timeout "$LIMIT" "$FIREFOX" --headless --no-remote --profile "$prof" \
+      --window-size="$width,$height" --screenshot "$abs" "$URL" >"$TMP/firefox.log" 2>&1
+  rc=$?
+  if (( rc == 124 )); then die4 "o navegador passou do prazo de ${LIMIT}s"; fi
+  if (( rc != 0 )); then tail -n 5 "$TMP/firefox.log" >&2; die4 "o navegador saiu com código $rc"; fi
+  [[ -s "$dest" ]] || die4 "o navegador não gerou o PNG: $dest"
+  png="$(head -c 4 "$dest" | tail -c 3)"
+  [[ "$png" == "PNG" ]] || die4 "a saída não é PNG: $dest"
+  printf '%s\n' "$dest"
+  return 0
+}
+
+if (( ALL )); then
+  dir="${OUTDIR:-.}"
+  mkdir -p "$dir" || die2 "não deu para criar a pasta $dir"
+  for dev in desktop:1280 mobile:390; do
+    for th in light:0 dark:1; do
+      shot "${dev#*:}" "$HEIGHT" "${th#*:}" "$dir/shot-${dev%%:*}-${th%%:*}.png"
+    done
+  done
+else
+  dev=desktop; width=1280; th=light
+  (( MOBILE )) && { dev=mobile; width=390; }
+  (( DARK )) && th=dark
+  dest="${OUT:-./shot-$dev-$th.png}"
+  mkdir -p "$(dirname "$dest")" || die2 "não deu para criar a pasta de $dest"
+  shot "$width" "$HEIGHT" "$DARK" "$dest"
+fi
+exit 0

@@ -174,6 +174,23 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   organização: OUTE_SONAR_ORG. Token: SONAR_TOKEN (item `sonar` do vault, pelo agent_env). Saída: 0 gate aprovado,
   1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise.
 
+## CONTAINER — screenshot de UI e PDF (oute-shot, #472)
+  oute-shot <url|arquivo> [--mobile] [--dark] [-o <png>] [--height <px>]
+                                    PNG da página: desktop 1280 ou --mobile 390, light ou --dark (padrão ./shot-<desktop|mobile>-<light|dark>.png,
+                                    altura 800)
+  oute-shot <url|arquivo> --all [-d <pasta>]   os quatro (desktop e mobile, light e dark)
+  Firefox ESR headless da imagem (versão e sha256 fixos no Dockerfile). Sem rede externa: só arquivo local, file:// ou
+  loopback (localhost, 127.0.0.1, [::1]); o que a página pedir fora do loopback não sai. Sem segredo: o navegador roda
+  com `env -i`, em perfil descartável. Saída: 0 ok, 2 uso ou destino recusado, 3 sem navegador, 4 falha, prazo
+  (OUTE_SHOT_TIMEOUT, 60 s) ou PNG não gerado.
+  PDF de referência: `pdftotext -layout ref.pdf -` (texto) e `pdftoppm -png -r 100 ref.pdf pasta/pag` (imagem de cada
+  página; depois leia o PNG), do poppler-utils.
+  Anexar ao PR: o `gh` não envia imagem a comentário. Suba o PNG num branch de imagens (nunca no branch do PR) e
+  referencie por `?raw=true`:
+    git worktree add --detach /tmp/shots origin/main && cd /tmp/shots && git switch -c shots/<issue>
+    cp <png> . && git add <png> && git commit -m "chore(shots): <issue>" && git push -u origin shots/<issue>
+    comentário do PR: ![desktop light](https://github.com/<dono>/<repo>/blob/<sha do commit>/<png>?raw=true)
+
 ## CONTAINER — cota das assinaturas (oute-quota, #346)
   oute-quota [--json] [--agent claude|codex]   janelas 5h e 7d de cada agente: % usada e hora do reset (UTC), ou
                                     `unknown` com o motivo (sem-credencial, token-expirado, rede, timeout, http-<código>,

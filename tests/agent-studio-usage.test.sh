@@ -218,6 +218,22 @@ try:
     usage.aggregate(con, lo, hi, config.load(test_cfg).prices, ("rodada",)); out("chave inválida recusada", False)
 except ValueError:
     out("chave inválida recusada", True)
+# `usage()` lê o DuckDB uma vez e reagrupa (#504): o resultado é o mesmo de uma consulta por corte, p95 incluído
+pr = config.load(test_cfg).prices
+U = usage.usage(con, lo, hi, pr)
+def rnd(x):
+    # a soma de DOUBLE em paralelo muda de ordem entre execuções (diferença na última casa): compara arredondado
+    if isinstance(x, float):
+        return round(x, 6)
+    if isinstance(x, dict):
+        return {k: rnd(v) for k, v in x.items()}
+    return [rnd(v) for v in x] if isinstance(x, list) else x
+def cut(keys):
+    return rnd([usage.render(k, a, keys) for k, a in usage._sorted(usage.aggregate(con, lo, hi, pr, keys))])
+out("usage(): totals e cortes iguais a um aggregate por corte",
+    rnd(U["totals"]) == rnd(usage.render((), usage.aggregate(con, lo, hi, pr, ())[()], ())) and rnd(U["rows"]) == cut(("host", "agent", "model"))
+    and rnd(U["series"]) == cut(("day", "host", "agent", "model")) and rnd(U["by_role"]) == cut(("role",)) and rnd(U["by_phase"]) == cut(("phase",)))
+out("usage(): a janela de teste tem dados e p95 nas linhas", len(U["rows"]) > 1 and any(r["latency_p95_ms"] for r in U["rows"]))
 
 # custo do Claude pelo log (#157): casos de borda da regra, num banco em memória montado pela ingestão
 from otlp_json import api_request, claude_call, rl, rs, span
@@ -251,8 +267,25 @@ out("custo do log que não é número: a chamada cai no estimado (nunca zero)",
     cl["estimated_calls"] == 1 and round(cl["estimated_usd"], 9) == 3.0)
 out("api_request só dá custo ao span do Claude (o do Codex segue sem preço)", cx["real_calls"] == 0 and cx["unpriced_calls"] == 1)
 sql, params = cost.window_spans_with_cost(0, 10)
-out("janela que começa no zero: a folga não fica negativa", params[2] == 0)
+out("janela que começa no zero: a folga não fica negativa", params[-2] == 0)
+# junção só por igualdade (#504): o plano não pode ter laço aninhado (era quadrático: ~30 s em /uso de 7 d)
+plan = " ".join(r[1] for r in st.con.execute("EXPLAIN SELECT count(*) FROM " + sql, params).fetchall())
+out("junção com os logs de custo: hash join, sem laço aninhado", "HASH_JOIN" in plan and not any(
+    n in plan for n in ("NESTED_LOOP_JOIN", "BLOCKWISE_NL_JOIN", "CROSS_PRODUCT", "PIECEWISE_MERGE_JOIN")))
 st.close()
+# span do Claude sem request_id e log repetido do mesmo request_id: sem custo inventado, um custo só por chamada
+st2 = Store(":memory:")
+g1 = claude_call(T0, 1, {"model": "claude-sonnet-5"}, 1.5)
+g2 = claude_call(T0 + 5, 1, {"model": "claude-sonnet-5"})
+g2[0]["attributes"] = [x for x in g2[0]["attributes"] if x["key"] != "request_id"]
+dup = api_request(T0 + 2, rid(g1[0]), 9.0, {})
+dup["timeUnixNano"] = str((T0 + 3) * 10**9)
+st2.write({"spans": otlp.span_rows({"resourceSpans": [rs(res, [g1[0], g2[0]])]}, 1),
+           "logs": otlp.log_rows({"resourceLogs": [rl(res, [g1[1], dup])]}, 1)})
+g = usage.aggregate(st2.con, T0 * 10**9, (T0 + 60) * 10**9, cost.PriceTable({}), ("model",))[("claude-sonnet-5",)]
+out("duas linhas do mesmo request_id: uma chamada, custo máximo; span sem request_id não junta",
+    g["calls"] == 2 and g["real_calls"] == 1 and g["real_usd"] == 9.0 and g["unpriced_calls"] == 1)
+st2.close()
 PY
 check_py_lines "$TMP/py.out"
 

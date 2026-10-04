@@ -115,10 +115,11 @@ def _add(a, b):
     return b if a is None else a + b
 
 
-def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC):
+def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
     depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
-    na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas."""
+    na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas.
+    `p95=False` pula o p95 (ele não soma entre grupos: quem reagrupa o lê à parte, com `fill_p95`)."""
     keys = tuple(keys)
     if set(keys) - set(KEYS):
         raise ValueError(f"chave inválida: {keys}")
@@ -152,9 +153,8 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
             else:
                 a["estimated_calls"] += pending
                 a["estimated_usd"] = _add(a["estimated_usd"], est)
-    for rec in _p95(con, keys, from_ns, to_ns, tz):
-        if rec["p95"] is not None:
-            acc(rec)["p95"] = rec["p95"]
+    if p95:
+        fill_p95(con, groups, keys, from_ns, to_ns, tz)
     for rec in _spans(con, keys, from_ns, to_ns, tz):
         a = acc(rec)
         a["spans"] += rec["spans"]
@@ -163,6 +163,37 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
         if rec["n"]:
             acc(rec)["log_errors"] += rec["n"]
     return groups
+
+
+def fill_p95(con, groups, keys, from_ns, to_ns, tz=tz_mod.UTC):
+    """Põe em cada grupo de `groups` (as chaves `keys`) o p95 das chamadas dele; consulta sem a junção com os logs de custo."""
+    for rec in _p95(con, keys, from_ns, to_ns, tz):
+        if rec["p95"] is not None:
+            groups.setdefault(tuple(rec[k] for k in keys), _empty())["p95"] = rec["p95"]
+    return groups
+
+
+def merge(into, a):
+    """Soma o acumulador `a` em `into` (o `p95` não soma: quem precisa dele o lê à parte)."""
+    for k in ("calls", "real_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
+        into[k] += a[k]
+    for t in into["tokens"]:
+        into["tokens"][t] += a["tokens"][t]
+    for k in ("real_usd", "estimated_usd"):
+        if a[k] is not None:
+            into[k] = a[k] if into[k] is None else into[k] + a[k]
+    into["unpriced_models"] |= a["unpriced_models"]
+    return into
+
+
+def regroup(fine, fine_keys, keys):
+    """O resultado de `aggregate(fine_keys, p95=False)` reagrupado por `keys` (subconjunto de `fine_keys`): uma leitura
+    do DuckDB serve vários cortes (#504: cada `aggregate` refazia a junção com os logs de custo). Sem p95."""
+    idx = [fine_keys.index(k) for k in keys]
+    out = {} if keys else {(): _empty()}
+    for key, a in fine.items():
+        merge(out.setdefault(tuple(key[i] for i in idx), _empty()), a)
+    return out
 
 
 def aggregate_p95(con, from_ns, to_ns, tz=tz_mod.UTC):
@@ -207,11 +238,17 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
     """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
     o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
     `by_phase` (fase do seletor ou `desconhecida`): cada uma soma o mesmo que `totals`."""
-    total = aggregate(con, from_ns, to_ns, prices, (), tz)[()]
-    rows = aggregate(con, from_ns, to_ns, prices, ("host", "agent", "model"), tz)
-    series = aggregate(con, from_ns, to_ns, prices, ("day", "host", "agent", "model"), tz)
-    by_role = aggregate(con, from_ns, to_ns, prices, ("role",), tz)
-    by_phase = aggregate(con, from_ns, to_ns, prices, ("phase",), tz)
+    fine_keys = ("day", "host", "agent", "model", "role", "phase")
+    fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False)  # a junção com os logs de custo roda uma vez só (#504)
+
+    def cut(keys):
+        return fill_p95(con, regroup(fine, fine_keys, keys), keys, from_ns, to_ns, tz)
+
+    total = cut(())[()]
+    rows = cut(("host", "agent", "model"))
+    series = cut(("day", "host", "agent", "model"))
+    by_role = cut(("role",))
+    by_phase = cut(("phase",))
     return {
         "timezone": tz.key,
         "totals": render((), total, ()),
