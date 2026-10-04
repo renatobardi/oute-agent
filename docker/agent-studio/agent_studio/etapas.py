@@ -185,7 +185,8 @@ def bar(steps):
     return out
 
 
-_INLINE = re.compile(r"(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}\*\*)|\[([^\]\n]{1,500})\]\((https://[^\s()<>\"'`]{1,1000})\)")
+_INLINE = re.compile(r"`[^`\n]{1,500}`|\*\*[^*\n]{1,500}\*\*|\[[^\]\n]{1,500}\]\(https://[^\s()<>\"'`]{1,1000}\)")
+_LINK = re.compile(r"^\[([^\]]*)\]\((https://.*)\)$")
 _ITEM = re.compile(r"^(?:[-*] +|\d{1,3}[.)] +)(.*)$")
 _ORDERED = re.compile(r"^\d{1,3}[.)] ")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -198,12 +199,14 @@ def inline(text):
     for m in _INLINE.finditer(text):
         if m.start() > pos:
             out.append({"t": "text", "s": text[pos:m.start()]})
-        if m.group(1):
-            out.append({"t": "code", "s": m.group(1)[1:-1]})
-        elif m.group(2):
-            out.append({"t": "b", "s": m.group(2)[2:-2]})
+        tok = m.group(0)
+        if tok.startswith("`"):
+            out.append({"t": "code", "s": tok[1:-1]})
+        elif tok.startswith("**"):
+            out.append({"t": "b", "s": tok[2:-2]})
         else:
-            out.append({"t": "a", "s": m.group(3), "href": m.group(4)})
+            link = _LINK.match(tok)
+            out.append({"t": "a", "s": link.group(1), "href": link.group(2)})
         pos = m.end()
     if pos < len(text):
         out.append({"t": "text", "s": text[pos:]})

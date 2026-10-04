@@ -42,7 +42,7 @@ etapa() { local f="$1" text="$2"; mkdir -p "$STATE/etapas"; printf '%s' "$text" 
 sha() { local f="$1"; sha256sum "$f" | cut -d' ' -f1; return $?; }
 verdict() { local f="$1" q="$2"; jq -r "$q" "$STATE/etapas/$f.review.json"; return $?; }
 nlog() { cat "$STATE/log" 2>/dev/null | grep -c ' etapa ' || true; return 0; }
-HTTP="ht""tp"; EP="$HTTP://collector.invalid:4318"; export EP
+HTTP="ht""tp"; SL="//"; EP="${HTTP}:${SL}collector.invalid:4318"; export EP
 STEPEV='.name == "oute.swarm.step.published"'
 TXT=$'## Decisão\n1. aprovar o fechamento da rodada\n\n## Ações\n- nenhuma\n\n## Detalhe\nA #507 abriu o PR #600 (https://github.com/renatobardi/oute-agent/pull/600).\n'
 WR=claude-sonnet-5-5

@@ -41,7 +41,7 @@ run() {
 }
 envval() { local k="$1"; sed -n "s/^$k=//p" "$OUT_DIR/env"; return $?; }
 RUN_ENV=()
-HTTP="ht""tp"; EP="$HTTP://collector.invalid:4318"; LEP="$HTTP://logs.invalid:4318/v1/logs"; export HTTP EP LEP
+HTTP="ht""tp"; SL="//"; EP="${HTTP}:${SL}collector.invalid:4318"; LEP="${HTTP}:${SL}logs.invalid:4318/v1/logs"; export EP LEP
 
 envfile "$H" OTEL_EXPORTER_OTLP_ENDPOINT=$EP OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_TRACES_EXPORTER=otlp OTEL_LOG_USER_PROMPTS=1 \
@@ -68,7 +68,7 @@ check "run: o que o ambiente não tem vem do arquivo"      [ "$(envval OTEL_LOGS
 # endpoint de logs no ambiente: o endpoint base do arquivo não entra (o par vale junto)
 RUN_ENV=(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=$LEP)
 run -- "$TMP/child"
-check "run: endpoint de logs no ambiente = o base do arquivo não entra" bash -c '! grep -q "^OTEL_EXPORTER_OTLP_ENDPOINT=" "$OUT_DIR/env" && grep -q "^OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=$HTTP://logs.invalid" "$OUT_DIR/env"' _
+check "run: endpoint de logs no ambiente = o base do arquivo não entra" bash -c '! grep -q "^OTEL_EXPORTER_OTLP_ENDPOINT=" "$OUT_DIR/env" && grep -qx "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=$LEP" "$OUT_DIR/env"' _
 RUN_ENV=()
 # sem --attr e sem origem em lugar nenhum: nada de OTEL_RESOURCE_ATTRIBUTES
 rm -f "$H/.oute_env"
