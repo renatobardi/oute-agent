@@ -23,7 +23,7 @@ Claude). Com o Codex também fora (`codex login status` ≠ 0 ou ausente): aviso
 Claude.
 
 Reserva por cota (#355): com o Claude disponível e sem escolha explícita, lê `oute-quota --json` (teto de 3 s). Qualquer
-janela do Claude >= `max_pct` (90) -> abre no Codex, `reserve` = `cota`, com a janela e a hora do reset no aviso.
+janela do Claude >= `max_pct` (98) -> abre no Codex, `reserve` = `cota`, com a janela e a hora do reset no aviso.
 Exceção: só a janela de 5 h passou do corte, está abaixo de 100% e reseta em menos de `reset_grace_s` (20 min) -> só
 aviso, abre no Claude. Cota do Claude `unknown` ou leitura que falha -> só aviso, abre no Claude. Claude e Codex >= corte:
 aviso, abre no Claude. Codex `unknown`: troca, com aviso. Nunca bloqueia.
@@ -73,7 +73,7 @@ JEV_REPLY_MAX = 1 << 20
 AUTH_TIMEOUT = 5.0
 # Reserva por cota (#355): `oute-quota --json`, teto de 3 s ($OUTE_SELECT_QUOTA_TIMEOUT só encurta, nos testes)
 QUOTA_TIMEOUT = 3.0
-QUOTA_MAX_PCT = 90.0
+QUOTA_MAX_PCT = 98.0
 QUOTA_GRACE_S = 1200.0
 JEV_INSTRUCTIONS = "Em que fase do ciclo de entrega de software esta tarefa está?"
 # o que cada fase do ADR-07 faz, para o Jev escolher; fase da tabela sem descrição aqui vai só com o nome

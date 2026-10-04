@@ -11,7 +11,7 @@
 #   porque a leitura nova deu 429, rede ou timeout.
 # tabela (#415): a hora do reset sai no fuso do container (`TZ`), com o deslocamento (`2026-10-03T21:30:00-03:00`);
 #   o --json segue em UTC (`…Z`), contrato de máquina.
-# ambiente: OUTE_QUOTA_MAX_PCT (padrão 90) e o grace de 1200 s só são ecoados no --json, para o consumidor (#258)
+# ambiente: OUTE_QUOTA_MAX_PCT (padrão 98) e o grace de 1200 s só são ecoados no --json, para o consumidor (#258)
 #   decidir sem reler env; XDG_CACHE_HOME (cache em <dir>/oute-quota/<agente>.json: só % e hora do reset, nunca token);
 #   CLAUDE_CONFIG_DIR e CODEX_HOME (onde estão as credenciais). Para teste: OUTE_QUOTA_CLAUDE_URL, OUTE_QUOTA_CODEX_URL
 #   (só https://) e OUTE_QUOTA_TIMEOUT (segundos por agente, padrão 5).
@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-MAX_PCT="${OUTE_QUOTA_MAX_PCT:-90}"
+MAX_PCT="${OUTE_QUOTA_MAX_PCT:-98}"
 [[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_QUOTA_MAX_PCT tem de ser um número"
 TIMEOUT="${OUTE_QUOTA_TIMEOUT:-5}"
 [[ "$TIMEOUT" =~ ^[0-9]+$ && "$TIMEOUT" -gt 0 ]] || die2 "OUTE_QUOTA_TIMEOUT tem de ser inteiro > 0"

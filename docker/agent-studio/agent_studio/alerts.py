@@ -73,7 +73,7 @@ class AlertConfig:
     spool_dropped_window_minutes: float = 60
     lookback_hours: float = 24
     quota_enabled: bool = True
-    quota_max_pct: float = 90
+    quota_max_pct: float = 98
     quota_metric: str = "oute.quota.used_pct"
     quota_reset_metric: str = "oute.quota.reset_in_seconds"
     quota_reset_grace_minutes: float = 20

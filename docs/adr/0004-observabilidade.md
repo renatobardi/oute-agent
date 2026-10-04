@@ -113,7 +113,7 @@ oute-emit reconcile                decided de todo inbox/*.out ainda não enviad
 - **`unknown` não emite ponto** (zero seria mentira): vai o evento `oute.quota.unknown`. Janela com `used_pct` fora de 0–100 ou sem hora de reset é pulada.
 - **Recurso:** só a origem do host e o agente; a marca de sessão (`oute.task.*`, `oute.swarm.*`) não entra, porque o instantâneo é do host.
 - **Sem spool:** métrica que não chega (coletor fora, 4xx) se perde; o instantâneo seguinte a substitui. O evento `unknown` usa o spool como os demais. O endpoint de métricas deriva do de logs (`…/v1/logs` → `…/v1/metrics`); endpoint de logs fora desse padrão = sem métrica.
-- **Alerta:** `quota` do agent-studio (ADR-08 §8), corte de 90% por janela.
+- **Alerta:** `quota` do agent-studio (ADR-08 §8), corte de 98% por janela (era 90%, #558).
 
 Hora do registro (`timeUnixNano`) = a hora do fato (linha do log, `criado:`, `aprovado:`/`recusado:`); no backfill também leva `oute.backfill=true`. Leitor filtra por `timeUnixNano`, não por `hour=`. Agente do `oute-propose`: `OUTE_PROPOSE_AGENT`, senão `CLAUDECODE=1` → `claude`, `CODEX_THREAD_ID` → `codex`, `PI_CODING_AGENT=true` → `pi`, senão `unknown`.
 
