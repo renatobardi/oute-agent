@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spike #458: saída por público</title>
+<style>
+  :root {
+    --bg: #f7f7f4; --card: #ffffff; --ink: #1c1d1f; --muted: #5d6166; --line: #d9dad5;
+    --hoje: #8a5a00; --hoje-bg: #fff4d9; --prop: #0b5c45; --prop-bg: #e2f4ec;
+    --risk: #9b1c1c; --risk-bg: #fde8e6; --code: #eeeeea; --link: #0b4f9c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141516; --card: #1e2022; --ink: #ececea; --muted: #a3a7ac; --line: #383b3f;
+      --hoje: #f0c060; --hoje-bg: #3a2f14; --prop: #6fd6ae; --prop-bg: #13342a;
+      --risk: #ff9a92; --risk-bg: #3d1a18; --code: #2a2c2f; --link: #8ab9f5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 1.25rem; margin: 40px 0 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1rem; margin: 0 0 12px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--link); }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+  .estado { color: var(--muted); }
+  .aviso { background: var(--risk-bg); border-left: 4px solid var(--risk); padding: 12px 14px; border-radius: 6px; margin: 16px 0; }
+  ol.resumo { padding-left: 22px; margin: 0; }
+  ol.resumo li { margin-bottom: 8px; }
+  .fluxos { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .fluxos { grid-template-columns: 1fr; } }
+  .fluxo { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .fluxo.hoje h3 { color: var(--hoje); }
+  .fluxo.prop h3 { color: var(--prop); }
+  .passo { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .hoje .passo { background: var(--hoje-bg); }
+  .prop .passo { background: var(--prop-bg); }
+  .passo.falha { background: var(--risk-bg); border-color: var(--risk); }
+  .passo.bardi { background: var(--card); border: 2px solid var(--ink); }
+  .passo strong { display: block; }
+  .passo span { color: var(--muted); font-size: .9rem; display: block; }
+  .seta { text-align: center; color: var(--muted); line-height: 1; padding: 6px 0; font-size: 1.2rem; }
+  .legenda { color: var(--muted); font-size: .9rem; margin-top: 12px; }
+  .rolagem { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .v { font-weight: 700; white-space: nowrap; }
+  .v.aj { color: var(--hoje); } .v.de { color: var(--risk); }
+  footer { margin-top: 40px; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Spike #458: saída por público</h1>
+<p class="estado">Relatório final, fatia 3. Branch <code>spike/karpathy-outputs</code>, sem PR e sem merge. Nenhum arquivo de produção mudou.</p>
+<div class="aviso"><strong>A decisão sobre o que adotar é do Bardi.</strong> Tudo o que esta página recomenda é recomendação do autor do relatório. A versão completa, com a fonte de cada número, é o <a href="README.md">README.md</a>.</div>
+
+<h2>Resumo</h2>
+<ol class="resumo">
+  <li><strong>O Bardi lê ou decide em 14 pontos.</strong> Em 12 deles o texto sai de um agente.</li>
+  <li><strong>Lado humano:</strong> o PT controlado com a decisão no topo funciona quando o Sonnet escreve. O Haiku não dá conta.</li>
+  <li><strong>O maior risco é a fidelidade.</strong> No P1, os dois modelos puseram uma recomendação que a fonte não faz.</li>
+  <li><strong>Lado máquina:</strong> o inglês reduz os tokens em 13% e a reescrita enxuta em 23%. Nenhuma troca está provada.</li>
+  <li><strong>Plano:</strong> 12 issues recomendadas, o lado humano primeiro. Nenhuma foi criada.</li>
+</ol>
+
+<h2>O fluxo de hoje e o fluxo proposto: texto que o Bardi lê</h2>
+<div class="fluxos">
+  <section class="fluxo hoje">
+    <h3>Hoje</h3>
+    <div class="passo"><strong>1. O agente da sessão escreve</strong><span>No modelo da fase. Pode ser o Haiku (fases <code>ops</code>, <code>ctx</code>, <code>learn</code>; labels <code>kaizen</code> e <code>docs</code>).</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>2. Texto livre em pt</strong><span>Nenhuma regra escrita manda o pt-BR. Nenhuma regra fixa a forma, fora os gabaritos.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo falha"><strong>3. Conferência só no PR</strong><span>A auditoria confere o PR. Conferência do pedido de merge, do script do canal e dos resumos: não verificado que exista.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo bardi"><strong>4. O Bardi lê</strong><span>A decisão pode estar no meio do texto. No #457 ela era o achado 2 de uma tabela.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo bardi"><strong>5. O Bardi decide</strong></div>
+  </section>
+  <section class="fluxo prop">
+    <h3>Proposto</h3>
+    <div class="passo"><strong>1. Sonnet ou Opus escreve</strong><span>A sessão em Haiku entrega o texto final a um subagente Sonnet, ou a tabela do seletor muda. A escolha é do Bardi.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>2. Contrato do ponto e PT controlado</strong><span>pt-BR por regra escrita. Decisão no topo. Opções numeradas. Fonte que o Bardi abre. Recomendação rotulada.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>3. Conferência por máquina</strong><span>A referência existe (<code>refcheck.py</code>). Os comandos do script não mudaram (<code>p2check.sh</code>).</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>4. Revisor de outro modelo</strong><span>Confere se a fonte sustenta a frase. Hoje só existe no PR (a auditoria). Nos outros pontos: em aberto.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo bardi"><strong>5. O Bardi lê</strong><span>A primeira linha diz o que ele decide.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo bardi"><strong>6. O Bardi decide</strong></div>
+  </section>
+</div>
+<p class="legenda">Caixa vermelha: onde o fluxo de hoje é mais fraco. Caixa com borda grossa: passo do Bardi.</p>
+
+<h2>O fluxo de hoje e o fluxo proposto: texto que o agente lê</h2>
+<div class="fluxos">
+  <section class="fluxo hoje">
+    <h3>Hoje</h3>
+    <div class="passo"><strong>1. Prompts, notas e skills em pt</strong><span>Os 7 arquivos medidos somam 67887 tokens no Sonnet e no Opus.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo falha"><strong>2. Regressão fraca</strong><span>Cobre 3 grupos de regra de cerca de 53. A tarefa <code>worktree</code> falha na linha de base.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>3. O agente lê em toda sessão</strong></div>
+  </section>
+  <section class="fluxo prop">
+    <h3>Proposto</h3>
+    <div class="passo"><strong>1. Regra do pt-BR da saída entra primeiro</strong><span>Antes de qualquer prompt mudar de língua.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>2. Regressão com poder de prova</strong><span>Tarefas para os grupos de regra sem medida e para a língua da saída.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>3. Um arquivo por vez em inglês</strong><span>Primeiro o <code>agent-notes.md</code> enxuto: 23% menos tokens. Um revisor de outro modelo lê regra por regra.</span></div>
+    <div class="seta">↓</div>
+    <div class="passo"><strong>4. O agente lê em toda sessão</strong><span>O <code>AGENTS.md</code> fica em pt: o Bardi também lê.</span></div>
+  </section>
+</div>
+
+<h2>Vereditos dos protótipos</h2>
+<div class="rolagem">
+<table>
+  <tr><th>Protótipo</th><th>Veredito</th><th>O que funcionou</th><th>O que falhou</th></tr>
+  <tr><td>P1, pedido de merge</td><td class="v aj">Ajustar</td><td>A decisão abre o texto. O Sonnet citou 10 referências e as 10 existem.</td><td>Os dois modelos recomendaram o que a auditoria não recomenda.</td></tr>
+  <tr><td>P2, script do watch</td><td class="v aj">Ajustar</td><td>Nenhum comando mudou. O Sonnet manteve 18 de 18 fatos.</td><td>O Haiku perdeu 2 fatos, mudou 2 e tranquilizou em vez de avisar.</td></tr>
+  <tr><td>P3, texto, diagrama e página</td><td class="v aj">Ajustar</td><td>Texto e página mantêm 47 de 47 fatos.</td><td>O diagrama perdeu 5 de 29 fatos. O ganho de leitura não foi medido.</td></tr>
+  <tr><td>P4, notas em inglês</td><td class="v aj">Ajustar</td><td>A variante enxuta gasta 23% menos tokens e mantém 53 de 53 regras.</td><td>A regressão não separa as variantes.</td></tr>
+  <tr><td>P5, caixa de entrada do dono</td><td class="v aj">Ajustar</td><td>Topo com contagem. 53 de 54 fatos mantidos.</td><td>O artefato ficou 2,2 vezes maior.</td></tr>
+  <tr><td>Vídeo</td><td class="v de">Descartar por ora</td><td>As ferramentas existem.</td><td>O ganho sobre uma página é pequeno e a conferência é mais lenta.</td></tr>
+</table>
+</div>
+
+<h2>Contrato de saída, em resumo</h2>
+<p>O contrato completo está em <a href="output-contract.md">output-contract.md</a>. Nos 14 pontos o idioma é pt-BR.</p>
+<div class="rolagem">
+<table>
+  <tr><th>#</th><th>Ponto</th><th>Formato proposto</th><th>Quem pode escrever</th></tr>
+  <tr><td>1</td><td>Proposta do ciclo</td><td>texto com tabela</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>2</td><td>Triagem da rodada</td><td>tabela</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>3</td><td>Pergunta com opções</td><td>texto; uma linha de até 300 caracteres no <code>oute-swarm ask</code></td><td>Sonnet ou Opus</td></tr>
+  <tr><td>4</td><td>Corpo do PR</td><td>Markdown com seções fixas</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>5</td><td>Relatório de auditoria</td><td>gabarito; forma curta quando não há achado</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>6</td><td>Pedido de merge</td><td>texto, com a decisão no topo</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>7</td><td>Proposta só GitHub e relatório de spike</td><td>comentário; diagrama quando descreve um fluxo</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>8</td><td>Script no <code>oute watch</code></td><td>script com <code># RESUMO</code> e <code># CUIDADO:</code></td><td>Sonnet ou Opus</td></tr>
+  <tr><td>9</td><td>Lições kaizen</td><td>texto</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>10</td><td>Resumo de fim de rodada</td><td>texto; diagrama pendente da comparação do Bardi no P3</td><td>Sonnet ou Opus; Haiku não provado</td></tr>
+  <tr><td>11</td><td>Saída do <code>scripts/oute</code></td><td>terminal, texto fixo</td><td>muda por PR</td></tr>
+  <tr><td>12</td><td>Tray, telas e alertas</td><td>página e menu, texto fixo</td><td>muda por PR</td></tr>
+  <tr><td>13</td><td>Insights do ciclo</td><td>comentário com tabela</td><td>Sonnet ou Opus</td></tr>
+  <tr><td>14</td><td>Relatórios de ship e ops</td><td>texto, com o veredito na primeira linha</td><td>Sonnet ou Opus</td></tr>
+</table>
+</div>
+
+<h2>Plano de incorporação</h2>
+<p>Recomendação do autor. O esforço é estimativa do autor: P = um PR só de texto; M = um PR com código ou teste; G = mais de um PR ou gate de <code>arch</code>. O detalhe está em <a href="issues-de-build.md">issues-de-build.md</a>.</p>
+<div class="rolagem">
+<table>
+  <tr><th>Ordem</th><th>Mudança</th><th>Esforço</th></tr>
+  <tr><td>1</td><td>PT controlado no repo e pt-BR da saída como regra escrita</td><td>P</td></tr>
+  <tr><td>2</td><td>Pedido de merge com a decisão no topo</td><td>M</td></tr>
+  <tr><td>3</td><td>Script do canal com <code># RESUMO</code> e <code># CUIDADO:</code></td><td>M</td></tr>
+  <tr><td>4</td><td>Quem escreve para o Bardi quando a sessão é Haiku</td><td>decisão do Bardi; depois P</td></tr>
+  <tr><td>5</td><td>Auditoria com a decisão no topo e forma curta sem achado</td><td>P</td></tr>
+  <tr><td>6</td><td>ADR de idioma</td><td>P, com gate de <code>arch</code></td></tr>
+  <tr><td>7</td><td>Regressão com poder de prova</td><td>G</td></tr>
+  <tr><td>8</td><td>Conferência de referência por máquina</td><td>M</td></tr>
+  <tr><td>9</td><td><code>agent-notes.md</code> em inglês enxuto</td><td>M</td></tr>
+  <tr><td>10</td><td>Uma linha <code>[ci]</code> por head quando tudo passa</td><td>M</td></tr>
+  <tr><td>11</td><td>Dois trechos ambíguos nos prompts de hoje</td><td>P</td></tr>
+  <tr><td>12</td><td>Caixa de entrada do dono, no <code>frentes-engenharia</code></td><td>P</td></tr>
+</table>
+</div>
+
+<h2>O que ficou em aberto</h2>
+<ul>
+  <li><strong>Não medido:</strong> o ganho de leitura do Bardi em qualquer artefato.</li>
+  <li><strong>Pendente do Bardi:</strong> a comparação entre o texto e a página do P3.</li>
+  <li><strong>Sem prova:</strong> que alguma variante em inglês não piora a qualidade.</li>
+  <li><strong>Não conferido:</strong> como esta página aparece no navegador. O container não tem navegador.</li>
+</ul>
+
+<footer>
+  Os diagramas desta página são caixas de HTML, não SVG. No P3 a fatia 2 estimou o texto do SVG em cerca de 7 px no celular, sem renderizar. As caixas se empilham em tela estreita.<br>
+  Outros arquivos: <a href="pt-controlado.md">pt-controlado.md</a>, <a href="lado-maquina.md">lado-maquina.md</a>, <a href="adr-rascunho-idioma.md">adr-rascunho-idioma.md</a>.
+</footer>
+
+</main>
+</body>
+</html>
