@@ -1,19 +1,13 @@
 // Botões Copiar (#468): copiam o texto do elemento que o botão aponta (`aria-controls`) e só isso. Sem o script os botões
-// seguem escondidos (nascem com `hidden`) e o texto fica à vista para selecionar.
+// seguem escondidos (nascem com `hidden`) e o texto fica à vista para selecionar. Sem a API da área de transferência
+// (página fora de contexto seguro) o texto é só selecionado, para o Ctrl+C.
 (function () {
-  function copiar(texto, alvo) {
-    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(texto);
-    return new Promise(function (ok, falha) {
-      var faixa = document.createRange();
-      faixa.selectNodeContents(alvo);
-      var sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(faixa);
-      var feito = false;
-      try { feito = document.execCommand("copy"); } catch (e) { feito = false; }
-      sel.removeAllRanges();
-      if (feito) ok(); else falha(new Error("copiar"));
-    });
+  function selecionar(alvo) {
+    var faixa = document.createRange();
+    faixa.selectNodeContents(alvo);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(faixa);
   }
   document.querySelectorAll("button.copiar[aria-controls]").forEach(function (btn) {
     var alvo = document.getElementById(btn.getAttribute("aria-controls"));
@@ -25,20 +19,27 @@
     aviso.setAttribute("role", "status");
     btn.after(aviso);
     btn.hidden = false;
+    function dizer(texto, copiado) {
+      rotulo.textContent = texto;
+      btn.classList.toggle("copiado", copiado);
+      aviso.textContent = texto;
+      window.setTimeout(function () {
+        rotulo.textContent = original;
+        btn.classList.remove("copiado");
+        aviso.textContent = "";
+      }, 2000);
+    }
     btn.addEventListener("click", function () {
-      copiar(alvo.textContent, alvo).then(function () {
-        rotulo.textContent = "Copiado";
-        btn.classList.add("copiado");
-        aviso.textContent = "Copiado";
+      if (!navigator.clipboard || !window.isSecureContext) {
+        selecionar(alvo);
+        dizer("Selecionado: Ctrl+C", false);
+        return;
+      }
+      navigator.clipboard.writeText(alvo.textContent).then(function () {
+        dizer("Copiado", true);
       }, function () {
-        rotulo.textContent = "Não copiou";
-        aviso.textContent = "Não foi possível copiar";
-      }).then(function () {
-        window.setTimeout(function () {
-          rotulo.textContent = original;
-          btn.classList.remove("copiado");
-          aviso.textContent = "";
-        }, 2000);
+        selecionar(alvo);
+        dizer("Não copiou: Ctrl+C", false);
       });
     });
   });
