@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Testes do custo por papel e por fase do agent-studio (#433, ADR-08 §9): `GET /v1/usage` devolve `by_role`
+# (dispatcher, worker, avulsa) e `by_phase` (o `aidlc:<fase>` do seletor ou `desconhecida`) ao lado dos agrupamentos de
+# sempre, e a tela `/uso` mostra as duas tabelas. Papel e fase saem dos eventos `oute.task.opened`/`reopened` da sessão
+# (e, sem eles, do resource da chamada); nenhum atributo novo. O DuckDB de exemplo nasce pela ingestão de verdade
+# (POST /v1/traces e /v1/logs). Sem Docker.
+# Uso: tests/agent-studio-custo.test.sh   (sai != 0 se algum caso falhar)
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP="$(mktemp -d)"
+. "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/agent-studio.sh"
+trap 'studio_stop; rm -rf "$TMP"' EXIT
+studio_init
+
+# ---------------------------------------------------------------- DuckDB de exemplo
+# D1 = 2025-09-27T19:06:40Z. Sessões (todas no oute-server, claude, exceto TA):
+#   TD dispatcher (rodada R, fase plan): 2 chamadas Opus com custo real, 0,50 + 0,30.
+#   TW worker (rodada R, sessão do swarm, fase build): 1 chamada real 0,10 e 1 estimada (1M de entrada = 3,00), uma
+#      chamada com erro; reaberta depois sem fase (vale a primeira conhecida).
+#   TA avulsa (sem rodada, aberta sem fase: escolha manual): 1 chamada do Codex estimada (1,25).
+#   TB avulsa com fase hostil no evento ("<b>x</b>"): desconhecida; chamada real 0,04.
+#   TX sem nenhum evento de abertura, mas com rodada e sessão do swarm no resource: worker/desconhecida, real 0,02.
+#   TY com evento de outro nome levando oute.task.phase=ops: o evento não vale, fica desconhecida; real 0,03.
+#   conversa sem oute.task.id: avulsa/desconhecida, real 0,07; chamada sem preço de TW: fora das somas (unpriced).
+#   Chamada de TW em janeiro de 2025: fora da janela.
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
+import json, sys
+from otlp_json import claude_call, event, kv, rl, rs, span
+tmp = sys.argv[1]
+D1 = 1759000000
+origin = {"host.name": "oute-server", "oute.instance": "oute-agent"}
+claude = {**origin, "service.name": "claude-code", "oute.agent": "claude"}
+codex = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "codex_exec", "oute.agent": "codex"}
+R = "swarm-0927-1900"
+sess = lambda tid, **extra: {**claude, "oute.task.id": tid, **extra}
+sonnet, opus = {"model": "claude-sonnet-5"}, {"model": "claude-opus-5"}
+TD, TW, TA, TB, TX, TY = ("repo-plan-1", "repo-build-1", "repo-avulsa-1", "repo-hostil-1", "repo-sem-evento-1", "repo-outro-1")
+calls = {
+  TD: [claude_call(D1, 2, {**opus, "input_tokens": 100}, 0.50), claude_call(D1 + 10, 2, {**opus, "input_tokens": 200}, 0.30)],
+  TW: [claude_call(D1 + 20, 2, {**sonnet, "input_tokens": 10}, 0.10),
+       claude_call(D1 + 30, 2, {**sonnet, "input_tokens": 1_000_000}),
+       claude_call(D1 + 40, 2, {**sonnet, "input_tokens": 5}, 0.05, err=True),
+       claude_call(D1 + 50, 2, {"model": "modelo-sem-preco", "input_tokens": 7}),
+       claude_call(1735689600, 1, {**sonnet, "input_tokens": 9}, 9.0)],
+  TB: [claude_call(D1 + 60, 2, {**sonnet, "input_tokens": 1}, 0.04)],
+  TX: [claude_call(D1 + 70, 2, {**sonnet, "input_tokens": 1}, 0.02)],
+  TY: [claude_call(D1 + 80, 2, {**sonnet, "input_tokens": 1}, 0.03)],
+  "": [claude_call(D1 + 90, 2, {**sonnet, "input_tokens": 1}, 0.07)],
+}
+res = {TD: sess(TD, **{"oute.swarm.round": R}), TW: sess(TW, **{"oute.swarm.round": R, "oute.swarm.session": "build-1"}),
+       TB: sess(TB), TX: sess(TX, **{"oute.swarm.round": R, "oute.swarm.session": "sem-evento"}), TY: sess(TY), "": claude}
+traces = {"resourceSpans": [rs(res[t], [s for s, _ in cs]) for t, cs in calls.items()] + [
+  rs({**codex, "oute.task.id": TA}, [span("session_task.turn", D1 + 100, 5, {
+    "model": "gpt-5-codex", "codex.turn.token_usage.non_cached_input_tokens": 1_000_000})])]}
+json.dump(traces, open(f"{tmp}/traces.json", "w"))
+n = [0]
+def ev(name, tid, extra=None, rnd=None, t=D1 - 100):
+    n[0] += 1
+    a = {"oute.task.id": tid, "oute.task.repo": "repo", "oute.task.slug": tid, **(extra or {})}
+    if rnd: a["oute.swarm.round"] = rnd
+    return event(t, name, f"e{n[0]}", a)
+events = [
+  ev("oute.task.opened", TD, {"oute.task.phase": "plan", "oute.task.origin": "manual"}, R),
+  ev("oute.task.opened", TW, {"oute.task.phase": "build", "oute.task.origin": "label", "oute.swarm.session": "build-1"}, R),
+  ev("oute.task.reopened", TW, {"oute.swarm.session": "build-1"}, R, D1 + 5),
+  ev("oute.task.opened", TA, {"oute.task.origin": "padrao"}),
+  ev("oute.task.opened", TB, {"oute.task.phase": "<b>x</b>"}),
+  ev("oute.task.opened", TY),
+  ev("oute.task.other", TY, {"oute.task.phase": "ops"}),
+]
+logs = {"resourceLogs": [rl(origin, events)] + [rl(res[t], [l for _, l in cs if l]) for t, cs in calls.items()]}
+json.dump(logs, open(f"{tmp}/logs.json", "w"))
+PY
+studio_prices "$TMP/prices.toml"
+WIN='from=2025-09-27T00:00:00Z&to=2025-09-29'
+studio_start "$TMP/s" AGENT_STUDIO_CONFIG="$TMP/prices.toml" || { echo "FAIL agent-studio não subiu"; cat "$TMP/s/stderr"; exit 1; }
+check "ingestão: traces = 200"                         test "$(post traces "$TMP/traces.json")" = 200
+check "ingestão: logs = 200"                           test "$(post logs "$TMP/logs.json")" = 200
+A=(-H "Authorization: Bearer $STUDIO_TOKEN")
+R="$(curl -s "${A[@]}" "$STUDIO_URL/v1/usage?$WIN")"
+role() { jq -c --arg k "$1" '.by_role[] | select(.role == $k)' <<<"$R"; }
+phase() { jq -c --arg k "$1" '.by_phase[] | select(.phase == $k)' <<<"$R"; }
+
+# ---------------------------------------------------------------- 1. por papel
+check "by_role: os três papéis, nada além"             jqe '[.by_role[].role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$R"
+check "dispatcher: 2 chamadas, real 0,80"              jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000) and .cost.estimated_usd == null and .tokens.input == 300" <<<"$(role dispatcher)"
+check "worker: real 0,17, estimado 3,00 (TW, e TX sem evento de abertura pelo resource)"     jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 170000) and (.cost.estimated_usd | $(usd .) == 3000000)" <<<"$(role worker)"
+check "worker: chamada sem preço fora das somas"       jqe ".cost.unpriced_calls == 1 and .cost.real_calls == 3 and .cost.estimated_calls == 1" <<<"$(role worker)"
+check "worker: o erro do span entra no grupo"          jqe ".errors.spans == 1" <<<"$(role worker)"
+check "avulsa: real 0,14 (TB, TY, sem sessão), est 1,25" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(role avulsa)"
+
+# ---------------------------------------------------------------- 2. por fase
+check "by_phase: plan, build e desconhecida"           jqe '[.by_phase[].phase] | sort == ["build", "desconhecida", "plan"]' <<<"$R"
+check "plan: o dispatcher"                             jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000)" <<<"$(phase plan)"
+check "build: TW (primeira fase conhecida vale)"       jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 150000) and (.cost.estimated_usd | $(usd .) == 3000000)" <<<"$(phase build)"
+check "desconhecida: sem evento, sem fase, hostil, outro evento, sem sessão" jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 160000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(phase desconhecida)"
+check "fase hostil não aparece em lugar nenhum"        bash -c '! grep -qF "<b>x</b>" <<<"$1"' _ "$R"
+
+# ---------------------------------------------------------------- 3. as somas batem com o total da janela
+sums() { jq -c --arg k "$1" '{calls: ([.[$k][].calls] | add), spans: ([.[$k][].spans] | add), input: ([.[$k][].tokens.input] | add),
+  output: ([.[$k][].tokens.output] | add), real: ([.[$k][].cost.real_usd // 0] | add), est: ([.[$k][].cost.estimated_usd // 0] | add),
+  unpriced: ([.[$k][].cost.unpriced_calls] | add), errors: ([.[$k][].errors.total] | add)}' <<<"$R"; }
+TOT="$(jq -c '.totals | {calls, spans, input: .tokens.input, output: .tokens.output, real: .cost.real_usd, est: .cost.estimated_usd,
+  unpriced: .cost.unpriced_calls, errors: .errors.total}' <<<"$R")"
+check "total: 11 chamadas na janela, 1 sem preço"      jqe '.calls == 11 and .unpriced == 1' <<<"$TOT"
+check "soma por papel = total (chamadas, spans, tokens, erros)" bash -c 'test "$(jq -S -c "del(.real, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .est)" <<<"$2")"' _ "$(sums by_role)" "$TOT"
+check "soma por fase = total (chamadas, spans, tokens, erros)"  bash -c 'test "$(jq -S -c "del(.real, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .est)" <<<"$2")"' _ "$(sums by_phase)" "$TOT"
+check "soma por papel = total (custo real e estimado)" bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_role)" "$TOT"
+check "soma por fase = total (custo real e estimado)"  bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_phase)" "$TOT"
+check "agrupamentos de sempre seguem na resposta"      jqe '(.rows | length) > 0 and (.series | length) > 0 and (.totals.calls == 11)' <<<"$R"
+check "janela vazia: papéis e fases vazios"            jqe '.by_role == [] and .by_phase == [] and .totals.calls == 0' <<<"$(curl -s "${A[@]}" "$STUDIO_URL/v1/usage?from=2030-01-01&to=2030-01-02")"
+
+# ---------------------------------------------------------------- 4. a tela de uso
+check "/uso sem login: 303 para o /login"              test "$(code "$STUDIO_URL/uso")$(hdr location "$STUDIO_URL/uso")" = "303/login?next=%2Fuso"
+check "/uso com token: 200"                            test "$(code "${A[@]}" "$STUDIO_URL/uso?$WIN")" = 200
+check "/uso janela inválida: 400"                      test "$(code "${A[@]}" "$STUDIO_URL/uso?from=ontem&to=2025-09-29")" = 400
+check "POST no /uso: 405"                              test "$(code -X POST "${A[@]}" "$STUDIO_URL/uso")" = 405
+HTML="$(curl -s "${A[@]}" "$STUDIO_URL/uso?$WIN")"
+P="$(data <<<"$HTML")"
+check "tela: tabela por papel com as três linhas"      jqe '[.[] | select(.role) | .role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$P"
+check "tela: tabela por fase com as três linhas"       jqe '[.[] | select(.phase) | .phase] | sort == ["build", "desconhecida", "plan"]' <<<"$P"
+check "tela: linha do dispatcher = a da API"           jqe ".[] | select(.role == \"dispatcher\") | .calls == \"2\" and (.[\"real-usd\"] | $(usd .) == 800000)" <<<"$P"
+check "tela: mais cara primeiro (build antes de plan)" jqe '[.[] | select(.phase) | .phase] | index("build") < index("plan")' <<<"$P"
+check "tela: total da janela"                          jqe '.[] | select(.tag == "p" and .calls == "11")' <<<"$P"
+check "tela: menu com o link do uso"                   grep -q 'href="/uso"' <<<"$HTML"
+check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada ao modelo' <<<"$(curl -s "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")"
+
+# ---------------------------------------------------------------- 5. nada novo na origem
+check "origem: oute-task/oute-emit/oute-swarm sem atributo de prompt, título ou caminho no evento da sessão" \
+  bash -c '! grep -nE "oute\.task\.(prompt|title|path|role)" "$1"/docker/oute-emit "$1"/docker/oute-task "$1"/docker/oute-swarm' _ "$ROOT"
+check_end
