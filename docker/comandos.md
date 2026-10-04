@@ -117,7 +117,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       acompanha PRs/CI/pedidos → retrospectiva kaizen (lições numeradas; você escolhe:
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
-      --agent = agente de todas as sessões da rodada, kaizen inclusive (sem ele: claude).
+      --agent = agente do dispatcher e de todas as sessões da rodada, kaizen inclusive (sem ele: dispatcher em
+      claude e o seletor escolhe cada sessão). Com `--agent codex` o dispatcher abre no Codex e o watch roda numa aba
+      `watch <rodada>` que digita os eventos no campo dele (`watch --deliver`); com claude nada muda (ferramenta Monitor).
       O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
       Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen]
@@ -138,10 +140,13 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     registra que você respondeu
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
-  oute-swarm watch [--interval s] [--round ID]
+  oute-swarm watch [--interval s] [--round ID] [--deliver]
                                     (monitor do dispatcher) uma linha por mudança real: sessão, aba, PR, CI,
                                     conflito, pedido pendente/rc≠0 no canal; retoma do último estado; sai no close --all.
-                                    Grava no log da rodada; PR/issue de outro repo aparecem como <repo>#n
+                                    Grava no log da rodada; PR/issue de outro repo aparecem como <repo>#n.
+                                    --deliver (dispatcher fora do Claude, aberto por `--agent codex`): digita os eventos,
+                                    agrupados numa mensagem, no campo do dispatcher parado (idle/done, campo achado e
+                                    vazio); ocupado, com diálogo ou com texto no campo, adia (fila em watch.queue, motivo no log)
   oute-swarm list                   abas abertas por rodada + worktrees
   Fim de cada sessão: `PRONTO #n: <url do PR>` ou `BLOQUEADO #n: <pergunta>`.
 

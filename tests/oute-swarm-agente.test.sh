@@ -19,14 +19,14 @@ CASE=agente-abre; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
 opn --max 2 --agent codex
 nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
 check "--agent: código 0 e rodada nova"                  [ "$RC" -eq 0 -a -n "$nr" ]
-check "--agent: meta com workers=codex e agent=claude"   [ "$(grep -cxE 'workers=codex|agent=claude' "$M")" -eq 2 ]
+check "--agent: meta com workers=codex e agent=codex (#213)" [ "$(grep -cxE 'workers=codex|agent=codex' "$M")" -eq 2 ]
 check "--agent: prompt com o agente da rodada"           grep -qF 'Agente das sessões: `codex` (escolhido pelo Bardi na abertura, `--agent codex`).' "$FAKE/oute-task.last"
 check "--agent: prompt manda não passar --agent nem --model" grep -qF -- '- **Agente e modelo:** não passe `--agent` nem `--model` no `spawn`' "$FAKE/oute-task.last"
 check "--agent: triagem com o agente de cada sessão"     grep -qF 'área tocada, agente da sessão,' "$FAKE/oute-task.last"
 check "--agent: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
 check "--agent: aviso com o agente"                      grep -qxF "dispatcher $nr · repo repo · max 2 · agente codex" <<<"$ERR"
 check "--agent: linha do log com o agente"               grep -q " abertura $nr (repo repo, max 2, agente codex)$" "$H/.oute/swarm/$nr/log"
-check "--agent: round.opened com oute.swarm.round.agent" [ "$(n '.name == "oute.swarm.round.opened" and .attrs["oute.swarm.round.agent"] == "codex" and .attrs["oute.agent"] == "claude"')" -eq 1 ]
+check "--agent: round.opened com oute.swarm.round.agent" [ "$(n '.name == "oute.swarm.round.opened" and .attrs["oute.swarm.round.agent"] == "codex" and .attrs["oute.agent"] == "codex"')" -eq 1 ]
 rcv_stop
 # 10b. abertura sem --agent: meta sem workers=, prompt com "seletor", evento sem o atributo
 CASE=agente-sem; round "$CASE"; rcv_start "$TMP/$CASE/rcv"

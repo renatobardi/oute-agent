@@ -2,7 +2,9 @@
 # oute-swarm — várias sessões de agente em paralelo, uma por issue, coordenadas por uma sessão do Claude.
 #
 #   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão.
-#              [--agent claude|codex]               --agent: agente das sessões da rodada (sem ele: claude)
+#              [--agent claude|codex]               --agent: agente do dispatcher e das sessões da rodada (sem ele: claude no
+#                                                   dispatcher e o seletor nas sessões). Com codex, o watch roda numa aba própria
+#                                                   e digita os eventos no campo do dispatcher parado (#213)
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
 #              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --agent: sobrepõe o da
 #              [--model <id>] [--repo <repo>]       rodada. --model: modelo da sessão (sem ele: o da fase da issue,
@@ -16,6 +18,10 @@
 #                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
+#   oute-swarm watch [--interval s] [--round ID]    uma linha por mudança real da rodada (monitor do dispatcher Claude)
+#              [--deliver]                          --deliver: em vez de depender do harness, digita os eventos (agrupados, numa
+#                                                   mensagem) no campo do dispatcher parado; nunca com ele ocupado nem sem achar
+#                                                   o campo; o resto fica na fila (watch.queue) e tudo vai ao log
 #   oute-swarm list                                 abas abertas por este dispatcher + worktrees de tarefa
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
@@ -86,7 +92,7 @@ resolve_repo() {
 
 cmd_start() {
   [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex]"
-  local repo max=3 label="" workers="" main name id prompt wtext
+  local repo max=3 label="" workers="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -100,24 +106,51 @@ cmd_start() {
   (( max <= 5 )) || die "--max acima de 5 não é permitido (quota e revisão humana)"
   [[ -z "$workers" ]] || check_agent "$workers"
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (o dispatcher abre abas nele)"
+  # dispatcher no Codex (#213): sem a ferramenta Monitor do Claude, o watch roda numa aba própria e digita os eventos
+  # no campo do dispatcher, que é este pane; sem ele o dispatcher nunca receberia evento
+  [[ "$workers" != codex ]] || dagent=codex
+  if [[ "$dagent" != claude ]]; then
+    [[ -n "${HERDR_PANE_ID:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "dispatcher $dagent precisa de HERDR_PANE_ID e HERDR_WORKSPACE_ID (rode no pane do herdr em que ele vai abrir)"
+  fi
   command -v gh >/dev/null || die "gh não encontrado"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="swarm-$(date +%m%d-%H%M)"
   mkdir -p "$STATE_ROOT/$id"
-  # agent = o do dispatcher (oute.agent dos eventos da rodada); workers = o das sessões, só com --agent (#212): sem ele,
-  # a rodada não tem padrão e o seletor decide em cada spawn (#219)
-  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=claude\n%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" \
-    "${workers:+workers=$workers$'\n'}" > "$STATE_ROOT/$id/meta"
+  # agent = o do dispatcher (oute.agent dos eventos da rodada): claude, ou o do --agent quando é codex (#213);
+  # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
+  # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (só fora do Claude)
+  printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=%s\n%s%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" "$dagent" \
+    "${workers:+workers=$workers$'\n'}" "$([[ "$dagent" == claude ]] || printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   if [[ -n "$workers" ]]; then wtext="\`$workers\` (escolhido pelo Bardi na abertura, \`--agent $workers\`)"
   else wtext="seletor (a rodada abriu sem \`--agent\`: \`claude\`, com o modelo da fase de cada issue)"; fi
-  prompt="$(sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
+  # trechos do prompt que dependem do agente do dispatcher (@@CL@@…@@/CL@@ = Claude, @@CX@@…@@/CX@@ = o resto): fica
+  # só o do agente dele; os marcadores saem, e o item que ficou vazio também. O do Claude é o texto de sempre, byte a byte
+  if [[ "$dagent" == claude ]]; then drop=CX keep=CL; else drop=CL keep=CX; fi
+  prompt="$(sed -e "s|@@$drop@@[^@]*@@/$drop@@||g" -e "s|@@/\?$keep@@||g" -e '/^- $/d' "$LIB/swarm.md" \
+            | sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
                 -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
-                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" "$LIB/swarm.md")"
+                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g")"
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
   echo "dispatcher $id · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
+  if [[ "$dagent" != claude ]]; then
+    # aba do watch: fora do agente, entrega os eventos digitando no campo do dispatcher (watch --deliver). Sem a aba o
+    # dispatcher ficaria cego: recusa a abertura em vez de abrir sem acompanhamento
+    wout="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "watch $id" --no-focus)" \
+      || die "herdr tab create falhou ao abrir a aba do watch: $wout"
+    wpane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
+    wtab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
+    if [[ -z "$wpane" ]]; then
+      [[ -z "$wtab" ]] || herdr tab close "$wtab" >/dev/null 2>&1 || true
+      slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch não iniciado: pane da aba não achado na saída do herdr"
+      die "não achei o pane da aba do watch na saída do herdr; dispatcher não aberto: $wout"
+    fi
+    printf -v wcmd 'OUTE_SWARM_ID=%q oute-swarm watch --round %q --deliver' "$id" "$id"
+    herdr pane run "$wpane" "$wcmd" >/dev/null || die "herdr pane run falhou na aba do watch ($wpane)"
+    slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch --deliver aberto na aba $wpane (dispatcher $dagent, pane $HERDR_PANE_ID)"
+  fi
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
-    exec oute-task --phase plan -r "$main" "$id" claude "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
+    exec oute-task --phase plan -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
 }
 
 cmd_spawn() {
@@ -315,9 +348,32 @@ field_text() {
     }'
 }
 
+# digita <texto> no campo do pane, confere o campo e só então dá Enter (tell e a entrega do watch). <st> = estado do
+# agente. Retorno: 0 enviado; 1 send-text falhou; 2 Enter falhou (texto digitado); 3 o campo não ficou com o texto
+# exato (SF_GOT = o que ele tinha). Não bateu: limpa com ctrl+c (só com a sessão idle/done) e tenta uma vez
+send_field() {
+  local pane="$1" agent="$2" text="$3" st="$4" try
+  SF_GOT=""
+  for try in 1 2; do
+    herdr pane send-text "$pane" "$text" >/dev/null || return 1
+    sleep 0.5
+    SF_GOT="$(field_text "$pane" "$agent")" || SF_GOT="(campo de entrada não encontrado na tela)"
+    if [[ "$(tr -d '[:space:]' <<<"$SF_GOT")" == "$(tr -d '[:space:]' <<<"$text")" ]]; then
+      herdr pane send-keys "$pane" enter >/dev/null || return 2
+      return 0
+    fi
+    (( try == 1 )) || break
+    [[ "$st" == idle || "$st" == done ]] || break   # ctrl+c/esc com a sessão trabalhando ou num diálogo interromperia/responderia
+    herdr pane send-keys "$pane" ctrl+c >/dev/null 2>&1 || break
+    sleep 0.5
+    [[ -z "$(field_text "$pane" "$agent" 2>/dev/null)" ]] || break   # não limpou: não empilha outro ctrl+c
+  done
+  return 3
+}
+
 cmd_tell() {
-  local force=0 wait=0 timeout="" want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text got try
-  local rc=1 start poll waited=0 tag=""
+  local force=0 wait=0 timeout="" want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text
+  local rc=1 start poll waited=0 tag="" sf
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force) force=1 ;;
@@ -387,23 +443,15 @@ cmd_tell() {
   (( ${#text} <= 800 )) || refuse "mensagem longa demais (${#text} caracteres com o prefixo; máx. 800); resuma"
   # sem campo na tela (diálogo/lista; o herdr dá idle no codex nesses casos) nada é digitado: teclas ali escolhem opções
   field_text "$pane" "$agent" >/dev/null || refuse "campo de entrada de $label não encontrado na tela (diálogo ou lista aberta?)"
-  for try in 1 2; do
-    herdr pane send-text "$pane" "$text" >/dev/null || refuse "send-text falhou em $pane"
-    sleep 0.5
-    got="$(field_text "$pane" "$agent")" || got="(campo de entrada não encontrado na tela)"
-    if [[ "$(tr -d '[:space:]' <<<"$got")" == "$(tr -d '[:space:]' <<<"$text")" ]]; then
-      herdr pane send-keys "$pane" enter >/dev/null || refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter"
-      slog "$state" "$(date -u +%FT%TZ) tell $slug ok$( (( force )) && echo " (--force, $st)")$tag"$'\t'"$msg"
-      echo "enviado a $label ($pane)"
-      return 0
-    fi
-    (( try == 1 )) || break
-    [[ "$st" == idle || "$st" == done ]] || break   # ctrl+c/esc com a sessão trabalhando ou num diálogo interromperia/responderia
-    herdr pane send-keys "$pane" ctrl+c >/dev/null 2>&1 || break
-    sleep 0.5
-    [[ -z "$(field_text "$pane" "$agent" 2>/dev/null)" ]] || break   # não limpou: não empilha outro ctrl+c
-  done
-  printf 'oute-swarm: campo de %s ficou assim (esperado a mensagem exata):\n%s\n' "$label" "$got" >&2
+  send_field "$pane" "$agent" "$text" "$st" && sf=0 || sf=$?
+  case "$sf" in
+    0) slog "$state" "$(date -u +%FT%TZ) tell $slug ok$( (( force )) && echo " (--force, $st)")$tag"$'\t'"$msg"
+       echo "enviado a $label ($pane)"
+       return 0 ;;
+    1) refuse "send-text falhou em $pane" ;;
+    2) refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter" ;;
+  esac
+  printf 'oute-swarm: campo de %s ficou assim (esperado a mensagem exata):\n%s\n' "$label" "$SF_GOT" >&2
   refuse "o campo de entrada não contém exatamente a mensagem" "sem Enter; confira o pane $pane"
 }
 
@@ -496,12 +544,19 @@ W_OLDQ='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$
     ... on CheckRun{name conclusion startedAt completedAt} ... on StatusContext{context state startedAt: createdAt}}}}}}}}'
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
 declare -A W_PREV=() W_CUR=() W_IID=()
+W_DELIVER=0 W_DLV_WHY=""
+W_DLV_MAX=700   # corpo do grupo de eventos; com o prefixo, abaixo dos 800 caracteres que o Claude Code ainda mostra inteiros
 
 # evento: no stdout (monitor do dispatcher) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
 w_ev() {
   [[ -n "$2" ]] || return 0
   printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"
   slog "$W_STATE" "$(date -u +%FT%TZ) watch [$1] $2"
+  # --deliver (#213): o evento também entra na fila de entrega ao dispatcher (uma linha, sem controles)
+  if (( W_DELIVER )) && [[ "$1" != rodada ]]; then   # o fechamento da rodada é do próprio dispatcher: não vai à fila
+    printf '%s\n' "$(date +%H:%M) [$1] $(printf '%s' "$2" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]')" >> "$W_STATE/watch.queue"
+  fi
+  return 0
 }
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
 w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }
@@ -711,13 +766,61 @@ w_check_merged_issues() {
   done
 }
 
+# entrega ao dispatcher (#213, watch --deliver): os eventos da fila (watch.queue) saem juntos, numa mensagem só, digitados
+# no campo do dispatcher (o pane do meta). Só com ele parado (idle/done), com o campo achado e vazio (nunca por cima do
+# que o Bardi está digitando, nem às cegas num diálogo). Qualquer outra situação adia: a fila fica e a próxima passada
+# tenta de novo. Cada motivo de adiamento vai ao log uma vez, até a situação mudar.
+w_dlv_wait() {
+  local why="$1"
+  if [[ "$why" != "$W_DLV_WHY" ]]; then
+    slog "$W_STATE" "$(date -u +%FT%TZ) watch entrega adiada: $why ($(wc -l < "$W_STATE/watch.queue" | tr -d ' ') evento(s) na fila)"
+    W_DLV_WHY="$why"
+  fi
+  return 0
+}
+
+w_deliver() {
+  local q="$W_STATE/watch.queue" pane agents agent st line body="" n=0 text sf field
+  if [[ ! -s "$q" ]]; then W_DLV_WHY=""; return 0; fi
+  pane="$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)"
+  agents="$(herdr agent list 2>&1)" || { w_dlv_wait "herdr agent list falhou"; return 0; }
+  read -r agent st < <(jq -r --arg p "$pane" '[.. | objects | select(.pane_id? == $p and has("agent_status"))][0] | "\(.agent // "-") \(.agent_status // "-")"' <<<"$agents" 2>/dev/null || echo "- -")
+  if [[ "$agent" == - || "$agent" == null ]]; then w_dlv_wait "nenhum agente no pane $pane do dispatcher"; return 0; fi
+  case "$st" in
+    idle|done) ;;
+    *) w_dlv_wait "dispatcher ocupado ($st)"; return 0 ;;
+  esac
+  # campo achado e vazio; o texto da sessão aberta no campo vira "campo com texto" (o Bardi digitando)
+  if ! field="$(field_text "$pane" "$agent")"; then w_dlv_wait "campo de entrada do dispatcher não encontrado na tela (diálogo ou lista aberta?)"; return 0; fi
+  if [[ -n "$field" ]]; then w_dlv_wait "campo do dispatcher com texto (o Bardi digitando?)"; return 0; fi
+  # agrupa os eventos que cabem; o resto fica para a próxima vez. Um evento sozinho maior que o corpo é cortado
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if (( n > 0 && ${#body} + ${#line} + 3 > W_DLV_MAX )); then break; fi
+    (( ${#line} <= W_DLV_MAX )) || line="${line:0:W_DLV_MAX-1}…"
+    body="${body:+$body | }$line"; n=$((n + 1))
+  done < "$q"
+  text="[watch $(basename "$W_STATE")] $n evento(s): $body"
+  send_field "$pane" "$agent" "$text" "$st" && sf=0 || sf=$?
+  case "$sf" in
+    0) slog "$W_STATE" "$(date -u +%FT%TZ) watch entrega ok: $n evento(s) ao dispatcher ($pane)"
+       tail -n +"$((n + 1))" "$q" > "$q.tmp" && mv "$q.tmp" "$q"
+       W_DLV_WHY="" ;;
+    1) w_dlv_wait "send-text falhou em $pane" ;;
+    2) w_dlv_wait "send-keys enter falhou em $pane (texto digitado, sem Enter)" ;;
+    *) w_dlv_wait "o campo do dispatcher não ficou com a mensagem exata, sem Enter" ;;
+  esac
+  return 0
+}
+
 cmd_watch() {
   local interval=60 round="" main since sfile tmp k v first=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --interval) interval="${2:?}"; shift 2 ;;
       --round) round="${2:?}"; shift 2 ;;
-      *) die "uso: oute-swarm watch [--interval s] [--round <rodada>]" ;;
+      --deliver) W_DELIVER=1; shift ;;
+      *) die "uso: oute-swarm watch [--interval s] [--round <rodada>] [--deliver]" ;;
     esac
   done
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 10 )) || die "--interval inválido: $interval (mínimo 10 s)"
@@ -728,6 +831,10 @@ cmd_watch() {
   main="$(sed -n 's/^repo=//p' "$W_STATE/meta")"; since="$(sed -n 's/^started=//p' "$W_STATE/meta")"
   [[ -d "$main" ]] || die "repo da rodada não encontrado: $main"
   command -v herdr >/dev/null && command -v gh >/dev/null && command -v jq >/dev/null || die "precisa de herdr, gh e jq"
+  if (( W_DELIVER )); then
+    [[ -n "$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)" ]] || die "meta da rodada sem dispatcher_pane ($W_STATE/meta): --deliver só vale para dispatcher aberto fora do Claude"
+    command -v herdr >/dev/null || die "precisa do herdr"
+  fi
   sfile="$W_STATE/watch.state"
   # um watch por rodada: o mais novo assume, e o antigo (monitor que expirou sem matar o processo) sai na próxima passada
   printf '%s\n' "$$" > "$W_STATE/watch.pid"
@@ -745,6 +852,7 @@ cmd_watch() {
     w_snapshot "$W_STATE" "$main" "$since"
     (( first )) || { w_diff; w_check_merged_issues; }
     first=0
+    (( ! W_DELIVER )) || w_deliver
     tmp="$(mktemp "$W_STATE/.watch.XXXXXX")"
     for k in "${!W_CUR[@]}"; do printf '%s\t%s\n' "$k" "${W_CUR[$k]}"; done | sort > "$tmp"
     mv "$tmp" "$sfile"
@@ -767,7 +875,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;
