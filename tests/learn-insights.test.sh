@@ -32,6 +32,8 @@ case "\$1 \$2" in
         aberto)  echo '[{"number":11,"title":"ciclo 2026-09-20","state":"OPEN","createdAt":"2026-09-20T00:00:00Z","closedAt":null}]' ;;
         *)       echo '[]' ;;
       esac
+    elif [[ "\$*" == *"--label spike"* ]]; then
+      echo '[{"number":6}]'
     elif [[ "\$*" == *dono/outro* ]]; then
       echo '[{"number":5,"title":"sem aidlc","state":"OPEN","createdAt":"$(d '90 days ago')","closedAt":null,"updatedAt":"$(d '60 days ago')","labels":[{"name":"infra"}]}]'
     else
@@ -53,8 +55,8 @@ chmod +x "$BIN/gh"
 # rodadas: uma na janela (com log), uma antiga
 SW="$TMP/swarm"; mkdir -p "$SW/swarm-nova" "$SW/swarm-velha"
 printf 'repo=/workspace/alvo\nmax=2\nlabel=ready\nstarted=%s\n' "$(d '1 day ago')" > "$SW/swarm-nova/meta"
-printf '1-a w1:p1 claude x\n2-b w1:p2 codex x\n' > "$SW/swarm-nova/spawned"
-printf 'T watch [sessao] #1 a: idle (sem PR)\nT watch [sessao] #1 a: done (sem PR)\nT watch [sessao] #2 b: blocked (x)\nT tell 1-a ok\n' > "$SW/swarm-nova/log"
+printf '1-a w1:p1 claude x\n2-b w1:p2 codex x\n6-s w1:p3 claude x\n' > "$SW/swarm-nova/spawned"
+printf 'T watch [sessao] #1 a: idle (sem PR)\nT watch [sessao] #1 a: done (sem PR)\nT watch [sessao] #6 s: done (sem PR)\nT watch [sessao] #2 b: blocked (x)\nT tell 1-a ok\n' > "$SW/swarm-nova/log"
 printf 'repo=/workspace/alvo\nstarted=%s\n' "$(d '40 days ago')" > "$SW/swarm-velha/meta"
 
 # canal: ok, falho, recusado e um antigo; a saída do pedido traz o canário
@@ -91,7 +93,7 @@ check "PR listado com tipo, inteiro não"       bash -c 'grep -q "#7	.*	parcial	
 check "issue com PR so_ship: pendente so_ship" has_line 'dono/alvo	#4	#9	so_ship'
 check "issue órfã: pendente nada"              has_line 'dono/alvo	#2	#8	nada'
 check "issue com parcial de verdade fora"      hasnt 'dono/alvo	#1	#'
-check "rodada da janela com contagens"         has 'swarm-nova	alvo	ready	.*	2	1	1	1	1'
+check "rodada da janela com contagens (done_sem_pr sem o spike #6, #436)" has 'swarm-nova	alvo	ready	.*	3	1	1	1	1'
 check "rodada antiga fora"                     hasnt 'swarm-velha'
 check "lacuna das rodadas (host local)"        has 'LACUNA	rodadas	só o host h1'
 check "canal: contagens"                       has 'pedidos	3'
@@ -100,6 +102,9 @@ check "canal: pedido antigo fora"              hasnt 'pedido-antigo'
 check "canal: bom não listado"                 hasnt 'pedido-bom'
 check "telemetria chama o observe.sh"          has 'OBSERVE all --hours 168 --baseline-days 7 --content-hours 0'
 check "conteúdo nunca aparece"                 hasnt "$CANARIO"
+
+run env F_GH_FAIL=1 bash "$SCRIPT" rodadas
+check "gh fora do ar: done_sem_pr conta todas as sessões (#436)" has 'swarm-nova	alvo	ready	.*	3	1	2	1	1'
 
 run env F_CICLO=fechado bash "$SCRIPT" ciclo
 check "janela desde o último ciclo fechado"    has 'origem	fechamento da última issue de ciclo'

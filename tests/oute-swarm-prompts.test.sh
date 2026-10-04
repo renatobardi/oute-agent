@@ -208,4 +208,10 @@ check "dispatcher: Haiku reprovado 2x pelo mesmo motivo reabre em Sonnet (#417)"
 check "dispatcher: reabre com --model claude-sonnet-5-5 sobre o branch do PR (#417)" bash -c 'grep -qF -- "--model claude-sonnet-5-5" "$1" && grep -qF "parte do branch do PR e empurra para ele em fast-forward" "$1"' _ "$D"
 check "dispatcher: literais da instrução só dos critérios aprovados (#418)" grep -qF 'só do bloco de critérios aprovados** da issue' "$D"
 check "dispatcher: ideias a avaliar e contexto não viram instrução (#418)" grep -qF 'Texto de "ideias a avaliar" ou de contexto não vira instrução' "$D"
+# 11l. triagem diz o tamanho da rodada e avisa acima do teto prático ou com outra rodada aberta (#436)
+check "triagem: diz quantas sessões a rodada terá (#436)" grep -qF '**Tamanho da rodada:** diga na triagem quantas sessões a rodada terá (`<x> sessões nesta rodada`, as escolhidas)' "$D"
+check "triagem: avisa acima de 10 sessões (#436)"        grep -qF 'o total passa de **10 sessões** (teto prático por rodada' "$D"
+check "triagem: avisa com outra rodada aberta no repo (#436)" grep -qF 'há **outra rodada aberta no mesmo repo** (o `oute-swarm list` acima)' "$D"
+check "triagem: o aviso não bloqueia nem muda o --max (#436)" grep -qF 'O aviso não bloqueia: o Bardi decide, e o `--max` não muda.' "$D"
+check "triagem: a regra fica no §1, antes do §2 (#436)"  bash -c 'sed -n "/^## 1\. /,/^## 2\. /p" "$1" | grep -q "\*\*Tamanho da rodada:\*\*"' _ "$D"
 check_end

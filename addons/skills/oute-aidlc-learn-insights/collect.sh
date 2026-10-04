@@ -159,6 +159,26 @@ github() {
 
 # ---------------------------------------------------------------- rodadas do swarm (host local)
 nlog() { [[ -f "$2/log" ]] && grep -c -- "$1" "$2/log" || echo 0; }  # nlog <regex> <pasta da rodada>
+# done_sem_pr não conta sessão de issue `spike` (a entrega dela é o relatório, sem PR: #115, #403, #436).
+# Só o label `spike` identifica; o log do swarm não marca a entrega só no GitHub. Sem resposta do gh, conta tudo.
+spikes() {  # spikes <caminho do repo da rodada> → números das issues com label spike, um por linha
+  local rp="$1" u
+  u="$(git -C "$WS/$(basename "$rp")" remote get-url origin 2>/dev/null)" || return 0
+  u="${u%.git}"; [[ "$u" == *github.com[:/]* ]] || return 0
+  gh issue list --repo "${u#*github.com[:/]}" --state all --label spike --limit 1000 --json number 2>/dev/null \
+    | jq -r '.[].number' 2>/dev/null || true
+  return 0
+}
+done_sem_pr() {  # done_sem_pr <pasta da rodada> <caminho do repo> → sessões done sem PR, fora as de spike
+  local d="$1" sp n
+  sp="$(spikes "$2")"
+  [[ -f "$d/log" ]] || { echo 0; return 0; }
+  { grep -- '\[sessao\] .*: done (sem PR)' "$d/log" || true; } \
+    | awk -v sp="$sp" 'BEGIN { n = split(sp, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") s["#" a[i]] = 1 }
+        { for (i = 1; i <= NF; i++) if ($i ~ /^#[0-9]+$/) { if (!($i in s)) c++; next } }
+        END { print c + 0 }'
+  return 0
+}
 rodadas() {
   echo "## rodadas do swarm ($SWARM, host $HOST)"
   printf 'LACUNA\trodadas\tsó o host %s: o volume oute-home é local de cada host\n' "$HOST"
@@ -172,7 +192,7 @@ rodadas() {
     repo="$(sed -n 's/^repo=//p' "$d/meta")"; label="$(sed -n 's/^label=//p' "$d/meta")"
     ses="$(cat "$d"/spawned "$d"/spawned.closed 2>/dev/null | awk 'NF {print $1}' | sort -u | wc -l)"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$(basename "${repo:--}")" "${label:--}" "$st" "$ses" \
-      "$(nlog '\[sessao\] .*: idle' "$d")" "$(nlog '\[sessao\] .*: done (sem PR)' "$d")" \
+      "$(nlog '\[sessao\] .*: idle' "$d")" "$(done_sem_pr "$d" "$repo")" \
       "$(nlog '\[sessao\] .*: blocked' "$d")" "$(nlog '^[^ ]* tell ' "$d")"
   done
 }
