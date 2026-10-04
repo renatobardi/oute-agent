@@ -8,6 +8,8 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
     $OUTE_MODELS_CLAUDE_BIN aponta outro arquivo).
   - Codex: `slug` e esforço em ${CODEX_HOME:-~/.codex}/models_cache.json (`supported_reasoning_levels`). Cache
     ausente, ilegível ou com mais de 7 dias = `desconhecido`, com aviso (o Codex o renova ao abrir).
+  - Revisor das etapas (#507): `[[reviewer]]` só com agent = "claude" (a linha com "codex" é recusada, código 2), o modelo conferido como os demais, o autor na tabela, o revisor diferente do
+    autor e o autor do dispatcher (fase plan) com revisor.
   - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, toda fase de `unless_phases` de uma
     exceção é do ADR-07 (#409), e toda exceção usa um label que existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
 
@@ -56,8 +58,9 @@ def load_table(path):
             t = tomllib.load(f)
     except (OSError, ValueError) as e:   # tomllib.TOMLDecodeError é ValueError
         die(f"tabela ilegível ({path}: {e})")
-    lines, exceptions = t.get("line", []), t.get("exception", [])
-    if not isinstance(t.get("default"), dict) or not isinstance(lines, list) or not isinstance(exceptions, list):
+    lines, exceptions, reviewers = t.get("line", []), t.get("exception", []), t.get("reviewer", [])
+    if (not isinstance(t.get("default"), dict) or not isinstance(lines, list) or not isinstance(exceptions, list)
+            or not isinstance(reviewers, list)):
         die(f"tabela sem [default], ou com [[line]]/[[exception]] fora do formato ({path})")
     rows = [("[default]", t["default"])]
     rows += [(f"[[line]] {i}", ln) for i, ln in enumerate(lines, 1)]
@@ -74,7 +77,15 @@ def load_table(path):
             die(f"[[exception]] {i} sem label ({path})")
         if not isinstance(ex.get("unless_phases", []), list) or not all(isinstance(p, str) for p in ex.get("unless_phases", [])):
             die(f"[[exception]] {i} com unless_phases inválido ({path})")
-    return rows, lines, exceptions
+    for i, rv in enumerate(reviewers, 1):   # #507: o par autor × revisor das etapas da rodada
+        if isinstance(rv, dict) and rv.get("agent") == "codex":
+            die(f"[[reviewer]] {i}: agent = \"codex\" não vale por enquanto (o codex herdaria o ~/.codex, sem isolamento conferido, #507); use claude ({path})")
+        if (not isinstance(rv, dict) or rv.get("agent") != "claude"
+                or not all(isinstance(rv.get(k), str) and rv[k] for k in ("model", "effort"))
+                or not isinstance(rv.get("writers"), list) or not rv["writers"]
+                or not all(isinstance(w, str) and w for w in rv["writers"])):
+            die(f"[[reviewer]] {i} sem writers, agent (claude), model ou effort ({path})")
+    return rows, lines, exceptions, reviewers
 
 
 def claude_bin():
@@ -166,6 +177,21 @@ def repo_labels():
         return None
 
 
+def check_reviewers(lines, reviewers):
+    """#507: o revisor de cada etapa é de outro modelo que o autor, o autor é um modelo da tabela, e o autor do
+    dispatcher (fase plan, que escreve as etapas) tem revisor"""
+    known = {m for ln in lines for m in (ln["claude"], ln["codex"])}
+    for i, rv in enumerate(reviewers, 1):
+        for w in rv["writers"]:
+            report("ok" if w in known else "FALTA", f"autor {w} do revisor {i} é um modelo da tabela", "tabela")
+            report("FALTA" if w == rv["model"] else "ok", f"revisor {rv['model']} é de outro modelo que o autor {w}", "tabela")
+    plan = next((ln for ln in lines if "plan" in ln["phases"]), None)
+    if plan:
+        for w in (plan["claude"], plan["codex"]):
+            have = any(w in rv["writers"] for rv in reviewers)
+            report("ok" if have else "FALTA", f"revisor do autor {w} (dispatcher, fase plan)", "tabela")
+
+
 def check_structure(lines, exceptions):
     keys = [p for ln in lines for p in ln["phases"]]
     for p in PHASES:
@@ -195,9 +221,10 @@ def main(argv):
         table = next(it, None)
         if table is None:
             die(f"--table sem valor\n{USAGE}")
-    rows, lines, exceptions = load_table(table)
-    check_claude(list(dict.fromkeys(r["claude"] for _, r in rows)))
+    rows, lines, exceptions, reviewers = load_table(table)
+    check_claude(list(dict.fromkeys([r["claude"] for _, r in rows] + [rv["model"] for rv in reviewers])))
     check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows)))
+    check_reviewers(lines, reviewers)
     check_structure(lines, exceptions)
     if status["FALTA"]:
         return 1

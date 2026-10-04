@@ -177,7 +177,7 @@ COPY docker/oute-regression /usr/local/bin/
 COPY docker/regression/ /usr/local/lib/oute/regression/
 # sessões paralelas coordenadas (oute-swarm; prompts do dispatcher e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
-COPY docker/swarm.md docker/swarm-worker.md /usr/local/lib/oute/
+COPY docker/swarm.md docker/swarm-worker.md docker/step-review.md /usr/local/lib/oute/
 # guia de comandos: `oute help` no container (o mesmo arquivo que o `oute help` do host)
 COPY docker/comandos.md /usr/local/lib/oute/comandos.md
 COPY docker/oute-container /usr/local/bin/oute

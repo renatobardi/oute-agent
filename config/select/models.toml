@@ -52,3 +52,21 @@ label = "docs"
 claude = "claude-haiku-4-5-20251001"
 codex = "gpt-6-luna"
 effort = "medium"
+
+# Revisor das etapas da rodada (#507, ADR-08, "Página da rodada e do ciclo"): o par de quem escreve × quem revisa.
+# Lido pelo `oute-swarm step review`, que recebe o modelo do autor em `--writer`. O revisor é sempre de outro modelo que
+# o autor (o `models-check` recusa linha com o autor na própria lista) e roda em modo headless, por `claude -p`: só
+# `agent = "claude"` vale (o `models-check` recusa "codex", que herdaria o ~/.codex sem isolamento conferido; o `effort`
+# fica na linha por forma e não é usado). Autor sem linha aqui, ou linha com agente que não é o claude, = etapa `sem-revisor`.
+# Quem escreve em Sonnet é revisado por Opus, e o inverso (recomendação do autor da proposta da #489).
+[[reviewer]]
+writers = ["claude-sonnet-5-5", "gpt-6.1-sol"]
+agent = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+
+[[reviewer]]
+writers = ["claude-opus-5-5", "gpt-6-astra"]
+agent = "claude"
+model = "claude-sonnet-5-5"
+effort = "high"

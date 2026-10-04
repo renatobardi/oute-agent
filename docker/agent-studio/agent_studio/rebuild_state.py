@@ -10,7 +10,7 @@ Idempotente: rodar de novo não muda o resultado.
 - Ambiente (o do serviço no compose): `AGENT_STUDIO_DB`, `AGENT_STUDIO_SURREAL_URL`, `AGENT_STUDIO_SURREAL_PASS`
   (e, se fugirem do padrão, `AGENT_STUDIO_SURREAL_USER|NS|DB`). Costura para os testes: `AGENT_STUDIO_REBUILD_CHUNK`
   (linhas por bloco, padrão 2000).
-- Saída (stdout), três linhas: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n>`,
+- Saída (stdout), três linhas: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n>`,
   `lidas: logs=<n> spans=<n>` e `depois: …` (a contagem do SurrealDB antes e depois). O stderr diz só o tipo do erro,
   nunca texto de linha do DuckDB nem de resposta do SurrealDB.
 - Sai 0 se aplicou tudo; 1 se o DuckDB não abre ou o SurrealDB falha (o que já entrou fica: rodar de novo termina);
@@ -25,9 +25,9 @@ import duckdb
 from . import state
 from .surreal import Surreal, SurrealError
 
-TABLES = ("rodada", "worker", "sessao", "pedido", "conversa")
+TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa")
 COUNT_NAMES = {"rodada": "rodadas", "worker": "workers", "sessao": "sessoes", "pedido": "pedidos",
-               "conversa": "conversas"}
+               "conversa": "conversas", "etapa": "etapas"}
 ORDER = "ORDER BY received_unix_nano, time_unix_nano, dedupe_key"
 LOGS = ("SELECT time_unix_nano, host_name, oute_instance, oute_agent, service_name, session_id, oute_task_id, "
         f"event_name, oute_event_id, trace_id, attributes, resource_attributes FROM logs {ORDER}")

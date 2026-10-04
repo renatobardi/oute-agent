@@ -32,7 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
+from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
                tz as tz_mod)
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -436,6 +436,39 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if ev is None and record is None:
             return error(request, 404, "Pedido não encontrado.")
         return page(request, "proposal.html", p=prop_mod.merged(proposal_id, ev, record), state_read=state_read)
+
+    # ------------------------------------------------ rodadas (#507): as etapas que o dispatcher publica; só leitura
+    @app.get("/rodadas")
+    async def rounds(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        rows, failed = await read(request, "lista de rodadas", store.read, lambda con: etapas_mod.listing(con))
+        if failed:
+            return failed
+        states, state_read = await proposal_state("estado das rodadas", etapas_mod.round_states, [r["round"] for r in rows])
+        for r in rows:
+            r["state"] = (states or {}).get(r["round"])
+        return page(request, "rodadas.html", rounds=rows, state_read=state_read,
+                    limit_reached=len(rows) >= etapas_mod.LIST_LIMIT)
+
+    @app.get("/rodada")
+    async def round_page(request: Request):
+        """Página da rodada: `/rodada?id=<rodada>`, com a barra de etapas e o texto de cada etapa."""
+        if (denied := await gate(request)) is not None:
+            return denied
+        rnd = request.query_params.get("id", "")
+        if not rnd:
+            return error(request, 400, "Falta o id da rodada.")
+        data, failed = await read(request, "rodada", etapas_mod.load, store, surreal, rnd)
+        if failed:
+            return failed
+        if data is None:
+            return error(request, 404, "Rodada não encontrada.")
+        if data["state_error"]:
+            tel.warn("web-state-failed", "tela: estado das etapas (SurrealDB) falhou, segui com o DuckDB: %s",
+                     data["state_error"], level=logging.ERROR)
+        etapas_mod.render(data["steps"])
+        return page(request, "rodada.html", r=data, bar=etapas_mod.bar(data["steps"]), state_read=data["state_read"])
 
     # ------------------------------------------------ preços (#340): só leitura
     @app.get("/precos")

@@ -8,15 +8,34 @@ valores do próprio fato: reenviar o mesmo lote, em qualquer ordem, dá o mesmo 
 `decided`.
 
 Tabelas: `rodada` (id = rodada), `worker` (id = [rodada, slug]), `sessao` (id = `oute.task.id`), `pedido`
-(id = `oute.canal.id`), `conversa` (id = `session.id`). Ligações por record link: `worker.rodada`,
-`worker.sessao`, `sessao.rodada`, `sessao.worker`, `conversa.sessao`.
+(id = `oute.canal.id`), `conversa` (id = `session.id`), `etapa` (id = [rodada, tipo, chave], #507: a revisão vigente de uma
+etapa da rodada; a mais alta vence em qualquer ordem de chegada; o texto fica só no DuckDB). Ligações por record link:
+`worker.rodada`, `worker.sessao`, `sessao.rodada`, `sessao.worker`, `conversa.sessao`, `etapa.rodada`.
 """
 import base64
+import re
 from datetime import datetime, timezone
 
 # tabelas e campos são constantes deste módulo; valores vão sempre em variáveis
 UPSERT = 'UPSERT type::record("{t}", $v.id) MERGE $v.d;'
 TIMES = 'UPDATE type::record("{t}", $v.id) SET {sets};'
+
+
+# etapa da rodada (#507, ADR-08 "Página da rodada e do ciclo"): o evento `oute.swarm.step.published`
+STEP_EVENT = "oute.swarm.step.published"
+STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento")
+STEP_REVIEWS = ("aprovado", "reprovado", "sem-revisor")
+STEP_REFCHECKS = ("ok", "falhou", "ausente")
+_STEP_TEXT = ("kind", "key", "sha256", "review", "writer", "reviewer", "refcheck", "cycle", "event", "host", "instance")
+_SHA = re.compile(r"^[0-9a-f]{64}$")
+_STEP_KEY = re.compile(r"^[1-9]\d{0,8}$")
+# `IF … THEN { UPSERT … } END`: só grava se o `rev` do evento é maior ou igual ao da revisão que já está lá (a revisão mais
+# alta vence, em qualquer ordem de chegada). Texto em base64, decodificado no SurrealDB (#337)
+STEP_UPSERT = (
+    'IF (array::first(SELECT VALUE rev FROM [type::record("etapa", $v.id)]) ?? 0) <= $v.rev THEN { '
+    'UPSERT type::record("etapa", $v.id) SET rev = $v.rev, '
+    + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _STEP_TEXT)
+    + ', published_at = <datetime> $v.t, rodada = type::record("rodada", $v.r); } END;')
 
 
 def iso(ns):
@@ -54,6 +73,35 @@ def upsert(table, rid, data, times=None, links=None, initial=None):
     if sets:
         out.append((TIMES.format(t=table, sets=", ".join(sets)), value))
     return out
+
+
+def step_valid(kind, key, rev, review, sha):
+    """O evento de etapa está no formato do `oute-swarm step publish`? (tipo e veredito conhecidos, sha256 de 64 hex, revisão
+    de 1 a 9999 e a chave, número do PR, só no `merge`). Fora dele o fato fica no DuckDB e não vira estado nem página."""
+    return (kind in STEP_KINDS and review in STEP_REVIEWS and isinstance(sha, str) and bool(_SHA.match(sha))
+            and isinstance(rev, int) and 1 <= rev <= 9999 and (kind == "merge") == bool(key)
+            and (not key or bool(_STEP_KEY.match(key))))
+
+
+def step_statements(rnd, a, t, ev, origin):
+    """`oute.swarm.step.published` -> statements. `a(chave)` lê um atributo do evento; `t` = hora do fato (ns); `ev` =
+    `oute.event.id`. Evento fora do formato (tipo, veredito, sha256, chave ou revisão inválidos) não vira estado: o fato
+    continua no DuckDB."""
+    key = str(a("oute.swarm.step.key") or "")
+    kind, review, sha = a("oute.swarm.step.kind"), a("oute.swarm.step.review"), a("oute.swarm.step.sha256")
+    try:
+        rev = int(a("oute.swarm.step.rev"))
+    except (TypeError, ValueError):
+        return []
+    if not step_valid(kind, key, rev, review, sha):
+        return []
+    refcheck = a("oute.swarm.step.refcheck")
+    fields = {"kind": kind, "key": key, "sha256": sha, "review": review, "writer": a("oute.swarm.step.writer"),
+              "reviewer": a("oute.swarm.step.reviewer"), "refcheck": refcheck if refcheck in STEP_REFCHECKS else "ausente",
+              "cycle": a("oute.swarm.cycle"), "event": ev, "host": origin.get("host"), "instance": origin.get("instance")}
+    b64 = lambda v: base64.b64encode(("" if v is None else str(v)).encode()).decode()  # noqa: E731
+    value = {"id": [rnd, kind, key], "rev": rev, "r": rnd, "t": iso(t), "b": {k: b64(fields[k]) for k in _STEP_TEXT}}
+    return upsert("rodada", rnd, origin) + [(STEP_UPSERT, value)]
 
 
 def _get(row, key):
@@ -96,6 +144,8 @@ def event_statements(row):
                           times={"opened_at": t}, initial="aberta")
         if name == "oute.swarm.round.closed":
             return upsert("rodada", rnd, {**origin, "state": "fechada", "closed_event": ev}, times={"closed_at": t})
+        if name == STEP_EVENT:
+            return step_statements(rnd, a, t, ev, origin)
         slug = a("oute.swarm.session")
         if not slug:
             return []
