@@ -9,7 +9,8 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 # herdr: listas lidas de $FAKE/*.json; ações anotadas em $FAKE/herdr.log. `tab create` devolve o JSON do herdr
 # com ids no workspace pedido, ou $FAKE/tab-create.out, se existir (saída quebrada, #276); $FAKE/tabs-after.json, se
 # existir, vira o `tab list` de depois do `tab create` (a aba nova na lista, #289). O campo de entrada do pane é
-# $FAKE/field (send-text escreve, pane read mostra entre réguas como o Claude Code, ctrl+c limpa).
+# $FAKE/field (send-text escreve, pane read mostra entre réguas como o Claude Code, ctrl+c limpa, Enter limpa com
+# $FAKE/enter-clears). $FAKE/pane-style: tela fixa no `pane read`; $FAKE/pane-codex: campo "›" do Codex.
 cat > "$BIN/herdr" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE/herdr.log"
@@ -23,9 +24,14 @@ case "$1 ${2:-}" in
   "tab close") [[ ! -e "$FAKE/tab-close.fail" ]] || exit 1 ;;
   "pane list") cat "$FAKE/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane run") ;;
-  "pane read") printf '%s\n❯ %s\n%s\n' "──────────────────" "$(cat "$FAKE/field" 2>/dev/null)" "──────────────────" ;;
-  "pane send-text") printf '%s' "$4" > "$FAKE/field" ;;
-  "pane send-keys") [[ "$4" != ctrl+c ]] || : > "$FAKE/field" ;;
+  "pane read") if [[ -e "$FAKE/pane-style" ]]; then cat "$FAKE/pane-style"   # tela fixa (diálogo, campo ausente…); "codex" = campo do Codex
+               elif [[ -e "$FAKE/pane-codex" ]]; then printf '%s\n' "› $(cat "$FAKE/field" 2>/dev/null)"
+               else printf '%s\n❯ %s\n%s\n' "──────────────────" "$(cat "$FAKE/field" 2>/dev/null)" "──────────────────"; fi ;;
+  "pane send-text") printf '%s' "$4" > "$FAKE/field"; printf '%s\n' "$4" >> "$FAKE/typed.log" ;;   # typed.log: tudo que foi digitado
+  "pane send-keys") case "$4" in
+                      ctrl+c) : > "$FAKE/field" ;;
+                      enter) [[ ! -e "$FAKE/enter-clears" ]] || : > "$FAKE/field" ;;   # como o agente: o Enter esvazia o campo
+                    esac ;;
   "agent list") cat "$FAKE/agents.json" 2>/dev/null || echo '{"result":{"agents":[]}}' ;;
   *) echo "herdr falso: sem suporte a '$*'" >&2; exit 1 ;;
 esac
@@ -140,7 +146,7 @@ ASSUME='OUTE_SWARM_ID ausente; assumindo a rodada swarm-test (worktree do dispat
 # so_teste: nenhuma rodada nova nem oute-task chamado. sp_agent <rodada> <slug>: agente gravado no spawned
 opn() {
   OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" \
-         OUTE_LIB="$ROOT/docker" HERDR_ENV=1 "$SWARM" "$REPO" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+         OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 HERDR_PANE_ID=w1:p0 "$SWARM" "$REPO" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
 nova() { ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1; }
 so_teste() { [ "$(ls "$H/.oute/swarm")" == swarm-test ] && [ ! -e "$FAKE/oute-task.last" ]; }
