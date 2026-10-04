@@ -367,34 +367,17 @@ def _p95_regression(con, latency, prev_latency, from_ns, to_ns):
 FINE = ("session", "agent", "model", "phase")
 
 
-def _merge(into, a):
-    """Soma o acumulador `a` em `into` (o `p95` não soma: quem precisa dele o lê à parte)."""
-    for k in ("calls", "real_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
-        into[k] += a[k]
-    for t in into["tokens"]:
-        into["tokens"][t] += a["tokens"][t]
-    for k in ("real_usd", "estimated_usd"):
-        if a[k] is not None:
-            into[k] = a[k] if into[k] is None else into[k] + a[k]
-    into["unpriced_models"] |= a["unpriced_models"]
-    return into
-
-
 def _regroup(fine, keys):
     """O resultado de `usage.aggregate(FINE)` reagrupado por `keys` (subconjunto de FINE): uma leitura só do DuckDB serve
     todos os cortes do Dashboard (#504: eram cinco leituras, cada uma refazendo a junção com os logs de custo)."""
-    idx = [FINE.index(k) for k in keys]
-    out = {} if keys else {(): usage_mod._empty()}
-    for key, a in fine.items():
-        _merge(out.setdefault(tuple(key[i] for i in idx), usage_mod._empty()), a)
-    return out
+    return usage_mod.regroup(fine, FINE, keys)
 
 
 def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
     """Tudo o que a tela mostra, do DuckDB, na janela [from_ns, to_ns) e na anterior de mesmo tamanho."""
     span = to_ns - from_ns
     prev_from = from_ns - span
-    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz)
+    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False)
     cur = _regroup(fine, ())[()]
     cur["p95"] = usage_mod.aggregate_p95(con, from_ns, to_ns, tz)
     prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz)[()]
