@@ -108,6 +108,9 @@ logs = {"resourceLogs": [
     # evento de nome qualquer com o oute.task.id: entra na página da sessão pela identidade, sem mudança na tela
     ev(D1 - 3 * 86400 + 11, "oute.exemplo.seletor", "ev-sel1", {"oute.task.id": S1, "fase": "build", "origem": "label",
                                                                  "modelo": "claude-sonnet-5", "nota": "<script>alert('ev')</script>"}),
+    # eventos de Gate da sessão (pedido ao Bardi e pergunta da rodada): ponto âmbar na linha do tempo (#468)
+    ev(D1 - 3 * 86400 + 12, "oute.canal.proposed", "ev-gate1", {"oute.task.id": S1, "oute.canal.id": "p-exemplo", "oute.canal.as": "root"}),
+    ev(D1 - 3 * 86400 + 13, "oute.swarm.round.asked", "ev-gate2", {"oute.task.id": S1, "oute.swarm.round": RND}),
     ev(D1 + 600, "oute.task.opened", "ev-t4", {"oute.task.id": S4, "oute.task.repo": "oute-agent", "oute.task.slug": "vazia",
                                                 "oute.task.agent": "shell"}),
   ], "oute-emit"),
@@ -226,10 +229,19 @@ check "sessão: rodada, label, estado, worker e issue"  jqe --arg r "$RND" '.tex
 check "sessão: host, agente, modelos e p95"            jqe '.text | test("Host oute-server \\(oute-agent\\) Agente claude Modelo claude-sonnet-5 ×3 claude-opus-5 ×1") and test("p95 das chamadas 9,1 s")' <<<"$RS"
 check "sessão: as 3 conversas, com link"               bash -c 'test "$(jq -c "[.[] | select(.conversa) | .conversa]" <<<"$1")" = "[\"s1-0\",\"s1-a\",\"s1-b\"]" && grep -qF "<a href=\"/conversa?id=s1-b\">s1-b</a>" "$2"' _ "$D" "$TMP/s1.html"
 G="$(jq -c '[.[] | select(.log)]' <<<"$D")"
-check "sessão: eventos dela, pela hora do fato (os logs das conversas não entram)" jqe 'map(.text | capture("(?<e>oute\\.[a-z.]+)").e) == ["oute.task.opened", "oute.exemplo.seletor"]' <<<"$G"
+check "sessão: eventos dela, pela hora do fato (os logs das conversas não entram)" jqe 'map(.text | capture("(?<e>oute\\.[a-z.]+)").e) == ["oute.task.opened", "oute.exemplo.seletor", "oute.canal.proposed", "oute.swarm.round.asked"]' <<<"$G"
 check "sessão: a escolha do seletor aparece no oute.task.opened (#219)" jqe '.[0].text | test("\"oute.task.phase\": \"build\"") and test("\"oute.task.origin\": \"label\"") and test("\"oute.task.model\": \"claude-sonnet-5-5\"")' <<<"$G"
 check "sessão: evento com o oute.task.id aparece com os atributos" jqe '.[1].text | test("\"fase\": \"build\"") and test("\"origem\": \"label\"") and test("\"modelo\": \"claude-sonnet-5\"")' <<<"$G"
 check "sessão: conteúdo do evento escapado"            bash -c '! grep -q "<script>alert" "$1" && grep -q "&lt;script&gt;alert" "$1"' _ "$TMP/s1.html"
+# linha do tempo (#468): lista ordenada com um item por evento, pela hora do fato; ponto âmbar só nos eventos de Gate
+check "sessão: linha do tempo em <ol>, um <li> por evento" bash -c 'grep -q "<ol class=\"tempo\">" "$1" && [ "$(grep -c "<li data-log=" "$1")" = 4 ]' _ "$TMP/s1.html"
+check "sessão: ponto âmbar nos 2 eventos de Gate e só neles" bash -c '[ "$(grep -o "class=\"ponto gate\"" "$1" | wc -l)" = 2 ] && [ "$(grep -o "class=\"ponto\"" "$1" | wc -l)" = 2 ] && [ "$(grep -o "class=\"badge gate\"" "$1" | wc -l)" = 2 ]' _ "$TMP/s1.html"
+S2P="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2")"
+check "sessão sem evento de Gate: nenhum ponto âmbar" bash -c '! grep -q "ponto gate" <<<"$1" && grep -q "<ol class=\"tempo\">" <<<"$1"' _ "$S2P"
+check "sessão: Badges do cabeçalho (estado, rodada · worker, issue, fase aidlc:*)" bash -c 'grep -q "<span class=\"badge\">.*aberta</span>" "$1" && grep -qE "badge contorno\">.*rodada [^<]+ · worker 207-tela</span>" "$1" && grep -qE "badge contorno\">.*issue #207</span>" "$1" && grep -qE "badge contorno\">.*aidlc:build</span>" "$1"' _ "$TMP/s1.html"
+check "sessão avulsa: a fase vem do evento de abertura (aidlc:ops) e o Badge é avulsa" bash -c 'grep -qE "badge contorno\">.*aidlc:ops</span>" <<<"$1" && grep -q "badge contorno\">avulsa</span>" <<<"$1"' _ "$S2P"
+check "sessão sem a fase no evento: sem Badge aidlc" bash -c '! grep -q "aidlc:" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
+check "sessão: 4 StatTiles (conversas, chamadas, custo, p95), fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/s1.html"
 S2H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
 check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"
@@ -314,6 +326,11 @@ html = web._env().get_template("session.html").render(**d, id=S1, state_read=Non
 check("sessão: o corte dos eventos aparece na página", "Mostrando os primeiros 1 eventos" in html and "oute.exemplo.seletor" not in html)
 check("sessão: sem corte, sem aviso", sessions.detail(con, S1, none)["events_truncated"] is False)
 check("sessão que o DuckDB não tem: None", sessions.detail(con, "nao-existe", none) is None)
+check("sessão: a fase do seletor sai do oute.task.opened (#468)", sessions.detail(con, S1, none)["phase"] == "build")
+check("fase: atributo ausente, JSON inválido ou que não é objeto = None",
+      sessions._phase(None) is None and sessions._phase("{}") is None and sessions._phase("{\"x\":") is None
+      and sessions._phase("[1]") is None and sessions._phase("{\"oute.task.phase\": 3}") is None
+      and sessions._phase("{\"oute.task.phase\": \"ops\"}") == "ops")
 
 # a regra de custo é a do #203: a chave `session` do aggregate dá os números da tela
 g = usage.aggregate(con, 0, 2**62, none, ("session",))
@@ -369,7 +386,7 @@ check("SurrealDB com resposta inesperada: 200 com aviso", status == 200 and "dat
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^$\|tela: .* falhou' "$TMP/py.out" || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 24 casos rodaram"          test "$((n_ok + n_fail))" = 24
+check "lógica em Python: os 26 casos rodaram"          test "$((n_ok + n_fail))" = 26
 
 # ---------------------------------------------------------------- 7. imagem
 PKG="$ROOT/docker/agent-studio/agent_studio"

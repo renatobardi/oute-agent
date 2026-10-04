@@ -64,6 +64,25 @@ rows = re.findall(r"<tr data-historico data-origin=\"(\w+)\" data-since=\"([^\"]
 check("histórico: as duas linhas, da mais antiga para a mais nova, cada uma com a origem",
       [r[0] for r in rows] == ["config", "fontes"] and rows[0][1] < rows[1][1])
 check("histórico: o preço antigo continua na lista", ">1,25<" in cod)
+# Kubo (#468): o histórico abre num <details> (sem botão) e cada linha leva a mini-barra do preço de entrada
+check("histórico abre num <details>, uma mini-barra <meter> por linha, na escala do maior preço de entrada",
+      '<details class="historico">' in cod and cod.count("<meter ") == 2 and 'max="1.5" value="1.25"' in cod and 'max="1.5" value="1.5"' in cod)
+check("cada modelo é um cartão (o bloco <section>)", all(f'class="cartao">' in section(m) for m in ("claude-sonnet-5", "gpt-5-codex")))
+check("fixo vira Badge de contorno com o cadeado", 'class="badge contorno" data-fixo>' in section("claude-sonnet-5") and "lucide.svg#lock" in section("claude-sonnet-5"))
+check("fontes em cartões, antes dos modelos, cada uma com o Badge", html.index('class="cartao fonte"') < html.index("<section data-modelo")
+      and html.count('class="badge secundario">ainda não conferiu') == 2)
+# fontes que já conferiram: Badge ok e Badge destrutivo com o motivo
+from agent_studio import price_sources as PS
+st2 = ST.Store(f"{tmp}/fontes.duckdb")
+def run(con, ns, source, ok, reason):
+    con.execute("INSERT INTO price_runs VALUES (?, ?, ?, ?)", [ns, source, ok, reason])
+    return True
+assert st2.transact(lambda con: run(con, NOW - 3600 * 10**9, PS.SOURCES[0], True, None))
+assert st2.transact(lambda con: run(con, NOW - 60 * 10**9, PS.SOURCES[1], False, "http_500"))
+_, hs = get(create_app(st2, TOKEN, config=cfg), "/precos")
+check("fonte que conferiu: Badge ok, ícone check e último sucesso", f'data-fonte="{PS.SOURCES[0]}"' in hs and 'class="badge">ok</span>' in hs and "lucide.svg#check" in hs)
+check("fonte que falhou: Badge destrutivo com o motivo e o ícone de alerta", 'class="badge destrutivo">falhou: http_500</span>' in hs and 'class="fonte-icone falhou"' in hs)
+check("fonte: nenhum botão nem campo (só mostra)", "<button" not in hs.split("<main", 1)[1] and "<input" not in hs.split("<main", 1)[1])
 check("modelo fixo marcado (e só ele)", 'data-fixed="true"' in section("claude-sonnet-5") and "data-fixo" in section("claude-sonnet-5")
       and 'data-fixed="false"' in cod and "data-fixo" not in cod)
 check("origem config no modelo sem troca", 'data-origin="config"' in section("claude-sonnet-5"))
@@ -99,5 +118,5 @@ check("leitura que falha: 500, sem a causa na página", s == 500 and "segredo-da
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 21
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 28
 check_end

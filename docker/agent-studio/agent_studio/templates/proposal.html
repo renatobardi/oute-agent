@@ -3,36 +3,29 @@
 {% set detail = true %}
 {% set back = "/pedidos" %}
 {% set crumbs = [("Pedidos", "/pedidos"), (p.id, none)] %}
+{% from "_macros.html" import badge, icon, copy_button %}
+{% block head %}<script src="/static/copiar.js" defer></script>{% endblock %}
 {% block title %}{{ p.title or p.id }} · agent-studio{% endblock %}
 {% block main %}
-<p><a href="/pedidos">← Pedidos</a></p>
-<h1>Pedido <code>{{ p.id }}</code></h1>
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha">
+    <div>
+      <div class="badges">
+        {% if p.state == "pendente" %}{{ badge("Gate · pendente" ~ ((" há " ~ p.proposed_at|ago) if p.proposed_at else ""), "gate", "hand") }}{% endif %}
+        {% if p.as == "root" %}{{ badge("root (sudo no host)", "destrutivo", "shield-alert") }}{% elif p.as == "user" %}{{ badge("user (o usuário do host)", "secundario", "user") }}{% endif %}
+      </div>
+      <h1>Pedido <code>{{ p.id }}</code></h1>
+      {% if p.title %}<p class="nota">{{ p.title }}</p>{% endif %}
+    </div>
+    <a class="botao" href="/pedidos">{{ icon("arrow-left", 14) }}Pedidos</a>
+  </div>
+</div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado do pedido (SurrealDB) não pôde ser lido:
   não dá para dizer aqui se ele está pendente ou decidido. A causa está no log do agent-studio.</p>{% endif %}
-<dl class="resumo" data-resumo-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}"
-    data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}"
-    data-rc="{{ '' if p.rc is none else p.rc }}">
-  <dt>Título</dt><dd>{{ p.title or "—" }}</dd>
-  <dt>Roda como</dt><dd{% if p.as == "root" %} class="root"{% endif %}>{% if p.as == "root" %}root (sudo no host){% elif p.as == "user" %}user (o usuário do host){% else %}{{ p.as or "—" }}{% endif %}</dd>
-  <dt>Agente</dt><dd>{{ p.agent or "—" }}</dd>
-  <dt>Host</dt><dd>{{ p.host or "—" }}{% if p.instance %} ({{ p.instance }}){% endif %}</dd>
-  <dt>Estado</dt><dd>{{ p.state or "desconhecido" }}</dd>
-  <dt>Proposto em ({{ tzl() }})</dt><dd>{{ p.proposed_at|when }}</dd>
-  {% if p.size is not none %}<dt>Tamanho do script</dt><dd>{{ p.size|num }} bytes</dd>{% endif %}
-  {% if p.state == "decidido" %}
-  <dt>Decisão</dt><dd>{{ p.decision or "—" }}</dd>
-  <dt>Decidido em ({{ tzl() }})</dt><dd>{{ p.decided_at|when }}</dd>
-  <dt>Código de saída (rc)</dt><dd{% if p.rc %} class="erro"{% endif %}>{{ "—" if p.rc is none else p.rc }}</dd>
-  <dt>Duração</dt><dd>{{ "—" if p.duration_s is none else (p.duration_s * 1000)|ms }}</dd>
-  <dt>Tamanho da saída</dt><dd>{{ "—" if p.output_bytes is none else (p.output_bytes|num) ~ " bytes" }}</dd>
-  <dt>Aprovador</dt><dd>{{ p.approver or "—" }}</dd>
-  {% if p.sha256 %}<dt>sha256 do script executado</dt><dd><code>{{ p.sha256 }}</code>{% if p.shown_sha256 and p.sha256 == p.shown_sha256 %} (igual ao do script exibido){% endif %}</dd>{% endif %}
-  {% endif %}
-</dl>
-<p class="nota">Esta tela só mostra. Aprovar ou recusar é no host, com o <code>oute approve</code>, e o que vale é o script
-  que ele mostra lá. A saída do script no host não vem para o agent-studio.</p>
-
-<h2>Script</h2>
+<div class="duas">
+<div class="pilha">
+<h2 class="secao">Script</h2>
 {% if p.versions > 1 %}
 <p class="aviso erro" role="alert" data-versoes="{{ p.versions }}">Chegaram {{ p.versions|num }} versões diferentes deste pedido (eventos <code>oute.canal.proposed</code>
   com o mesmo id e script ou cabeçalho diferentes). A página mostra a primeira pela hora do evento e não tem como dizer
@@ -46,8 +39,50 @@
 {% if p.script is not none %}
 <p class="nota" data-sha-exibido="{{ p.shown_sha256 }}">sha256 do script exibido, como o <code>oute approve</code> mostra: <code>{{ p.shown_sha256 }}</code>
   (os 12 primeiros; inclui o cabeçalho do <code>oute-propose</code>: título, como, agente e hora).</p>
-<pre class="script" data-script>{{ p.script }}</pre>
+<div class="script-bloco">
+  <div class="script-topo"><span>Script · sha256 exibido <code>{{ p.shown_sha256 }}</code></span>{{ copy_button("script-corpo") }}</div>
+  <div id="script-corpo"><pre class="script" data-script>{{ p.script }}</pre></div>
+</div>
 {% else %}
 <p class="aviso" data-sem-script>O script deste pedido não chegou ao agent-studio (falta o evento <code>oute.canal.proposed</code>).</p>
 {% endif %}
+</div>
+<div class="pilha">
+<div class="cartao bloco">
+<dl class="resumo" data-resumo-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}"
+    data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}"
+    data-rc="{{ '' if p.rc is none else p.rc }}">
+  <dt>Título</dt><dd>{{ p.title or "—" }}</dd>
+  <dt>Roda como</dt><dd{% if p.as == "root" %} class="root"{% endif %}>{% if p.as == "root" %}root (sudo no host){% elif p.as == "user" %}user (o usuário do host){% else %}{{ p.as or "—" }}{% endif %}</dd>
+  <dt>Agente</dt><dd>{{ p.agent or "—" }}</dd>
+  <dt>Host</dt><dd>{{ p.host or "—" }}{% if p.instance %} ({{ p.instance }}){% endif %}</dd>
+  <dt>Estado</dt><dd>{% if p.state == "pendente" %}{{ badge("pendente", "gate") }}{% else %}{{ p.state or "desconhecido" }}{% endif %}</dd>
+  <dt>Proposto em ({{ tzl() }})</dt><dd>{{ p.proposed_at|when }}</dd>
+  {% if p.size is not none %}<dt>Tamanho do script</dt><dd>{{ p.size|num }} bytes</dd>{% endif %}
+  {% if p.state == "decidido" %}
+  <dt>Decisão</dt><dd>{{ p.decision or "—" }}</dd>
+  <dt>Decidido em ({{ tzl() }})</dt><dd>{{ p.decided_at|when }}</dd>
+  <dt>Código de saída (rc)</dt><dd{% if p.rc %} class="erro"{% endif %}>{{ "—" if p.rc is none else p.rc }}</dd>
+  <dt>Duração</dt><dd>{{ "—" if p.duration_s is none else (p.duration_s * 1000)|ms }}</dd>
+  <dt>Tamanho da saída</dt><dd>{{ "—" if p.output_bytes is none else (p.output_bytes|num) ~ " bytes" }}</dd>
+  <dt>Aprovador</dt><dd>{{ p.approver or "—" }}</dd>
+  {% if p.sha256 %}<dt>sha256 do script executado</dt><dd><code>{{ p.sha256 }}</code>{% if p.shown_sha256 and p.sha256 == p.shown_sha256 %} (igual ao do script exibido){% endif %}</dd>{% endif %}
+  {% endif %}
+</dl>
+</div>
+<div class="cartao bloco">
+  <h2>Decidir no host</h2>
+  {% if p.state == "pendente" and p.id is safe_cmd_id %}
+  <code class="comando" id="comando">oute approve {{ p.id }}</code>
+  {{ copy_button("comando", "Copiar comando") }}
+  {% elif p.state == "pendente" %}
+  <p class="aviso" data-id-fora-do-padrao>O id deste pedido tem caracteres fora do padrão (letras, números, ponto, hífen e sublinhado):
+    a página não monta o comando com ele. Rode <code>oute approve</code> no host e escolha o pedido pela lista.</p>
+  {% endif %}
+  <p class="nota">Esta tela só mostra. Aprovar ou recusar é no host, com o <code>oute approve</code>, e o que vale é o script
+    que ele mostra lá. A saída do script no host não vem para o agent-studio.</p>
+</div>
+</div>
+</div>
+</div>
 {% endblock %}

@@ -3,30 +3,32 @@
 {% set crumbs = [("Análise", none), ("Uso", none)] %}
 {% from "_macros.html" import cost %}
 {% macro usage_table(kind, label, rows) %}
+<div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}">
   <thead><tr>
-    <th>{{ label }}</th><th class="n">Chamadas</th><th class="n">Entrada</th><th class="n">Saída</th>
-    <th class="n" title="tokens de cache: leitura / escrita">Cache</th><th class="n">Custo</th>
+    <th>{{ label }}</th><th class="n">Chamadas</th>
+    <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th><th class="n">Custo</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}
   <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}">
     <td>{{ r[kind] }}</td>
     <td class="n">{{ r.calls|num }}</td>
-    <td class="n">{{ r.tokens.input|num }}</td>
-    <td class="n">{{ r.tokens.output|num }}</td>
-    <td class="n">{{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</td>
+    <td class="n">{{ r.tokens.input|num }} / {{ r.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</span></td>
     <td class="n custo">{{ cost(r.cost) }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="6">Nenhuma chamada ao modelo nessa janela.</td></tr>
+  <tr><td colspan="4">Nenhuma chamada ao modelo nessa janela.</td></tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endmacro %}
 {% block title %}Uso · agent-studio{% endblock %}
 {% block main %}
-<h1>Uso por papel e por fase</h1>
+<div class="pagina">
+<div class="pagina-topo">
+<div class="titulo-linha"><h1>Uso por papel e por fase</h1>
 <form class="filtro" method="get" action="/uso">
   {% if range.from %}
   <label>De <input name="from" value="{{ range.from }}"></label>
@@ -40,15 +42,17 @@
   </label>
   {% endif %}
   <button type="submit">Aplicar</button>
-</form>
+</form></div>
 <p class="nota">Chamadas ao modelo entre {{ from_ns|ts }} e {{ to_ns|ts }} (hora do fato, em {{ tzl() }}). Preço de lista, não gasto: os agentes
   rodam por assinatura. <strong>Papel</strong>: dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora
   de rodada (e a conversa sem sessão). <strong>Fase</strong>: o <code>aidlc:&lt;fase&gt;</code> que o seletor usou; sessão sem
   fase registrada fica em <code>desconhecida</code>. Cada tabela soma o total da janela.</p>
-<p id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
+</div>
+<p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
   Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span></p>
 <h2>Por papel</h2>
 {{ usage_table("role", "Papel", by_role) }}
 <h2>Por fase</h2>
 {{ usage_table("phase", "Fase", by_phase) }}
+</div>
 {% endblock %}

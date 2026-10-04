@@ -168,16 +168,16 @@ check "CSS: @font-face Inter Variable 100-900 com local('Inter') e a url de /sta
 check "CSS: nenhum hex de cor nem variável antiga"      bash -c '! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | grep -qE "#[0-9a-fA-F]{3,8}\b|--(fundo|painel|texto|fraco|linha|link|erro|est|real)\b"' _ "$TMP/studio.css"
 check "CSS: tokens Kubo no claro e no escuro (OKLCH)"   bash -c 'for v in background foreground card muted muted-foreground border primary destructive gate gate-tint; do [ "$(grep -c -- "^ *--$v: oklch(" "$1")" = 2 ] || exit 1; done' _ "$TMP/studio.css"
 check "CSS: dark por prefers-color-scheme"              grep -q "@media (prefers-color-scheme: dark)" "$TMP/studio.css"
-check "CSS: âmbar (--gate) só em .decisoes"             bash -c '[ "$(grep -c "var(--gate" "$1")" -ge 2 ] && ! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | perl -0ne "while (/([^{}]+)\{([^{}]*)\}/g) { my (\$s, \$b) = (\$1, \$2); \$s =~ s/^\\s+|\\s+\$//g; print qq{\$s\n} if \$b =~ /var\(--gate/ }" | grep -vqE "^\s*\.decisoes\s*\$"' _ "$TMP/studio.css"
+check "CSS: âmbar (--gate) só em .decisoes, no Badge gate e no ponto de Gate da linha do tempo (#468)"             bash -c '[ "$(grep -c "var(--gate" "$1")" -ge 2 ] && ! perl -0pe "s{/\*.*?\*/}{}gs" "$1" | perl -0ne "while (/([^{}]+)\{([^{}]*)\}/g) { my (\$s, \$b) = (\$1, \$2); \$s =~ s/^\\s+|\\s+\$//g; print qq{\$s\n} if \$b =~ /var\(--gate/ }" | grep -vqE "^\s*(\.decisoes|\.badge\.gate|\.tempo \.ponto\.gate)\s*\$"' _ "$TMP/studio.css"
 check "CSS: body Inter 14px, h1 20px/600/-0.025em, h2 16px/500, mono 12px" bash -c 'grep -q "font: 14px/1.5 var(--font-sans)" "$1" && grep -q "^h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.025em;" "$1" && grep -q "^h2 { font-size: 16px; font-weight: 500;" "$1" && grep -q "font-family: var(--font-mono); font-size: 12px;" "$1"' _ "$TMP/studio.css"
 check "CSS: .real sem cor; .est muted itálico"          bash -c '! grep -E "^\.real \{.*color" "$1" && grep -q "^\.est { color: var(--muted-foreground); font-style: italic; }" "$1"' _ "$TMP/studio.css"
-check "CSS: .aviso.erro e tr.erro com --destructive tingido" bash -c 'grep -E "^\.aviso\.erro" "$1" | grep -q "color-mix(in oklch, var(--destructive)" && grep -q "^tr\.erro > td:first-child { box-shadow: inset 3px 0 var(--destructive); }" "$1"' _ "$TMP/studio.css"
+check "CSS: .aviso.erro e Badge destrutivo com --destructive tingido; a linha não leva mais a borda do erro (#468)" bash -c 'grep -E "^\.aviso\.erro" "$1" | grep -q "color-mix(in oklch, var(--destructive)" && grep -E "^\.badge\.destrutivo" "$1" | grep -q "color-mix(in oklab, var(--destructive)" && ! grep -q "tr\.erro" "$1"' _ "$TMP/studio.css"
 check "páginas não vão para cache"                     test "$(hdr cache-control "${C[@]}" "$STUDIO_URL/conversas")" = no-store
 check "sem build de front-end no repo"                 bash -c '! ls "$1"/package.json "$1"/../package.json "$1"/node_modules 2>/dev/null | grep -q .' _ "$PKG"
 
 # ---------------------------------------------------------------- 2b. casco: sidebar, header, sprite e Entrar (#467)
 echo "$LOGIN" > "$TMP/login.html"
-GLIFOS="layout-dashboard message-square layers chart-column receipt shield-check siren hand panel-left log-out moon sun chevron-right chevron-left chevron-down chevron-up info triangle-alert copy check x server terminal sparkles wrench workflow corner-down-right circle-dot repeat archive loader user shield-alert lock eye eye-off arrow-left arrow-right menu network database sakura"
+GLIFOS="layout-dashboard message-square layers chart-column receipt shield-check siren hand panel-left log-out moon sun chevron-right chevron-left chevron-down chevron-up info triangle-alert copy check x server terminal sparkles wrench workflow corner-down-right circle-dot repeat archive loader user shield-alert lock eye eye-off arrow-left arrow-right menu network database sakura activity timer tag circle-alert arrow-left-right"
 check "sprite /static/lucide.svg: 200 sem login, como svg" test "$(code "$STUDIO_URL/static/lucide.svg")$(hdr content-type "$STUDIO_URL/static/lucide.svg" | cut -d';' -f1)" = "200image/svg+xml"
 curl -s "$STUDIO_URL/static/lucide.svg" > "$TMP/lucide.svg"
 check "sprite: é o arquivo do repo"                    cmp -s "$TMP/lucide.svg" "$PKG/static/lucide.svg"
@@ -276,7 +276,7 @@ check "árvore: níveis (raiz 0, filho 1, neto 2)"       jqe 'map(.depth) == ["0
 check "árvore: cada filho aponta o pai"                jqe '.parent == "00000000000000a3" and .name == "claude_code.tool.execution"' <<<"$(sp a4)"
 check "árvore: span com pai ausente vira raiz, marcado" jqe '.orphan == "1" and .depth == "0" and (.text | test("pai ausente"))' <<<"$(sp a6)"
 check "árvore: só o órfão é marcado"                   jqe '[.[] | select(.orphan == "1")] | length == 1' <<<"$S"
-check "span: nome, duração e modelo"                   jqe '.text | test("claude_code.llm_request \\+1,0 s 2,0 s claude-sonnet-5 100 50 1\\.000 / 10 US\\$ 0,0100")' <<<"$(sp a2)"
+check "span: nome, duração e modelo"                   jqe '.text | test("claude_code.llm_request \\+1,0 s 2,0 s claude-sonnet-5 100 / 50 cache 1\\.000 / 10 US\\$ 0,0100")' <<<"$(sp a2)"
 check "span: custo real"                               jqe ".[\"cost-kind\"] == \"real\" and $(usd .cost) == 10000" <<<"$(sp a2)"
 check "span: custo estimado, marcado"                  jqe ".[\"cost-kind\"] == \"estimated\" and $(usd .cost) == 3000000 and (.text | test(\"≈ US\\\\$ 3,0000 est\\\\.\"))" <<<"$(sp a5)"
 check "span: modelo sem preço nunca vira zero"         jqe '.["cost-kind"] == "unpriced" and .cost == "" and (.text | test("sem preço"))' <<<"$(sp a6)"
@@ -322,6 +322,34 @@ check "mais logs: offset inválido ou sem id = 400"     test "$(code "${C[@]}" "
 check "id com espaço, /, & e acento abre o detalhe"    grep -q 'data-calls="2"' <(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv%20d/1%26x%3D%C3%A9")
 check "conversa só com spans: aviso no lugar dos logs" grep -q 'Esta conversa não tem logs' <(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-c")
 check "a tela não derrubou o servidor (sem 500 no stderr)" bash -c '! grep -q "respondi 500\|Traceback" "$1"' _ "$TMP/s/stderr"
+# ---------------------------------------------------------------- 4b. receitas Kubo nas macros e nas páginas (#468)
+curl -s "$STUDIO_URL/static/copiar.js" > "$TMP/copiar.js"
+check "copiar.js: servido sem login, é o arquivo do repo" bash -c '[ "$(curl -s -o /dev/null -w "%{http_code}" "$1/static/copiar.js")" = 200 ] && cmp -s "$2" "$3"' _ "$STUDIO_URL" "$TMP/copiar.js" "$PKG/static/copiar.js"
+check "copiar.js: só copia (sem rede, eval nem HTML montado)" bash -c '! grep -qE "fetch|XMLHttpRequest|eval\(|innerHTML|new Function|sendBeacon|WebSocket" "$1" && grep -q "clipboard" "$1"' _ "$TMP/copiar.js"
+check "CSS: Badge padrão, contorno, secundário, destrutivo e gate" bash -c 'for v in "^\.badge \{" "^\.badge\.contorno" "^\.badge\.secundario" "^\.badge\.destrutivo" "^\.badge\.gate"; do grep -qE "$v" "$1" || exit 1; done' _ "$TMP/studio.css"
+check "CSS: cartão com anel (ring de 1 px a 10%), th 12px/500 muted, linha com hover muted/50" bash -c 'grep -qE "^\.cartao \{.*box-shadow: 0 0 0 1px color-mix\(in oklab, var\(--foreground\) 10%" "$1" && grep -q "^th { padding-top: 8px; padding-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--muted-foreground)" "$1" && grep -q "^tbody tr:hover > td { background: color-mix(in oklab, var(--muted) 50%" "$1"' _ "$TMP/studio.css"
+check "CSS: árvore de spans com 16 px por nível" bash -c 'grep -q "\.d1 { padding-left: 36px; } \.d2 { padding-left: 52px; }" "$1" && grep -q "\.d12 { padding-left: 212px; }" "$1"' _ "$TMP/studio.css"
+check "CSS celular: tabela empilha vira cartão/linha de 2 níveis, alvos de 44 px" bash -c 'm="$(perl -0ne "print \$1 if /\@media \(max-width: 640px\) \{\n  \.tiles(.*?)\n\}\n/s" "$1")"; grep -q "table.empilha .sec { display: none; }" <<<"$m" && grep -q "table.empilha tr { display: flex; flex-wrap: wrap;" <<<"$m" && grep -q "\.botao, \.copiar { min-height: 44px; }" <<<"$m"' _ "$TMP/studio.css"
+check "listas: tabela no cartão, Tokens ent / saí numa célula com o cache embaixo, sem as colunas Entrada e Saída" bash -c 'grep -q "<div class=\"cartao rolagem\">" "$1" && grep -q "<table class=\"conversas empilha\">" "$1" && grep -q "<th class=\"n\" title=\"[^\"]*\">Tokens ent / saí</th>" "$1" && grep -q "<span class=\"fino\" title=\"tokens de cache: leitura / escrita\">cache " "$1" && ! grep -qE "<th class=\"n\">(Entrada|Saída|Cache)</th>" "$1"' _ "$TMP/list.html"
+check "listas: no celular a linha de baixo (início, host, agente, chamadas, duração) e as colunas secundárias marcadas" bash -c 'grep -q "<span class=\"so-celular-linha\">" "$1" && grep -q "<td class=\"hora sec\">" "$1" && grep -q "<td class=\"prim\"><a href=\"/conversa?id=" "$1"' _ "$TMP/list.html"
+check "listas: Erros em Badge destrutivo só onde há erro, linha sem class erro" bash -c 'n="$(grep -c "data-errors=\"[1-9]" "$1")"; [ "$n" -ge 1 ] && [ "$(grep -o "<td class=\"n\"><span class=\"badge destrutivo\">" "$1" | wc -l)" = "$n" ] && ! grep -q "class=\"erro\"" "$1"' _ "$TMP/list.html"
+check "detalhe: 4 StatTiles (chamadas, tokens ent / saí, custo, duração) fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && grep -q "Tokens ent / saí</strong>\|tile-rotulo\"><svg[^>]*><use href=\"/static/lucide.svg#arrow-left-right\"/></svg>Tokens ent / saí" "$1" && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/a.html"
+check "detalhe: resumo num cartão, spans num cartão com o Badge de erros" bash -c 'grep -q "<div class=\"cartao bloco\">" "$1" && grep -q "<span class=\"badge destrutivo\">1 com erro</span>" "$1"' _ "$TMP/a.html"
+check "árvore: ícone por tipo (workflow, sparkles, wrench, terminal) e o mesmo ícone de chamada para a chamada sem pai" python3 -c '
+import re, sys
+h = open(sys.argv[1]).read()
+def icon(sid):
+    m = re.search(r"<tr data-span=\"0*" + sid + r"\".*?<use href=\"/static/lucide.svg#([a-z-]+)\"", h, re.S)
+    return m.group(1) if m else None
+want = {"a1": "workflow", "a2": "sparkles", "a3": "wrench", "a4": "terminal", "a5": "sparkles", "a6": "sparkles"}
+sys.exit(0 if {k: icon(k) for k in want} == want else 1)' "$TMP/a.html"
+check "árvore: pai ausente em Badge de contorno; erro em Badge destrutivo na coluna Status; a linha sem class erro" bash -c 'grep -q "<span class=\"badge contorno\">pai ausente</span>" "$1" && [ "$(grep -o "<td><span class=\"badge destrutivo\">erro</span></td>" "$1" | wc -l)" = 1 ] && ! grep -q "<tr [^>]*class=\"erro\"" "$1"' _ "$TMP/a.html"
+check "árvore: Tokens ent / saí numa célula e o cache em segunda linha menor" bash -c 'grep -q "100 / 50<span class=\"fino\" title=\"tokens de cache: leitura / escrita\">cache 1.000 / 10</span>" "$1"' _ "$TMP/a.html"
+check "árvore: o conteúdo do span segue pelo htmx (hx-get, hx-target, linha de conteúdo)" bash -c '[ "$(grep -c "hx-target=\"next .conteudo\"" "$1")" = 7 ] && [ "$(grep -c "<tr class=\"conteudo-linha\"><td class=\"conteudo\" colspan=\"7\">" "$1")" = 7 ]' _ "$TMP/a.html"
+check "logs: tabela no cartão, nível em Badge (erro destrutivo, o resto de contorno), sem class erro na linha" bash -c 'grep -q "<table class=\"logs empilha\">" "$1" && grep -q "<span class=\"badge destrutivo\">" "$1" && grep -q "<span class=\"badge contorno\">" "$1" && ! grep -q "<tr [^>]*class=\"erro\"" "$1"' _ "$TMP/a.html"
+check "detalhe e logs: botão de voltar com o ícone, no lugar do link solto" bash -c 'grep -q "<a class=\"botao\" href=\"/conversas\">.*Conversas</a>" "$1" && grep -q "<a class=\"botao\" href=\"/conversa?id=conv-b\">" "$2"' _ "$TMP/a.html" "$TMP/logs.html"
+check "ícones das páginas novas todos no sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/a.html" "$TMP/list.html"
+
 studio_stop
 
 # ---------------------------------------------------------------- 5. lógica direto em Python

@@ -268,4 +268,14 @@ check "audit: forma curta lista cada seção conferida (#482)" grep -qF '**Confe
 check "audit: achado ou gate não rodado leva a forma completa (#482)" grep -qF 'Qualquer achado, ou um gate que não rodou, leva a forma completa.' "$A"
 check "audit: forma completa mantém todas as seções (#482)" bash -c 'for t in "### Gates" "### Achados" "### Eixo Spec" "### Superfície sensível e supply chain" "### Eixo Standards" "### Registro de alegações" "### Checklist funcional" "### Prós e contras" "### Correção sugerida e limites"; do [ "$(grep -cF "$t" "$1")" -ge 1 ] || exit 1; done' _ "$A"
 check "audit: cita o doc de PT controlado (#482)"          bash -c 'sed -n "/^\*\*Ordem do relatório/p" "$1" | grep -qF docs/pt-controlado.md' _ "$A"
+
+# pedido de merge com a decisão no topo (#479)
+check "merge: pedido abre com a decisão e as opções numeradas (#479)" grep -qF 'o pedido abre com a decisão e as opções numeradas; o detalhe vem depois, ou por link' "$D"
+check "merge: primeira linha diz o que o Bardi decide (#479)" grep -qF 'ex.: `Decisão: fazer merge do #75?`' "$D"
+check "merge: cada achado traz a decisão que pede (#479)" grep -qF '`<achado> → decisão: <o que o Bardi escolhe>`' "$D"
+check "merge: sem recomendação que a auditoria não fez (#479)" grep -qF '**Nenhuma recomendação que a auditoria não fez.**' "$D"
+check "merge: recomendação do dispatcher é rotulada (#479)" grep -qF 'escreva `recomendação do dispatcher:` antes' "$D"
+check "merge: condição da auditoria aparece inteira (#479)" grep -qF '**A condição da auditoria aparece inteira.**' "$D"
+check "merge: condição copiada sem encurtar (#479)"     grep -qF 'sem encurtar nem tirar o "só se", o "pelo menos" ou o "antes de"' "$D"
+check "merge: regras ficam no §3 (#479)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -qF "Formato do pedido de merge (#479)"' _ "$D"
 check_end
