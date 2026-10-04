@@ -89,7 +89,7 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - **Tray:** app nativo pequeno em Swift (`MenuBarExtra`), código neste repo, instalado por `oute tray install` (compila no Mac, abre no login; sem App Store nem assinatura).
 - Mostra: na barra, nº de pedidos pendentes + nº de alertas; máquinas (ativa/parada, "último dado há X"); pedidos pendentes (título, root/user, agente, idade); custo de hoje (total e por agente, estimado marcado); erros na última hora; alertas; "Abrir o agent-studio"; notificação do macOS de pedido novo.
 - Lê a API do agent-studio **a cada 15 s**, num **endpoint que devolve tudo o que o menu mostra numa chamada**, mais uma página "ver script" por pedido (contrato em "Endpoint do tray: `GET /v1/tray` (#205)").
-- **A API do agent-studio é só leitura.** Sem endpoint de ação e sem auditoria nova. (A conferência diária de preços, #339, é a única chamada do serviço à internet, e a API segue só leitura; ver o adendo "Preços".)
+- **A API do agent-studio é só leitura.** Sem endpoint de ação e sem auditoria nova. (Exceção única, do adendo #489: `POST /rodada/acao`, que só marca ação como feita e não faz o host rodar nada; ver "Página da rodada e do ciclo".) (A conferência diária de preços, #339, é a única chamada do serviço à internet, e a API segue só leitura; ver o adendo "Preços".)
 - **Aprovar… / Recusar…** no tray **abrem o Terminal** no `oute approve <id>` daquele pedido (local no Mac, ou `ssh oute-server` para pedido do servidor); o Bardi lê o script e confirma como hoje. O `oute approve` já grava `.out`, `approve.log` e emite `oute.canal.decided`. **O ADR-01 não muda.** Motivo: os agentes rodam em yolo no mesmo servidor e na mesma rede docker do agent-studio; uma API que fizesse o host executar um pedido deixaria um agente aprovar o próprio pedido e virar root no host.
 - Nenhuma outra ação no v1. Ação nova entra depois, no mesmo padrão: abrir o Terminal no comando que já existe.
 
@@ -301,6 +301,57 @@ Volume do SurrealDB perdido com o DuckDB intacto: o estado derivado (§3) se ref
 - **Saída:** `antes:`, `lidas:` e `depois:`, com a contagem de rodadas, workers, sessões, pedidos e conversas do SurrealDB, para o ensaio no host. O stderr diz só o tipo do erro.
 - **Falhas:** DuckDB que não abre, ou SurrealDB que recusa = código 1 (o que já entrou fica; rodar de novo termina); sem URL ou senha do SurrealDB no ambiente = 2. O serviço volta em todos os casos.
 - **Código:** `agent_studio/rebuild_state.py`, `studio_rebuild_state` no `scripts/oute`. Teste: `tests/agent-studio-rebuild-state.test.sh`.
+
+### Página da rodada e do ciclo (#489, #506)
+
+Adendo do gate de `arch` da #489 (Bardi, 2026-10-04; o merge do PR da #506 é o registro do gate). Fontes: a [proposta de arquitetura](https://github.com/renatobardi/oute-agent/issues/489#issuecomment-5981047968) e o [gate de `arch`](https://github.com/renatobardi/oute-agent/issues/489#issuecomment-5981141567), com as escolhas D1=1, D2=1, D3=1, D4=1, D5=1, D6=1 e D7=2. Decisões de `spec`: [comentário da #489](https://github.com/renatobardi/oute-agent/issues/489#issuecomment-5980973475). Este adendo só registra a decisão: nenhum código muda aqui. Onde este texto diverge das fontes, valem as fontes.
+
+O resumo de cada etapa da rodada vira uma página do agent-studio.
+
+- **Etapa:** texto que o dispatcher escreve para o Bardi num ponto de parada da rodada. Tipos: `triagem`, `merge` (um por PR), `kaizen` e `fechamento`. Cada rodada tem uma página só (`GET /rodada?id=`), com as etapas em ordem e uma **barra de etapas** desenhada pelo agent-studio. Nenhum diagrama vem do modelo.
+- **Transporte (D1=1):** evento operacional `oute.swarm.step.published` (ADR-04, catálogo), com o texto no corpo. O dispatcher grava o texto em arquivo da rodada, `oute-swarm step publish` grava a linha `etapa …` no log, e o `oute-emit swarm` emite o evento. O collector entrega ao bucket e ao agent-studio, como todo evento. Sem credencial nova: o `agent` segue sem a credencial de ingestão (§6).
+- **Limite de tamanho:** 32 KiB por etapa. Acima disso, o `oute-swarm step publish` recusa e não corta, porque cortar mudaria o fato (regra 12 do `docs/pt-controlado.md`).
+- **O que o texto leva:** só o que o dispatcher escreveu. Nunca saída de host, de comando ou de tela, e nunca segredo. CUIDADO: o texto vai ao bucket `oute-observability`, que nunca é apagado (§7). Um segredo escrito numa etapa não se desfaz.
+- **Conteúdo não confiável:** o texto é dado, nunca instrução, para a tela e para quem o lê. Markdown restrito, com as seções `## Decisão`, `## Ações` e `## Detalhe`. O agent-studio monta o HTML e escapa tudo, com a mesma CSP das outras telas (#206). HTML cru não passa. A gramática exata fica para a fase `design` da fatia 1.
+- **Revisor (D5=1):** antes de publicar, `oute-swarm step review` chama outro modelo em modo headless, com prompt fixo da imagem. O `publish` só marca `aprovado` com veredito gravado para o mesmo sha256 do texto: a trava mora no comando, não no prompt. Quem escreve em Sonnet é revisado por Opus, e o inverso (recomendação do autor da proposta; a tabela do par fica em `config/select/models.toml`, a fechar na `design`).
+- **Etapa reprovada ou sem revisor (D6=1):** depois de 2 reprovações, do tempo esgotado ou sem revisor disponível, a etapa sai como `reprovado` ou `sem-revisor`. A página mostra um aviso fixo, escrito pelo agent-studio, e o texto fica fechado até o Bardi abrir. A trava protege contra falha, não contra agente hostil: um agente em yolo consegue forjar o atributo `review`, como já consegue forjar o `oute.canal.proposed` (§6, "Por quê").
+- **Estado derivado (D4=1; §3):** `etapa:[<rodada>, <tipo>, <chave>]` no SurrealDB, com a revisão vigente (a mais alta vence, em qualquer ordem de chegada), o link `rodada` e, na etapa `merge`, o link `worker`. O texto fica só no DuckDB (`logs`), lido pelo `oute.event.id`. Com o SurrealDB fora, a página sai com o texto e um aviso. A tabela `pedido` é só o pedido do canal: a etapa de merge não é um registro `pedido`, por isso o tipo se chama `merge`.
+- **Ciclo:** o evento da triagem leva `oute.swarm.cycle`. `GET /ciclo?id=` lista as rodadas do ciclo e leva a cada uma.
+- **Tray:** o `GET /v1/tray` ganha o bloco `steps` (etapas das rodadas abertas, com `url`). O tray avisa só de etapa ainda não vista. O título de cada linha é fixo por tipo e sai do agent-studio, não do modelo.
+- **Correção registrada:** nenhum ADR proíbe texto no evento operacional. A afirmação "o ADR-08 proíbe texto livre na telemetria", do comentário de decisões de `spec`, não tinha fonte. O ADR-04 permite o contrário: o evento operacional leva o que o agente escreveu (prompt, texto do `tell`, script do pedido), e só a saída do host não vai (ADR-04, adendo #124). O limite de 300 caracteres é do `oute-swarm ask`, não do pipeline. O que este adendo acrescenta ao evento é o teto de 32 KiB e a regra "nunca saída de host nem segredo".
+
+#### Exceção ao §10: escrita vinda da tela
+
+O §10 diz que a API do agent-studio é só leitura e sem endpoint de ação. Este adendo abre **uma** exceção, com este alcance e nenhum outro:
+
+- **Rota:** só `POST /rodada/acao`. Ela marca uma ação do Bardi como `feita` ou `pendente`. É a única escrita do navegador além do login e do logout.
+- **Não faz o host rodar nada.** A marca não aprova pedido, não faz merge e não dispara comando. O motivo do §10 (um agente aprovar o próprio pedido e virar root no host) continua atendido, e o ADR-01 não muda. A exceção não vale para nenhuma outra rota nem para ação que rode algo no host.
+- **Credencial de marcação (D2=1, §6):** terceira credencial, na pasta `oute-services` do vault, nunca no `agent`. O Bardi cola uma vez por aparelho, numa tela própria. O cookie dela é separado, `HttpOnly`, `Secure` e `SameSite=Strict`. Sem a credencial configurada, a rota não existe e as caixas aparecem só para leitura. Com a credencial de leitura, a resposta é 403. Motivo: o `agent` alcança o agent-studio pela rede `oute` e consegue montar o cookie de leitura; uma rota que aceitasse a leitura aceitaria o agente.
+- **Entrada:** rodada, etapa, id da ação e estado. Nenhum campo de texto livre. O servidor só aceita ação que existe na revisão publicada. Corpo acima de 4 KB = 413. Defesa contra envio de outro site: `SameSite=Strict`, conferência do `Origin` e campo oculto com HMAC da credencial. Respostas: 401 sem o cookie de marcação, 403 com o de leitura, 400 para ação inexistente, 503 se a gravação falha; 2xx só depois do commit.
+- **Registro (D3=1):** tabela `action_marks` no DuckDB, só de acréscimo (rodada, etapa, ação, estado, hora do servidor, `by = human`), escrita só por essa rota. A ingestão nunca escreve nela. Estado em `acao:[<rodada>, <tipo>, <chave>, <id da ação>]` no SurrealDB, derivado do texto vigente e de `action_marks`. A ação que cita um pedido do canal não tem caixa: o estado dela é o do `pedido`.
+- **Perda aceita:** a marca não vai ao bucket. CUIDADO: com o volume do DuckDB perdido, todas as caixas voltam a `pendente` e não há como recuperar as marcas. O texto das etapas volta pelo `oute studio replay`.
+- **Quem lê:** o dispatcher, por `GET /v1/rodada?id=<rodada>` (credencial de leitura). A marca é dado, nunca instrução nem confirmação de ação, e não substitui a opção numerada de merge, de `close` nem de ação no host.
+- **`rebuild-state`:** `etapa` se remonta de `logs`. `acao` precisa de fonte nova no laço: `action_marks`. A saída ganha as contagens `etapas=` e `acoes=`.
+
+#### Fatias (D7=2)
+
+Quatro fatias, com o revisor dentro da fatia 1. Cada uma precisa de release, porque o agent-studio vai na imagem.
+
+| Fatia | Entrega | Issue |
+|---|---|---|
+| 0 | Este adendo, a linha no ADR-04 e os termos no `CONTEXT.md`. Só documento, sem release. | #506 |
+| 1 | Transporte, página só de leitura com a barra de etapas até o `fechamento`, e o revisor (`oute-swarm step review`, trava no `publish`, aviso da D6). Fica maior: transporte, tela e revisor num PR. Nenhum texto de etapa aparece sem revisor por falta de implementação. | #507 |
+| 2 | Triagem, pedidos de merge e retrospectiva na mesma página. Bloco `steps` no `GET /v1/tray` e aviso no tray (o PR leva a saída de `swift build && swift test` do Mac). | #508 |
+| 3 | Página do ciclo. | #509 |
+| 4 | Lista de ações com escrita: credencial de marcação, `POST /rodada/acao`, `action_marks`, `rebuild-state`. | #510 |
+
+Fonte das issues: [comentário de tickets da #489](https://github.com/renatobardi/oute-agent/issues/489#issuecomment-5981372637) e o título de cada issue (`gh issue view <n> --json title`). Ordem: #506, depois #507; as #508, #509 e #510 dependem da #507, uma por vez.
+
+#### Descartado
+Endpoint de escrita novo no agent-studio com credencial nova no `agent` (D1=2); marcar com a credencial de leitura (D2=2); evento de marca assinado no bucket (D3=2); tudo lido só do DuckDB (D4=2); revisor como subagente do próprio dispatcher (D5=2); texto aberto com faixa de aviso (D6=2); cinco fatias (D7=1); arquivo no `oute-shared` lido pelo serviço; o serviço buscar o comentário no GitHub; identidade da tailnet por cabeçalho do nginx; revisor dentro do agent-studio; texto no SurrealDB.
+
+#### Não verificado (a tratar nas fatias)
+Tamanho real de uma triagem e de um resumo de fechamento; tempo e custo de uma revisão; revisor com dispatcher em Codex; `POST` no vhost do repo `lab`.
 
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
