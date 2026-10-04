@@ -1,2 +1,0 @@
-### Changed
-- **Relatório da `oute-aidlc-qa-pr-audit` abre com a decisão do Bardi** (#482). O gabarito começa pela ação recomendada e pela "Decisão do Bardi" com opções numeradas (ou "nenhuma"). A auditoria sem achado usa uma forma curta: head auditado, gates, `Closes` × `Refs` e a lista do que foi conferido continuam obrigatórios. A skill é addon: entra com `git pull` + `oute down/up`, sem release.

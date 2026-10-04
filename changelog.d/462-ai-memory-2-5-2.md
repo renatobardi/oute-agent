@@ -1,2 +1,0 @@
-### Changed
-- **ai-memory 2.4.1 → 2.5.2, servidor e cliente** (#462). Captura sanitiza o título antes de truncar e aplica `[capture] ignore_paths` a comandos de shell; `memory_query` com `workspace`+`project` explícitos passa a trazer as preferências `_global`; correções de segurança do upstream (GHSA-vh98, GHSA-gf78). Inclui a migração de schema V70 do servidor: faça `oute memory-backup` antes do deploy. **Precisa de release** (o Dockerfile vai na imagem).
