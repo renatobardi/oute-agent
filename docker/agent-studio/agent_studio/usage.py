@@ -165,6 +165,13 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
     return groups
 
 
+def aggregate_p95(con, from_ns, to_ns, tz=tz_mod.UTC):
+    """O p95 (ms) de todas as chamadas da janela, sem a junção com os logs de custo; `None` sem chamada com duração."""
+    for rec in _p95(con, (), from_ns, to_ns, tz):
+        return rec["p95"]
+    return None
+
+
 def render(key, a, keys):
     """Acumulador -> objeto da resposta (custo real e estimado sempre separados)."""
     out = {}

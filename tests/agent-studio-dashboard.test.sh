@@ -303,8 +303,51 @@ check("janela inválida: 400", get(app4, "/", "hours=abc")[0] == 400 and get(app
       and get(app4, "/", "hours=0")[0] == 400)
 check("HX-Request não leva o casco nem os alertas, mas a rota responde", get(app4, "/", "hours=24", headers=(("HX-Request", "true"),))[0] == 200)
 check("nome de sessão com HTML sai escapado nos links e no texto", "T-LENTA" in html and "<b>x</b>" not in html)
+# a consulta do Dashboard não segura a trava do escritor (#504): outras leituras e a ingestão seguem enquanto ela roda
+import threading
+db9 = DB("trava").flush()
+calls = []
+real_snapshot = ST.dash_mod.snapshot
+def slow_snapshot(con, *a, **k):
+    calls.append(1)
+    time.sleep(1.0)
+    return {"ok": len(calls)}
+ST.dash_mod.snapshot = slow_snapshot
+th = threading.Thread(target=db9.dashboard, args=(NOW - 3600 * SEC, NOW, CF.load().prices if hasattr(CF, "load") else None))
+th.start()
+time.sleep(0.2)
+t0 = time.time()
+db9.conversations(NOW - 3600 * SEC, NOW, None)
+fast = time.time() - t0
+th.join()
+check("Dashboard lento não trava as outras leituras", fast < 0.5)
+MIN = 60 * SEC
+base = NOW // MIN * MIN
+r1 = db9.dashboard(base - 3600 * SEC, base, None)
+r2 = db9.dashboard(base - 3600 * SEC + 5 * SEC, base + 5 * SEC, None)
+n = len(calls)
+check("mesma janela no mesmo minuto: o cache evita refazer a conta", r1 is r2 and n == 1)
+# janela "últimas N horas" vencida: a tela recebe a última na hora e a conta se refaz em segundo plano
+ST.dash_mod.snapshot = slow_snapshot
+ST.DASH_TTL_S = 0
+t0 = time.time()
+r3 = db9.dashboard(base - 3600 * SEC, base, None)
+check("janela vencida: devolve a última sem esperar a conta", r3 is r2 and time.time() - t0 < 0.5)
+time.sleep(1.5)
+check("e refaz a conta em segundo plano", db9.dashboard(base - 3600 * SEC, base, None) is not r2)
+ST.DASH_TTL_S = 60
+ST.dash_mod.snapshot = lambda con, *a, **k: con.execute("SELECT count(*) FROM range(100000000000)").fetchall()
+ST.DASH_DEADLINE_S = 0.3
+t0 = time.time()
+try:
+    db9.dashboard(NOW - 7200 * SEC, NOW, None)
+    stopped = False
+except Exception:
+    stopped = True
+check("consulta que passa do prazo é interrompida", stopped and time.time() - t0 < 5)
+ST.dash_mod.snapshot = real_snapshot
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 69
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 74
 check_end

@@ -5,6 +5,7 @@ chegada (`received_at` fica à parte). A chave de dedupe é a PRIMARY KEY: reenv
 nova.
 """
 import threading
+import time
 
 import duckdb
 
@@ -97,6 +98,8 @@ TABLES["metrics"] = [
     ("received_unix_nano", "UBIGINT NOT NULL"),
 ]
 DERIVED = {"time": "time_unix_nano", "received_at": "received_unix_nano"}
+DASH_DEADLINE_S = 50   # prazo da consulta do Dashboard (abaixo do corte de 60 s do nginx)
+DASH_TTL_S = 60        # quanto o resultado da janela vale
 TS_UTC = "(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')"
 
 
@@ -123,6 +126,9 @@ class Store:
         # a hora é sempre UTC, qualquer que seja o TZ do container (a imagem usa America/Sao_Paulo)
         self.con.execute("SET TimeZone = 'UTC'")
         self.lock = threading.Lock()
+        self._dash_lock = threading.Lock()
+        self._dash_cache = {}
+        self._dash_refreshing = {}
         with self.lock:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
@@ -173,9 +179,40 @@ class Store:
             return usage_mod.usage(self.con, from_ns, to_ns, prices, tz)
 
     def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
-        """Leitura do Dashboard (#469), sob a mesma trava."""
-        with self.lock:
-            return dash_mod.snapshot(self.con, from_ns, to_ns, prices, tz)
+        """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
+        sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
+        prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano."""
+        minute = 60 * 10**9
+        tzk = getattr(tz, "key", str(tz))
+        live = abs(time.time_ns() - to_ns) < 2 * minute
+        key = ("live", to_ns - from_ns, tzk) if live else (from_ns // minute, to_ns // minute, tzk)
+        with self._dash_lock:
+            hit = self._dash_cache.get(key)
+            if hit and time.monotonic() - hit[0] < DASH_TTL_S:
+                return hit[1]
+            if hit and live:
+                if not self._dash_refreshing.get(key):
+                    self._dash_refreshing[key] = True
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz), daemon=True).start()
+                return hit[1]
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz)
+
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz):
+        with self._dash_lock:
+            try:
+                cur = self.con.cursor()
+                timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
+                timer.start()
+                try:
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz)
+                finally:
+                    timer.cancel()
+                    cur.close()
+                self._dash_cache = {**self._dash_cache, key: (time.monotonic(), snap)}
+                return snap
+            finally:
+                self._dash_refreshing.pop(key, None)
 
     def alerts(self, at_ns, cfg):
         """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
