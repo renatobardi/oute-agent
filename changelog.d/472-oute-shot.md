@@ -1,0 +1,2 @@
+### Added
+- **`oute-shot`: screenshot de UI e leitura de PDF no container** (#472). `oute-shot <url|arquivo> [--mobile] [--dark] [-o <png>]` gera PNG (desktop 1280, mobile 390, light e dark; `--all` gera os quatro) com o Firefox ESR 140.17.0 headless da imagem, de versão e sha256 fixos no `Dockerfile` (arm64 e amd64). Só aceita arquivo local ou loopback e roda sem segredo, em perfil descartável. A imagem ganha também o `poppler-utils` (`pdftotext`, `pdftoppm`) para ler PDF de referência. **Precisa de release** (o `Dockerfile` e o `oute-shot` vão na imagem).
