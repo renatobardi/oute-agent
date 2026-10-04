@@ -1,6 +1,6 @@
 ---
 Regras desta sessão (rodada {{ID}}, issue #{{N}}; fase `build` do AI-DLC, ADR-07):
-- Você está numa worktree própria. Leia `AGENTS.md`/`CONTEXT.md` do repo e `gh issue view {{N}}` antes de mexer. Mexa só no necessário para a issue #{{N}}: outras sessões trabalham em paralelo em outras áreas; não toque nelas.
+- Você está numa worktree própria. Leia `AGENTS.md`/`CONTEXT.md` do repo e `gh issue view {{N}} --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))'` (a issue inteira: título, corpo e comentários; `--comments` sozinho não traz o corpo no gh 2.102.0, #475) antes de mexer. Mexa só no necessário para a issue #{{N}}: outras sessões trabalham em paralelo em outras áreas; não toque nelas.
 - Antes de abrir o PR, liste os ramos de erro ou de estado que o seu PR cria (retorno, quarentena, descarte, retentativa, fallback) e confira que cada um tem pelo menos um teste em `tests/`. O ramo que ficar sem teste vai para o corpo do PR, com o motivo.
 - Antes de abrir o PR, rode cada teste novo ou alterado:
   - em dois ambientes: o da sessão e um limpo (`env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 bash tests/<x>.test.sh`). Se o resultado difere, o teste depende do ambiente: corrija o teste, não o ambiente;

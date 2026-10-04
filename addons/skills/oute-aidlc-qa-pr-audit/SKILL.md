@@ -236,7 +236,7 @@ grep -n -E '^FAIL |[Ee]rror|falha' "$AUD/$G.out"   # as linhas da falha, com o n
 
 Pergunta: o PR entrega o que a issue pediu, nem mais, nem menos, e declara isso honestamente?
 
-1. **Achar a issue.** `closingIssuesReferences` do PR e as referências `Closes|Fixes|Resolves #n` e `Refs #n` do corpo (usadas só como ponteiro). Leia cada uma com `gh issue view <n> --comments`. Sem issue: diga "sem spec disponível" no relatório e pule para o passo 8.
+1. **Achar a issue.** `closingIssuesReferences` do PR e as referências `Closes|Fixes|Resolves #n` e `Refs #n` do corpo (usadas só como ponteiro). Leia cada uma com `gh issue view <n> --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))'`. Sem issue: diga "sem spec disponível" no relatório e pule para o passo 8.
 2. **Critérios de aceite.** Liste cada item de "Acceptance criteria"/"Critérios de aceite" da issue, citando o texto do critério. Para cada um, dê o veredito com evidência **que você mesmo conferiu** no diff, no repo ou num gate (arquivo:linha, comando e saída):
    - `atendido`: evidência no head;
    - `parcial`: diga o que falta;

@@ -5,7 +5,7 @@ Issues and PRDs for this repo live as GitLab issues. Use the [`glab`](https://gi
 ## Conventions
 
 - **Create an issue**: `glab issue create --title "..." --description "..."`. Use a heredoc for multi-line descriptions. Pass `--description -` to open an editor.
-- **Read an issue**: `glab issue view <number> --comments`. Use `-F json` for machine-readable output.
+- **Read an issue**: `glab issue view <number> --comments`. Use `-F json` for machine-readable output. **Not verified** (#475): `glab` is not installed in the container; `gh 2.102.0` prints neither title nor description for `issue view --comments`, and `glab` may behave the same. Check on a real issue (title, description and notes all show up) before relying on it.
 - **List issues**: `glab issue list -F json` with appropriate `--label` filters.
 - **Comment on an issue**: `glab issue note <number> --message "..."`. GitLab calls comments "notes".
 - **Apply / remove labels**: `glab issue update <number> --label "..."` / `--unlabel "..."`. Multiple labels can be comma-separated or by repeating the flag.
@@ -32,7 +32,7 @@ Create a GitLab issue.
 
 ## When a skill says "fetch the relevant ticket"
 
-Run `glab issue view <number> --comments`.
+Run `glab issue view <number> --comments` (not verified, see above; fall back to `glab issue view <number> -F json`).
 
 ## Wayfinding operations
 

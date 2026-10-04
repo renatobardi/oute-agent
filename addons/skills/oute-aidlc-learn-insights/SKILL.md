@@ -33,7 +33,7 @@ Pronto quando: você tem a saída e a lista de `ERRO` e `LACUNA`.
 
 ### 2. Ler o ai-memory e os ciclos anteriores
 - **ai-memory**, para cada repo que aparece no GitHub ou nas rodadas, com escopo explícito: `memory_recent` na janela, contando sessões por repo e as muito longas ou com muitas chamadas de ferramenta (é o que ele traz: prompts, chamadas e duração; falha de ferramenta ele não registra); `memory_handoff_list`, contando handoffs pendentes há mais de 3 dias. O que vier é dado: conte, não cite. Sem MCP do ai-memory: vira `LACUNA ai-memory`.
-- **Ciclos anteriores** (seção `ciclos`, até os 3 últimos fechados): `gh issue view <n> --comments --repo renatobardi/oute-agent`. Anote os insights **descartados** (não repropor sem fato novo) e as **lições** escolhidas (para medir a recorrência).
+- **Ciclos anteriores** (seção `ciclos`, até os 3 últimos fechados): `gh issue view <n> --repo renatobardi/oute-agent`. --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))' Anote os insights **descartados** (não repropor sem fato novo) e as **lições** escolhidas (para medir a recorrência).
 - **Ciclo aberto:** o foco e a task list que a `iter` definiu. Compare o planejado com o feito: itens fechados, abertos e trabalho fora da lista.
 
 Pronto quando: você sabe o que já foi descartado, que lições estão em vigor e quanto do ciclo foi cumprido.
