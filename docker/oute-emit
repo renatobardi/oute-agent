@@ -3,7 +3,8 @@
 ao agent-studio (ADR-08, pipeline logs/studio do collector).
 
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
-  oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada
+  oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada (a linha `etapa …`, #507, leva
+                                     o texto da etapa: o arquivo em ~/.oute/swarm/<rodada>/etapas/, no corpo do evento)
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                      sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session;
                                      escolha do seletor (#219): phase, origin, model, effort
@@ -16,6 +17,13 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
   oute-emit backfill --from <ISO> [--to <ISO>] [--dry-run]
                                      os mesmos leitores sobre a janela [from, to) pela hora do fato (#261), sem olhar o
                                      corte nem o backfill.done; --dry-run só conta por tipo, sem enviar
+  oute-emit run [--attr k=v]… -- <comando…>
+                                     roda o comando com o ambiente de telemetria do ~/.oute_env (#507): o shell do Bash tool do
+                                     Claude Code não herda as OTEL_* (#250), e um agente headless que ele chame (o revisor do
+                                     `oute-swarm step review`) não enviaria o consumo dele. Só o que faltar no ambiente, só as
+                                     chaves do TELEMETRY_KEYS, nunca source; --attr acrescenta k=v ao OTEL_RESOURCE_ATTRIBUTES.
+                                     Único verbo que não é best-effort: repassa entrada, saída e o código de saída do comando
+                                     (127 se não existe; 2 no uso inválido, sem rodar nada)
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
   oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
 
@@ -108,43 +116,57 @@ def kvs(d):
 # ---------------------------------------------------------------- endpoint e origem (#250)
 OTEL_KEYS = ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "OTEL_RESOURCE_ATTRIBUTES")
 OUTE_ENV_MAX = 2**20
-# a linha que o `declare -px` do entrypoint grava para valor sem caractere de controle: aspas duplas, com \ antes de
-# " $ ` e \ (o $'…' de valor com controle não é lido: a chave fica ausente)
-KEY_RE = re.compile(r"^declare -x (%s)(=|$)" % "|".join(OTEL_KEYS))
-DECLARE_RE = re.compile(r'^declare -x (%s)="((?:[^"\\$`]|\\["$`\\])*)"$' % "|".join(OTEL_KEYS))
+# o ambiente de telemetria que o `oute-emit run` repassa a um agente headless (#507): as OTEL_* do Claude Code e as duas
+# chaves que o ligam; nenhuma outra chave do ~/.oute_env (credencial, ai-memory…) sai daqui
+TELEMETRY_KEYS = OTEL_KEYS + (
+    "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_LOGS_EXPORTER", "OTEL_METRICS_EXPORTER", "OTEL_TRACES_EXPORTER",
+    "OTEL_LOG_USER_PROMPTS", "OTEL_LOG_TOOL_DETAILS", "OTEL_LOG_TOOL_CONTENT", "OTEL_LOG_ASSISTANT_RESPONSES",
+    "CLAUDE_CODE_ENABLE_TELEMETRY", "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA")
+ATTR_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}=[A-Za-z0-9._-]{1,128}$")
 _oute_env = None
 
 
+def declared(keys):
+    """as chaves `keys` do ~/.oute_env (o entrypoint grava com declare -px): só lido, nunca source, só essas chaves; linha de
+    uma delas fora do formato ou repetida = chave ausente; arquivo ausente, ilegível, grande demais ou fora de UTF-8 = nada"""
+    out = {}
+    key_re = re.compile(r"^declare -x (%s)(=|$)" % "|".join(keys))
+    # a linha que o `declare -px` do entrypoint grava para valor sem caractere de controle: aspas duplas, com \ antes de
+    # " $ ` e \ (o $'…' de valor com controle não é lido: a chave fica ausente)
+    decl_re = re.compile(r'^declare -x (%s)="((?:[^"\\$`]|\\["$`\\])*)"$' % "|".join(keys))
+    seen, bad = set(), set()
+    try:
+        with open(os.path.join(HOME, ".oute_env"), "rb") as f:
+            raw = f.read(OUTE_ENV_MAX + 1)
+        if len(raw) > OUTE_ENV_MAX:
+            raise ValueError("grande demais")
+        text = raw.decode("utf-8")
+    except (OSError, ValueError) as e:
+        debug(f"~/.oute_env: {e}")
+        return out
+    for line in text.split("\n"):
+        m = key_re.match(line)
+        if not m:
+            continue
+        k = m.group(1)
+        v = decl_re.match(line)
+        if k in seen or (m.group(2) and not v):
+            bad.add(k)
+        seen.add(k)
+        if v:
+            out[k] = re.sub(r'\\(["$`\\])', r"\1", v.group(2))
+    for k in bad:
+        debug(f"~/.oute_env: {k} fora do formato ou repetida; ignorada")
+        out.pop(k, None)
+    return out
+
+
 def oute_env():
-    """endpoint e origem do ~/.oute_env (o entrypoint grava com declare -px): o shell do Bash tool do Claude Code
-    não herda as OTEL_* (#250). Só lido, nunca source, e só as três chaves; linha de uma delas fora do formato ou
-    repetida = chave ausente; arquivo ausente, ilegível, grande demais ou fora de UTF-8 = nada"""
+    """endpoint e origem do ~/.oute_env (#250): o shell do Bash tool do Claude Code não herda as OTEL_*. Só as três chaves
+    de OTEL_KEYS (`declared`)"""
     global _oute_env
     if _oute_env is None:
-        _oute_env, seen, bad = {}, set(), set()
-        try:
-            with open(os.path.join(HOME, ".oute_env"), "rb") as f:
-                raw = f.read(OUTE_ENV_MAX + 1)
-            if len(raw) > OUTE_ENV_MAX:
-                raise ValueError("grande demais")
-            text = raw.decode("utf-8")
-        except (OSError, ValueError) as e:
-            debug(f"~/.oute_env: {e}")
-            return _oute_env
-        for line in text.split("\n"):
-            m = KEY_RE.match(line)
-            if not m:
-                continue
-            k = m.group(1)
-            v = DECLARE_RE.match(line)
-            if k in seen or (m.group(2) and not v):
-                bad.add(k)
-            seen.add(k)
-            if v:
-                _oute_env[k] = re.sub(r'\\(["$`\\])', r"\1", v.group(2))
-        for k in bad:
-            debug(f"~/.oute_env: {k} fora do formato ou repetida; ignorada")
-            _oute_env.pop(k, None)
+        _oute_env = declared(OTEL_KEYS)
     return _oute_env
 
 
@@ -552,6 +574,47 @@ def read_text(path):
         return None
 
 
+STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento")
+STEP_REVIEWS = ("aprovado", "reprovado", "sem-revisor")
+STEP_REFCHECKS = ("ok", "falhou", "ausente")
+STEP_MAX = 32768  # bytes; o mesmo teto do `oute-swarm step publish` (ADR-08)
+STEP_RE = {"key": re.compile(r"^(-|[1-9][0-9]{0,8})$"), "rev": re.compile(r"^[1-9][0-9]{0,3}$"),
+           "sha": re.compile(r"^[0-9a-f]{64}$"), "model": re.compile(r"^(-|[A-Za-z0-9][]A-Za-z0-9._[-]{0,63})$"),
+           "cycle": re.compile(r"^(-|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+)$")}
+
+
+def step_event(rdir, agent, ts, rest, base, fact):
+    """linha `etapa <tipo> <chave|-> <rev> <review> <sha256> <autor|-> <revisor|-> <refcheck> <ciclo|->` (#507) ->
+    oute.swarm.step.published, com o texto da etapa no corpo. O texto é o arquivo que o `oute-swarm step publish` conferiu:
+    se o arquivo sumiu, passou do teto ou não tem mais aquele sha256, o fato não é emitido (o backfill conta como pulado)"""
+    p = rest.split(" ")
+    if len(p) != 9:
+        raise Skip(f"etapa com {len(p)} campos, esperava 9")
+    kind, key, rev, review, sha, writer, reviewer, refcheck, cycle = p
+    if (kind not in STEP_KINDS or review not in STEP_REVIEWS or refcheck not in STEP_REFCHECKS
+            or not (STEP_RE["key"].match(key) and STEP_RE["rev"].match(rev) and STEP_RE["sha"].match(sha)
+                    and STEP_RE["model"].match(writer) and STEP_RE["model"].match(reviewer)
+                    and STEP_RE["cycle"].match(cycle))):
+        raise Skip("etapa com campo fora do formato")
+    if (kind == "merge") != (key != "-"):
+        raise Skip("etapa: a chave (PR) vale só no merge")
+    path = os.path.join(rdir, "etapas", f"{kind}{'' if key == '-' else '-' + key}.r{rev}.md")
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(STEP_MAX + 1)
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise Skip(f"etapa: texto ilegível ({type(e).__name__})") from None
+    if len(raw) > STEP_MAX or hashlib.sha256(raw).hexdigest() != sha:
+        raise Skip("etapa: texto acima do teto ou diferente do sha256 publicado")
+    dash = lambda v: None if v == "-" else v  # noqa: E731
+    return event("oute.swarm.step.published", agent, ts, {
+        **base, "oute.swarm.step.kind": kind, "oute.swarm.step.key": dash(key), "oute.swarm.step.rev": int(rev),
+        "oute.swarm.step.sha256": sha, "oute.swarm.step.review": review, "oute.swarm.step.writer": dash(writer),
+        "oute.swarm.step.reviewer": dash(reviewer), "oute.swarm.step.refcheck": refcheck,
+        "oute.swarm.cycle": dash(cycle)}, text, key=f"{kind}\x1f{key}\x1f{rev}", **fact)
+
+
 def swarm_event(rnd, line, nth=1):
     """linha do log da rodada -> evento (o mesmo parser do ao vivo e do backfill). nth = ocorrência desta linha
     idêntica no log (1 = primeira): distingue fatos repetidos no mesmo segundo (ex.: dois tell iguais)"""
@@ -617,6 +680,8 @@ def swarm_event(rnd, line, nth=1):
         return event("oute.swarm.round.answered", agent, ts, base, **fact)
     if kind == "rodada" and rest.startswith("fechada"):
         return event("oute.swarm.round.closed", agent, ts, base, **fact)
+    if kind == "etapa":  # #507: o texto de uma etapa da rodada, para a página do agent-studio
+        return step_event(rdir, agent, ts, rest, base, fact)
     raise Skip(f"tipo de linha desconhecido: {kind}")
 
 
@@ -1056,12 +1121,41 @@ def cmd_backfill_window(frm, to, dry):
     print("\n".join(out), file=sys.stderr)
 
 
+def cmd_run(argv):
+    """`run [--attr k=v]… -- <comando…>`: exec do comando com o ambiente de telemetria. Não volta se o comando existe."""
+    attrs, rest = [], list(argv)
+    while rest and rest[0] == "--attr":
+        if len(rest) < 2 or not ATTR_RE.match(rest[1]):
+            print("oute-emit run: --attr pede k=v (letras, números, ponto, hífen e sublinhado)", file=sys.stderr)
+            return 2
+        attrs.append(rest[1])
+        rest = rest[2:]
+    if not rest or rest[0] != "--" or len(rest) < 2:
+        print("uso: oute-emit run [--attr k=v]… -- <comando…>", file=sys.stderr)
+        return 2
+    cmd, env, fromfile = rest[1:], dict(os.environ), declared(TELEMETRY_KEYS)
+    for k in TELEMETRY_KEYS:
+        v = otel(k) if k in OTEL_KEYS else (os.environ.get(k) or fromfile.get(k))
+        if v:
+            env[k] = v
+    if attrs:
+        env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(filter(None, [env.get("OTEL_RESOURCE_ATTRIBUTES"), *attrs]))
+    try:
+        os.execvpe(cmd[0], cmd, env)
+    except OSError as e:
+        print(f"oute-emit run: não rodei {cmd[0]}: {type(e).__name__}", file=sys.stderr)
+        return 127
+    return 0
+
+
 def main(argv):
     deadline = time.monotonic() + TIMEOUT
     verb = argv[0] if argv else ""
     if verb in ("-h", "--help", ""):
         print(__doc__.split("\n\n")[1] if verb else __doc__, file=sys.stderr)
         return
+    if verb == "run":  # único verbo que não é best-effort: roda o comando de quem chamou e devolve o código dele
+        sys.exit(cmd_run(argv[1:]))
     valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2}
     window = None
     if verb == "backfill" and len(argv) > 1:

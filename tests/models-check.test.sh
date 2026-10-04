@@ -75,6 +75,18 @@ label = "docs"
 claude = "claude-haiku-4-5-20251001"
 codex = "gpt-6-luna"
 effort = "medium"
+
+[[reviewer]]
+writers = ["claude-sonnet-5-5", "gpt-6.1-sol"]
+agent = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+
+[[reviewer]]
+writers = ["claude-opus-5-5", "gpt-6-astra"]
+agent = "claude"
+model = "claude-sonnet-5-5"
+effort = "high"
 TOML
 # a tabela de exemplo com as trocas dadas (sed)
 table() { sed "$@" "$EX" > "$TMP/table.toml"; }
@@ -249,6 +261,42 @@ mc --table
 check "--table sem valor: código 2"                     bash -c '[ "$1" -eq 2 ] && grep -qF -- "--table sem valor" <<<"$2"' _ "$RC" "$ERR"
 mc --help
 check "--help: o uso, código 0"                         bash -c '[ "$1" -eq 0 ] && grep -qF "scripts/models-check [--table <arquivo>]" <<<"$2"' _ "$RC" "$OUT"
+
+# ---------------------------------------------------------------- 7b. revisor das etapas da rodada (#507)
+ex
+check "revisor: a tabela de exemplo passa, sem FALTA"    bash -c '[ "$1" -eq 0 ] && ! grep -q "^FALTA " <<<"$2"' _ "$RC" "$OUT"
+check "revisor: o autor é um modelo da tabela"           has_line "ok autor claude-sonnet-5-5 do revisor 1 é um modelo da tabela (tabela)"
+check "revisor: outro modelo que o autor"                has_line "ok revisor claude-opus-5-5 é de outro modelo que o autor claude-sonnet-5-5 (tabela)"
+check "revisor: o autor do dispatcher (fase plan) tem revisor, no Claude e no Codex" bash -c 'grep -qxF "ok revisor do autor claude-sonnet-5-5 (dispatcher, fase plan) (tabela)" <<<"$1" && grep -qxF "ok revisor do autor gpt-6.1-sol (dispatcher, fase plan) (tabela)" <<<"$1"' _ "$OUT"
+table -e 's/^model = "claude-opus-5-5"/model = "claude-opus-9-9"/'; mc --table "$TMP/table.toml"
+check "revisor com id que o Claude não tem: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA claude-opus-9-9 (claude)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^model = "claude-opus-5-5"/model = "claude-sonnet-5-5"/'; mc --table "$TMP/table.toml"
+check "revisor igual ao autor: FALTA, código 1"          bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA revisor claude-sonnet-5-5 é de outro modelo que o autor claude-sonnet-5-5 (tabela)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^writers = \["claude-sonnet-5-5", "gpt-6.1-sol"\]/writers = ["gpt-6.1-sol"]/'; mc --table "$TMP/table.toml"
+check "autor do dispatcher sem revisor: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA revisor do autor claude-sonnet-5-5 (dispatcher, fase plan) (tabela)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^writers = \["claude-opus-5-5", "gpt-6-astra"\]/writers = ["claude-opus-5-5", "gpt-9-9"]/'; mc --table "$TMP/table.toml"
+check "autor que não é modelo da tabela: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA autor gpt-9-9 do revisor 2 é um modelo da tabela (tabela)" <<<"$2"' _ "$RC" "$OUT"
+python3 - "$EX" > "$TMP/table.toml" <<'PY'
+import sys
+t = open(sys.argv[1]).read()
+old = 'agent = "claude"\nmodel = "claude-opus-5-5"\neffort = "high"'
+assert old in t
+print(t.replace(old, 'agent = "codex"\nmodel = "gpt-6-luna"\neffort = "medium"', 1), end="")
+PY
+mc --table "$TMP/table.toml"
+check "revisor pelo codex: o modelo e o esforço dele saem pelo cache do Codex" bash -c '[ "$1" -eq 0 ] && grep -qxF "ok gpt-6-luna (codex)" <<<"$2" && grep -qxF "ok gpt-6-luna esforço medium (codex)" <<<"$2"' _ "$RC" "$OUT"
+python3 - "$EX" > "$TMP/table.toml" <<'PY'
+import sys
+t = open(sys.argv[1]).read()
+print(t.replace('agent = "claude"\nmodel = "claude-opus-5-5"\neffort = "high"', 'agent = "codex"\nmodel = "gpt-6-luna"\neffort = "xhigh"', 1), end="")
+PY
+mc --table "$TMP/table.toml"
+check "revisor pelo codex com esforço que o modelo não tem: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA gpt-6-luna esforço xhigh (codex)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^agent = "claude"/agent = "outro"/'; mc --table "$TMP/table.toml"
+check "revisor com agent fora de claude e codex: código 2" bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers, agent (claude ou codex), model ou effort" <<<"$2"' _ "$RC" "$ERR"
+table -e 's/^writers = \["claude-sonnet-5-5", "gpt-6.1-sol"\]/writers = []/'; mc --table "$TMP/table.toml"
+check "revisor sem autor na lista: código 2"             bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers" <<<"$2"' _ "$RC" "$ERR"
+check "tabela do repo: tem [[reviewer]] e o par passa na estrutura" bash -c 'grep -q "^\[\[reviewer\]\]" "$1" && ! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA (autor|revisor)"' _ "$TABLE" "$MC"
 
 # ---------------------------------------------------------------- 8. nenhuma chamada a modelo
 check "nenhum claude, codex ou shim foi executado"      [ ! -e "$FAKE/called" ]

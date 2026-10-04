@@ -11,6 +11,8 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - `GET /v1/usage`: só leitura, credencial de leitura; janela inválida = 400; leitura que falha = 500.
 - `GET /v1/alerts`: só leitura, credencial de leitura; `at` inválido = 400; leitura que falha = 500.
 - `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
+- `GET /v1/rodada?id=`: só leitura, credencial de leitura; as etapas publicadas da rodada (#507); sem id = 400, rodada desconhecida =
+  404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
   `proposals.available` = `false` (o resto do menu segue).
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
@@ -29,7 +31,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import (auth as auth_mod, config as config_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
+from . import (auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
                tz as tz_mod, web)
 
 log = logging.getLogger("agent_studio")
@@ -249,6 +251,29 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             detail.exception("consulta do tray falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone))
+
+    # ------------------------------------------------ a rodada em JSON (#507)
+    @app.get("/v1/rodada")
+    async def v1_rodada(request: Request):
+        """As etapas publicadas da rodada (ADR-08, "Página da rodada e do ciclo"); só leitura, credencial de leitura."""
+        if not auth.reader(request):
+            tel.warn("unauthorized", "recusado: token ausente ou errado (rodada)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        rnd = request.query_params.get("id", "")
+        if not rnd:
+            return JSONResponse({"message": "falta o id da rodada"}, status_code=400)
+        try:
+            data = await run_in_threadpool(etapas_mod.load, store, surreal, rnd)
+        except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
+            tel.warn("rodada-failed", "consulta da rodada falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
+            detail.exception("consulta da rodada falhou")
+            return JSONResponse({"message": "consulta falhou"}, status_code=500)
+        if data is None:
+            return JSONResponse({"message": "rodada não encontrada"}, status_code=404)
+        if data["state_error"]:
+            tel.warn("rodada-state-failed", "rodada: estado (SurrealDB) falhou, respondi só com o DuckDB: %s",
+                     data["state_error"], level=logging.ERROR)
+        return JSONResponse(etapas_mod.api(data))
 
     # ------------------------------------------------ tela: login e conversas (#206), sessões (#207), pedidos e
     # alertas (#208)

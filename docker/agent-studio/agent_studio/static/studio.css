@@ -435,3 +435,24 @@ table.compacta td.sec { color: var(--muted-foreground); }
   .barra-linha { grid-template-columns: 96px minmax(0, 1fr) 72px; }
   .janelas { align-self: flex-start; }
 }
+
+/* página da rodada (#507): a barra de etapas (desenhada pelo agent-studio) e o texto das etapas (Markdown restrito) */
+.barra-etapas { background: var(--card); border-radius: var(--radius-2xl); box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); padding: 12px 16px; }
+.barra-etapas ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 4px; align-items: center; }
+.barra-etapas .passo { display: flex; align-items: center; color: var(--muted-foreground); }
+.barra-etapas .passo + .passo::before { content: ""; display: block; width: 24px; height: 1px; margin-right: 4px; background: var(--border); }
+.barra-etapas .passo > a, .barra-etapas .passo > span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; border: 1px solid var(--border); color: inherit; text-decoration: none; }
+.barra-etapas .passo.feito > a { color: var(--foreground); background: var(--muted); }
+.barra-etapas .passo.atual > a { border-color: var(--foreground); font-weight: 600; }
+.barra-etapas .passo[data-review="reprovado"] > a { border-color: var(--destructive); color: var(--destructive); }
+.barra-etapas .passo[data-review="sem-revisor"] > a { border-style: dashed; border-color: var(--foreground); }
+.etapa { scroll-margin-top: 16px; }
+.etapa-aviso { margin: 0 20px 12px; }
+.etapa-texto { padding: 0 20px 16px; max-width: 760px; overflow-wrap: anywhere; }
+.etapa-texto h3 { margin: 1.25rem 0 .5rem; font-size: 15px; font-weight: 600; }
+.etapa-texto .texto-secao:first-child h3 { margin-top: 0; }
+.etapa-texto p, .etapa-texto ul, .etapa-texto ol { margin: .5rem 0; }
+.etapa-texto li { margin: .2rem 0; }
+.etapa-fechada { margin: 0 20px 16px; }
+.etapa-fechada > summary { cursor: pointer; color: var(--muted-foreground); font-size: 13px; padding: 4px 0; }
+.etapa-fechada > .etapa-texto { padding: 12px 0 0; }
