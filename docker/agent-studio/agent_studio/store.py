@@ -8,7 +8,7 @@ import threading
 
 import duckdb
 
-from . import (alerts as alerts_mod, conversations as conv_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
+from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
                sessions as sess_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
@@ -171,6 +171,11 @@ class Store:
         """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila."""
         with self.lock:
             return usage_mod.usage(self.con, from_ns, to_ns, prices, tz)
+
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
+        """Leitura do Dashboard (#469), sob a mesma trava."""
+        with self.lock:
+            return dash_mod.snapshot(self.con, from_ns, to_ns, prices, tz)
 
     def alerts(self, at_ns, cfg):
         """Leitura do `/v1/alerts` (#204), sob a mesma trava."""

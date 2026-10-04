@@ -1,6 +1,6 @@
 """Tela do agent-studio (ADR-08 §9): login por token que vira cookie, lista de conversas e detalhe (#206), as
 sessões do `oute-task` com as conversas de cada uma (#207), os pedidos do canal de aprovação e os alertas do
-pipeline no topo das páginas (#208) e a página de preços (#340) e o uso por papel e por fase (#433).
+pipeline no topo das páginas (#208) e a página de preços (#340), o uso por papel e por fase (#433) e o Dashboard `/` (#469).
 
 HTML gerado no servidor (Jinja2, sempre com autoescape) + htmx servido daqui mesmo (`/static`): sem SPA, sem build
 de front-end e sem CDN. Só leitura.
@@ -32,7 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import (alert_text, conversations as conv_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
+from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
                tz as tz_mod)
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -89,6 +89,27 @@ def _usdm(v):
     return "—" if v is None else _br(f"{v:g}")
 
 
+def _usd2(v):
+    return "—" if v is None else f"US$ {_br(f'{v:,.2f}')}"
+
+
+def _pct_in(frac, digits=0):
+    return "—" if frac is None else f"{_br(f'{frac * 100:.{digits}f}')}%"
+
+
+def _calls(n):
+    return f"{_num(n)} {'chamada' if n == 1 else 'chamadas'}"
+
+
+def _compact(n):
+    """Contagem curta para rótulo de gráfico: 410k, 1,9M."""
+    if n is None:
+        return "—"
+    if n >= 1_000_000:
+        return f"{_br(f'{n / 1e6:.1f}')}M"
+    return f"{_br(f'{n / 1e3:.0f}')}k" if n >= 1000 else str(n)
+
+
 def _ago(iso):
     """Datetime do SurrealDB -> idade até agora (`3 min 05 s`)."""
     age = prop_mod.age_seconds(iso, time.time_ns())
@@ -98,7 +119,7 @@ def _ago(iso):
 def _env(zone=tz_mod.UTC):
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(HERE, "templates")), autoescape=True,
                              undefined=jinja2.StrictUndefined, trim_blocks=True, lstrip_blocks=True)
-    env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago,
+    env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago, usd2=_usd2, pct=_pct_in, compact=_compact, calls=_calls,
                        alert_title=alert_text.title, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     env.tests["safe_cmd_id"] = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v) is not None  # id que cabe num comando sem aspas
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
@@ -180,11 +201,32 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             detail_log.exception("tela: %s falhou", what)
             return None, error(request, 500, "A consulta falhou. A causa está no log do agent-studio.")
 
-    # ------------------------------------------------ login
+    # ------------------------------------------------ dashboard (#469): só leitura
     @app.get("/")
-    async def root():
-        return RedirectResponse(HOME, status_code=303, headers=HEADERS)
+    async def dashboard(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        q = request.query_params
+        try:
+            from_ns, to_ns = window(q)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz)
+        if failed:
+            return failed
+        now = time.time_ns()
+        # Gate pendente = pedido pendente (SurrealDB) e decisão pendente da rodada (já lida pelo `gate`)
+        records, state_read = await proposal_state("pedidos pendentes", prop_mod.pending)
+        ages = [a for a in (prop_mod.age_seconds(p.get("proposed_at"), now) for p in (records or {}).get("pending", []))
+                if a is not None]
+        ages += [d["age_seconds"] for d in getattr(request.state, "decisions", None) or []]
+        hours = q.get("hours", "" if "from" in q else "24")
+        qs = f"from={quote(q['from'], safe='')}&to={quote(q.get('to', ''), safe='')}" if "from" in q else f"hours={quote(hours, safe='')}"
+        return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
+                    gates=len(ages), window_qs=qs, hours=hours, from_ns=from_ns, to_ns=to_ns,
+                    windows=(("24", "24 h"), ("168", "7 dias")), range={"from": q.get("from", ""), "to": q.get("to", "")})
 
+    # ------------------------------------------------ login
     @app.get("/login")
     async def login_form(request: Request):
         target = safe_next(request.query_params.get("next"))

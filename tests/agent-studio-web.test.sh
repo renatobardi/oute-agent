@@ -102,7 +102,8 @@ check "  … a volta guarda a query"                     test "$(hdr location "$
 check "detalhe, logs e span sem login: 303"            test "$(code "$STUDIO_URL/conversa?id=conv-a")$(code "$STUDIO_URL/conversa/logs?id=conv-a")$(code "$STUDIO_URL/conversa/span?trace=1&span=2")" = 303303303
 check "htmx sem login: 401 com HX-Redirect"            test "$(code "${HX[@]}" "$STUDIO_URL/conversas")$(hdr hx-redirect "${HX[@]}" "$STUDIO_URL/conversas")" = "401/login?next=%2Fconversas"
 check "API sem cookie nem Bearer: 401"                 test "$(code "$STUDIO_URL/v1/usage")$(code "$STUDIO_URL/v1/alerts")" = 401401
-check "/ leva às conversas"                            test "$(code "$STUDIO_URL/")$(hdr location "$STUDIO_URL/")" = "303/conversas"
+check "/ sem login: 303 para o /login, com a volta"    test "$(code "$STUDIO_URL/")$(hdr location "$STUDIO_URL/")" = "303/login?next=%2F"
+check "htmx sem login em /: 401 com HX-Redirect"       test "$(code "${HX[@]}" "$STUDIO_URL/")$(hdr hx-redirect "${HX[@]}" "$STUDIO_URL/")" = "401/login?next=%2F"
 LOGIN="$(curl -s "$STUDIO_URL/login")"
 check "GET /login: formulário do token"                grep -q 'name="token" type="password"' <<<"$LOGIN"
 check "GET /login: sem o menu de quem entrou"          bash -c '! grep -q "/logout" <<<"$1"' _ "$LOGIN"
@@ -132,6 +133,7 @@ check "cookie forjado: 303"                            test "$(code -H "Cookie: 
 check "o token cru como cookie: 303"                   test "$(code -H "Cookie: ${COOKIE%%=*}=$STUDIO_TOKEN" "$STUDIO_URL/conversas")" = 303
 check "cookie forjado na API: 401"                     test "$(code -H "Cookie: ${COOKIE}0" "$STUDIO_URL/v1/usage")" = 401
 check "ingestão só com o cookie: 401 (só Bearer)"      test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "${C[@]}" -H 'Content-Type: application/json' --data-binary "@$TMP/logs.json" "$STUDIO_URL/v1/logs")" = 401
+check "com o cookie: / é o Dashboard (200, sem redirecionar)" bash -c 'test "$(curl -s -o "$2" -w "%{http_code}" "${@:3}" "$1/")" = 200 && grep -q "<h1>Dashboard</h1>" "$2"' _ "$STUDIO_URL" "$TMP/dash.html" "${C[@]}"
 check "já entrou: /login leva às conversas"            test "$(hdr location "${C[@]}" "$STUDIO_URL/login")" = "/conversas"
 for n in 'https://evil.example/' '//evil.example/x' '/\evil.example' 'conversas'; do
   login --data-urlencode "token=$STUDIO_TOKEN" --data-urlencode "next=$n" >/dev/null

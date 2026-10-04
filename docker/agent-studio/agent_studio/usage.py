@@ -30,9 +30,12 @@ _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"
 def _cols(tz, extra=None):
     """Colunas de agrupamento. `day` = a data local no fuso `tz` (`ZoneInfo`) da hora do fato: o nome vem do `zoneinfo`
     (validado em `tz.parse`) e vai literal no SQL, o ICU do DuckDB faz a conversão, inclusive para dias antigos."""
-    day = (f"CAST(timezone('{tz.key}', make_timestamp_ns(CAST(time_unix_nano AS BIGINT)) AT TIME ZONE 'UTC') "
-           "AS DATE)")
-    return {"day": day, **_COLS, **(extra or {})}
+    return {"day": f"CAST({local_expr(tz)} AS DATE)", **_COLS, **(extra or {})}
+
+
+def local_expr(tz):
+    """A hora do fato (`time_unix_nano`) como TIMESTAMP no fuso `tz`: base do dia aqui e das horas do dashboard (#469)."""
+    return f"timezone('{tz.key}', make_timestamp_ns(CAST(time_unix_nano AS BIGINT)) AT TIME ZONE 'UTC')"
 
 
 # papel e fase por sessão, dos eventos de abertura (valores fixos no SQL; nada vem de entrada). Fase fora de `[a-z]{2,16}`
