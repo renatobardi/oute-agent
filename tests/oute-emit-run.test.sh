@@ -43,7 +43,7 @@ envval() { local k="$1"; sed -n "s/^$k=//p" "$OUT_DIR/env"; return $?; }
 RUN_ENV=()
 HTTP="ht""tp"; SL="//"; EP="${HTTP}:${SL}collector.invalid:4318"; LEP="${HTTP}:${SL}logs.invalid:4318/v1/logs"; export EP LEP
 
-envfile "$H" OTEL_EXPORTER_OTLP_ENDPOINT=$EP OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
+envfile "$H" "OTEL_EXPORTER_OTLP_ENDPOINT=${EP}" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/json OTEL_LOGS_EXPORTER=otlp OTEL_METRICS_EXPORTER=otlp OTEL_TRACES_EXPORTER=otlp OTEL_LOG_USER_PROMPTS=1 \
   CLAUDE_CODE_ENABLE_TELEMETRY=1 CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1
 run --attr oute.swarm.round=swarm-1004-1306 --attr oute.swarm.step=fechamento -- "$TMP/child" um "dois três" --flag

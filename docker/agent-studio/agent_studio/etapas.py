@@ -187,7 +187,7 @@ def bar(steps):
 
 _INLINE = re.compile(r"`[^`\n]{1,500}`|\*\*[^*\n]{1,500}\*\*|\[[^\]\n]{1,500}\]\(https://[^\s()<>\"'`]{1,1000}\)")
 _LINK = re.compile(r"^\[([^\]]*)\]\((https://.*)\)$")
-_ITEM = re.compile(r"^(?:[-*] +|\d{1,3}[.)] +)(.*)$")
+_ITEM = re.compile(r"^(?:[-*]|\d{1,3}[.)]) (.*)$")
 _ORDERED = re.compile(r"^\d{1,3}[.)] ")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -246,7 +246,7 @@ class _Parser:
         if self.para or (self.items and self.ordered != bool(_ORDERED.match(s))):
             self.flush()
         self.ordered = bool(_ORDERED.match(s))
-        self.items.append(_ITEM.match(s).group(1))
+        self.items.append(_ITEM.match(s).group(1).strip())
 
     def line(self, line):
         if self.fence is not None:

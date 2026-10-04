@@ -317,7 +317,7 @@ rm -f "$RBIN/codex"
 
 # ---------------------------------------------------------------- 7b. o shell do dispatcher não tem as OTEL_* (#250): o revisor as leva do ~/.oute_env
 CASE=otel; round "$CASE"; mkdir -p "$FAKE/rev"; ok_json
-env -i OTEL_EXPORTER_OTLP_ENDPOINT=$EP OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
+env -i "OTEL_EXPORTER_OTLP_ENDPOINT=${EP}" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" \
   OTEL_LOGS_EXPORTER=otlp CLAUDE_CODE_ENABLE_TELEMETRY=1 GH_X=segredo bash -c 'declare -px' | grep -E '^declare -x (GH_|OTEL_|CLAUDE_CODE_)' > "$H/.oute_env"
 etapa fechamento.r1 "$TXT"
 KEEP_EP="$OTEL_EXPORTER_OTLP_ENDPOINT"; KEEP_RA="$OTEL_RESOURCE_ATTRIBUTES"; unset OTEL_EXPORTER_OTLP_ENDPOINT OTEL_RESOURCE_ATTRIBUTES
