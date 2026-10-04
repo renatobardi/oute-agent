@@ -1,0 +1,2 @@
+### Changed
+- **Tray do Mac no Kubo** (#473). O menu ganha símbolos SF Symbols sem cor (pintados pelo sistema) nos títulos de seção e nos botões. O âmbar do Gate aparece só no pedido pendente e na decisão pendente do swarm. Erro e alerta usam o mesmo símbolo, sem cor. O contrato do `/v1/tray` não muda. Entra no Mac com `git pull` + `oute tray install`, sem release (o tray é do host, não da imagem).
