@@ -1,0 +1,2 @@
+### Changed
+- **`docker/swarm-worker.md` consolidado** (#434). Regras sobrepostas fundidas (worktree e escopo, testes em dois ambientes, 3 execuções, `check-lib` e prova contra a `main`, prompt de permissão e `rm` com variável, `PRONTO` e fim da sessão), sem mudar o comportamento de nenhuma regra: o prompt do worker perde ~12% dos bytes. Os casos de `tests/oute-swarm-prompts.test.sh` acompanham o texto novo. **Precisa de release** (o `swarm-worker.md` vai na imagem).
