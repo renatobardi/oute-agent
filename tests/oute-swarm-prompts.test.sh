@@ -214,4 +214,10 @@ check "triagem: avisa acima de 10 sessões (#436)"        grep -qF 'o total pass
 check "triagem: avisa com outra rodada aberta no repo (#436)" grep -qF 'há **outra rodada aberta no mesmo repo** (o `oute-swarm list` acima)' "$D"
 check "triagem: o aviso não bloqueia nem muda o --max (#436)" grep -qF 'O aviso não bloqueia: o Bardi decide, e o `--max` não muda.' "$D"
 check "triagem: a regra fica no §1, antes do §2 (#436)"  bash -c 'sed -n "/^## 1\. /,/^## 2\. /p" "$1" | grep -q "\*\*Tamanho da rodada:\*\*"' _ "$D"
+check "sonar ausente: lê oute-sonar pr --json após 5 min (#426)" grep -qF 'se o check não aparece em `gh pr checks <n>` por mais de 5 minutos depois do push do head, leia `oute-sonar pr <n> --json`' "$D"
+check "sonar ausente: commit = head e gate OK pede push novo (#426)" grep -qF 'peça ao worker um push novo (atualizar com a `origin/main`, ou commit vazio se já está atualizado)' "$D"
+check "sonar ausente: commit diferente ou gate falho é pendente (#426)" grep -qF 'Com `commit` diferente do head, ou gate que não é `OK`' "$D"
+check "sonar ausente: nunca dispensa o check (#426)"     grep -qF 'Nunca dispense o check sozinho' "$D"
+check "sonar ausente: regra no §3 (#426)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -q "Check .SonarCloud Code Analysis. ausente"' _ "$D"
+check "sonar ausente: skill de auditoria traz a regra (#426)" grep -qF 'check `SonarCloud Code Analysis` ausente no head por mais de 5 minutos (#426)' "$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
 check_end
