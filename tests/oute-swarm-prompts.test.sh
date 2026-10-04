@@ -233,4 +233,8 @@ check "sonar ausente: commit diferente ou gate falho é pendente (#426)" grep -q
 check "sonar ausente: nunca dispensa o check (#426)"     grep -qF 'Nunca dispense o check sozinho' "$D"
 check "sonar ausente: regra no §3 (#426)"                bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -q "Check .SonarCloud Code Analysis. ausente"' _ "$D"
 check "sonar ausente: skill de auditoria traz a regra (#426)" grep -qF 'check `SonarCloud Code Analysis` ausente no head por mais de 5 minutos (#426)' "$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
+# aviso do canal só para pedido da rodada (#452)
+check "canal: aviso só do pedido da rodada (#452)"       grep -qF 'houver pedido pendente **da rodada** no canal de aprovação' "$D"
+check "canal: atribuição pelo #<n> do título (#452)"     grep -qF 'a linha `[canal]` traz no título `#<n>` de uma issue da rodada' "$D"
+check "canal: pedido alheio numa linha, sem pergunta nem ação (#452)" grep -qF 'é alheio: uma linha' "$D"
 check_end
