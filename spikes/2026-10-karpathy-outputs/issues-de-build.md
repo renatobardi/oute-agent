@@ -30,7 +30,7 @@ A coluna "Release" segue o `AGENTS.md` ("Precisa de release: mudança na imagem"
 
 | Item | Motivo |
 |---|---|
-| Resumo de rodada com diagrama ou página | depende da comparação do Bardi no P3 (texto contra página), que está pendente |
+| Resumo de rodada como página | o Bardi preferiu a página no P3 ([comentário](https://github.com/renatobardi/oute-agent/issues/458#issuecomment-5979659271)), numa amostra. Falta definir como a página chega a ele e corrigir os defeitos que a revisão do P3 apontou. É a candidata mais forte a 13ª issue; a escolha é do Bardi |
 | Prompts do swarm e skills em inglês | dependem da issue 7 e da leitura de fidelidade dos 6 arquivos que ninguém conferiu |
 | ASD-STE100 a 80% nos prompts | custa mais que o inglês direto e não mostrou ganho ([`lado-maquina.md`](lado-maquina.md)) |
 | Vídeo | veredito "descartar por ora" (fatia 2) |

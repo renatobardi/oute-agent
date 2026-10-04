@@ -65,7 +65,7 @@
 <h2>Resumo</h2>
 <ol class="resumo">
   <li><strong>O Bardi lê ou decide em 14 pontos.</strong> Em 12 deles o texto sai de um agente.</li>
-  <li><strong>Lado humano:</strong> o PT controlado com a decisão no topo funciona quando o Sonnet escreve. O Haiku não dá conta.</li>
+  <li><strong>Lado humano:</strong> o PT controlado com a decisão no topo funciona quando o Sonnet escreve. O Haiku não dá conta. No P3 o Bardi preferiu a página ao texto (uma amostra).</li>
   <li><strong>O maior risco é a fidelidade.</strong> No P1, os dois modelos puseram uma recomendação que a fonte não faz.</li>
   <li><strong>Lado máquina:</strong> o inglês reduz os tokens em 13% e a reescrita enxuta em 23%. Nenhuma troca está provada.</li>
   <li><strong>Plano:</strong> 12 issues recomendadas, o lado humano primeiro. Nenhuma foi criada.</li>
@@ -130,7 +130,7 @@
   <tr><th>Protótipo</th><th>Veredito</th><th>O que funcionou</th><th>O que falhou</th></tr>
   <tr><td>P1, pedido de merge</td><td class="v aj">Ajustar</td><td>A decisão abre o texto. O Sonnet citou 10 referências e as 10 existem.</td><td>Os dois modelos recomendaram o que a auditoria não recomenda.</td></tr>
   <tr><td>P2, script do watch</td><td class="v aj">Ajustar</td><td>Nenhum comando mudou. O Sonnet manteve 18 de 18 fatos.</td><td>O Haiku perdeu 2 fatos, mudou 2 e tranquilizou em vez de avisar.</td></tr>
-  <tr><td>P3, texto, diagrama e página</td><td class="v aj">Ajustar</td><td>Texto e página mantêm 47 de 47 fatos.</td><td>O diagrama perdeu 5 de 29 fatos. O ganho de leitura não foi medido.</td></tr>
+  <tr><td>P3, texto, diagrama e página</td><td class="v aj">Ajustar</td><td>Texto e página mantêm 47 de 47 fatos.</td><td>O diagrama perdeu 5 de 29 fatos.</td></tr>
   <tr><td>P4, notas em inglês</td><td class="v aj">Ajustar</td><td>A variante enxuta gasta 23% menos tokens e mantém 53 de 53 regras.</td><td>A regressão não separa as variantes.</td></tr>
   <tr><td>P5, caixa de entrada do dono</td><td class="v aj">Ajustar</td><td>Topo com contagem. 53 de 54 fatos mantidos.</td><td>O artefato ficou 2,2 vezes maior.</td></tr>
   <tr><td>Vídeo</td><td class="v de">Descartar por ora</td><td>As ferramentas existem.</td><td>O ganho sobre uma página é pequeno e a conferência é mais lenta.</td></tr>
@@ -151,7 +151,7 @@
   <tr><td>7</td><td>Proposta só GitHub e relatório de spike</td><td>comentário; diagrama quando descreve um fluxo</td><td>Sonnet ou Opus</td></tr>
   <tr><td>8</td><td>Script no <code>oute watch</code></td><td>script com <code># RESUMO</code> e <code># CUIDADO:</code></td><td>Sonnet ou Opus</td></tr>
   <tr><td>9</td><td>Lições kaizen</td><td>texto</td><td>Sonnet ou Opus</td></tr>
-  <tr><td>10</td><td>Resumo de fim de rodada</td><td>texto; diagrama pendente da comparação do Bardi no P3</td><td>Sonnet ou Opus; Haiku não provado</td></tr>
+  <tr><td>10</td><td>Resumo de fim de rodada</td><td>página, com as decisões no topo; o Bardi preferiu a página no P3 (uma amostra)</td><td>Sonnet ou Opus; Haiku não provado</td></tr>
   <tr><td>11</td><td>Saída do <code>scripts/oute</code></td><td>terminal, texto fixo</td><td>muda por PR</td></tr>
   <tr><td>12</td><td>Tray, telas e alertas</td><td>página e menu, texto fixo</td><td>muda por PR</td></tr>
   <tr><td>13</td><td>Insights do ciclo</td><td>comentário com tabela</td><td>Sonnet ou Opus</td></tr>
@@ -181,8 +181,8 @@
 
 <h2>O que ficou em aberto</h2>
 <ul>
-  <li><strong>Não medido:</strong> o ganho de leitura do Bardi em qualquer artefato.</li>
-  <li><strong>Pendente do Bardi:</strong> a comparação entre o texto e a página do P3.</li>
+  <li><strong>Não medido:</strong> o ganho de leitura do Bardi fora do P3.</li>
+  <li><strong>Medida do P3:</strong> o Bardi preferiu a página ao texto. É uma amostra, sem tempo cronometrado.</li>
   <li><strong>Sem prova:</strong> que alguma variante em inglês não piora a qualidade.</li>
   <li><strong>Não conferido:</strong> como esta página aparece no navegador. O container não tem navegador.</li>
 </ul>

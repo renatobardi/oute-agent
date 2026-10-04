@@ -5,7 +5,7 @@
 ## 1. Resumo
 
 1. **O Bardi lê ou decide em 14 pontos.** Em 12 deles o texto sai de um agente. O contrato de cada ponto está em [`output-contract.md`](output-contract.md).
-2. **Lado humano:** o PT controlado com a decisão no topo funciona quando o Sonnet escreve. O Haiku não dá conta. Os cinco protótipos ficaram com o veredito **Ajustar**; o vídeo, **Descartar por ora**.
+2. **Lado humano:** o PT controlado com a decisão no topo funciona quando o Sonnet escreve. O Haiku não dá conta. No P3 o Bardi preferiu a página ao texto (uma amostra). Os cinco protótipos ficaram com o veredito **Ajustar**; o vídeo, **Descartar por ora**.
 3. **O maior risco é a fidelidade.** No P1, os dois modelos puseram uma recomendação que a fonte não faz. A máquina só confere que a referência existe; só um revisor confere que ela sustenta a frase.
 4. **Lado máquina:** o inglês reduz os tokens em 13% e a reescrita enxuta em 23%, mas nenhuma troca está provada. A regressão cobre 3 grupos de regra de cerca de 53.
 5. **Plano:** 12 issues recomendadas, o lado humano primeiro ([`issues-de-build.md`](issues-de-build.md)). Nenhuma foi criada.
@@ -43,7 +43,7 @@ Cada protótipo usou uma saída real e uma amostra só. O detalhe está no [come
 |---|---|---|---|---|
 | **P1** pedido de merge | [auditoria do #457](https://github.com/renatobardi/oute-agent/pull/457#issuecomment-5976361202) | **Ajustar** | a decisão e as opções abrem o texto; o Sonnet citou 10 referências e as 10 existem | os dois modelos recomendaram o que a auditoria não recomenda; o Sonnet perdeu uma condição |
 | **P2** script do watch | pedido `20261003-230905` do canal | **Ajustar** (Sonnet); **não** (Haiku) | nenhum comando mudou; o Sonnet manteve 18 de 18 fatos | um `CUIDADO` do Sonnet exagera; o Haiku perdeu 2 fatos, mudou 2 e tranquilizou em vez de avisar |
-| **P3** resumo em texto, diagrama e página | [resumo do ciclo na #437](https://github.com/renatobardi/oute-agent/issues/437#issuecomment-5976459420) | **Ajustar** | texto e página mantêm 47 de 47 fatos | o diagrama perdeu 5 de 29 fatos; o ganho de leitura não foi medido |
+| **P3** resumo em texto, diagrama e página | [resumo do ciclo na #437](https://github.com/renatobardi/oute-agent/issues/437#issuecomment-5976459420) | **Ajustar** | texto e página mantêm 47 de 47 fatos | o diagrama perdeu 5 de 29 fatos; a página foi lida com os defeitos da revisão sem corrigir |
 | **P4** notas em inglês | `docker/agent-notes.md` | **Ajustar** | a variante enxuta gasta 23% menos tokens e mantém 53 de 53 regras | a regressão não separa as variantes; 2 pontos de ambiguidade nova |
 | **P5** caixa de entrada do dono | FE#67 (privada) | **Ajustar** | topo com contagem; 53 de 54 fatos mantidos | o artefato ficou 2,2 vezes maior; uma classificação sem base na fonte |
 | **Vídeo** | só pesquisa | **Descartar por ora** | as ferramentas existem | o ganho sobre uma página é pequeno e a conferência é mais lenta |
@@ -68,7 +68,9 @@ Fonte: [`fatia-2/medidas/forma.tsv`](fatia-2/medidas/forma.tsv), [`tokens.tsv`](
 
 - **O texto controlado é mais longo, não mais curto.** A fonte por linha e as opções numeradas pesam.
 - **Isso não contraria a meta.** No lado humano o custo não é restrição (issue #458, "Prioridades").
-- **O ganho de leitura não foi medido.** Só o Bardi mede. A comparação do P3 está pendente com ele.
+- **O ganho de leitura tem uma medida humana, do P3.** O Bardi comparou o texto e a página e respondeu "a página" ([comentário](https://github.com/renatobardi/oute-agent/issues/458#issuecomment-5979659271)).
+- **Os limites dessa medida:** uma amostra, um leitor, sem tempo cronometrado. O comentário não diz que parte da página ajudou. Vale como preferência declarada.
+- **Nos outros protótipos o ganho de leitura não foi medido.**
 
 ### Lado máquina
 
@@ -101,7 +103,7 @@ Em ordem de gravidade. A fidelidade vem primeiro.
 | # | Pergunta | Resposta | Onde está |
 |---|---|---|---|
 | 1 | Onde o Bardi lê ou aprova? | Em 14 pontos. Nos 10 últimos PRs não há pedido do Bardi escrito no GitHub. A conversa na aba não fica registrada: **não medida**. | seção 2; fatia 1 |
-| 2 | Que degrau em cada ponto? | Degrau 1 (texto) em 13 pontos. Degrau 3 no ponto 12, que já é página. O degrau 2 no ponto 10 fica **pendente** da comparação do Bardi no P3. Degrau 4 em nenhum. Recomendação do autor. | [`output-contract.md`](output-contract.md) |
+| 2 | Que degrau em cada ponto? | **Ponto 10: página (degrau 3).** O Bardi comparou o texto e a página do P3 e preferiu a página ([comentário](https://github.com/renatobardi/oute-agent/issues/458#issuecomment-5979659271)). É uma amostra, sem tempo cronometrado. Degrau 3 também no ponto 12, que já é página. Degrau 1 (texto) nos outros 12 pontos; a página nos pontos 7 e 13, que também são relatórios longos, é recomendação do autor por analogia, sem medida. Degrau 4 em nenhum. | [`output-contract.md`](output-contract.md) |
 | 3 | Regras de PT controlado; o modelo cumpre? | 15 regras. O Sonnet cumpre o limite de 25 palavras por frase nas duas amostras e passa do limite de parágrafo numa. O Haiku não cumpre. A voz passiva não tem medida confiável. | [`pt-controlado.md`](pt-controlado.md) |
 | 4 | O glossário vira dicionário? | Sim. 9 dos 50 termos do `CONTEXT.md` já trazem "Evite". O Sonnet usou 0 termos a evitar nas três amostras; o Haiku usou 3 numa. | [`pt-controlado.md`](pt-controlado.md), "Dicionário" |
 | 5 | Padrão de aviso | Proposta: `# RESUMO` no topo e `# CUIDADO:` com o comando e depois a perda. A garantia "comandos iguais" se confere por máquina. Se o padrão melhora a decisão do Bardi: **não medido**. | regra 9; P2 |
@@ -168,14 +170,14 @@ Se o rascunho do ADR vale naquele repo: **em aberto**.
 ## 10. O que ficou em aberto
 
 - **Não medido:**
-  - o ganho de leitura do Bardi em qualquer artefato;
+  - o ganho de leitura do Bardi fora do P3;
   - os tokens no Codex e no `claude-fable-5-1`;
   - o efeito do cache de prompt;
   - quantas vezes cada arquivo entra numa rodada;
   - a conversa na aba;
   - as páginas do ai-memory;
   - a renderização do `report.html` (não há navegador no container).
-- **Pendente do Bardi:** a comparação entre o texto e a página do P3.
+- **Sem resposta na medida do P3:** que parte da página ajudou (as decisões no topo, a lista de marcar ou o diagrama) e quanto tempo ela poupa.
 - **Não conferido:** a fidelidade de 6 dos 7 arquivos das variantes b e c da fatia 1.
 - **Lista que se perdeu:** a fatia 1 prometeu a lista completa dos trechos ambíguos do pt de hoje. Ela não ficou no branch. Ficaram os dois exemplos do comentário, que reli nesta fatia (`docker/swarm.md:88` e `addons/skills/oute-aidlc-qa-pr-audit/SKILL.md:253`).
 - **O que ficou nos serviços:** esta fatia só leu. Ela chamou `memory_recent` e `memory_handoff_list` (leitura) e o `gh` (leitura). A única escrita fora do branch é o comentário final na #458, publicado depois deste commit. Os hooks da sessão gravam a atividade dela no ai-memory, no escopo do repo: **não conferi o que foi gravado**.
