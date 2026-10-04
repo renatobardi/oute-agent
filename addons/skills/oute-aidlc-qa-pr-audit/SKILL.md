@@ -351,6 +351,8 @@ REPORT_URL=$(gh pr comment <N> --body-file <arquivo>)   # o gh imprime o URL do 
 
 Guarde o `REPORT_URL` (e anote-o na conversa): é o único link válido do relatório, citado depois no passo 14 e na linha "relatório anterior" de uma reauditoria. Nunca escreva esse link à mão nem o reconstrua de memória; saída sem URL (comentário não publicado, alvo ref local) significa "sem link", não um valor inventado.
 
+**Referências (#485).** Antes de publicar, rode `oute-refcheck <arquivo do relatório>`. Referência `quebrada` ou `nao-abre` (inclui caminho de `/tmp` e de scratchpad) é corrigida no relatório, ou declarada nele como "não abre" com o motivo; `nao-conferido` (gh fora do ar) é declarada "não conferida". O comando confere que a referência existe, não que ela sustenta a frase: isso é seu.
+
 Não use `gh pr review --approve` nem `--request-changes`. Cada auditoria é um comentário novo, e comentários antigos não são editados nem apagados. A primeira linha é sempre o marcador fixo, que serve para contar as auditorias depois. Nunca cole segredo nem saída que contenha segredo; corte a saída dos gates ao trecho relevante.
 
 **Ordem do relatório (#482):** o Bardi lê primeiro o que decide. O relatório abre com a ação recomendada e, se houver, a "Decisão do Bardi" com as opções numeradas; depois vêm o head, os gates e os achados. O texto ao Bardi segue `docs/pt-controlado.md`: pt-BR, frase curta, fonte que ele abre, recomendação rotulada. A forma muda; o que a auditoria confere (passos 2 a 11) não muda.

@@ -174,6 +174,13 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   organização: OUTE_SONAR_ORG. Token: SONAR_TOKEN (item `sonar` do vault, pelo agent_env). Saída: 0 gate aprovado,
   1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise.
 
+## CONTAINER — conferência de referências (oute-refcheck, #485)
+  oute-refcheck [arquivo]           confere, num texto (arquivo ou stdin), cada #N, SHA, arquivo:linha[@sha] e link de
+                                    comentário do GitHub: existe e o Bardi abre? /tmp e scratchpad = nao-abre
+  Uma linha por referência (ok, quebrada, nao-abre, nao-conferido) e o resumo. Saída: 0 todas ok, 1 há quebrada ou
+  nao-abre, 2 uso, 3 só há nao-conferido (gh fora do ar ou sem resposta). Só leitura: gh api (GET) e git.
+  LIMITE: confere que a referência EXISTE, não que ela SUSTENTA a frase; isso é do revisor.
+
 ## CONTAINER — screenshot de UI e PDF (oute-shot, #472)
   oute-shot <url|arquivo> [--mobile] [--dark] [-o <png>] [--height <px>]
                                     PNG da página: desktop 1280 ou --mobile 390, light ou --dark (padrão ./shot-<desktop|mobile>-<light|dark>.png,
