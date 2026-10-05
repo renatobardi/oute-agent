@@ -1,5 +1,6 @@
 """Filtro de repositório das quatro telas (#528): o `oute.task.repo` que o `oute-task` põe no resource de toda conversa
-(ADR-04). Conversa aberta fora do `oute-task` não tem repositório: é a opção "sem repositório".
+(ADR-04) e que o shim põe na conversa aberta direto numa pasta de repositório (#599). Conversa aberta fora de repositório
+não tem repositório: é a opção "sem repositório". No histórico, o `repo_infer` preenche a coluna pelo `file_path`.
 
 - **Onde mora:** coluna fixa `oute_repo` de `spans` e `logs` (`store.py`), preenchida na ingestão (`otlp.FIXED`) e, no
   histórico, uma vez na subida (`store.migrate`), a partir do JSON `resource_attributes`. A medida que embasa a escolha

@@ -202,7 +202,7 @@
 </section>
 {% endcall %}
 
-{# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa fora do oute-task #}
+{# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa aberta fora de repositório (#599) #}
 {% call fragment("repos") %}
 <section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
   <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>

@@ -229,13 +229,30 @@ check "agente aberto direto na worktree (-p): marcado" [ "$(aenv claude OTEL_RES
 t semid claude; rm -f "$(gitdir "$SP/proj-semid")/oute-task"; before=$((before + 1))
 printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-semid" > "$HOME/.claude/projects/p/conv-semid.jsonl"
 shim claude "$WS/proj" --resume conv-semid
-check "restore em worktree sem id: sem marca"          [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-semid" && pwd -P)" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+check "restore em worktree sem id: só o repositório principal, sem oute.task.id (#599)" [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-semid" && pwd -P)" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
 shim claude "$WS/proj" -p "no checkout principal"
-check "checkout principal: sem marca"                  [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+check "checkout principal: oute.task.repo = a pasta, sem oute.task.id (#599)" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
+mkdir -p "$WS/proj/sub/dir"
+shim claude "$WS/proj/sub/dir" -p "numa subpasta"
+check "subpasta do repositório: o repositório, não a subpasta" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
+shim codex "$WS/proj" exec "no checkout principal"
+check "checkout principal no Codex: a mesma marca"     [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
+mkdir -p "$TMP/com espaco+x" && git -C "$TMP/com espaco+x" init -q
+shim claude "$TMP/com espaco+x" -p "nome com espaco"
+check "nome de pasta com caractere fora de [A-Za-z0-9._-]: vira hífen, como no oute-task" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=com-espaco-x" ]
 shim claude "$TMP" -p "fora de repo"
 check "fora de repo: sem marca"                        [ "$RC" -eq 0 -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+git init -q --bare "$TMP/nu.git"
+shim claude "$TMP/nu.git" -p "repositório bare"
+check "repositório sem pasta .git própria (bare): sem marca" [ "$RC" -eq 0 -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+OUT="$(cd "$WS/proj" && OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=de-fora,oute.task.slug=x" PATH="$SHIMS:$PATH" "$SHIMS/claude" -p "já marcada" 2>&1 </dev/null)"
+check "oute.task.id já no ambiente (quem chamou marcou): o shim não mexe" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=de-fora,oute.task.slug=x" ]
+OUT="$(cd "$WS/proj" && OTEL_RESOURCE_ATTRIBUTES="oute.task.repo=outra,$ORIGIN" PATH="$SHIMS:$PATH" "$SHIMS/claude" -p "repo de outra pasta" 2>&1 </dev/null)"
+check "oute.task.repo de outra pasta no ambiente: vale o desta, sem repetir a chave" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
+OUT="$(cd "$WS/proj" && env -u OTEL_RESOURCE_ATTRIBUTES PATH="$SHIMS:$PATH" "$SHIMS/claude" -p "sem origem" 2>&1 </dev/null)"
+check "sem origem no ambiente: só oute.task.repo"       [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "oute.task.repo=proj" ]
 OUT="$(cd "$SP/proj-s1" && PATH="$SHIMS:$NOTASK:/usr/bin:/bin" "$SHIMS/claude" -p "sem oute-task" 2>&1 </dev/null)"; RC=$?
-check "shim sem oute-task no PATH: abre igual, sem marca" [ "$RC" -eq 0 -a "$OUT" == "agente falso claude" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN" ]
+check "shim sem oute-task no PATH: abre igual, só com o repositório da pasta" [ "$RC" -eq 0 -a "$OUT" == "agente falso claude" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
 check "shim: não emite evento"                         [ "$(total)" -eq "$before" ]
 OUT="$(cd "$WS/proj" && "$TASK" --mark 2>&1; cd "$TMP" && "$TASK" --mark 2>&1; "$TASK" --mark /nao/existe 2>&1)"; RC=$?
 check "--mark fora de worktree com id: nada, código 0" [ "$RC" -eq 0 -a -z "$OUT" ]
@@ -328,6 +345,7 @@ live="$OTEL_EXPORTER_OTLP_ENDPOINT"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
 t0=$(date +%s); down="$(ciclo ciclo-fora)"
 check "coletor fora do ar: mesma saída, mesmo exec, mesmos códigos" [ "$down" == "$up" ]
+[ "$down" == "$up" ] || { echo "--- diferença (coletor no ar × fora do ar):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$down"); } >&2
 check "coletor fora do ar: rápido"                     [ $(( $(date +%s) - t0 )) -le 6 ]
 check "coletor fora do ar: os três eventos ficam no spool" [ "$(ls "$HOME/.oute/emit/spool"/*.json 2>/dev/null | wc -l)" -eq 3 ]
 export OTEL_EXPORTER_OTLP_ENDPOINT="$live"
@@ -335,6 +353,7 @@ oute-emit flush
 check "coletor de volta: o spool entrega o ciclo"      [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-fora"' | jq -r .name | tr '\n' ' ')" == "oute.task.opened oute.task.reopened oute.task.removed " ]
 noemit="$(PATH="$NOEMIT:/usr/bin:/bin"; ciclo ciclo-sem)"
 check "sem oute-emit: mesma saída, mesmo exec, mesmos códigos" [ "$noemit" == "$up" ]
+[ "$noemit" == "$up" ] || { echo "--- diferença (coletor no ar × sem oute-emit):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$noemit"); } >&2
 check "sem oute-emit: nada emitido"                    [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-sem"' | grep -c .)" -eq 0 ]
 check "sem oute-emit: a marca nas conversas não depende dele" grep -qE "^$ORIGIN,oute.task.id=proj-ciclo-sem-[0-9]{14},oute.task.repo=proj,oute.task.slug=ciclo-sem$" <<<"$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
 

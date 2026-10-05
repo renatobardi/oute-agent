@@ -152,11 +152,35 @@ Decisões do grilling de `arch` da #128 (Bardi). Uma **sessão** (worktree + bra
 - **`removed`:** emitido depois que o `git worktree remove` deu certo, com o id lido antes. Motivos: `merged` (PR mergeado), `empty` (sem commits além de `origin/<base>`), `detached` (HEAD detached contida em `origin/<base>`). Não leva `oute.task.agent` (o agente é o das aberturas). Worktree removida por fora do `oute-task clean` não emite.
 - **Rodada:** no dispatcher, `OUTE_SWARM_ID`; no worker, o `oute-swarm spawn` passa `OUTE_SWARM_ROUND=<rodada>` ao `oute-task`, que usa o slug como `oute.swarm.session`. `spawn` fora de rodada (`avulso`) abre sessão avulsa. Com a rodada no ambiente, vale ela (e a marca é atualizada); sem ambiente (reabertura na mão, restore), vale a que a marca guardou.
 - **Marca nas conversas:** antes do `exec` (também no `shell`), `OTEL_RESOURCE_ATTRIBUTES` = o valor atual sem `oute.task.*`/`oute.swarm.*` + `oute.task.id`, `oute.task.repo`, `oute.task.slug` e, em sessão de rodada, `oute.swarm.round`/`oute.swarm.session`. Valores só com `[A-Za-z0-9._-]` (o resto vira `-`).
-- **Shim:** toda chamada de `claude`/`codex` de dentro de uma worktree com id refaz a mesma marca (`oute-task --mark`): restore do herdr, `--resume`, `-c`, `-p`. Worktree sem id, checkout principal e fora de repo: sem marca.
+- **Shim:** toda chamada de `claude`/`codex` de dentro de uma worktree com id refaz a mesma marca (`oute-task --mark`): restore do herdr, `--resume`, `-c`, `-p`. Worktree sem id e checkout principal: só o repositório da pasta, sem id (#599, "Repositório da pasta", abaixo). Fora de repo: sem marca.
 - **`oute.agent` (quem chamou), nesta ordem:** `CLAUDECODE=1` → `claude`; `CODEX_THREAD_ID` → `codex`; ambiente do swarm (`OUTE_SWARM_ID`, `OUTE_SWARM_ROUND` ou `OUTE_SWARM_WORKER`) → o agente do dispatcher (`agent=` do `meta` da rodada; sem ele, `claude`); stdin e stdout em terminal → `human`; senão `unknown`.
 - **Codex conferido (0.159.2):** um `codex exec` com o exporter OTLP apontado para um receptor local e a marca no ambiente mandou logs e traces com `oute.task.id`, `oute.task.repo` e `oute.task.slug` no resource. Sem lacuna. O marcador de sessão do Codex é `CODEX_THREAD_ID`. A conferência no bucket é a do pós-deploy.
 - **Falha:** nada disto muda saída, `exec` ou código do `oute-task`. Sem `oute-emit` na imagem não há evento, mas a marca nas conversas continua. Coletor fora: o evento vai ao spool. Coletor que não responde: até 2 s (teto do `oute-emit`) antes do `exec`.
 - **Agente Claude (#250):** o shell do Bash tool do Claude Code não herda as `OTEL_*`; o `oute-emit` lê endpoint e origem do `~/.oute_env` (ver a interface do adendo #124), e o `oute-task` chamado por um agente Claude (o `clean --yes` do fim da rodada) emite como os demais. A marca nas conversas não depende disso.
+
+### Repositório da pasta (#599, 2026-10-05)
+Decisão do Bardi (2026-10-05, #599): a conversa aberta direto numa pasta, sem o `oute-task`, usa a pasta como o repositório dela. Cada pasta tem o seu repositório.
+- **Qual repositório vale para cada pasta.** O repositório é o **repositório principal** da pasta: o nome da pasta que contém o `.git` comum (`git rev-parse --git-common-dir`), com o que não é `[A-Za-z0-9._-]` trocado por `-`. É o mesmo nome que o `oute-task` grava.
+
+  | Pasta em que a conversa abre | `oute.task.repo` |
+  |---|---|
+  | checkout principal (`/workspace/<repo>`) | `<repo>` |
+  | subpasta do checkout principal ou de uma worktree | o repositório, nunca a subpasta |
+  | worktree com a marca da sessão (id) | o da marca, com `oute.task.id` e `oute.task.slug` (#128, sem mudança) |
+  | worktree sem a marca da sessão | o repositório principal da worktree, não o nome da pasta da worktree |
+  | repositório sem pasta `.git` própria (bare, submódulo) | sem marca |
+  | pasta fora de repositório | sem marca: a conversa segue "sem repositório" |
+- **Quem marca:** o shim (`docker/shims/oute-agent-shim`), em toda chamada de `claude`/`codex`. A conversa sai só com `oute.task.repo`. Ela **não** ganha `oute.task.id` nem `oute.task.slug`: não é sessão, e nenhum evento `oute.task.*` sai.
+- **Ambiente já marcado:** com `oute.task.id` no `OTEL_RESOURCE_ATTRIBUTES` de quem chamou (ex.: `oute-regression`), o shim não mexe. Um `oute.task.repo` que veio de outra pasta sai, e entra o da pasta atual. O resto do valor fica como está.
+- **Revisor (`oute-swarm step review`):** roda numa pasta vazia, fora de repositório. Leva o repositório da rodada: o nome da pasta do `repo=` do `meta` da rodada, por `oute-emit run --attr oute.task.repo=…`. A etapa `ciclo` não tem `meta`, e o revisor dela sai sem repositório.
+- **Fase na exibição:** a conversa sem `oute.task.id` aparece na fase `interativa` (Uso e Dashboard do agent-studio). `interativa` é categoria de exibição, não é fase do AI-DLC (ADR-07). `desconhecida` fica só para a sessão com id e sem fase registrada. O revisor também não tem `oute.task.id` e cai em `interativa`.
+- **Histórico (conversas anteriores à marca):** o agent-studio infere o repositório **só pelo `file_path`** dos spans de ferramenta (`claude_code.tool`) da própria conversa (`agent_studio/repo_infer.py`, na subida). Ele não lê o texto do comando (`full_command`) nem a entrada ou a saída da ferramenta.
+  - Entra a conversa em que nenhum fato tem repositório. Cada `file_path` que aponta um repositório que o banco já conhece dá um voto.
+  - Caminhos que votam: `/workspace/<repo>/…`; `/workspace/.worktrees/<espaço>/<repo>-<slug>/…` (e o formato antigo, sem `<espaço>`); e a pasta em que a conversa abriu, como o harness a grava em `/tmp/claude-<uid>/<pasta>/…` e em `~/.claude/projects/<pasta>/…`.
+  - Vale o repositório com mais da metade dos votos. Empate, caminho ambíguo ou conversa sem voto: segue "sem repositório".
+  - O agent-studio grava só a coluna `oute_repo` dos fatos da conversa. O `resource_attributes` e o bucket não mudam. O fato inferido se reconhece: coluna preenchida e JSON sem `oute.task.repo`.
+  - Ler conteúdo (o `cd <pasta>` do comando) para cobrir o resto é decisão do Bardi e está pendente (#599).
+- Opções descartadas: criar `oute.task.id` para a conversa interativa (fora de escopo da #599: ela não é sessão); marcar pelo nome da pasta da worktree (dois nomes para o mesmo repositório no filtro); mudar o `oute-task` (fora de escopo da #599).
 
 ## Onde cada coisa fica / limites
 | Local | Conteúdo | Limite |
