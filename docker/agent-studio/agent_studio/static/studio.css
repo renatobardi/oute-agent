@@ -535,3 +535,17 @@ th[aria-sort="ascending"] a.ordem, th[aria-sort="descending"] a.ordem { color: v
   table.empilha[data-tabela] th, table.empilha[data-tabela] th:first-child, table.empilha[data-tabela] th:last-child { display: block; padding: 0; border: 0; background: transparent; }
   table.empilha[data-tabela] th a.ordem { padding: 12px 0; }
 }
+
+/* #536: espaços por forma; só CSS local, inclusive com movimento reduzido. */
+.carregamento { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; }
+.shimmer { display: grid; gap: 12px; }
+.shimmer span { display: block; height: 18px; border-radius: 4px; background: linear-gradient(100deg, var(--muted) 20%, var(--background) 50%, var(--muted) 80%); background-size: 200% 100%; animation: studio-shimmer 1.6s linear infinite; }
+.shimmer span:last-child { width: 65%; }
+.carregamento.grafico .shimmer { height: 240px; align-content: end; }
+.carregamento.grafico .shimmer span { height: 35px; }
+.carregamento.tabela .shimmer { grid-template-columns: 2fr 1fr 1fr 1fr; min-height: 180px; align-content: start; }
+.carregamento.tabela .shimmer span { height: 150px; }
+.carregamento.indicadores .shimmer { grid-template-columns: repeat(4, 1fr); }
+.carregamento.indicadores .shimmer span { height: 100px; }
+@keyframes studio-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .shimmer span { animation: none; } }

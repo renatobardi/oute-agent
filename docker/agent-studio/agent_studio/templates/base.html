@@ -97,6 +97,8 @@
 {% endmacro %}
 {# faixas sob o cabeçalho (#467): só nas listas; nos detalhes (conversa, sessão, pedido) somem #}
 {# alertas do pipeline (#204) no topo de toda página de quem entrou; fora do #conteudo, que o htmx troca #}
+{% call fragment("alertas") %}
+{% if loading_shell and not _detail %}{{ loading_slot("alertas", "faixa") }}{% else %}
 {% if alerts_shown is defined and alerts_shown and not _detail %}
 {% if alerts is none %}
 <section class="alertas" id="alertas" data-alertas="" role="alert">
@@ -123,7 +125,11 @@
 <div id="alertas" data-alertas="0" hidden></div>
 {% endif %}
 {% endif %}
+{% endif %}
+{% endcall %}
 {# decisão pendente do Bardi (#386): rodada do swarm esperando resposta; fora do #conteudo, como os alertas #}
+{% call fragment("decisoes") %}
+{% if loading_shell and not _detail %}{{ loading_slot("decisoes", "faixa") }}{% else %}
 {% if decisions is defined and (decisions or decisions_old) and not _detail %}
 <section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" data-decisoes-antigas="{{ decisions_old|length }}" role="status">
   {{ icon("hand") }}
@@ -142,6 +148,9 @@
   <a class="faixa-link" href="/pedidos">Ver pedidos</a>
 </section>
 {% endif %}
+{% if loading_target == "decisoes" and decisions is none %}<p class="aviso erro" role="alert">As decisões pendentes não puderam ser lidas.</p>{% endif %}
+{% endif %}
+{% endcall %}
     <main id="conteudo">
 {% block main %}{% endblock %}
     </main>

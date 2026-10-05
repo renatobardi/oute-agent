@@ -11,14 +11,17 @@
 {% block main %}
 {% set W = 600 %}{% set H = 180 %}
 <div class="pagina dashboard">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
 <div class="titulo-linha">
-  <div><h1>Dashboard</h1>
+  <div>{% if loading_target is none %}<h1>Dashboard</h1>{% endif %}
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
   {{ filter("/", windows, hours, range, repos=repos, repo=repo, model=model) }}
 </div>
 </div>
+{% endcall %}
 
+{% call fragment("kpis") %}
 <section class="kpis" id="kpis" aria-label="Indicadores">
   {% for k in snap.kpis %}
   <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"{% if k.get("hint") %} title="{{ k.hint }}"{% endif %}
@@ -36,7 +39,9 @@
   </div>
   {% endfor %}
 </section>
+{% endcall %}
 
+{% call fragment("insights") %}
 <section class="cartao bloco" id="insights" data-insights="{{ insights|length }}">
   <div class="grafico-topo"><h2>{{ icon("sparkles") }} Insights</h2><span class="nota">regras fixas sobre a janela, sem LLM</span></div>
   {% if gates_read is not true %}
@@ -60,10 +65,12 @@
   {% endif %}
 </section>
 {{ aviso_custo() }}
+{% endcall %}
 
 <div class="graficos">
 
 {# 1) chamadas por hora ou dia: linha + área #}
+{% call fragment("chamadas") %}
 {% set s = snap.series %}
 {% set n = s.points|length %}
 <section class="cartao bloco grafico" data-grafico="chamadas" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
@@ -102,8 +109,10 @@
     <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
   </div>
 </section>
+{% endcall %}
 
 {# 2) custo por modelo: barras empilhadas, informado pela fonte (cheio) × estimado (tracejado) #}
+{% call fragment("custo-modelo") %}
 {% set comp = snap.composition %}
 <section class="cartao bloco grafico" data-grafico="custo-modelo" data-models="{{ snap.models_total }}">
   <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">{{ "custo efetivo" if custo == "efetivo" else "preço de lista" }} · ≈ estimado</span></div>
@@ -136,8 +145,10 @@
     </div>
   </div>
 </section>
+{% endcall %}
 
 {# 3) latência por modelo: percentis em tabela, mini-barra no p95 #}
+{% call fragment("latencia") %}
 <section class="cartao bloco grafico" data-grafico="latencia">
   <div class="grafico-topo"><h2>Latência das chamadas por modelo</h2><span class="nota">percentis</span></div>
   <div class="rolagem">
@@ -157,8 +168,10 @@
   </table>
   </div>
 </section>
+{% endcall %}
 
 {# 4) tokens por fase AI-DLC #}
+{% call fragment("fases") %}
 <section class="cartao bloco grafico" data-grafico="fases">
   <div class="grafico-topo"><h2>Tokens por fase AI-DLC</h2><a class="nota" href="/uso?{{ window_qs }}">ver Uso</a></div>
   {% for f in snap.phases %}
@@ -172,8 +185,10 @@
   {% endfor %}
   <span class="nota">Entrada + saída; cache fora. Fase pelo label <code>aidlc</code> da sessão.</span>
 </section>
+{% endcall %}
 
 {# 5) atividade por dia da semana × hora: 5 degraus de --primary, sempre os 7 dias até agora #}
+{% call fragment("atividade") %}
 {% set heat = snap.heat %}
 <section class="cartao bloco grafico" data-grafico="atividade" data-peak="{{ heat.peak }}" data-total="{{ heat.total }}">
   <div class="grafico-topo"><h2>Atividade por dia e hora</h2><span class="nota">últimos 7 dias, {{ tzl() }}</span></div>
@@ -187,8 +202,10 @@
   </div>
   <div class="escala"><span>menos</span>{% for i in (0, 1, 2, 3, 4) %}<span class="calor-celula n{{ i }}"></span>{% endfor %}<span>mais chamadas</span></div>
 </section>
+{% endcall %}
 
 {# 6) sessões que mais custaram #}
+{% call fragment("sessoes") %}
 <section class="cartao bloco grafico" data-grafico="sessoes">
   <div class="grafico-topo"><h2>Sessões que mais custaram</h2><a class="nota" href="/sessoes?{{ window_qs }}">ver Sessões</a></div>
   {% for t in snap.top_sessions %}
@@ -201,8 +218,10 @@
   <p class="nota">Nenhuma sessão com custo nesta janela.</p>
   {% endfor %}
 </section>
+{% endcall %}
 
 {# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa fora do oute-task #}
+{% call fragment("repos") %}
 <section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
   <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>
   {% for r in snap.by_repo %}
@@ -216,8 +235,10 @@
   <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
   {% endfor %}
 </section>
+{% endcall %}
 
 {# 8) ferramentas mais usadas (#535): barra nos usos, o erro dela ao lado; o link leva à tela Ferramentas com a mesma janela e repositório #}
+{% call fragment("ferramentas") %}
 {% set tl = snap.tools %}
 <section class="cartao bloco grafico" data-grafico="ferramentas" data-ferramentas="{{ tl.rows|length }}" data-total="{{ tl.total }}" data-erros="{{ tl.errors }}">
   <div class="grafico-topo"><h2>Ferramentas mais usadas</h2><a class="nota" href="/ferramentas?{{ window_qs }}">ver Ferramentas</a></div>
@@ -231,6 +252,7 @@
   <p class="nota">Nenhum uso de ferramenta nesta janela.</p>
   {% endfor %}
 </section>
+{% endcall %}
 
 </div>
 </div>

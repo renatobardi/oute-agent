@@ -6,8 +6,9 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <h1>Rodadas</h1>
+  {% if loading_target is none %}<h1>Rodadas</h1>{% endif %}
 </div>
+{% call fragment("tabela") %}
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido: repositório e estado podem faltar. A causa está no log do agent-studio.</p>{% endif %}
 {% if t.rows %}
 <div class="cartao rolagem">
@@ -33,5 +34,6 @@
 {% else %}
 {% if t.filtered %}{{ sem_linhas(t, "Nenhuma rodada com este filtro.") }}{% else %}<p class="aviso" data-sem-rodadas>Nenhuma rodada publicou etapa ainda.</p>{% endif %}
 {% endif %}
+{% endcall %}
 </div>
 {% endblock %}

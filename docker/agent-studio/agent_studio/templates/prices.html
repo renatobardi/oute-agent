@@ -4,12 +4,19 @@
 {% from "_macros.html" import badge, icon %}
 {% block title %}Preços · Agent Studio{% endblock %}
 {% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
+{% macro price_header(m) %}
+  <div class="modelo-topo"><h2>{{ m.model }}</h2>
+    {% if m.trend %}<span class="selo-tendencia {{ 'alta' if m.trend.dir == 'up' else 'queda' }}" data-tendencia="{{ m.trend.dir }}">{{ icon("trending-up" if m.trend.dir == "up" else "trending-down", 14) }}{{ m.trend.axis }} {{ "subiu" if m.trend.dir == "up" else "caiu" }}{% if m.trend.pct is not none %} {{ "%+.1f"|format(m.trend.pct)|replace(".", ",") }}%{% endif %} · {{ m.trend.since|when }}</span>
+    {% else %}<span class="badge secundario" data-sem-troca>sem troca</span>{% endif %}
+    {% if m.fixed %}<span class="badge contorno" data-fixo>{{ icon("lock", 12) }}fixo no config.toml</span>{% endif %}</div>
+{% endmacro %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <h1>Preços</h1>
+  {% if loading_target is none %}<h1>Preços</h1>{% endif %}
 </div>
 
+{% call fragment("fontes") %}
 <div class="fontes">
   {% for s in sources %}
   <div class="cartao fonte" data-fonte="{{ s.source }}">
@@ -20,25 +27,42 @@
   </div>
   {% endfor %}
 </div>
+{% endcall %}
 
+{% call fragment("resumo") %}
 {% if models %}
 <div class="cartao resumo-preco" id="resumo-tendencia">
   <span class="selo-tendencia alta">{{ icon("trending-up", 14) }}<strong data-subiram>{{ summary.up }}</strong> {{ "modelo subiu" if summary.up == 1 else "modelos subiram" }}</span>
   <span class="selo-tendencia queda">{{ icon("trending-down", 14) }}<strong data-cairam>{{ summary.down }}</strong> {{ "modelo caiu" if summary.down == 1 else "modelos caíram" }}</span>
   <span class="nota">nos últimos {{ summary.days }} dias (último preço de lista de cada modelo)</span>
 </div>
+{% endif %}
+{% endcall %}
+{% if models %}
+{% call fragment("modelos") %}
+{% if loading_target %}
 {% for m in models %}
 <section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}" class="cartao">
-  <div class="modelo-topo"><h2>{{ m.model }}</h2>
-    {% if m.trend %}<span class="selo-tendencia {{ 'alta' if m.trend.dir == 'up' else 'queda' }}" data-tendencia="{{ m.trend.dir }}">{{ icon("trending-up" if m.trend.dir == "up" else "trending-down", 14) }}{{ m.trend.axis }} {{ "subiu" if m.trend.dir == "up" else "caiu" }}{% if m.trend.pct is not none %} {{ "%+.1f"|format(m.trend.pct)|replace(".", ",") }}%{% endif %} · {{ m.trend.since|when }}</span>
-    {% else %}<span class="badge secundario" data-sem-troca>sem troca</span>{% endif %}
-    {% if m.fixed %}<span class="badge contorno" data-fixo>{{ icon("lock", 12) }}fixo no config.toml</span>{% endif %}</div>
+{{ price_header(m) }}
+{{ loading_slot("preco-" ~ loop.index0 ~ "-grafico", "grafico") }}
+{{ loading_slot("preco-" ~ loop.index0 ~ "-vigente", "tabela") }}
+{{ loading_slot("preco-" ~ loop.index0 ~ "-historico", "tabela") }}
+</section>
+{% endfor %}
+{% endif %}
+{% endcall %}
+{% for m in models %}
+<section data-modelo="{{ m.model }}" data-fixed="{{ 'true' if m.fixed else 'false' }}" class="cartao">
+{{ price_header(m) }}
+{% call fragment("preco-" ~ loop.index0 ~ "-grafico") %}
   <figure class="grafico-preco" data-grafico>
     <svg class="degrau-svg" viewBox="0 0 {{ m.chart.w }} {{ m.chart.h }}" preserveAspectRatio="none" role="img" aria-label="Preço de entrada e de saída ao longo do tempo, em degraus">
       <path class="saida" d="{{ m.chart.output }}"/><path class="entrada" d="{{ m.chart.input }}"/>
     </svg>
     <figcaption><span class="leg entrada">entrada</span> <span class="leg saida">saída</span> · escala até {{ m.chart.top|usdm }}</figcaption>
   </figure>
+{% endcall %}
+{% call fragment("preco-" ~ loop.index0 ~ "-vigente") %}
   <div class="rolagem">
   <table class="precos">
     <thead><tr><th>Vigente</th><th class="n">Entrada</th><th class="n">Saída</th><th class="n">Cache (leitura)</th><th class="n">Cache (criação)</th><th>Origem</th><th>Desde ({{ tzl() }})</th><th>Última conferência</th></tr></thead>
@@ -50,6 +74,8 @@
     </tbody>
   </table>
   </div>
+{% endcall %}
+{% call fragment("preco-" ~ loop.index0 ~ "-historico") %}
   {% set top = m.history|map(attribute="input")|map("default", 0, true)|max %}
   <details class="historico">
     <summary>Histórico (data) · {{ m.history|length|num }}</summary>
@@ -63,10 +89,13 @@
       </tbody>
     </table>
   </details>
+{% endcall %}
 </section>
 {% endfor %}
 {% else %}
+{% call fragment("modelos") %}
 <p class="aviso" id="sem-precos">Nenhum preço no histórico.</p>
+{% endcall %}
 {% endif %}
 </div>
 {% endblock %}

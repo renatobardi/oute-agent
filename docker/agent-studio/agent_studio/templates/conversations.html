@@ -5,11 +5,14 @@
 {% block title %}Conversas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
+  <div class="titulo-linha">{% if loading_target is none %}<h1>Conversas</h1>{% endif %}{{ filter("/conversas", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 {{ aviso_custo() }}
+{% endcall %}
+{% call fragment("tabela") %}
 {% if t.rows %}
 <div class="cartao rolagem">
 <table class="conversas empilha" data-tabela>
@@ -46,5 +49,6 @@
 {% else %}
 {{ sem_linhas(t, "Nenhuma conversa nessa janela.") }}
 {% endif %}
+{% endcall %}
 </div>
 {% endblock %}

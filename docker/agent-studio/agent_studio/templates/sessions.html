@@ -5,11 +5,14 @@
 {% block title %}Sessões · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
+  <div class="titulo-linha">{% if loading_target is none %}<h1>Sessões</h1>{% endif %}{{ filter("/sessoes", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 {{ aviso_custo() }}
+{% endcall %}
+{% call fragment("sessoes") %}
 {{ state_warning(state_read) }}
 {% if ts.rows %}
 {% call session_table(ts) %}
@@ -26,7 +29,9 @@
 {% else %}
 {{ sem_linhas(ts, "Nenhuma sessão nessa janela.") }}
 {% endif %}
+{% endcall %}
 
+{% call fragment("conversas") %}
 <h2>Conversas sem sessão</h2>
 <p class="nota">Conversas sem <code>oute.task.id</code> (agente aberto fora do <code>oute-task</code>), uma por
   <code>session.id</code>.</p>
@@ -39,5 +44,6 @@
 {% else %}
 {{ sem_linhas(tl, "Nenhuma conversa sem sessão nessa janela.", "vazio-sem-sessao") }}
 {% endif %}
+{% endcall %}
 </div>
 {% endblock %}

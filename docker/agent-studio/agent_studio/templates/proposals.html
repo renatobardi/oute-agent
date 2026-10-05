@@ -10,8 +10,9 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <h1>Pedidos</h1>
+  {% if loading_target is none %}<h1>Pedidos</h1>{% endif %}
 </div>
+{% call fragment("pendentes") %}
 <div class="pilha">
 <h2 class="secao">Pendentes ({{ tp.unfiltered|num }})</h2>
 {% if tp.rows %}
@@ -39,6 +40,8 @@
 {% endif %}
 </div>
 
+{% endcall %}
+{% call fragment("decididos") %}
 <details class="pilha decididos" id="decididos"{% if td.touched %} open{% endif %}>
 <summary class="secao">Decididos ({{ td.unfiltered|num }})</summary>
 {% if td.rows %}
@@ -68,5 +71,6 @@
 {{ sem_linhas(td, "Nenhum pedido decidido.", "sem-decididos") }}
 {% endif %}
 </details>
+{% endcall %}
 </div>
 {% endblock %}
