@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set nav = "ferramentas" %}
-{% set crumbs = [("Análise", none), ("Ferramentas", "/ferramentas?" ~ link_qs), (tool, none)] %}
+{% set crumbs = [("Análise", none), ("Ferramentas", "/ferramentas?" ~ link_qs), (tool ~ (" · " ~ group_name if group else ""), none)] %}
 {% from "_macros.html" import conv_name, badge with context %}
 {# Conversas que usaram a ferramenta na janela (#535), com os erros dela em destaque. Sem a entrada nem a saída: isso fica no detalhe da conversa. #}
 {% block title %}{{ tool }} · Ferramentas · Agent Studio{% endblock %}
@@ -8,13 +8,13 @@
 <div class="pagina">
 {% call fragment("filtros") %}
 <div class="pagina-topo">
-  <div class="titulo-linha">{% if loading_target is none %}<h1 class="mono">{{ tool }}</h1>{% endif %}<a class="botao" href="/ferramentas?{{ link_qs }}">Voltar às ferramentas</a></div>
-  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if host %} · host {{ host }}{% endif %}{% if agent %} · agente {{ agent }}{% endif %}{% if repo %} · repositório {{ repo }}{% endif %}{% if data and data.total > data.conversations|length %} · Mostrando as {{ data.conversations|length }} primeiras de {{ data.total }}{% endif %}</p>
+  <div class="titulo-linha">{% if loading_target is none %}<h1 class="mono">{{ tool }}{% if group %} · {{ group_name }}{% endif %}</h1>{% endif %}<a class="botao" href="/ferramentas?{{ link_qs }}">Voltar às ferramentas</a></div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if group %} · grupo {{ group_name }} (rótulo do Claude Code; o texto do comando não é lido){% endif %}{% if host %} · host {{ host }}{% endif %}{% if agent %} · agente {{ agent }}{% endif %}{% if repo %} · repositório {{ repo }}{% endif %}{% if data and data.total > data.conversations|length %} · Mostrando as {{ data.conversations|length }} primeiras de {{ data.total }}{% endif %}</p>
 </div>
 {% endcall %}
 {% call fragment("total") %}
 {% if data %}
-<section class="cartao bloco" id="total" data-usos="{{ data.uses }}" data-erros="{{ data.errors }}" data-conversas="{{ data.total }}">
+<section class="cartao bloco" id="total"{% if group %} data-grupo="{{ group }}"{% endif %} data-usos="{{ data.uses }}" data-erros="{{ data.errors }}" data-conversas="{{ data.total }}">
   <div class="grafico-topo"><h2>Na janela</h2><span class="nota">{{ data.uses|num }} {{ "uso" if data.uses == 1 else "usos" }} · {{ data.errors|num }} {{ "erro" if data.errors == 1 else "erros" }} · {{ data.total|num }} {{ "conversa" if data.total == 1 else "conversas" }}</span></div>
 </section>
 {% endif %}

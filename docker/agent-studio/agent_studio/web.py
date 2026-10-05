@@ -47,6 +47,7 @@ HOME = "/"
 CONVERSAS = "/conversas"
 SESSOES = "/sessoes"
 FERRAMENTA = "/ferramenta"
+GRUPO_INVALIDO = "grupo inválido: só o Bash tem grupos"
 CONVERSA_LOGS = "/conversa/logs"
 MAX_LOGIN_BODY = 4096
 # janelas prontas das quatro telas com período (#527; horas -> rótulo); a URL aceita também from/to, como o /v1/usage, e de/ate no fuso da tela
@@ -370,6 +371,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             raise ValueError("O id do ciclo tem de ser <dono>/<repo>#<número>.")
         if path == FERRAMENTA and (not q.get("nome") or len(q["nome"]) > 200):
             raise ValueError("informe o nome da ferramenta")
+        if path == FERRAMENTA and tool_group(q) is None:
+            raise ValueError(GRUPO_INVALIDO)
         if path == "/conversa/span" and (not q.get("trace") or not q.get("span")):
             raise ValueError("Faltam trace e span.")
         if path == CONVERSA_LOGS:
@@ -527,6 +530,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs += "&custo=efetivo"
         return qs
 
+    def tool_group(q):
+        """O `grupo=` da lista de uma ferramenta (#600): "" sem ele, o id do grupo do Bash, ou `None` se não vale
+        (id que não existe, ou grupo em ferramenta que não é o Bash)."""
+        group = q.get("grupo", "")
+        if group and (group not in tools_mod.GROUPS or q.get("nome") != tools_mod.BASH):
+            return None
+        return group
+
     @screen("/ferramentas")
     async def tools_screen(request: Request):
         if (denied := await gate(request)) is not None:
@@ -556,12 +567,15 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         name = q.get("nome", "")
         if not name or len(name) > 200:
             return error(request, 400, "informe o nome da ferramenta")
+        group = tool_group(q)
+        if group is None:
+            return error(request, 400, GRUPO_INVALIDO)
         host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "conversas da ferramenta", store.tool_conversations, name, from_ns, to_ns,
-                                  repo_mod.parse(repo), host or None, agent or None)
+                                  repo_mod.parse(repo), host or None, agent or None, group or None)
         if failed:
             return failed
-        return page(request, "tool.html", data=data, tool=name, host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
+        return page(request, "tool.html", data=data, tool=name, group=group, group_name=tools_mod.GROUPS.get(group), host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
                     link_qs=tools_qs(q, from_ns, to_ns, host, agent, repo), limit=tools_mod.CONV_LIMIT)
 
     # ------------------------------------------------ login

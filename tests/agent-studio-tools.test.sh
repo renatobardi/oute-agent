@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Testes da tela Ferramentas do agent-studio (#535, épico #522): o menu no grupo Análise, o uso de ferramenta por
-# ferramenta (usos, erros, taxa, p95), por repositório e no tempo, os filtros (período, repositório, host, agente), a
+# ferramenta (usos, erros, taxa, p95), o Bash aberto por tipo de comando (#600), por repositório e no tempo, os filtros (período, repositório, host, agente), a
 # lista de conversas de cada ferramenta com os erros em destaque, a regra de contar um uso só uma vez (o span
 # `claude_code.tool`, não o `tool.execution` nem o `blocked_on_user`), o gráfico do Dashboard, o escape do nome da
 # ferramenta e a ausência da entrada e da saída. Chama o app pelo ASGI (tests/lib/studio_asgi.py) sobre um DuckDB de
@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from agent_studio import config as CF
 from agent_studio.app import create_app
 from pycheck import check
-from studio_asgi import TOKEN, get
+from studio_asgi import TOKEN, get, raw_get
 from studio_db import StudioDB
 from studio_form import submit as form_submit
 
@@ -46,9 +46,14 @@ db = StudioDB(tmp, "t")
 
 
 def use(at, name, dur, exec_dur=None, conv=None, repo=None, host="oute-server", agent="claude", err=False, exec_err=False,
-        ok=None, blocked=True):
-    """Um uso como o Claude Code manda: o span `tool` (com o nome), o `tool.execution` filho e o `blocked_on_user` filho."""
+        ok=None, blocked=True, cls=None, argv0=None):
+    """Um uso como o Claude Code manda: o span `tool` (com o nome), o `tool.execution` filho e o `blocked_on_user` filho.
+    `cls` e `argv0` = os rótulos `bash_command_class` e `bash_argv0` do span `tool` (#600)."""
     attrs = {"full_command": SECRET, "tool_output": SECRET}
+    if cls is not None:
+        attrs["bash_command_class"] = cls
+    if argv0 is not None:
+        attrs["bash_argv0"] = argv0
     if name:
         attrs["tool_name"] = name
     parent = db.span(ts(at), dur, name="claude_code.tool", conv=conv, repo=repo, host=host, agent=agent, err=err, attrs=attrs)
@@ -81,6 +86,25 @@ db.span(ts(f"{D}15:00:00"), 1, name="mcp.tools.call", conv="c-codex", agent="cod
 # fora da janela: antes (gama) e logo depois
 use("2025-09-20T10:00:00", "Bash", 10, 2, conv="c-g1", repo="gama", exec_err=True)
 use("2025-10-02T00:00:01", "Bash", 10, 2, conv="c-fora", repo="alfa", exec_err=True)
+# o Bash por tipo de comando (#600), num dia só dele (2025-10-03): cada classe que o Claude Code manda, o `cd`, um uso
+# sem classe, uma classe que a tela não conhece e um Read com rótulo de Bash. `full_command` (o SECRET) começa por outro
+# comando: se a tela o lesse, o grupo seria outro.
+K = "2025-10-03T"
+QK = "from=2025-10-03T00%3A00%3A00Z&to=2025-10-04T00%3A00%3A00Z"
+BASH_CASES = [  # (classe, argv0, conversa, falha na execução)
+    ("shell_builtin", "cd", "c-k1", True), ("shell_builtin", "cd", "c-k1", False), ("shell_builtin", "cd", "c-k2", False),
+    ("shell_builtin", "echo", "c-k1", False), ("text_transform", "sed", "c-k1", False),
+    ("file_read", "cat", "c-k1", True), ("file_read", "head", "c-k2", False),
+    ("file_search", "grep", "c-k1", False), ("vcs", "git", "c-k1", False), ("github_cli", "gh", "c-k1", False),
+    ("lang_runtime", "python3", "c-k1", False),
+    ("other", "oute-task", "c-k1", False), ("fs_mutation", "mkdir", "c-k1", False), ("process_system", "ps", "c-k1", False),
+    ("network", "curl", "c-k1", False), ("unparsed", None, "c-k2", True), ("package_manager", "npm", "c-k1", False),
+    ("claude_cli", "claude", "c-k1", False), ("build_test", "make", "c-k1", False),
+    (None, None, "c-k1", False), ("classe_nova", "x", "c-k1", False), ("other", "cd", "c-k1", False),
+]
+for i, (cls, argv0, conv, fail) in enumerate(BASH_CASES):
+    use(f"{K}10:{i:02d}:00", "Bash", 10, 1, conv=conv, repo="alfa" if conv == "c-k1" else "beta", exec_err=fail, cls=cls, argv0=argv0)
+use(f"{K}11:00:00", "Read", 10, 1, conv="c-k1", repo="alfa", cls="file_read", argv0="cat")
 app = create_app(db.flush(), TOKEN, config=cfg)
 
 
@@ -179,8 +203,72 @@ check("a lista da ferramenta com nome sem nome ('(sem nome)'): a conversa c-b1",
 check("cada ferramenta da tela leva à lista, com a janela e os filtros", 'href="/ferramenta?nome=Bash&amp;from=2025-10-01T00%3A00%3A00Z&amp;to=2025-10-02T00%3A00%3A00Z"' in html
       and 'nome=Bash&amp;from=2025-10-01T00%3A00%3A00Z&amp;to=2025-10-02T00%3A00%3A00Z&amp;repo=beta' in get(app, "/ferramentas", Q + "&repo=beta")[1])
 
+# ---- o Bash por tipo de comando (#600)
+def group_rows(h):
+    return [(m[0], int(m[1]), int(m[2]), m[3]) for m in re.findall(r'<tr class="grupo-bash[^"]*" data-grupo="([^"]*)" data-usos="(\d+)" data-erros="(\d+)" data-taxa="([^"]*)"', h)]
+
+
+def group_names(h):
+    return re.findall(r'<a href="/ferramenta\?nome=Bash&amp;grupo=([a-z]+)&amp;[^"]*">([^<]*)</a>', h)
+
+
+def convs(h):
+    return re.findall(r'<tr[^>]*data-conversa="([^"]*)" data-usos="(\d+)" data-erros="(\d+)"', h)
+
+
+stk, hk = get(app, "/ferramentas", QK)
+groups = group_rows(hk)
+by_id = {g[0]: g[1:3] for g in groups}
+bash_k = tool_rows(hk).get("Bash")
+check("Bash por tipo: a linha Bash da janela tem 22 usos e 3 erros, e o Read com rótulo de Bash fica no Read", stk == 200 and bash_k == (22, 3) and tool_rows(hk).get("Read") == (1, 0))
+check("Bash por tipo: no máximo 8 grupos, o maior primeiro (outros 11, cd 3, depois empate por id)",
+      [g[0] for g in groups] == ["outros", "cd", "ler", "shell", "buscar", "gh", "git", "linguagem"] and len(groups) <= 8)
+check("Bash por tipo: usos e erros de cada grupo (cd 3/1, ler 2/1, buscar 1/0, git 1/0, gh 1/0, linguagem 1/0, shell 2/0, outros 11/1)",
+      by_id == {"cd": (3, 1), "ler": (2, 1), "buscar": (1, 0), "git": (1, 0), "gh": (1, 0), "linguagem": (1, 0), "shell": (2, 0), "outros": (11, 1)})
+check("Bash por tipo: a soma dos grupos é igual aos usos e aos erros de Bash da janela", bash_k is not None
+      and (sum(g[1] for g in groups), sum(g[2] for g in groups)) == bash_k)
+rates = {g[0]: g[3] for g in groups}
+check("Bash por tipo: cada grupo mostra a taxa de erro (cd 1 de 3, ler 50%, git 0)", rates.get("cd", "")[:5] == "0.333"
+      and rates.get("ler") == "0.5" and rates.get("git") == "0.0" and "33,3" in hk)
+check("Bash por tipo: `cd` só é grupo próprio na classe shell_builtin (echo vai para shell; `other` com argv0 cd, para outros)",
+      by_id.get("cd") == (3, 1) and by_id.get("shell") == (2, 0))
+check("Bash por tipo: unparsed, uso sem classe e classe desconhecida caem em outros (8 classes sem grupo + 3 = 11)", by_id.get("outros") == (11, 1))
+check("Bash por tipo: nomes em pt-BR, cada um com link para o filtro do grupo", dict(group_names(hk)) == {
+    "cd": "cd e encadeado", "ler": "ler arquivo", "buscar": "buscar", "git": "git", "gh": "GitHub (gh)",
+    "linguagem": "linguagem (python e outras)", "shell": "shell e texto", "outros": "outros"})
+check("Bash por tipo: os grupos vêm logo depois da linha Bash, antes da ferramenta seguinte",
+      re.search(r'data-ferramenta="Bash".*?data-grupo="outros".*?data-grupo="linguagem".*?data-ferramenta="Read"', hk, re.S) is not None)
+check("Bash por tipo: a tela diz que o texto do comando não é lido", "o texto do comando não é lido" in hk)
+check("Bash por tipo: uso sem rótulo (os 4 da primeira janela) fica todo em outros, e a soma segue igual", group_rows(html) == [("outros", 4, 1, "0.25")])
+hkb = get(app, "/ferramentas", QK + "&repo=beta")[1]
+check("Bash por tipo com repo=beta: os grupos acompanham o filtro (cd 1, ler 1, outros 1) e o link leva o repositório",
+      {g[0]: g[1:3] for g in group_rows(hkb)} == {"cd": (1, 0), "ler": (1, 0), "outros": (1, 1)}
+      and 'href="/ferramenta?nome=Bash&amp;grupo=cd&amp;from=2025-10-03T00%3A00%3A00Z&amp;to=2025-10-04T00%3A00%3A00Z&amp;repo=beta"' in hkb)
+check("Bash por tipo: janela sem Bash não tem linha de grupo", group_rows(get(app, "/ferramentas", QK + "&agent=codex")[1]) == [])
+stg, hg = get(app, "/ferramenta", QK + "&nome=Bash&grupo=cd")
+check("filtro por grupo: cd lista só os usos do grupo, por conversa (c-k1 2 usos e 1 erro, c-k2 1 e 0), com o nome do grupo",
+      stg == 200 and convs(hg) == [("c-k1", "2", "1"), ("c-k2", "1", "0")] and num(hg, "usos") == "3" and num(hg, "erros") == "1"
+      and num(hg, "grupo") == "cd" and "cd e encadeado" in hg)
+check("filtro por grupo: outros traz o unparsed de c-k2 (1 uso, 1 erro) e os 10 de c-k1",
+      sorted(convs(get(app, "/ferramenta", QK + "&nome=Bash&grupo=outros")[1])) == [("c-k1", "10", "0"), ("c-k2", "1", "1")])
+check("filtro por grupo com repo=beta: só c-k2", convs(get(app, "/ferramenta", QK + "&nome=Bash&grupo=ler&repo=beta")[1]) == [("c-k2", "1", "0")])
+check("sem grupo, a lista do Bash segue com todos os usos (22)", num(get(app, "/ferramenta", QK + "&nome=Bash")[1], "usos") == "22")
+stv, hv = get(app, "/ferramenta", Q + "&nome=Bash&grupo=git")
+check("grupo sem uso na janela: 200 e o aviso", stv == 200 and 'id="vazio"' in hv)
+check("grupo que não existe: 400, no casco e na página inteira", raw_get(app, "/ferramenta", QK + "&nome=Bash&grupo=nada")[0] == 400
+      and raw_get(app, "/ferramenta", QK + "&nome=Bash&grupo=nada&full=1")[0] == 400)
+check("grupo em ferramenta que não é o Bash: 400, no casco e na página inteira", raw_get(app, "/ferramenta", QK + "&nome=Read&grupo=ler")[0] == 400
+      and raw_get(app, "/ferramenta", QK + "&nome=Read&grupo=ler&full=1")[0] == 400)
+check("a página inteira (full=1) do grupo abre: 200 com os 3 usos de cd", raw_get(app, "/ferramenta", QK + "&nome=Bash&grupo=cd&full=1")[0] == 200
+      and num(raw_get(app, "/ferramenta", QK + "&nome=Bash&grupo=cd&full=1")[1], "usos") == "3")
+dk = get(app, "/", QK)[1]
+gk = re.search(r'<section[^>]*data-grafico="ferramentas".*?</section>', dk, re.S)
+check("Dashboard: o Bash segue como uma barra só (22 usos), sem grupo, com link para a tela", gk is not None
+      and re.findall(r'data-ferramenta="Bash" data-usos="(\d+)"', gk.group(0)) == ["22"] and "grupo" not in gk.group(0)
+      and 'href="/ferramentas?from=2025-10-03T00%3A00%3A00Z' in gk.group(0))
+
 # ---- dado não confiável e sem entrada nem saída
-page = html + bash + get(app, "/ferramenta", Q + "&nome=" + "%3Cimg+src%3Dx+onerror%3D1%3E")[1] + get(app, "/", Q)[1]
+page = hk + hg + html + bash + get(app, "/ferramenta", Q + "&nome=" + "%3Cimg+src%3Dx+onerror%3D1%3E")[1] + get(app, "/", Q)[1]
 check("nome de ferramenta com HTML sai escapado em toda tela, nunca cru", EVIL not in page and "&lt;img src=x onerror=1&gt;" in page)
 check("a tela não mostra a entrada nem a saída da ferramenta", SECRET not in page)
 
@@ -203,5 +291,5 @@ check("Dashboard sem uso de ferramenta na janela: o gráfico diz que não há", 
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 42
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 64
 check_end
