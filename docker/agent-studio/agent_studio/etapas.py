@@ -26,6 +26,7 @@ do SurrealDB, com o título fixo por tipo (`title`) e nunca o texto.
 Histórico (#601): a lista `GET /rodadas` sai dos eventos `oute.swarm.*` do DuckDB, e não só das etapas: entra toda rodada
 com `oute.swarm.round.opened` (e a rodada com etapa publicada cujo evento de abertura não chegou). A abertura, o fechamento,
 o repositório e o número de sessões vêm desses eventos; o SurrealDB só dá o ciclo e completa a rodada sem evento de abertura.
+Sem período escolhido, a lista traz todas as rodadas (`ALL_TIME`, #618); o filtro de período restringe quando escolhido.
 """
 import re
 from urllib.parse import quote, urlsplit
@@ -44,6 +45,7 @@ CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z",
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
 LIST_LIMIT = 100   # rodadas na lista (a tela, que pagina, pede `tabela.ALL`)
+ALL_TIME = (0, 2**63 - 1)   # a janela de `/rodadas` sem período escolhido (#618): todas as rodadas, sem limite de data
 SWARM_PREFIX = "oute.swarm."
 OPENED, CLOSED, SPAWNED = "oute.swarm.round.opened", "oute.swarm.round.closed", "oute.swarm.session.spawned"
 TRAY_LIMIT = 50    # etapas no bloco `steps` do tray (as mais novas); `total` diz quantas há

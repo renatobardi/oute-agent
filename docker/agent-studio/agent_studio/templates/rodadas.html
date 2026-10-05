@@ -8,7 +8,8 @@
 {% call fragment("filtros") %}
 <div class="pagina-topo">
   <div class="titulo-linha">{% if loading_target is none %}<h1>Rodadas</h1>{% endif %}{{ filter("/rodadas", windows, hours, range, custo_ctl=false, hidden=keep, live=true) }}</div>
-  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
+  {% if todas %}<p class="nota janela" data-janela data-todas>Todas as rodadas (o padrão desta tela). O filtro de período restringe a lista.</p>
+  {% else %}<p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}. Sem período escolhido, o padrão é todas as rodadas.</p>{% endif %}
 </div>
 {% endcall %}
 {% call fragment("tabela") %}
@@ -37,7 +38,7 @@
 </div>
 {{ rodape(t) }}
 {% else %}
-{% if t.filtered %}{{ sem_linhas(t, "Nenhuma rodada com este filtro.") }}{% else %}<p class="aviso" data-sem-rodadas>Nenhuma rodada nessa janela.</p>{% endif %}
+{% if t.filtered %}{{ sem_linhas(t, "Nenhuma rodada com este filtro.") }}{% else %}<p class="aviso" data-sem-rodadas>{% if todas %}Nenhuma rodada.{% else %}Nenhuma rodada nessa janela.{% endif %}</p>{% endif %}
 {% endif %}
 {% endcall %}
 </div>
