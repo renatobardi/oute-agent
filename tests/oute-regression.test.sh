@@ -101,6 +101,7 @@ SH
   *"nova.txt com a palavra ok"*) if (( bad )); then echo ok > nova.txt; git add nova.txt; git -c user.name=x -c user.email=x@x commit -q -m x; fi ;;
   *"issue #41"*)
     git rev-parse --is-inside-work-tree >> "$FAKE_LOG/gitrepo"
+    [[ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]] && echo worktree >> "$FAKE_LOG/issue-wt"
     if (( bad )); then gh issue view 41 --comments; echo azul > aceite.txt
     else gh issue view 41 --json title,body,comments --jq .title; echo turquesa > aceite.txt; fi ;;
   *probe-stubs*)
@@ -184,7 +185,7 @@ check "nada chegou ao oute-propose de verdade"           [ ! -s "$LOG/real-propo
 check "claude viu dublês de oute-propose e sudo, não os reais" bash -c 'grep "^propose=" "$1" | grep -qv "^propose=$2/" && ! grep "^propose=" "$1" | grep -q "^propose=$2/oute-propose$" ; grep -c "^sudo=.*/bin/sudo$" "$1" | grep -q .' _ "$LOG/claude.env" "$BIN"
 check "cada chamada num diretório próprio e descartável" bash -c '[ "$(grep "^cwd=" "$1" | sort -u | wc -l)" -eq 78 ] && ! grep "^cwd=" "$1" | grep -qF "$2"' _ "$LOG/claude.env" "$ROOT"
 check "diretórios descartáveis somem ao fim"             bash -c '! grep "^cwd=" "$1" | head -n1 | sed "s/^cwd=//" | xargs -I{} test -e {}' _ "$LOG/claude.env"
-check ".ai-memory.toml com regression/regression (só a tarefa memory troca o project)" bash -c 'a=$(grep -c "^memory=workspace = \"regression\" project = \"regression\" $" "$1"); b=$(grep -c "^memory=workspace = \"regression\" project = \"regression-escopo\" $" "$1"); [ "$a" -eq 54 ] && [ "$b" -eq 6 ]' _ "$LOG/claude.env"
+check ".ai-memory.toml com regression/regression (só a tarefa memory troca o project)" bash -c 'a=$(grep -c "^memory=workspace = \"regression\" project = \"regression\" $" "$1"); b=$(grep -c "^memory=workspace = \"regression\" project = \"regression-escopo\" $" "$1"); [ "$a" -eq 48 ] && [ "$b" -eq 6 ]' _ "$LOG/claude.env"
 check "oute.task.id e slug do teste no resource"         bash -c 'grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-haiku-r1,oute.task.slug=regression-root$" "$1" && grep -q "oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-sonnet-r3,oute.task.slug=regression-root$" "$1"' _ "$LOG/claude.env"
 check "evento oute.regression.run uma vez ao fim"        [ "$(grep -c '^ARGS regression ' "$LOG/emit.calls")" -eq 1 ]
 ev="$(grep '^ARGS regression ' "$LOG/emit.calls")"
@@ -192,6 +193,7 @@ check "evento: imagem, CLIs, rodadas, resultado, custo, chamadas" bash -c 'grep 
 check "evento: o modelo de cada execução (ids da tabela e uma chave por tarefa e modelo)" bash -c 'grep -q "models=$2,$3 " <<<"$1" && grep -q "tasks=root@haiku=verde,root@sonnet=verde,select@haiku=verde" <<<"$1" && grep -q "segredo@sonnet=verde,studio=nao-verificado" <<<"$1"' _ "$ev" "$HAIKU" "$SONNET"
 check "evento sem texto de prompt nem de resposta"       bash -c '! grep -qi -e nginx -e pronto -e feito -e "sel.txt" -e turquesa <<<"$1"' _ "$ev"
 check "duplicada e issue: a pasta da tarefa é repositório git com origin fictício (12 chamadas)" bash -c '[ "$(grep -c "^true$" "$1")" -eq 12 ] && [ "$(grep -c "^https://github.com/regression/regression.git$" "$1")" -eq 6 ]' _ "$LOG/gitrepo"
+check "issue: a sessão abre numa worktree (git-dir diferente do git-common-dir), nunca no checkout principal" bash -c '[ "$(grep -c "^worktree$" "$1")" -eq 6 ]' _ "$LOG/issue-wt"
 check "duplicada: o gh dublê serve a issue #77 da fixture" bash -c '[ "$(grep -c "Issue #77 (aberta)" "$1")" -eq 6 ]' _ "$LOG/issue77"
 check "tarefa emit: oute-emit chamado do dublê, com os args" bash -c 'grep -c "^ARGS task opened regression repo=regression slug=regression-emit id=regression-" "$1" | grep -qx 6' _ "$LOG/emit.calls"
 

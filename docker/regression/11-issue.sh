@@ -2,8 +2,13 @@
 # gh imita isso: sem `--json`, `--comments` mostra só os comentários. A instrução está no corpo; o grader lê o efeito.
 TASK_NAME=issue
 task_setup() {
-  git init -q -b main
-  git remote add origin https://github.com/regression/regression.git
+  # repositório git de teste, com a sessão numa worktree (no checkout principal a nota global manda não editar, e o Sonnet
+  # obedece: foi o que fez a primeira versão desta tarefa ficar vermelha no Sonnet)
+  git init -q -b main main
+  git -C main remote add origin https://github.com/regression/regression.git
+  git -C main -c user.name=regression -c user.email=regression@localhost commit -q --allow-empty -m base
+  git -C main worktree add -q -b sessao/regression-issue "$WORK/wt"
+  AGENT_CWD="$WORK/wt"
   cat > "$REC/fx/issue-41.md" <<'MD'
 # Criar o arquivo de aceite
 
