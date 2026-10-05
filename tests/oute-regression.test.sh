@@ -316,6 +316,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_write_page","arguments":{"workspace":"w","project":"p"}}}' \
   'lixo que não é json' '{"jsonrpc":"2.0","id":4,"method":"ping"}' '{"jsonrpc":"2.0","id":5,"method":"nao/existe"}' \
   | python3 "$ROOT/docker/regression/ai-memory-double.py" "$MEMLOG" > "$TMP/memory-double.out"
+for badlog in "relativo.log" "$TMP/../x.log" "$TMP/pasta-que-nao-existe/x.log" "$TMP"; do
+  echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | python3 "$ROOT/docker/regression/ai-memory-double.py" "$badlog" >/dev/null 2>&1
+  check "dublê do ai-memory: recusa o log '${badlog#"$TMP"}' (relativo, com .., sem pasta ou pasta)" [ $? -ne 0 ]
+done
 check "dublê do ai-memory: initialize responde com o protocolo pedido" jqe 'select(.id == 1) | .result.protocolVersion == "2025-06-18" and .result.serverInfo.name == "ai-memory"' < "$TMP/memory-double.out"
 check "dublê do ai-memory: lista memory_write_page e memory_query" bash -c 'jq -e "select(.id == 2) | [.result.tools[].name] | (index(\"memory_write_page\") != null and index(\"memory_query\") != null)" "$1" >/dev/null' _ "$TMP/memory-double.out"
 check "dublê do ai-memory: grava a chamada com os argumentos e responde ok" bash -c '[ "$(cat "$1")" = "{\"tool\": \"memory_write_page\", \"args\": {\"workspace\": \"w\", \"project\": \"p\"}}" ] && jq -e "select(.id == 3) | .result.isError == false" "$2" >/dev/null' _ "$MEMLOG" "$TMP/memory-double.out"
