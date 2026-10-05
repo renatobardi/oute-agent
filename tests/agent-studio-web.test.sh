@@ -14,6 +14,33 @@ trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
+svg_templates_valid() {
+  local templates="$1" template content svg_ok
+  [ -d "$templates" ] || return 0
+  for template in "$templates"/*.html; do
+    [ -f "$template" ] || continue
+    case "${template##*/}" in
+      _macros.html|_graficos*.html) continue ;;
+    esac
+    if grep -q '<svg' "$template"; then
+      content="$(cat "$template")"
+      svg_ok="$(printf '%s' "$content" | grep -A 100 '<svg' | grep -E '({{|{%)' | head -1)"
+      if [ -z "$svg_ok" ]; then
+        return 1
+      fi
+    fi
+  done
+  return 0
+}
+
+svg_templates_rejects_screen() {
+  local templates="$1"
+  if svg_templates_valid "$templates"; then
+    return 1
+  fi
+  return 0
+}
+
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as conversas na janela de 2025.
@@ -197,7 +224,11 @@ studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b" > "$TMP/logs.html"
 studio_page "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe" > "$TMP/erro.html"
 curl -s -X POST --data-urlencode "token=${STUDIO_TOKEN}x" "$STUDIO_URL/login" > "$TMP/login-erro.html"
 check "páginas: todo ícone aponta para um símbolo do sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/list.html" "$TMP/a.html" "$TMP/logs.html" "$TMP/erro.html" "$TMP/login-erro.html" "$TMP/login.html"
-check "templates: <svg só na macro (icon e logo) e nos gráficos do dashboard (#469), dos preços (#534), da Uso (#533) e das ferramentas (#535), nunca colado nas outras telas" bash -c '! grep -l "<svg" "$1"/templates/*.html | grep -v "/_macros.html$" | grep -v "/dashboard.html$" | grep -v "/prices.html$" | grep -v "/_graficos_uso.html$" | grep -v "/tools.html$" && [ "$(grep -c "<svg" "$1/templates/_macros.html")" = 2 ]' _ "$PKG"
+check "templates: <svg só na macro ou em _graficos*.html" svg_templates_valid "$PKG/templates"
+check "macro _macros.html: exatamente 2 SVGs (icon e logo)" bash -c '[ "$(grep -c "<svg" "$1")" = 2 ]' _ "$PKG/templates/_macros.html"
+mkdir -p "$TMP/svg-regra"
+printf '%s\n' '<svg></svg>' > "$TMP/svg-regra/tela.html"
+check "templates: a regra reprova <svg> colado numa tela" svg_templates_rejects_screen "$TMP/svg-regra"
 check "templates: nenhum style= nem <style"            bash -c '! grep -rnE "style=|<style" "$1/templates"' _ "$PKG"
 check "macro icon(name, size=16): <use> do sprite, traço currentColor, escondido do leitor de tela" bash -c 'grep -q "macro icon(name, size=16" "$1" && grep -q "stroke=\"currentColor\"" "$1" && grep -q "aria-hidden=\"true\"><use href=\"/static/lucide.svg#{{ name }}\"/>" "$1"' _ "$PKG/templates/_macros.html"
 check "páginas: o ícone sai do sprite com o tamanho pedido" bash -c 'grep -q "<svg class=\"icone\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" [^>]*><use href=\"/static/lucide.svg#layers\"/></svg>" "$1" && grep -q "<svg class=\"icone\" width=\"14\" height=\"14\" [^>]*><use href=\"/static/lucide.svg#chevron-right\"/>" "$1"' _ "$TMP/list.html"
