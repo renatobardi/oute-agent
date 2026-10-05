@@ -73,6 +73,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     `mark_token` = a de marcação (#510; sem ela, `POST /rodada/acao` não existe)."""
     auth = auth_mod.Auth(token, read_token, mark_token)
     tel = tel or telemetry.Noop()
+    store.obs = tel.phase  # tempo por fase da gravação e das leituras (#570)
     config = config or config_mod.Config()
 
     # na parada: o uvicorn reenvia o SIGTERM a si mesmo depois de parar, então o que vem depois do uvicorn.run não
@@ -111,9 +112,11 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         received_ns = time.time_ns()
         try:
             raw = _decompress(await request.body(), request.headers.get("content-encoding"))
+            t_parse = time.monotonic()
             payload = json.loads(raw)
             build, table = SIGNALS[signal]
             rows = build(payload, received_ns)
+            tel.phase("parse", time.monotonic() - t_parse, signal)  # no laço de eventos: se for caro, trava todas as rotas
         except OverflowError:
             tel.warn("too-large", "recusado: %s com corpo acima de %d bytes", signal, MAX_BODY)
             return JSONResponse({"message": "corpo grande demais"}, status_code=413)
