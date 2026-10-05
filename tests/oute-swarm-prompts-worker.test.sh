@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Testes do oute-swarm, tema: instruções do worker: issue sem arquivo, spike, regras de teste, sessão sem ação manual, check-lib, parallel-lib, funções de shell nova, audit (#115, #100, #358, #373, #401, #417, #450, #488, #501).
+# Testes do oute-swarm, tema: instruções do worker: issue sem arquivo, spike, regras de teste, sessão sem ação manual, check-lib, parallel-lib, funções de shell nova, audit (#115, #100, #358, #373, #401, #417, #450, #488, #501, #585).
 # Bash puro, sem herdr, gh nem rede de verdade (dublês e apoio em tests/lib/swarm.sh).
 # Acrescente caso novo no arquivo do tema (swarm-worker.md → este arquivo).
 # Uso: tests/oute-swarm-prompts-worker.test.sh   (sai != 0 se algum caso falhar)
@@ -150,4 +150,10 @@ check "worker: Closes se cumpre todos menos os de ship (#501)" grep -qF 'se o PR
 check "worker: Refs se algum critério de build, qa ou design faltar (#501)" grep -qF 'se algum critério de `build`, `qa` ou `design` ficar de fora' "$W"
 check "worker: ship no Falta com marca (ship) (#501)"        grep -qF 'vai no `## Falta` com a marca `(ship)`, e o PR usa `Closes`' "$W"
 check "worker: critério de ship é depois de entrar ou deploy ou release (#501)" grep -qF 'Critério de `ship` (com "depois de entrar", "depois do deploy" ou "medida após a release")' "$W"
+# 585. conferir funções de shell novas com grep antes do PR e declarar o resultado (#585)
+check "worker: lista funções novas do diff com grep antes do PR (#585)" grep -qF 'git diff --unified=0 origin/main...HEAD -- tests/*.test.sh scripts/ docker/ | grep -E' "$W"
+check "worker: grep identifica definições de função no diff (#585)" grep -qF 'function[[:space:]]+[[:alnum:]_]+|[[:alnum:]_]+[[:space:]]*[(][)][[:space:]]*[{]' "$W"
+check "worker: confere local em cada função nova (#585)" grep -qF 'todo parâmetro posicional deve ser atribuído a uma variável `local`' "$W"
+check "worker: confere return explícito em cada função nova (#585)" grep -qF 'deve haver um `return` explícito no fim' "$W"
+check "worker: informa a contagem e o resultado no corpo do PR (#585)" grep -qF 'No corpo do PR, informe: `Funções novas: N; todas com local e return.`' "$W"
 check_end
