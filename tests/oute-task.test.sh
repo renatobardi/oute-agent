@@ -684,6 +684,7 @@ check "reserva: marca guarda o codex (o restore reabre nele)" [ "$(smark "$SP/pr
 check "reserva: o aviso do seletor sai"                grep -qF "abrindo no Codex (reserva)" <<<"$SELW"
 FAKE_RC=0 t 40-reserva claude "faça a 40"
 check "reserva, reabertura: reopened com agente codex e reserve" bash -c 'jq -e ".name == \"oute.task.reopened\" and .attrs[\"oute.task.agent\"] == \"codex\" and .attrs[\"oute.task.reserve\"] == \"indisponivel\"" <<<"$1" >/dev/null' _ "$(last)"
+check "reserva, reabertura: o evento diz de qual assinatura saiu (reserve_from=claude, #598)" jqe '.attrs["oute.task.reserve_from"] == "claude"' <<<"$(last)"
 # escolha explícita não cai na reserva
 rm -f "$FAKE/claude.args"
 t --agent claude 40-explicito claude "p"
@@ -708,6 +709,15 @@ oute-emit task opened human repo=a slug=b reserve=chute
 check "oute-emit task: reserve inválido não emite"     [ "$(total)" -eq "$before" ]
 oute-emit task opened human repo=a slug=b agent=codex reserve=cota
 check "oute-emit task: reserve=cota vale"              jqe '.attrs["oute.task.reserve"] == "cota"' <<<"$(last)"
+oute-emit task opened human repo=a slug=b agent=codex reserve=cota reserve_from=claude
+check "oute-emit task: reserve_from vale com reserve"  jqe '.attrs["oute.task.reserve_from"] == "claude" and .attrs["oute.task.reserve"] == "cota"' <<<"$(last)"
+before="$(total)"
+oute-emit task opened human repo=a slug=b agent=codex reserve=cota 'reserve_from=Claude; x'
+check "oute-emit task: reserve_from inválido não emite" [ "$(total)" -eq "$before" ]
+oute-emit task opened human repo=a slug=b agent=codex reserve_from=claude
+check "oute-emit task: reserve_from sem reserve não emite" [ "$(total)" -eq "$before" ]
+oute-emit task removed human repo=a slug=b reason=merged reserve=indisponivel reserve_from=claude
+check "oute-emit task: removed sem o reserve_from"     jqe '.attrs | has("oute.task.reserve_from") | not' <<<"$(last)"
 oute-emit task removed human repo=a slug=b reason=merged reserve=indisponivel
 check "oute-emit task: removed sem o reserve"          jqe '.name == "oute.task.removed" and (.attrs | has("oute.task.reserve") | not)' <<<"$(last)"
 check "nenhum oute.task.* com corpo (seletor)"         [ "$(task_ev '.body != null' | grep -c .)" -eq 0 ]
