@@ -4,6 +4,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.40] - 2026-10-05
+
+### Changed
+- **Conferência de funções de shell no worker** (#585). O prompt pede conferir com `grep` funções novas e declarar o resultado no corpo do PR. **Precisa de release** (o prompt vai na imagem).
+- **Controle das telas do agent-studio** (#586). Testes de controle enviam os campos do formulário renderizado como o navegador, usando `tests/lib/studio_form.py`.
+
 ## [0.7.39] - 2026-10-05
 
 ### Added
