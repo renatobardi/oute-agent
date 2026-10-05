@@ -79,10 +79,10 @@ def parse(table, q):
     if direction is not None and direction not in DIRECTIONS:
         raise ValueError("direção de ordem inválida (asc ou desc)")
     size = q.get(table.name("tam"))
-    if size is not None and (not size.isdigit() or int(size) not in SIZES):
+    if size is not None and (not (size.isascii() and size.isdigit()) or int(size) not in SIZES):
         raise ValueError("tamanho de página inválido (20, 50 ou 100)")
     page = q.get(table.name("pag"))
-    if page is not None and (not page.isdigit() or not 1 <= int(page) <= 10**9):
+    if page is not None and (not (page.isascii() and page.isdigit()) or not 1 <= int(page) <= 10**9):
         raise ValueError("página inválida")
     default_order, default_dir = table.default
     order = order or default_order

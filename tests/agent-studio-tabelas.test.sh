@@ -156,7 +156,7 @@ check("formulário do período: leva host, ordem, direção e tamanho escondidos
 check("formulário do período enviado: a primeira página do filtrado e ordenado, no tamanho escolhido", rows(after) == exp)
 
 # ---------------------------------------------------------------- parâmetro fora da lista fixa: 400
-bad = ["ord=nao-existe", "ord=cost;DROP%20TABLE%20spans", "ord=cost%20desc", "dir=up", "tam=7", "tam=abc", "tam=-20", "tam=20.0", "tam=", "pag=0", "pag=-1", "pag=x", "pag=1e3",
+bad = ["ord=nao-existe", "ord=cost;DROP%20TABLE%20spans", "ord=cost%20desc", "dir=up", "tam=7", "tam=abc", "tam=-20", "tam=20.0", "tam=", "pag=0", "pag=-1", "pag=x", "pag=1e3", "pag=%C2%B2", "tam=%D9%A2%D9%A0",
        "f_nada=1", "f_host=oute-mac", "ord_c=start", "dir_c=asc", "pag_p=2", "f_state=aberta", "f_model=x", "f_agent_c=x"]
 check("Conversas: ordem, direção, tamanho, página e filtro fora da lista fixa dão 400", [b for b in bad if q("/conversas", b)[0] != 400] == [])
 check("o 400 não repete o que veio na URL", "DROP" not in q("/conversas", "ord=cost;DROP%20TABLE%20spans")[1] and "nao-existe" not in q("/conversas", "ord=nao-existe")[1])
