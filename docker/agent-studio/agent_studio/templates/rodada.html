@@ -3,26 +3,8 @@
 {% set detail = true %}
 {% set back = "/rodadas" %}
 {% set crumbs = [("Rodadas", "/rodadas"), (r.id, none)] %}
-{% from "_macros.html" import badge, icon %}
+{% from "_macros.html" import badge, icon, review_badge, etapa_corpo %}
 {% block title %}Rodada {{ r.id }} · Agent Studio{% endblock %}
-{# o texto da etapa é dado não confiável (ADR-08): o parser (etapas.py) devolve só dados, nunca HTML, e tudo aqui sai escapado #}
-{% macro inl(tokens) %}{% for t in tokens %}{% if t.t == "code" %}<code>{{ t.s }}</code>{% elif t.t == "b" %}<strong>{{ t.s }}</strong>{% elif t.t == "a" %}<a href="{{ t.href }}" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer" title="{{ t.href }}">{{ t.s }}</a> <span class="link-host">({{ t.host }})</span>{% else %}{{ t.s }}{% endif %}{% endfor %}{% endmacro %}
-{% macro doc(d) %}
-{% for sec in d.sections %}
-<section class="texto-secao"{% if sec.title %} data-secao="{{ sec.title }}"{% endif %}>
-  {% if sec.title %}<h3>{{ sec.title }}</h3>{% endif %}
-  {% for b in sec.blocks %}
-  {% if b.t == "p" %}<p>{{ inl(b.inl) }}</p>
-  {% elif b.t == "h" %}<h4>{{ inl(b.inl) }}</h4>
-  {% elif b.t == "ul" %}<ul>{% for i in b["items"] %}<li>{{ inl(i) }}</li>{% endfor %}</ul>
-  {% elif b.t == "ol" %}<ol>{% for i in b["items"] %}<li>{{ inl(i) }}</li>{% endfor %}</ol>
-  {% else %}<pre class="script">{{ b.s }}</pre>{% endif %}
-  {% endfor %}
-</section>
-{% endfor %}
-{% if d.missing %}<p class="nota" data-secoes-faltando="{{ d.missing|join(',') }}">O texto não traz a seção {{ d.missing|join(", ") }}.</p>{% endif %}
-{% endmacro %}
-{% macro review_badge(review) %}{% if review == "aprovado" %}{{ badge("aprovado pelo revisor", "secundario", "check") }}{% elif review == "reprovado" %}{{ badge("reprovado pelo revisor", "destrutivo", "triangle-alert") }}{% else %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% endif %}{% endmacro %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
@@ -32,6 +14,7 @@
         {% if r.record and r.record.state %}{{ badge(r.record.state, "", "loader" if r.record.state == "aberta" else "") }}{% endif %}
         {% if r.record and r.record.repo %}{{ badge(r.record.repo, "contorno") }}{% endif %}
         {% if r.record and r.record.label %}{{ badge("label " ~ r.record.label, "contorno", "tag") }}{% endif %}
+        {% if r.cycle_url %}<a href="{{ r.cycle_url }}" data-ciclo>{{ badge("ciclo " ~ r.record.cycle, "contorno", "repeat") }}</a>{% endif %}
       </div>
       <h1>Rodada <code>{{ r.id }}</code></h1>
       <p class="nota">As etapas que o dispatcher publicou para o Bardi, conferidas por um revisor de outro modelo. Esta tela só mostra.</p>
@@ -59,26 +42,11 @@
     <div>
       <h2>{{ s.title }}</h2>
       <p class="etapa-posicao" data-posicao>Etapa {{ s.pos }} de {{ s.total }} da rodada</p>
-      <p>revisão {{ s.rev }} · publicada em {{ s.published_at|when }} {{ tzl() }} · autor {{ s.writer or "—" }} · revisor {{ s.reviewer or "—" }} · sha256 <code>{{ s.sha_short }}</code>{% if s.cycle %} · ciclo {{ s.cycle }}{% endif %}</p>
+      <p>revisão {{ s.rev }} · publicada em {{ s.published_at|when }} {{ tzl() }} · autor {{ s.writer or "—" }} · revisor {{ s.reviewer or "—" }} · sha256 <code>{{ s.sha_short }}</code>{% if s.cycle_url %} · <a href="{{ s.cycle_url }}">ciclo {{ s.cycle }}</a>{% elif s.cycle %} · ciclo {{ s.cycle }}{% endif %}</p>
     </div>
     {{ review_badge(s.review) }}
   </div>
-  {% if s.review == "reprovado" %}
-  <p class="aviso erro etapa-aviso" role="alert" data-aviso="reprovado">Etapa reprovada pelo revisor. O texto abaixo não foi aprovado e pode ter erro de fato, de fonte ou de forma. Abra só se quiser lê-lo assim mesmo.</p>
-  {% elif s.review == "sem-revisor" %}
-  <p class="aviso etapa-aviso" role="alert" data-aviso="sem-revisor">Etapa sem revisor. Nenhum outro modelo conferiu este texto (tempo esgotado ou revisor indisponível). Abra só se quiser lê-lo assim mesmo.</p>
-  {% endif %}
-  {% if s.doc is none %}
-  <p class="aviso etapa-aviso" data-sem-texto>O texto desta etapa não chegou ao agent-studio (falta o corpo do evento <code>oute.swarm.step.published</code> no DuckDB).</p>
-  {% elif s.review == "aprovado" %}
-  <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
-  {% else %}
-  <details class="etapa-fechada" data-texto-fechado>
-    <summary>Abrir o texto sem revisão aprovada</summary>
-    <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
-  </details>
-  {% endif %}
-  {% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}
+  {{ etapa_corpo(s) }}
   {% if s.total > 1 %}
   <nav class="etapa-nav" aria-label="Etapa anterior e seguinte" data-etapa-nav>
     {% if s.prev %}<a class="botao" rel="prev" href="#{{ s.prev.anchor }}" data-nav="anterior">{{ icon("arrow-left", 14) }}<span>Anterior: {{ s.prev.title }}</span></a>{% else %}<span></span>{% endif %}

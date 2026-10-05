@@ -617,6 +617,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         states, state_read = await proposal_state("estado das rodadas", etapas_mod.round_states, [r["round"] for r in rows])
         for r in rows:
             r["state"] = (states or {}).get(r["round"])
+            r["cycle_url"] = etapas_mod.cycle_url((r["state"] or {}).get("cycle"))
         return page(request, "rodadas.html", rounds=rows, state_read=state_read,
                     limit_reached=len(rows) >= etapas_mod.LIST_LIMIT)
 
@@ -638,6 +639,28 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                      data["state_error"], level=logging.ERROR)
         etapas_mod.render(data["steps"])
         return page(request, "rodada.html", r=data, bar=etapas_mod.bar(data["steps"]), state_read=data["state_read"])
+
+    @app.get("/ciclo")
+    async def cycle_page(request: Request):
+        """Página do ciclo (#509): `/ciclo?id=<dono>/<repo>#<n>`, o resumo do ciclo e as rodadas dele, com o link de cada uma."""
+        if (denied := await gate(request)) is not None:
+            return denied
+        cycle = request.query_params.get("id", "")
+        if not cycle:
+            return error(request, 400, "Falta o id do ciclo.")
+        if not etapas_mod.CYCLE_ID.match(cycle):
+            return error(request, 400, "O id do ciclo tem de ser <dono>/<repo>#<número>.")   # nada do cliente na resposta
+        data, failed = await read(request, "ciclo", etapas_mod.load_cycle, store, surreal, cycle)
+        if failed:
+            return failed
+        if data is None:
+            return error(request, 404, "Ciclo não encontrado.")
+        if data["state_error"]:
+            tel.warn("web-state-failed", "tela: estado do ciclo (SurrealDB) falhou, segui com o DuckDB: %s",
+                     data["state_error"], level=logging.ERROR)
+        if data["summary"] is not None:
+            etapas_mod.render([data["summary"]])
+        return page(request, "ciclo.html", c=data, state_read=data["state_read"])
 
     # ------------------------------------------------ preços (#340): só leitura
     @app.get("/precos")

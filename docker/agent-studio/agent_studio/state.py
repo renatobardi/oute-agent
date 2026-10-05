@@ -23,12 +23,14 @@ TIMES = 'UPDATE type::record("{t}", $v.id) SET {sets};'
 
 # etapa da rodada (#507, ADR-08 "Página da rodada e do ciclo"): o evento `oute.swarm.step.published`
 STEP_EVENT = "oute.swarm.step.published"
-STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento")
+STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento", "ciclo")
+CYCLE_KIND = "ciclo"   # #509: o resumo do ciclo; a "rodada" dele é a pasta `ciclo-<dono>_<repo>-<n>` da sessão avulsa, não uma rodada
 STEP_REVIEWS = ("aprovado", "reprovado", "sem-revisor")
 STEP_REFCHECKS = ("ok", "falhou", "ausente")
 _STEP_TEXT = ("kind", "key", "sha256", "review", "writer", "reviewer", "refcheck", "cycle", "event", "host", "instance")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _STEP_KEY = re.compile(r"^[1-9]\d{0,8}$")
+_CYCLE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+\Z", re.ASCII)   # `<dono>/<repo>#<n>`, a issue do ciclo
 # `IF … THEN { UPSERT … } END`: só grava se o `rev` do evento é maior ou igual ao da revisão que já está lá (a revisão mais
 # alta vence, em qualquer ordem de chegada). Texto em base64, decodificado no SurrealDB (#337)
 STEP_UPSERT = (
@@ -36,6 +38,11 @@ STEP_UPSERT = (
     'UPSERT type::record("etapa", $v.id) SET rev = $v.rev, '
     + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _STEP_TEXT)
     + ', published_at = <datetime> $v.t, rodada = type::record("rodada", $v.r); } END;')
+# #509: o ciclo da rodada é o da revisão vigente da triagem (sem ciclo, o campo sai): só grava depois do STEP_UPSERT, se a
+# revisão deste evento é a vigente, para o reenvio e a ordem de chegada não mudarem o resultado
+STEP_CYCLE = (
+    'IF (array::first(SELECT VALUE rev FROM [type::record("etapa", $v.id)]) ?? 0) = $v.rev THEN { '
+    'UPSERT type::record("rodada", $v.r) SET cycle = IF $v.c = "" THEN NONE ELSE <string>encoding::base64::decode($v.c) END; } END;')
 
 
 def iso(ns):
@@ -101,7 +108,13 @@ def step_statements(rnd, a, t, ev, origin):
               "cycle": a("oute.swarm.cycle"), "event": ev, "host": origin.get("host"), "instance": origin.get("instance")}
     b64 = lambda v: base64.b64encode(("" if v is None else str(v)).encode()).decode()  # noqa: E731
     value = {"id": [rnd, kind, key], "rev": rev, "r": rnd, "t": iso(t), "b": {k: b64(fields[k]) for k in _STEP_TEXT}}
-    return upsert("rodada", rnd, origin) + [(STEP_UPSERT, value)]
+    if kind == CYCLE_KIND:
+        # o resumo do ciclo sem o ciclo não tem onde aparecer; e a pasta dele não é rodada (não ganha registro `rodada`)
+        return [(STEP_UPSERT, value)] if _CYCLE.match(fields["cycle"] or "") else []
+    out = upsert("rodada", rnd, origin) + [(STEP_UPSERT, value)]
+    if kind == "triagem":
+        out.append((STEP_CYCLE, {**value, "c": b64(fields["cycle"] if _CYCLE.match(fields["cycle"] or "") else "")}))
+    return out
 
 
 def _get(row, key):
