@@ -35,6 +35,9 @@ for run in range(5):
             status, html = await raw_get(app, '/', 'hours=168')
             shell_ms = (time.perf_counter() - start) * 1000
             assert status == 200
+            slots = Slots(html).slots
+            if not slots:
+                return shell_ms, shell_ms
             limit = asyncio.Semaphore(8)
 
             async def fetch(slot):
@@ -43,7 +46,7 @@ for run in range(5):
                     code, _ = await raw_get(app, url.path, url.query)
                     assert code == 200
 
-            await asyncio.gather(*(fetch(slot) for slot in Slots(html).slots))
+            await asyncio.gather(*(fetch(slot) for slot in slots))
             return shell_ms, (time.perf_counter() - start) * 1000
 
         rows.append(asyncio.run(measure()))
