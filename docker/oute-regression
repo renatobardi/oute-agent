@@ -104,17 +104,20 @@ RUN_TASKS=(); for t in "${TASKS[@]}"; do selected "$t" && RUN_TASKS+=("$t"); don
 RUN_STUDIO=0; selected "$STUDIO_TASK" && RUN_STUDIO=1
 [[ ${#RUN_TASKS[@]} -gt 0 || $RUN_STUDIO = 1 ]] || die2 "nenhuma tarefa selecionada"
 
-# --- cota: janela >= MAX_PCT = não começa (saída 3); desconhecida ou sem o comando = aviso e segue
+# --- cota: janela >= MAX_PCT = não começa (saída 3); desconhecida ou sem o comando = aviso e segue. Só conta a cota das
+# assinaturas que a execução usa (#598): as tarefas rodam no Claude e, com --codex, também no Codex; a cota de outra assinatura
+# (de outra rodada, por exemplo) não trava a suíte.
+USED_SUBS='["claude"]'; [[ $CODEX = 0 ]] || USED_SUBS='["claude","codex"]'
 if command -v oute-quota >/dev/null; then
   q="$(oute-quota --json 2>/dev/null)" || q=""
   pct=""; qagent=""; qwin=""
-  read -r pct qagent qwin < <(jq -r '[.agents | to_entries[]? | select(.value.status == "ok") | .key as $a
-    | .value.windows | to_entries[]? | select(.value.used_pct | type == "number") | {a: $a, w: .key, p: .value.used_pct}]
+  read -r pct qagent qwin < <(jq -r --argjson used "$USED_SUBS" '[.agents | to_entries[]? | select(.value.status == "ok") | .key as $a
+    | select($used | index($a)) | .value.windows | to_entries[]? | select(.value.used_pct | type == "number") | {a: $a, w: .key, p: .value.used_pct}]
     | if length == 0 then empty else max_by(.p) | "\(.p) \(.a) \(.w)" end' <<<"$q" 2>/dev/null)
   if [[ -z "$pct" ]]; then
-    warn "cota desconhecida (oute-quota sem leitura); sigo"
+    warn "cota desconhecida (oute-quota sem leitura das assinaturas usadas: $(jq -r -n --argjson u "$USED_SUBS" '$u | join(", ")')); sigo"
   elif awk -v p="$pct" -v m="$MAX_PCT" 'BEGIN { exit !(p >= m) }'; then
-    printf 'oute-regression: cota em %s%% (%s, janela %s; limite %s%%): a suíte não começou; quem abre PR de prompt declara que a regressão não rodou\n' \
+    printf 'oute-regression: cota em %s%% (assinatura %s, janela %s; limite %s%%): a suíte não começou; quem abre PR de prompt declara que a regressão não rodou\n' \
       "$pct" "$qagent" "$qwin" "$MAX_PCT" >&2
     exit "$EXIT_QUOTA"
   fi

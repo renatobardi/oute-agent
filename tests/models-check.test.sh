@@ -40,6 +40,16 @@ good_cache() { codex_cache "${1:-1}" gpt-6.1-sol:low,medium,high gpt-6-astra:low
 # tabela de exemplo do teste (não a do repo): um [default], três [[line]] e duas [[exception]]
 EX="$TMP/exemplo.toml"
 cat > "$EX" <<'TOML'
+[[subscription]]
+name = "claude"
+default = true
+
+[[subscription]]
+name = "codex"
+
+[select]
+reserve_mode = "mais-livre"
+
 [default]
 claude = "claude-sonnet-5-5"
 codex = "gpt-6.1-sol"
@@ -246,7 +256,7 @@ check "tabela que não é TOML: código 2"                 [ "$RC" -eq 2 ]
 table -e '/^\[default\]/,/^$/d'; mc --table "$TMP/table.toml"
 check "tabela sem [default]: código 2"                  bash -c '[ "$1" -eq 2 ] && grep -qF "sem [default]" <<<"$2"' _ "$RC" "$ERR"
 table -e '0,/^effort = /{/^effort = /d}'; mc --table "$TMP/table.toml"
-check "linha sem effort: código 2"                      bash -c '[ "$1" -eq 2 ] && grep -qF "[default] sem claude, codex ou effort" <<<"$2"' _ "$RC" "$ERR"
+check "linha sem effort: código 2"                      bash -c '[ "$1" -eq 2 ] && grep -qF "[default] sem effort" <<<"$2"' _ "$RC" "$ERR"
 table -e '/^phases = \["ops"/d'; mc --table "$TMP/table.toml"
 check "[[line]] sem phases: código 2"                   bash -c '[ "$1" -eq 2 ] && grep -qF "[[line]] 3 sem phases" <<<"$2"' _ "$RC" "$ERR"
 table -e '/^label = "docs"/d'; mc --table "$TMP/table.toml"
@@ -290,6 +300,36 @@ check "revisor com agent fora de claude e codex: código 2" bash -c '[ "$1" -eq 
 table -e 's/^writers = \["claude-sonnet-5-5", "gpt-6.1-sol"\]/writers = []/'; mc --table "$TMP/table.toml"
 check "revisor sem autor na lista: código 2"             bash -c '[ "$1" -eq 2 ] && grep -qF "[[reviewer]] 1 sem writers" <<<"$2"' _ "$RC" "$ERR"
 check "tabela do repo: tem [[reviewer]] e o par passa na estrutura" bash -c 'grep -q "^\[\[reviewer\]\]" "$1" && ! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA (autor|revisor)"' _ "$TABLE" "$MC"
+
+# ---------------------------------------------------------------- 7b. assinaturas (#598): padrão, colunas, modo das reservas
+# tabela com uma terceira assinatura fictícia (`fict`), com a coluna em toda linha
+sub3() { local extra=("$@"); sed -e 's/^codex = \(.*\)$/codex = \1\nfict = "fict-x"/' -e 's/^name = "codex"$/name = "codex"\n\n[[subscription]]\nname = "fict"/' \
+  -e 's/^writers = \(\["claude-sonnet-5-5", "gpt-6.1-sol"\)\]/writers = \1, "fict-x"]/' ${extra[@]+"${extra[@]}"} "$EX" > "$TMP/table.toml"; return $?; }
+sub3; mc --table "$TMP/table.toml"
+check "três assinaturas completas: sem FALTA, o id da terceira fica desconhecido (código 3)" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido fict-x (fict)" <<<"$2" && ! grep -q "^FALTA" <<<"$2"' _ "$RC" "$OUT"
+check "três assinaturas: avisa que só claude e codex têm conferência" bash -c 'grep -qF "assinatura fict: sem conferência dos ids" <<<"$1"' _ "$ERR"
+check "três assinaturas: uma padrão só, e a coluna da terceira em toda linha" bash -c 'grep -qxF "ok uma assinatura padrão só (claude) (tabela)" <<<"$1" && grep -qxF "ok modelo da assinatura fict em [[line]] 2 (tabela)" <<<"$1"' _ "$OUT"
+sub3; sed -i 's/^name = "fict"$/name = "fict"\ndefault = true/' "$TMP/table.toml"; mc --table "$TMP/table.toml"
+check "duas padrão: FALTA, código 1"                    bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA uma assinatura padrão só (claude, fict) (tabela)" <<<"$2"' _ "$RC" "$OUT"
+sub3 -e 's/^default = true$//'; mc --table "$TMP/table.toml"
+check "nenhuma padrão: FALTA, código 1"                 bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA uma assinatura padrão só (nenhuma) (tabela)" <<<"$2"' _ "$RC" "$OUT"
+sub3; python3 - "$TMP/table.toml" <<'PY'
+import re
+import sys
+t = open(sys.argv[1]).read()
+open(sys.argv[1], "w").write(re.sub(r'(?s)(\[\[line\]\]\nphases = \["build".*?)fict = "fict-x"\n', r"\1", t, count=1))
+PY
+mc --table "$TMP/table.toml"
+check "linha sem a coluna de uma assinatura: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA modelo da assinatura fict em [[line]] 2 (tabela)" <<<"$2"' _ "$RC" "$OUT"
+table -e 's/^reserve_mode = "mais-livre"/reserve_mode = "ordem"/'; mc --table "$TMP/table.toml"
+check "modo ordem: aceito"                              bash -c '[ "$1" -eq 0 ]' _ "$RC"
+table -e 's/^reserve_mode = "mais-livre"/reserve_mode = "sorteio"/'; mc --table "$TMP/table.toml"
+check "modo desconhecido: código 2, sem stdout"         bash -c '[ "$1" -eq 2 ] && grep -qF "reserve_mode desconhecido" <<<"$2" && [ -z "$3" ]' _ "$RC" "$ERR" "$OUT"
+table -e 's/^name = "codex"$/name = "claude"/'; mc --table "$TMP/table.toml"
+check "assinatura repetida: código 2"                   bash -c '[ "$1" -eq 2 ] && grep -qF "nome repetido" <<<"$2"' _ "$RC" "$ERR"
+table -e '/^\[\[subscription\]\]/,/^reserve_mode/d'; mc --table "$TMP/table.toml"
+check "sem [[subscription]]: código 2"                  bash -c '[ "$1" -eq 2 ] && grep -qF "sem [[subscription]]" <<<"$2"' _ "$RC" "$ERR"
+check "tabela do repo: uma padrão só e toda assinatura com linha por fase" bash -c '! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA (uma assinatura|modelo da assinatura)" && "$2" --table "$1" 2>/dev/null | grep -qxF "ok uma assinatura padrão só (claude) (tabela)"' _ "$TABLE" "$MC"
 
 # ---------------------------------------------------------------- 8. nenhuma chamada a modelo
 check "nenhum claude, codex ou shim foi executado"      [ ! -e "$FAKE/called" ]

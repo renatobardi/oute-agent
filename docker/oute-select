@@ -2,31 +2,37 @@
 """oute-select — seletor de modelo por sessão (ADR-02, #219, #257): diz com que agente e modelo uma sessão abre, sem abrir.
 
   oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>]
-              [--agent claude|codex] [--model <id>] [--text-file <arquivo>|-]
+              [--agent <assinatura>] [--prefer <assinatura>] [--model <id>] [--text-file <arquivo>|-]
 
   --issue <n>      issue da sessão; --task <n>-<slug> tira o número do slug (slug sem número = sessão sem issue)
   --repo <dir>     checkout em que o `gh` lê a issue (padrão: o diretório atual)
   --phase <fase>   fase fixa, sem ler a issue (o dispatcher do swarm abre em `plan`)
   --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase
+  --prefer <nome>  pedido (não escolha explícita) de abrir numa assinatura que não é a padrão: vale a mesma regra de cota,
+                   e a sessão pode voltar para a padrão (#598). Sem a opção, o ponto de partida é a padrão
   --text-file <f>  texto da tarefa (`-` = stdin), para o Jev classificar a fase quando nenhum label a dá
-  --json           {"phase","origin","agent","model","effort","reason","confidence","reserve"}; sem ele, uma linha para ler
+  --json           {"phase","origin","agent","model","effort","reason","confidence","reserve"} (+ "reserve_from" só
+                   quando houve reserva: a assinatura de onde a sessão saiu); sem ele, uma linha para ler
 
 Precedência: --agent/--model > exceção por label (`spike`, `kaizen`, `docs`) > label `aidlc:<fase>` > Jev > padrão (Sonnet).
 A exceção `kaizen` não vale com label de fase que mexe em código (`unless_phases` da tabela: build, qa, design, plan,
 ship, iter; #409): vale a fase. `spike` e `docs` não têm essa ressalva.
 Origem: `manual`, `label`, `jev` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
 
-Reserva (#258): quando a sessão abriria no Claude e ele está indisponível (`claude auth status` ≠ 0 ou `claude` ausente,
-teto de 5 s), abre no Codex, na linha da mesma fase, e `reserve` vale `indisponivel` (senão ""). Não troca de agente
-com --agent/--model ou --phase explícitos (só avisa), nem quando o `auth status` não responde a tempo (aviso, abre no
-Claude). Com o Codex também fora (`codex login status` ≠ 0 ou ausente): aviso "Claude e Codex indisponíveis" e abre no
-Claude.
+Assinaturas (#598, ADR-02): a tabela lista as assinaturas (`[[subscription]]`: `name`, `default` em uma só, `status` = o comando
+que diz se o agente está logado, `effort`, `prefixes`); as outras são reservas. Cada linha de fase tem uma coluna por
+assinatura. Acrescentar uma é cadastro na tabela (e a leitura da cota dela no `oute-quota`), não código aqui. O campo
+`[select] reserve_mode` escolhe a reserva: `mais-livre` (a de mais cota livre; cota livre = 100 − a janela mais cheia) ou
+`ordem` (a primeira da tabela abaixo do teto).
 
-Reserva por cota (#355): com o Claude disponível e sem escolha explícita, lê `oute-quota --json` (teto de 3 s). Qualquer
-janela do Claude >= `max_pct` (98) -> abre no Codex, `reserve` = `cota`, com a janela e a hora do reset no aviso.
-Exceção: só a janela de 5 h passou do corte, está abaixo de 100% e reseta em menos de `reset_grace_s` (20 min) -> só
-aviso, abre no Claude. Cota do Claude `unknown` ou leitura que falha -> só aviso, abre no Claude. Claude e Codex >= corte:
-aviso, abre no Claude. Codex `unknown`: troca, com aviso. Nunca bloqueia.
+Reserva (#258, #355, #598): sem escolha explícita, a sessão parte da padrão (ou da de `--prefer`). Ela fica nela se está
+disponível (o `status` sai 0; sem resposta em 5 s só avisa) e com toda janela abaixo de `max_pct` (98, #558). Senão abre
+em outra, pela ordem: a padrão (se a de partida era reserva), depois as reservas disponíveis abaixo do teto, pelo modo
+(`reserve` = `cota` ou `indisponivel`, `reserve_from` = a de partida); depois as de cota desconhecida (por último, com
+aviso de que a cota não foi lida); com todas no teto, a de mais cota livre, com aviso. Nunca recusa. Exceção da janela de 5 h
+(só na assinatura de partida): só ela passou do corte, abaixo de 100%, e reseta em menos de `reset_grace_s` (20 min) -> só aviso.
+Cota da assinatura de partida `unknown` ou leitura que falha -> só aviso, abre nela. Com escolha explícita (--agent, --model,
+--phase) a sessão não troca: só avisa que a padrão está indisponível, e a cota nem é lida.
 Tabela: $OUTE_SELECT_TABLE (padrão /opt/oute/select/models.toml, o config/select/ do checkout, só leitura).
 
 Jev (#257): só sem label de fase (sessão sem issue, ou issue sem `aidlc:<fase>`), com texto da tarefa e sem --model.
@@ -52,11 +58,18 @@ import urllib.error
 import urllib.request
 
 TABLE = os.environ.get("OUTE_SELECT_TABLE", "/opt/oute/select/models.toml")
-AGENTS = ("claude", "codex")
+SUB_NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
+RESERVE_MODES = ("mais-livre", "ordem")
+# tabela ausente ou inválida: as duas assinaturas de antes da #598, para a reserva (#258) seguir valendo sem modelo
+FALLBACK_SUBS = [
+    {"name": "claude", "default": True, "status": ["claude", "auth", "status"], "effort": False, "prefixes": ()},
+    {"name": "codex", "default": False, "status": ["codex", "login", "status"], "effort": True,
+     "prefixes": ("gpt-", "codex")},
+]
 MODEL_RE = re.compile(r"[A-Za-z0-9._-]+(\[1m\])?")
 PHASE_RE = re.compile(r"[a-z]+")
 USAGE = "uso: oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] " \
-        "[--agent claude|codex] [--model <id>] [--text-file <arquivo>|-]"
+        "[--agent <assinatura>] [--prefer <assinatura>] [--model <id>] [--text-file <arquivo>|-]"
 
 # Jev direto na TypeSafe (ADR-02, #257). A URL só muda nos testes (TypeSafe falsa, com TLS) e só vale com https://
 # (#313): sem TLS, o texto da tarefa e a chave iriam em claro.
@@ -103,37 +116,70 @@ def warn(msg):
     print(f"oute-select: aviso: {msg}", file=sys.stderr)
 
 
-def line_ok(d):
+def line_ok(d, names):
     return isinstance(d, dict) and all(isinstance(d.get(k), str) and MODEL_RE.fullmatch(d[k])
-                                       for k in ("claude", "codex", "effort"))
+                                       for k in (*names, "effort"))
+
+
+def load_subscriptions(t):
+    """([assinatura], modo das reservas) de `[[subscription]]` e `[select]`; ValueError se inválidos"""
+    raw = t.get("subscription")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("sem [[subscription]]")
+    subs = []
+    for r in raw:
+        if not isinstance(r, dict) or not isinstance(r.get("name"), str) or not SUB_NAME_RE.fullmatch(r["name"]):
+            raise ValueError("[[subscription]] sem name válido")
+        st, pre = r.get("status"), r.get("prefixes", [])
+        if st is not None and (not isinstance(st, list) or not st or not all(isinstance(x, str) and x for x in st)):
+            raise ValueError(f"[[subscription]] {r['name']} com status inválido")
+        if not isinstance(pre, list) or not all(isinstance(x, str) and x for x in pre):
+            raise ValueError(f"[[subscription]] {r['name']} com prefixes inválido")
+        if not isinstance(r.get("default", False), bool) or not isinstance(r.get("effort", False), bool):
+            raise ValueError(f"[[subscription]] {r['name']} com default ou effort que não é booleano")
+        subs.append({"name": r["name"], "default": r.get("default", False), "status": st,
+                     "effort": r.get("effort", False), "prefixes": tuple(pre)})
+    names = [x["name"] for x in subs]
+    if len(set(names)) != len(names):
+        raise ValueError("[[subscription]] com nome repetido")
+    if sum(x["default"] for x in subs) != 1:
+        raise ValueError("[[subscription]] precisa de uma, e só uma, com default = true")
+    sel = t.get("select", {})
+    mode = sel.get("reserve_mode", "mais-livre") if isinstance(sel, dict) else None
+    if mode not in RESERVE_MODES:
+        raise ValueError(f"[select] reserve_mode desconhecido (use {' ou '.join(RESERVE_MODES)})")
+    return subs, mode
 
 
 def load_table():
-    """(padrão, {fase: linha}, [(label, linha)]); tabela ausente ou inválida = (None, {}, []), com aviso"""
+    """(padrão, {fase: linha}, [(label, linha)], [assinatura], modo); tabela ausente ou inválida = (None, {}, [],
+    assinaturas de antes da #598, "mais-livre"), com aviso"""
     try:
         with open(TABLE, "rb") as f:
             t = tomllib.load(f)
+        subs, mode = load_subscriptions(t)
+        names = [x["name"] for x in subs]
         default, phases, exceptions = t["default"], {}, []
-        if not line_ok(default):
-            raise ValueError("[default] sem claude, codex ou effort")
+        if not line_ok(default, names):
+            raise ValueError(f"[default] sem {', '.join(names)} ou effort")
         for ln in t.get("line", []):
-            if not line_ok(ln) or not isinstance(ln.get("phases"), list):
-                raise ValueError("[[line]] sem phases, claude, codex ou effort")
+            if not line_ok(ln, names) or not isinstance(ln.get("phases"), list):
+                raise ValueError(f"[[line]] sem phases, {', '.join(names)} ou effort")
             for p in ln["phases"]:
                 if not isinstance(p, str) or not PHASE_RE.fullmatch(p):
                     raise ValueError(f"fase inválida: {p!r}")
                 phases[p] = ln
         for ex in t.get("exception", []):
-            if not line_ok(ex) or not isinstance(ex.get("label"), str) or not ex["label"]:
-                raise ValueError("[[exception]] sem label, claude, codex ou effort")
+            if not line_ok(ex, names) or not isinstance(ex.get("label"), str) or not ex["label"]:
+                raise ValueError(f"[[exception]] sem label, {', '.join(names)} ou effort")
             skip = ex.get("unless_phases", [])
             if not isinstance(skip, list) or not all(isinstance(p, str) and PHASE_RE.fullmatch(p) for p in skip):
                 raise ValueError("[[exception]] com unless_phases inválido")
             exceptions.append((ex["label"], ex))
-        return default, phases, exceptions
+        return default, phases, exceptions, subs, mode
     except (OSError, KeyError, ValueError, TypeError) as e:   # tomllib.TOMLDecodeError é ValueError
         warn(f"tabela de fase ausente ou inválida ({TABLE}: {e}); a sessão abre com o modelo padrão do agente")
-        return None, {}, []
+        return None, {}, [], FALLBACK_SUBS, "mais-livre"
 
 
 def issue_labels(repo, issue):
@@ -274,15 +320,18 @@ def by_issue(repo, issue, phases, exceptions):
     return None, "", "padrao", why, why, True
 
 
-def guess_agent(model, default, phases, exceptions):
-    """agente de um --model dado sem --agent: a coluna da tabela em que o id aparece; fora dela, pelo prefixo"""
+def guess_agent(model, default, phases, exceptions, subs):
+    """assinatura de um --model dado sem --agent: a coluna da tabela em que o id aparece; fora dela, pelo prefixo
+    (`prefixes` da assinatura); sem nada disso, a padrão"""
     lines = [default] if default else []
     lines += list(phases.values()) + [ln for _, ln in exceptions]
-    if any(ln["codex"] == model for ln in lines):
-        return "codex"
-    if any(ln["claude"] == model for ln in lines):
-        return "claude"
-    return "codex" if model.startswith(("gpt-", "codex")) else "claude"
+    for sub in subs:
+        if any(ln[sub["name"]] == model for ln in lines):
+            return sub["name"]
+    for sub in subs:
+        if model.startswith(sub["prefixes"]):
+            return sub["name"]
+    return next(x["name"] for x in subs if x["default"])
 
 
 def auth_timeout():
@@ -362,36 +411,129 @@ def quota_over(wins, cut):
     return {n: w for n, w in wins.items() if w[0] >= cut}
 
 
-def quota_trigger():
-    """("claude"|"codex", aviso ou None) pela cota: "codex" só com o Claude em/acima do corte e sem exceção"""
-    q = quota_read()
-    if q is None:
-        return "claude", "não li a cota (`oute-quota --json` falhou ou não respondeu em tempo); abrindo no Claude"
-    cut, grace = num(q.get("max_pct"), QUOTA_MAX_PCT), num(q.get("reset_grace_s"), QUOTA_GRACE_S)
-    cst, cw = quota_windows(q, "claude")
-    if cst != "ok":
-        return "claude", "a cota do Claude está desconhecida (unknown); abrindo no Claude"
-    over = quota_over(cw, cut)
-    if not over:
-        return "claude", None
-    desc = ", ".join(f"{n} em {w[0]:g}% (reseta {reset_text(w[2])})" for n, w in sorted(over.items()))
-    five = over.get("5h")
-    if list(over) == ["5h"] and five[0] < 100 and five[1] is not None and five[1] < grace:
-        return "claude", f"Claude com a janela de 5h em {five[0]:g}%, mas reseta em menos de {grace / 60:g} min " \
-                         f"({reset_text(five[2])}); abrindo no Claude"
-    xst, xw = quota_windows(q, "codex")
-    if xst == "ok":
-        xover = quota_over(xw, cut)
-        if xover:
-            xd = ", ".join(f"{n} em {w[0]:g}% (reseta {reset_text(w[2])})" for n, w in sorted(xover.items()))
-            return "claude", f"cota do Claude esgotada ({desc}) e a do Codex também ({xd}); abrindo no Claude"
-        return "codex", f"cota do Claude esgotada ({desc}); abrindo no Codex (reserva por cota)"
-    return "codex", f"cota do Claude esgotada ({desc}) e a do Codex está desconhecida (unknown); " \
-                    "abrindo no Codex mesmo assim (reserva por cota)"
+def label(name):
+    return name.capitalize()
+
+
+def join_pt(items):
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " e " + items[-1]
+
+
+def wins_text(wins):
+    return ", ".join(f"{n} em {w[0]:g}% (reseta {reset_text(w[2])})" for n, w in sorted(wins.items()))
+
+
+def free_pct(wins):
+    """cota livre de uma assinatura: a da janela mais apertada dela (5h a 91% e 7d a 39% = 9% livre)"""
+    return 100.0 - max(w[0] for w in wins.values())
+
+
+def pick_other(cands, subs, mode, q, cut, start_over):
+    """(assinatura, "ok"|"desconhecida"|"no-teto", {nome: janelas no teto}) entre os candidatos (nunca vazio).
+    Abaixo do teto: a padrão primeiro, depois as reservas pelo modo (mais-livre: mais cota livre; ordem: a da tabela);
+    sem nenhuma, a de cota desconhecida (a padrão, depois as reservas na ordem da tabela); sem nenhuma, a de mais cota
+    livre entre os candidatos e a de partida (`start_over` = {nome: (assinatura, janelas)}), a de partida no empate"""
+    info = {c["name"]: quota_windows(q, c["name"]) if q else ("unknown", {}) for c in cands}
+    over = {n: quota_over(w, cut) for n, (st, w) in info.items() if st == "ok"}
+    order = {x["name"]: i for i, x in enumerate(subs)}
+
+    def rank(c):   # a padrão primeiro, depois a ordem da tabela
+        return (not c["default"], order[c["name"]])
+
+    under = sorted((c for c in cands if info[c["name"]][0] == "ok" and not over[c["name"]]), key=rank)
+    if under:
+        if mode == "mais-livre":
+            reserves = sorted((c for c in under if not c["default"]), key=lambda c: (-free_pct(info[c["name"]][1]), rank(c)))
+            under = [c for c in under if c["default"]] + reserves
+        return under[0], "ok", over
+    unknown = sorted((c for c in cands if info[c["name"]][0] != "ok"), key=rank)
+    if unknown:
+        return unknown[0], "desconhecida", over
+    pool = [(free_pct(info[c["name"]][1]), 1, rank(c), c) for c in cands]
+    pool += [(free_pct(w), 0, rank(sub), sub) for sub, w in start_over.values()]
+    best = sorted(pool, key=lambda x: (-x[0], x[1], x[2]))[0]
+    return best[3], "no-teto", over
+
+
+def cmd_text(sub):
+    return " ".join(sub["status"][:3]) if sub["status"] else ""
+
+
+def availability(sub):
+    """"ok", "down" ou "slow" da assinatura; sem `status` na tabela, sempre "ok" """
+    return agent_state(sub["status"]) if sub["status"] else "ok"
+
+
+def decide(subs, mode, start):
+    """(assinatura onde abrir, reserve, de) pela regra da #598; só sem escolha explícita. Avisos em stderr, nunca bloqueia.
+    reserve = "indisponivel" | "cota" | "" ; de = a assinatura de partida quando houve troca, senão "" """
+    by_name = {x["name"]: x for x in subs}
+    sub = by_name[start]
+    state, reason, q, read = availability(sub), "", None, False
+    if state == "slow":
+        warn(f"o `{cmd_text(sub)}` não respondeu em {auth_timeout():g} s; abrindo no {label(start)}")
+    elif state == "down":
+        reason = "indisponivel"
+    start_over = {}
+    if state != "down":   # gatilho de cota (#355): só com a assinatura de partida disponível
+        q, read = quota_read(), True
+        if q is None:
+            warn(f"não li a cota (`oute-quota --json` falhou ou não respondeu em tempo); abrindo no {label(start)}")
+            return start, "", ""
+        cut, grace = num(q.get("max_pct"), QUOTA_MAX_PCT), num(q.get("reset_grace_s"), QUOTA_GRACE_S)
+        st, wins = quota_windows(q, start)
+        if st != "ok":
+            warn(f"a cota do {label(start)} está desconhecida (unknown); abrindo no {label(start)}")
+            return start, "", ""
+        over = quota_over(wins, cut)
+        if not over:
+            return start, "", ""
+        five = over.get("5h")
+        if list(over) == ["5h"] and five[0] < 100 and five[1] is not None and five[1] < grace:
+            warn(f"{label(start)} com a janela de 5h em {five[0]:g}%, mas reseta em menos de {grace / 60:g} min "
+                 f"({reset_text(five[2])}); abrindo no {label(start)}")
+            return start, "", ""
+        reason, start_over = "cota", {start: (sub, wins)}
+    cands = []
+    for c in subs:
+        if c["name"] == start:
+            continue
+        cs = availability(c)
+        if cs == "slow":
+            warn(f"o `{cmd_text(c)}` não respondeu em {auth_timeout():g} s; tratado como disponível")
+        if cs != "down":
+            cands.append(c)
+    if not cands:
+        warn(f"{join_pt([label(x['name']) for x in subs])} indisponíveis; abrindo no {label(start)}")
+        return start, "", ""
+    if reason == "indisponivel":
+        if len(cands) > 1:
+            q = quota_read()
+            if q is None:
+                warn("não li a cota (`oute-quota --json` falhou ou não respondeu em tempo); ordem pela tabela")
+        cut = num(q.get("max_pct"), QUOTA_MAX_PCT) if q else QUOTA_MAX_PCT
+        pick = cands[0] if len(cands) == 1 else pick_other(cands, subs, mode, q, cut, {})[0]
+        warn(f"o {label(start)} está indisponível (`{cmd_text(sub)}` falhou); abrindo no {label(pick['name'])} (reserva)")
+        return pick["name"], reason, start
+    base = f"cota do {label(start)} esgotada ({wins_text(start_over[start][1])})"
+    pick, kind, over = pick_other(cands, subs, mode, q, cut, start_over)
+    pn = pick["name"]
+    if kind == "ok":
+        warn(f"{base}; abrindo no {label(pn)} (reserva por cota)")
+    elif kind == "desconhecida":
+        warn(f"{base} e a do {label(pn)} está desconhecida (unknown, cota não lida); abrindo no {label(pn)} mesmo assim (reserva por cota)")
+    else:
+        also = "; ".join(f"a do {label(n)} também ({wins_text(w)})" for n, w in over.items() if w)
+        also = f" e {also}" if also else ""
+        if pn == start:
+            warn(f"{base}{also}; abrindo no {label(start)}")
+            return start, "", ""
+        warn(f"{base}{also}; abrindo no {label(pn)}, a de mais cota livre")
+    return pn, reason, start
 
 
 def main(argv):
-    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "text-file": ""}
+    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "prefer": "", "text-file": ""}
     it = iter(argv)
     for a in it:
         if a in ("-h", "--help"):
@@ -400,7 +542,7 @@ def main(argv):
         if a == "--json":
             opt["json"] = True
             continue
-        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--model", "--text-file"):
+        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--prefer", "--model", "--text-file"):
             die(f"opção desconhecida: {a}\n{USAGE}")
         v = next(it, None)
         if v is None:
@@ -415,14 +557,16 @@ def main(argv):
         else:
             opt[a[2:]] = v
     agent, model = opt["agent"], opt["model"]
+    default, phases, exceptions, subs, mode = load_table()
+    names = [x["name"] for x in subs]
     if agent == "pi":
         die("Pi saiu do stack (#217), use claude ou codex")
-    if agent and agent not in AGENTS:
-        die(f"agente inválido: {agent}; use claude ou codex")
+    for flag, what in (("agent", "agente"), ("prefer", "assinatura")):
+        if opt[flag] and opt[flag] not in names:
+            die(f"{what} inválido: {opt[flag]}; use {' ou '.join(names)}")
     if model and not MODEL_RE.fullmatch(model):
         die(f"modelo inválido: {model}")
 
-    default, phases, exceptions = load_table()
     warning, confidence = None, None
     if opt["phase"]:
         phase = opt["phase"]
@@ -443,48 +587,40 @@ def main(argv):
     if agent or model:
         origin = "manual"
         reason = " ".join(x for x in (agent and f"--agent {agent}", model and f"--model {model}") if x) + f" ({reason})"
+    default_sub = next(x for x in subs if x["default"])["name"]
     if not agent:
-        agent = guess_agent(model, default, phases, exceptions) if model else "claude"
-    # reserva (#258): só quando a sessão abriria no Claude. Escolha explícita (--agent, --model, --phase) só avisa
-    reserve = ""
-    if agent == "claude":
-        explicit = bool(opt["agent"] or model or opt["phase"])
-        cs = agent_state(["claude", "auth", "status"])
+        agent = guess_agent(model, default, phases, exceptions, subs) if model else (opt["prefer"] or default_sub)
+    # reserva (#258, #355, #598): sem escolha explícita (--agent, --model, --phase), a regra de cota e de disponibilidade;
+    # com ela, só avisa (e só da padrão indisponível)
+    reserve, reserve_from = "", ""
+    explicit = bool(opt["agent"] or model or opt["phase"])
+    if not explicit:
+        agent, reserve, reserve_from = decide(subs, mode, agent)
+    elif agent == default_sub:
+        sub = next(x for x in subs if x["name"] == agent)
+        cs = availability(sub)
         if cs == "slow":
-            warn(f"o `claude auth status` não respondeu em {auth_timeout():g} s; abrindo no Claude")
-        elif cs == "down" and explicit:
-            warn("o Claude está indisponível (`claude auth status` falhou), mas a escolha foi explícita "
-                 "(--agent, --model ou --phase); abrindo no Claude")
+            warn(f"o `{cmd_text(sub)}` não respondeu em {auth_timeout():g} s; abrindo no {label(agent)}")
         elif cs == "down":
-            xs = agent_state(["codex", "login", "status"])
-            if xs == "down":
-                warn("Claude e Codex indisponíveis; abrindo no Claude")
-            else:
-                if xs == "slow":
-                    warn(f"o `codex login status` não respondeu em {auth_timeout():g} s; abrindo no Codex mesmo assim")
-                agent, reserve = "codex", "indisponivel"
-                warn("o Claude está indisponível (`claude auth status` falhou); abrindo no Codex (reserva)")
-        if cs != "down" and not explicit:   # gatilho de cota (#355): só com o Claude disponível e sem escolha explícita
-            who, note = quota_trigger()
-            if note:
-                warn(note)
-            if who == "codex":
-                agent, reserve = "codex", "cota"
+            warn(f"o {label(agent)} está indisponível (`{cmd_text(sub)}` falhou), mas a escolha foi explícita "
+                 "(--agent, --model ou --phase); abrindo no " + label(agent))
     # o aviso só interessa quando o padrão escolheu o modelo; sem tabela, o aviso dela já saiu
     if warning and not model and default:
         warn(f"{warning}; abrindo no padrão ({ln[agent]})" if ln is default else warning)
     if not model and ln:
         model = ln[agent]
-    effort = ln["effort"] if ln and agent == "codex" else ""
+    effort = ln["effort"] if ln and next(x for x in subs if x["name"] == agent)["effort"] else ""
     out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason,
            "confidence": "" if confidence is None else round(confidence, 4), "reserve": reserve}
+    if reserve:
+        out["reserve_from"] = reserve_from
     if opt["json"]:
         print(json.dumps(out, ensure_ascii=False))
     else:
         print(f"fase {phase or '-'} · origem {origin} · agente {agent} · modelo {model or '-'}"
               f"{' · esforço ' + effort if effort else ''}"
               f"{' · confiança ' + fmt_conf(confidence) if confidence is not None else ''}"
-              f"{' · reserva ' + reserve if reserve else ''} · motivo: {reason}")
+              f"{' · reserva ' + reserve + ' (de ' + reserve_from + ')' if reserve else ''} · motivo: {reason}")
     return 0
 
 
