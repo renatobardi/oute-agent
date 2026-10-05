@@ -1,0 +1,5 @@
+{# Barras e amostras em SVG do Dashboard (#469) e da tela Ferramentas (#535): sem JS e sem estilo na tag. O <title> vem do bloco da chamada
+   (`{% call barra(frac) %}dica{% endcall %}`). A regra do repo é: <svg só na macro icon e nos _graficos*.html (#588). #}
+{% macro barra(frac) %}<svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ caller() }}</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([frac * 100, 1]|max) }}" height="14"/></svg>{% endmacro %}
+{% macro mini(frac) %}<svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>{{ caller() }}</title><rect x="0" y="0" width="{{ '%.2f'|format([frac * 100, 2]|max) }}" height="6"/></svg>{% endmacro %}
+{% macro amostra(classe) %}<svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="{{ classe }}" width="8" height="8"/></svg>{% endmacro %}
