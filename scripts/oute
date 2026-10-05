@@ -60,7 +60,8 @@ SERVICES_FOLDER="${OUTE_VAULT_SERVICES_FOLDER:-oute-services}"
 # nomes de serviço conhecidos: nunca ficam no agent.env, venham de onde vierem (transição: pasta oute-services
 # ainda não criada, item ainda na pasta oute-agent, agent.env gravado por versão antiga). AGENT_STUDIO_TOKEN é o
 # token único de antes da #256 (ingestão + leitura).
-SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN"
+# OPENROUTER_MEMORY_API_KEY (#459) é a chave do proxy do LLM do ai-memory: só ele a recebe.
+SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN OPENROUTER_MEMORY_API_KEY"
 
 # fallback de quem precisa de um segredo e não o tem no ambiente: só o agent.env, nunca o vault
 load_agent_env() {
@@ -252,6 +253,24 @@ agent_studio_up() {
   export AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_READ_TOKEN="${AGENT_STUDIO_READ_TOKEN:-}" \
     OUTE_OTEL_STUDIO=agent-studio
   COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
+  export COMPOSE_PROFILES
+}
+
+# --- proxy do LLM do ai-memory (#459, ADR-08 adendo): o serviço llm-proxy do compose (profile llm-proxy) é a única porta do
+# ai-memory para o OpenRouter e emite o consumo ao collector. Sobe nos dois hosts (oute-server e Mac) quando o
+# services.env tem OPENROUTER_MEMORY_API_KEY (campo do item openrouter-memoria da pasta oute-services do vault). A chave
+# é só dele: o compose a interpola só no serviço llm-proxy, nunca no agent nem no ai-memory. Sem a chave, sobe o resto
+# (o ai-memory segue sem LLM, como hoje) e a nota diz como ligar. Nunca bloqueia a subida.
+LLM_PROXY_PROFILE=llm-proxy
+llm_proxy_up() {
+  if [[ -z "${OPENROUTER_MEMORY_API_KEY:-}" ]]; then
+    echo "nota: OPENROUTER_MEMORY_API_KEY não está em $SERVICES_ENV_FILE (item openrouter-memoria da pasta" \
+      "$SERVICES_FOLDER do vault): o proxy do LLM do ai-memory não sobe e o ai-memory segue sem LLM" >&2
+    unset OPENROUTER_MEMORY_API_KEY
+    return 0
+  fi
+  export OPENROUTER_MEMORY_API_KEY
+  COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$LLM_PROXY_PROFILE"
   export COMPOSE_PROFILES
 }
 
@@ -1133,7 +1152,7 @@ case "${1:-}" in
   up)
     refresh=0; up_args=()
     for a in "${@:2}"; do if [[ "$a" == --refresh-secrets ]]; then refresh=1; else up_args+=("$a"); fi; done
-    host_secrets "$refresh"; agent_studio_up; ensure_dirs; mount_shared
+    host_secrets "$refresh"; agent_studio_up; llm_proxy_up; ensure_dirs; mount_shared
     legacy_cleanup
     ensure_image
     queue_reserve_check
@@ -1142,12 +1161,12 @@ case "${1:-}" in
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
     ;;
-  # --profile: down/logs/status enxergam também o agent-studio, quando ele existe (no Mac não há nada dele)
-  down)    legacy_cleanup; "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" down "${@:2}"; umount_shared ;;
+  # --profile: down/logs/status enxergam também o agent-studio e o llm-proxy, quando existem (no Mac não há nada dele)
+  down)    legacy_cleanup; "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" --profile "$LLM_PROXY_PROFILE" down "${@:2}"; umount_shared ;;
   restart) "$0" down; "$0" up ;;
-  logs)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs --tail=100 "${@:2}" ;;
-  follow)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" logs -f "${@:2}" ;;
-  status)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" ps; queue_status_line ;;
+  logs)    "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" --profile "$LLM_PROXY_PROFILE" logs --tail=100 "${@:2}" ;;
+  follow)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" --profile "$LLM_PROXY_PROFILE" logs -f "${@:2}" ;;
+  status)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" --profile "$LLM_PROXY_PROFILE" ps; queue_status_line ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
   ssh)     # com comando: -t quando há terminal (CLIs em modo headless podem ler stdin se não for TTY e ficar esperando EOF)
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
@@ -1204,6 +1223,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)
   up [--refresh-secrets]  sobe agent + ai-memory + otel-collector com os segredos de ~/.oute/agent.env (agent) e
                ~/.oute/services.env (só os serviços, nunca o agent; pasta oute-services do vault, #256)
+               (+ llm-proxy nos dois hosts quando o services.env tem OPENROUTER_MEMORY_API_KEY: proxy do LLM do ai-memory, #459)
                (+ agent-studio no host com OUTE_AGENT_STUDIO=1 no .env e o item agent-studio no vault, ADR-08;
                 nos outros, o collector manda ao agent-studio.oute.pro pela tailnet com a credencial de ingestão, #190)
                (senha do Vaultwarden só sem agent.env ou com --refresh-secrets)

@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""oute-llm-proxy: proxy do LLM do ai-memory (#459, ADR-08 adendo "Consumo do LLM do ai-memory").
+
+O ai-memory só fala com o OpenRouter por aqui (`AI_MEMORY_LLM_BASE_URL` aponta para este serviço). O proxy repassa a
+chamada com a chave da memória (`LLM_PROXY_API_KEY`, pasta `oute-services`; o ai-memory nunca a vê, e o que ele manda
+em `Authorization` é descartado), lê o `usage` da resposta e manda ao collector um span `ai_memory.llm_request`
+(OTLP/HTTP JSON) com agente, host, instância, modelo, tokens e custo (`usage.cost`, US$).
+
+Só chegam à telemetria os campos de uma lista fixa (modelo, tokens, custo, status, duração). Texto de prompt, de
+resposta ou de observação não sai daqui: nem no span, nem no log, nem no corpo de erro que o próprio proxy gera. O log
+(stderr) leva só o modelo (conferido por regex), números e o status.
+
+Rotas: `POST /api/v1/chat/completions`, `GET /api/v1/models` e `GET /healthz`; o resto é 404. Sem chave: 503.
+Um heartbeat (métrica `oute.llm_proxy.up`, uma por minuto) deixa o agent-studio alertar quando o proxy cai.
+
+Ambiente: LLM_PROXY_API_KEY, LLM_PROXY_UPSTREAM (padrão a API do OpenRouter; só `https`), LLM_PROXY_BIND/PORT
+(0.0.0.0:8440; o compose não publica porta e só põe o proxy na rede `llm`), OTEL_EXPORTER_OTLP_ENDPOINT (sem ele, não
+emite), OUTE_HOST, OUTE_INSTANCE, LLM_PROXY_AGENT (padrão ai-memory), LLM_PROXY_HEARTBEAT_SECONDS (60), LLM_PROXY_RETRY_SECONDS (5; nova tentativa
+da emissão ao collector).
+Só stdlib. Teste: tests/oute-llm-proxy.test.sh.
+"""
+import http.client
+import json
+import math
+import os
+import queue
+import re
+import secrets
+import ssl
+import sys
+import threading
+import time
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+UPSTREAM = os.environ.get("LLM_PROXY_UPSTREAM", "https://openrouter.ai/api/v1").rstrip("/")
+AGENT = os.environ.get("LLM_PROXY_AGENT", "ai-memory")
+SPAN_NAME = "ai_memory.llm_request"
+HEARTBEAT_METRIC = "oute.llm_proxy.up"
+MAX_REQUEST = 8 * 2**20       # corpo do pedido
+MAX_PARSE = 16 * 2**20        # resposta lida inteira para achar o `usage`; acima disso passa, sem registro de uso
+MAX_ERROR_BODY = 64 * 2**10   # corpo de erro do upstream, lido inteiro para tirar a chave
+MAX_SSE_LINE = 2**20
+MODEL_RE = re.compile(r"^[A-Za-z0-9._:/@+-]{1,128}$")
+UPSTREAM_TIMEOUT = 300
+ROUTES = {("POST", "/api/v1/chat/completions"): "/chat/completions", ("GET", "/api/v1/models"): "/models"}
+QUEUE_MAX = 1000
+RETRY_SECONDS = float(os.environ.get("LLM_PROXY_RETRY_SECONDS", "5"))
+
+
+def log(msg):
+    sys.stderr.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n")
+    sys.stderr.flush()
+
+
+def api_key():
+    return os.environ.get("LLM_PROXY_API_KEY", "")
+
+
+def redact(data):
+    """Tira a chave de um corpo que vai ao cliente (erro do upstream)."""
+    key = api_key().encode()
+    return data.replace(key, b"[redacted]") if key else data
+
+
+def clean_model(v):
+    return v if isinstance(v, str) and MODEL_RE.match(v) else None
+
+
+def count(v):
+    """Contagem de tokens: inteiro >= 0 (bool não vale); o resto é "não informado"."""
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v > 10**12:
+        return None
+    return v
+
+
+def cost(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or v > 10**6:
+        return None
+    return float(v)
+
+
+def usage_of(obj):
+    """{input, output, cache_read, cost, model} do corpo de resposta (ou do último pedaço do SSE); campo ausente = None.
+    `input` é a entrada não cacheada (o que o preço do agent-studio espera): prompt_tokens menos os cacheados."""
+    out = {"input": None, "output": None, "cache_read": None, "cost": None, "model": None}
+    if not isinstance(obj, dict):
+        return out
+    out["model"] = clean_model(obj.get("model"))
+    u = obj.get("usage")
+    if not isinstance(u, dict):
+        return out
+    prompt, out["output"], out["cost"] = count(u.get("prompt_tokens")), count(u.get("completion_tokens")), cost(u.get("cost"))
+    details = u.get("prompt_tokens_details")
+    cached = count(details.get("cached_tokens")) if isinstance(details, dict) else None
+    if prompt is not None and cached is not None and cached <= prompt:
+        out["input"], out["cache_read"] = prompt - cached, cached
+    else:
+        out["input"] = prompt
+    return out
+
+
+class SseUsage:
+    """Lê o SSE aos pedaços e guarda só o último `usage`; o texto dos pedaços não é retido."""
+
+    def __init__(self):
+        self.buf = b""
+        self.found = None
+        self.model = None
+
+    def feed(self, chunk):
+        self.buf += chunk
+        *lines, self.buf = self.buf.split(b"\n")
+        if len(self.buf) > MAX_SSE_LINE:
+            self.buf = b""
+        for line in lines:
+            line = line.strip()
+            if not line.startswith(b"data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == b"[DONE]" or b'"model"' not in payload and b'"usage"' not in payload:
+                continue
+            try:
+                obj = json.loads(payload)
+            except ValueError:
+                continue
+            u = usage_of(obj)
+            if u["model"]:
+                self.model = u["model"]
+            if isinstance(obj, dict) and isinstance(obj.get("usage"), dict):
+                self.found = u
+
+    def result(self):
+        r = dict(self.found or usage_of(None))
+        r["model"] = r["model"] or self.model
+        return r
+
+
+# ------------------------------------------------------------------ telemetria (OTLP/HTTP JSON ao collector)
+def attr(key, value):
+    if isinstance(value, bool):
+        v = {"boolValue": value}
+    elif isinstance(value, int):
+        v = {"intValue": str(value)}
+    elif isinstance(value, float):
+        v = {"doubleValue": value}
+    else:
+        v = {"stringValue": value}
+    return {"key": key, "value": v}
+
+
+def resource():
+    return {"attributes": [attr("service.name", "oute-llm-proxy"), attr("oute.agent", AGENT),
+                           attr("host.name", os.environ.get("OUTE_HOST", "oute")),
+                           attr("oute.instance", os.environ.get("OUTE_INSTANCE", "oute-agent"))]}
+
+
+def span_payload(rec):
+    """Span do registro `rec` (lista fixa de campos; nada do corpo do pedido ou da resposta)."""
+    attrs = [attr("oute.agent", AGENT), attr("http.response.status_code", rec["status"]),
+             attr("oute.llm.stream", rec["stream"]), attr("oute.llm.usage_missing", rec["usage_missing"])]
+    for key, value in (("gen_ai.request.model", rec["request_model"]), ("gen_ai.response.model", rec["model"]),
+                       ("gen_ai.usage.input_tokens", rec["input"]), ("gen_ai.usage.output_tokens", rec["output"]),
+                       ("gen_ai.usage.cache_read_input_tokens", rec["cache_read"]), ("oute.cost_usd", rec["cost"])):
+        if value is not None:
+            attrs.append(attr(key, value))
+    status = {"code": 2, "message": rec["error"]} if rec["error"] else {"code": 1}
+    span = {"traceId": secrets.token_hex(16), "spanId": secrets.token_hex(8), "name": SPAN_NAME, "kind": 3,
+            "startTimeUnixNano": str(rec["start_ns"]), "endTimeUnixNano": str(rec["end_ns"]),
+            "attributes": attrs, "status": status}
+    return {"resourceSpans": [{"resource": resource(), "scopeSpans": [{"scope": {"name": "oute-llm-proxy"}, "spans": [span]}]}]}
+
+
+def heartbeat_payload():
+    point = {"timeUnixNano": str(time.time_ns()), "asInt": "1", "attributes": [attr("oute.llm_proxy.key_present", bool(api_key()))]}
+    metric = {"name": HEARTBEAT_METRIC, "unit": "1", "gauge": {"dataPoints": [point]}}
+    return {"resourceMetrics": [{"resource": resource(), "scopeMetrics": [{"scope": {"name": "oute-llm-proxy"}, "metrics": [metric]}]}]}
+
+
+class Emitter:
+    """Fila em memória (até QUEUE_MAX) e uma thread que entrega ao collector; falha = tenta de novo, sem perder a ordem.
+    Estourou a fila: descarta o mais antigo e conta (o aviso sai no log, sem dado). Sem endpoint: não emite."""
+
+    def __init__(self, endpoint):
+        self.endpoint = endpoint.rstrip("/") if endpoint else ""
+        self.q = queue.Queue()
+        self.dropped = 0
+        self.failing = False
+        if self.endpoint:
+            threading.Thread(target=self.run, daemon=True).start()
+        else:
+            log("OTEL_EXPORTER_OTLP_ENDPOINT vazio: o consumo não é emitido")
+
+    def send(self, signal, payload):
+        if not self.endpoint:
+            return
+        if self.q.qsize() >= QUEUE_MAX:
+            try:
+                self.q.get_nowait()
+                self.dropped += 1
+                log(f"fila de emissão cheia: descartados {self.dropped} registro(s) até agora")
+            except queue.Empty:
+                pass
+        self.q.put((signal, json.dumps(payload).encode()))
+
+    def post(self, signal, body):
+        url = urllib.parse.urlsplit(f"{self.endpoint}/v1/{signal}")
+        conn_cls = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
+        conn = conn_cls(url.netloc, timeout=10)
+        try:
+            conn.request("POST", url.path, body, {"Content-Type": "application/json"})
+            r = conn.getresponse()
+            r.read()
+            return 200 <= r.status < 300
+        finally:
+            conn.close()
+
+    def run(self):
+        while True:
+            signal, body = self.q.get()
+            while True:
+                try:
+                    ok = self.post(signal, body)
+                except (OSError, http.client.HTTPException):
+                    ok = False
+                if ok:
+                    if self.failing:
+                        log("emissão ao collector voltou")
+                    self.failing = False
+                    break
+                if not self.failing:
+                    log("emissão ao collector falhou; tentando de novo")
+                self.failing = True
+                time.sleep(RETRY_SECONDS)
+
+
+EMIT = None
+
+
+def heartbeat_loop(every):
+    while True:
+        EMIT.send("metrics", heartbeat_payload())
+        time.sleep(every)
+
+
+# ------------------------------------------------------------------ proxy
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    timeout = 60
+    server_version = "oute-llm-proxy"
+    sys_version = ""
+
+    def log_message(self, *a):
+        pass
+
+    def reply(self, code, obj):
+        data = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        self.handle_any()
+
+    def do_POST(self):
+        self.handle_any()
+
+    def do_PUT(self):
+        self.handle_any()
+
+    do_PATCH = do_DELETE = do_PUT
+
+    def handle_any(self):
+        path = self.path.split("?")[0]
+        if self.command == "GET" and path == "/healthz":
+            return self.reply(200, {"status": "ok", "key": bool(api_key())})
+        route = ROUTES.get((self.command, path))
+        if route is None:
+            return self.reply(404, {"error": "rota não existe neste proxy"})
+        if not api_key():
+            log("503 sem chave (LLM_PROXY_API_KEY vazia)")
+            return self.reply(503, {"error": "llm-proxy sem chave"})
+        body = b""
+        request_model, stream = None, False
+        if self.command == "POST":
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return self.reply(411, {"error": "Content-Length obrigatório"})
+            if length < 0 or length > MAX_REQUEST:
+                return self.reply(413, {"error": "pedido grande demais"})
+            body = self.rfile.read(length)
+            try:
+                req = json.loads(body)
+            except ValueError:
+                req = None
+            if isinstance(req, dict):
+                request_model, stream = clean_model(req.get("model")), req.get("stream") is True
+        self.forward(route, body, request_model, stream)
+
+    def forward(self, route, body, request_model, stream):
+        rec = {"status": 0, "stream": stream, "request_model": request_model, "model": None, "input": None,
+               "output": None, "cache_read": None, "cost": None, "usage_missing": True, "error": None,
+               "start_ns": time.time_ns(), "end_ns": 0}
+        parts = urllib.parse.urlsplit(UPSTREAM)
+        if parts.scheme != "https":
+            rec["error"] = "upstream não é https"
+            return self.finish(rec, 502, {"error": "llm-proxy: upstream inválido"})
+        headers = {"Authorization": f"Bearer {api_key()}", "User-Agent": "oute-llm-proxy", "Accept": "application/json, text/event-stream"}
+        if body:
+            headers["Content-Type"] = "application/json"
+        conn = http.client.HTTPSConnection(parts.netloc, timeout=UPSTREAM_TIMEOUT, context=ssl.create_default_context())
+        try:
+            conn.request(self.command, parts.path + route, body or None, headers)
+            resp = conn.getresponse()
+        except (OSError, http.client.HTTPException):
+            conn.close()
+            rec["error"] = "upstream indisponível"
+            return self.finish(rec, 502, {"error": "llm-proxy: upstream indisponível"})
+        rec["status"] = resp.status
+        if resp.status >= 400:
+            rec["error"] = f"HTTP {resp.status}"
+        try:
+            self.relay(resp, rec)
+        except (OSError, http.client.HTTPException):
+            rec["error"] = rec["error"] or "resposta interrompida"
+            self.close_connection = True
+        finally:
+            conn.close()
+            self.record(rec)
+
+    def relay(self, resp, rec):
+        ctype = resp.getheader("Content-Type", "application/json")
+        sse = ctype.startswith("text/event-stream")
+        length = resp.getheader("Content-Length")
+        self.send_response(resp.status)
+        self.send_header("Content-Type", ctype)
+        retry = resp.getheader("Retry-After")
+        if retry and retry.isdigit():
+            self.send_header("Retry-After", retry)
+        if resp.status >= 400:
+            data = redact(resp.read(MAX_ERROR_BODY))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if length is not None and length.isdigit():
+            self.send_header("Content-Length", length)
+        else:
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        self.end_headers()
+        sse_usage, kept, size = SseUsage() if sse else None, [], 0
+        while True:
+            chunk = resp.read1(65536)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
+            if sse_usage:
+                sse_usage.feed(chunk)
+            else:
+                size += len(chunk)
+                if size <= MAX_PARSE:
+                    kept.append(chunk)
+                else:
+                    kept.clear()
+        if sse_usage:
+            u = sse_usage.result()
+        elif size <= MAX_PARSE:
+            try:
+                u = usage_of(json.loads(b"".join(kept)))
+            except ValueError:
+                u = usage_of(None)
+        else:
+            u = usage_of(None)
+        rec["model"] = u["model"]
+        for k in ("input", "output", "cache_read", "cost"):
+            rec[k] = u[k]
+        rec["usage_missing"] = u["input"] is None and u["output"] is None and u["cost"] is None
+
+    def finish(self, rec, code, obj):
+        rec["status"] = code
+        try:
+            self.reply(code, obj)
+        finally:
+            self.record(rec)
+
+    def record(self, rec):
+        rec["end_ns"] = time.time_ns()
+        if self.command != "POST":
+            return  # só a chamada ao modelo é consumo
+        EMIT.send("traces", span_payload(rec))
+        ms = (rec["end_ns"] - rec["start_ns"]) // 1_000_000
+        log(f"status={rec['status']} model={rec['model'] or rec['request_model'] or '-'} ms={ms} in={rec['input']} "
+            f"out={rec['output']} cost={rec['cost']}{' erro=' + rec['error'] if rec['error'] else ''}")
+
+
+def main():
+    global EMIT
+    EMIT = Emitter(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
+    try:
+        every = float(os.environ.get("LLM_PROXY_HEARTBEAT_SECONDS", "60"))
+    except ValueError:
+        every = 60.0
+    if every > 0:
+        threading.Thread(target=heartbeat_loop, args=(every,), daemon=True).start()
+    srv = ThreadingHTTPServer((os.environ.get("LLM_PROXY_BIND", "0.0.0.0"), int(os.environ.get("LLM_PROXY_PORT", "8440"))), Handler)
+    srv.daemon_threads = True
+    port_file = os.environ.get("LLM_PROXY_PORT_FILE")
+    if port_file:
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write(str(srv.server_address[1]))
+    log(f"escutando na porta {srv.server_address[1]}; chave {'presente' if api_key() else 'ausente'}")
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

@@ -10,6 +10,7 @@ TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFU
           alerts_mod.NO_DATA: "Host sem dado", alerts_mod.SPOOL: "Spool do oute-emit",
           alerts_mod.QUOTA: "Cota da assinatura",
           alerts_mod.ROUND_STALLED: "Rodada parada", alerts_mod.ROUND_OLD: "Rodada antiga sem fechamento",
+          alerts_mod.LLM_PROXY: "Proxy do LLM do ai-memory fora (ai-memory sem LLM)",
           # preços (#339): critérios em `price_alerts.py`
           "price_changed": "Preço trocado", "price_sources_diverge": "Fontes de preço divergem",
           "price_source_down": "Fonte de preço fora do ar", "price_model_unpriced": "Modelo em uso sem preço",

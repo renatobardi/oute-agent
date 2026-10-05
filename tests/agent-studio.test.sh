@@ -277,7 +277,7 @@ rm -f "$TMP/.env"
 up OUTE_AGENT_STUDIO=1 AGENT_STUDIO_INGEST_TOKEN=$T1 AGENT_STUDIO_SURREAL_PASS=$S1
 check "OUTE_AGENT_STUDIO=1 no ambiente também liga"    grep -qx 'profiles=agent-studio' <<<"$OUT"
 check "up chama agent_studio_up depois dos segredos"   grep -q 'host_secrets "$refresh"; agent_studio_up;' "$ROOT/scripts/oute"
-check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
+check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-profile \"\$STUDIO_PROFILE\" --profile \"\$LLM_PROXY_PROFILE\" down" "$0" && grep -q "\-\-profile \"\$STUDIO_PROFILE\" --profile \"\$LLM_PROXY_PROFILE\" ps" "$0"' "$ROOT/scripts/oute"
 
 # ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
 . "$ROOT/tests/lib/surreal.sh"
