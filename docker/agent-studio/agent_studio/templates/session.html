@@ -10,10 +10,11 @@
 {% block title %}{{ id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("resumo") %}
 <div class="pagina-topo">
   <div class="titulo-linha">
     <div>
-      <h1>Sessão <code>{{ id }}</code></h1>
+      {% if loading_target is none %}<h1>Sessão <code>{{ id }}</code></h1>{% endif %}
       <div class="badges">
         {% if st and st.state %}{{ badge(st.state, "", "loader" if st.state == "aberta" else "") }}{% endif %}
         {% if s.swarm_round %}{{ badge("rodada " ~ s.swarm_round ~ ((" · worker " ~ st.worker) if st and st.worker else ""), "contorno", "repeat") }}{% else %}{{ badge("avulsa", "contorno") }}{% endif %}
@@ -32,8 +33,10 @@
   {% call tile("Custo", "receipt") %}<span class="custo">{{ cost(u.cost) }}</span>{% endcall %}
   {% call tile("p95", "timer") %}{{ u.latency_p95_ms|ms }}{% endcall %}
 </div>
+{% endcall %}
 <div class="duas">
 <div class="pilha">
+{% call fragment("conversas") %}
   <h2 class="secao">Conversas ({{ s.conversation_count|num }})</h2>
   {% if s.conversations %}
   {% call session_table() %}
@@ -44,6 +47,8 @@
   {% else %}
   <p class="aviso">Esta sessão não tem conversas.</p>
   {% endif %}
+{% endcall %}
+{% call fragment("eventos") %}
   <div class="cartao">
     <div class="cartao-topo"><div><h2>Eventos da sessão</h2>
       <p>Eventos com o <code>oute.task.id</code> desta sessão e sem conversa (<code>oute.task.*</code> e o que mais
@@ -55,7 +60,9 @@
     <p class="aviso">Esta sessão não tem eventos.</p>
     {% endif %}
   </div>
+{% endcall %}
 </div>
+{% call fragment("dados") %}
 <div class="cartao bloco">
   <h2>Resumo</h2>
   <dl class="resumo" data-resumo-sessao="{{ id }}" data-agents="{{ s.agents|join(',') }}"
@@ -84,6 +91,7 @@
   <dt>Erros</dt><dd>{{ u.errors.spans|num }} spans · {{ u.errors.logs|num }} logs</dd>
 </dl>
 </div>
+{% endcall %}
 </div>
 </div>
 {% endblock %}

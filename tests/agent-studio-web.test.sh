@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
@@ -104,7 +104,7 @@ check "htmx sem login: 401 com HX-Redirect"            test "$(code "${HX[@]}" "
 check "API sem cookie nem Bearer: 401"                 test "$(code "$STUDIO_URL/v1/usage")$(code "$STUDIO_URL/v1/alerts")" = 401401
 check "/ sem login: 303 para o /login, com a volta"    test "$(code "$STUDIO_URL/")$(hdr location "$STUDIO_URL/")" = "303/login?next=%2F"
 check "htmx sem login em /: 401 com HX-Redirect"       test "$(code "${HX[@]}" "$STUDIO_URL/")$(hdr hx-redirect "${HX[@]}" "$STUDIO_URL/")" = "401/login?next=%2F"
-LOGIN="$(curl -s "$STUDIO_URL/login")"
+LOGIN="$(studio_page "$STUDIO_URL/login")"
 check "GET /login: formulário do token"                grep -q 'name="token" type="password"' <<<"$LOGIN"
 check "GET /login: sem o menu de quem entrou"          bash -c '! grep -q "/logout" <<<"$1"' _ "$LOGIN"
 
@@ -140,7 +140,7 @@ for n in 'https://evil.example/' '//evil.example/x' '/\evil.example' 'conversas'
   login --data-urlencode "token=$STUDIO_TOKEN" --data-urlencode "next=$n" >/dev/null
   check "next de fora ($n): volta ao Dashboard (#523)" grep -qi '^location: /$' <(tr -d '\r' < "$TMP/h")
 done
-check "next de fora no GET /login: descartado"         grep -q 'name="next" value="/"' <(curl -s "$STUDIO_URL/login?next=https://evil.example/")
+check "next de fora no GET /login: descartado"         grep -q 'name="next" value="/"' <(studio_page "$STUDIO_URL/login?next=https://evil.example/")
 SAIR="$(curl -s -o /dev/null -D - -X POST "${C[@]}" "$STUDIO_URL/logout" | tr -d '\r')"
 check "sair: 303 para o /login"                        bash -c 'grep -q "^HTTP/[0-9.]* 303" <<<"$1" && grep -qi "^location: /login$" <<<"$1"' _ "$SAIR"
 check "sair: apaga o cookie (vazio, Max-Age=0)"        grep -qiE "^set-cookie: ${COOKIE%%=*}=(\"\")?;.*Max-Age=0" <<<"$SAIR"
@@ -154,11 +154,11 @@ HTMX_SHA=d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717
 check "htmx: é o arquivo fixado (sha256)"              test "$(curl -s "$STUDIO_URL/static/htmx.min.js" | sha256sum | cut -d' ' -f1)" = "$HTMX_SHA"
 check "CSS servido pelo agent-studio"                  test "$(code "$STUDIO_URL/static/studio.css")" = 200
 check "fora do /static: nada de arquivo do pacote"     test "$(code "$STUDIO_URL/static/../web.py")$(code "$STUDIO_URL/static/%2e%2e/web.py")" = 404404
-curl -s "${C[@]}" "$STUDIO_URL/conversas?$WIN" > "$TMP/list.html"
-curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-a" > "$TMP/a.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversas?$WIN" > "$TMP/list.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv-a" > "$TMP/a.html"
 check "páginas: nenhum script, estilo ou link de fora" bash -c '! grep -hoiE "(src|href|action|hx-get)=\"[^\"]*\"" "$@" | grep -qE "=\"([a-z]+:)?//"' _ "$TMP/list.html" "$TMP/a.html" <(echo "$LOGIN")
 check "páginas: sem script nem estilo inline"          bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@"' _ "$TMP/list.html" "$TMP/a.html" <(echo "$LOGIN")
-check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "$TMP/list.html" "$TMP/a.html" | sort -u)" = '<script src="/static/htmx.min.js" defer>'
+check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "$TMP/list.html" "$TMP/a.html" | sort -u)" = $'<script src="/static/htmx.min.js" defer>\n<script src="/static/loading.js" defer>'
 CSP="$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/conversa?id=conv-a")"
 check "CSP: script e estilo só deste servidor"         bash -c 'grep -q "default-src .none." <<<"$1" && grep -q "script-src .self.;" <<<"$1" && grep -q "style-src .self.;" <<<"$1"' _ "$CSP"
 check "CSP: font-src só deste servidor, e o resto da política igual" bash -c 'grep -q "img-src .self.; font-src .self.; connect-src .self.; form-action .self.; base-uri .none.; frame-ancestors .none." <<<"$1"' _ "$CSP"
@@ -193,8 +193,8 @@ import sys, xml.etree.ElementTree as ET
 ids = [e.get("id") for e in ET.parse(sys.argv[1]).iter() if e.tag.endswith("symbol")]
 sys.exit(0 if sorted(ids) == sorted(set(ids)) and set(ids) == set(sys.argv[2].split()) else 1)' "$TMP/lucide.svg" "$GLIFOS"
 check "sprite: sem script, estilo nem recurso de fora" bash -c '! sed "s/xmlns=\"[^\"]*\"//" "$1" | grep -qiE "<script|<style|style=|href=|xlink|https?:|[ \"]on[a-z]+="' _ "$TMP/lucide.svg"
-curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b" > "$TMP/logs.html"
-curl -s "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe" > "$TMP/erro.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b" > "$TMP/logs.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe" > "$TMP/erro.html"
 curl -s -X POST --data-urlencode "token=${STUDIO_TOKEN}x" "$STUDIO_URL/login" > "$TMP/login-erro.html"
 check "páginas: todo ícone aponta para um símbolo do sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/list.html" "$TMP/a.html" "$TMP/logs.html" "$TMP/erro.html" "$TMP/login-erro.html" "$TMP/login.html"
 check "templates: <svg só na macro (icon e logo) e nos gráficos do dashboard (#469), dos preços (#534), da Uso (#533) e das ferramentas (#535), nunca colado nas outras telas" bash -c '! grep -l "<svg" "$1"/templates/*.html | grep -v "/_macros.html$" | grep -v "/dashboard.html$" | grep -v "/prices.html$" | grep -v "/_graficos_uso.html$" | grep -v "/tools.html$" && [ "$(grep -c "<svg" "$1/templates/_macros.html")" = 2 ]' _ "$PKG"
@@ -218,7 +218,7 @@ check "header: o menu (celular) abre pela barra, sem script" bash -c 'grep -q "<
 check "celular: na lista há o menu e nenhum voltar"    bash -c 'grep -q "title=\"Abrir o menu\"" "$1" && ! grep -q "title=\"Voltar\"" "$1"' _ "$TMP/list.html"
 check "celular: no detalhe o voltar (para a lista) toma o lugar do menu" bash -c 'grep -q "<a class=\"botao icone-botao so-celular\" href=\"/conversas\" title=\"Voltar\">" "$1" && ! grep -q "title=\"Abrir o menu\"" "$1"' _ "$TMP/a.html"
 check "celular: CSS até 640 px, header 56 px e barra em folha" bash -c 'grep -q "@media (max-width: 640px)" "$1" && grep -q "^  \.cabecalho { height: 56px;" "$1" && grep -q "z-index: 20; inset: 0 auto 0 0; width: 300px" "$1"' _ "$TMP/studio.css"
-check "casco só para quem entrou: o trecho do htmx não leva barra nem cabeçalho" bash -c '! grep -qE "class=\"(barra|cabecalho)\"" <<<"$1"' _ "$(curl -s "${C[@]}" -H 'HX-Request: true' "$STUDIO_URL/conversa/logs?id=conv-b")"
+check "casco só para quem entrou: o trecho do htmx não leva barra nem cabeçalho" bash -c '! grep -qE "class=\"(barra|cabecalho)\"" <<<"$1"' _ "$(studio_page "${C[@]}" -H 'HX-Request: true' "$STUDIO_URL/conversa/logs?id=conv-b")"
 check "erro de quem entrou (404) leva o casco, com o #conteudo" bash -c 'grep -q "class=\"barra\"" "$1" && grep -q "<main id=\"conteudo\">" "$1"' _ "$TMP/erro.html"
 check "logs do detalhe: casco com o voltar para a conversa" bash -c 'grep -q "href=\"/conversa?id=conv-b\" title=\"Voltar\"" "$1"' _ "$TMP/logs.html"
 # tela Entrar
@@ -257,22 +257,22 @@ check "conv-b: tela não mostra custo real"             jqe '.text | test("≈ U
 RD="$(row 'conv d/1&x=é')"
 check "conversa que começou antes da janela: números da conversa inteira" jqe ".calls == \"2\" and $(usd '.["real-usd"]') == 750000" <<<"$RD"
 check "lista: link do detalhe com o id codificado"     grep -qF 'href="/conversa?id=conv%20d/1%26x%3D%C3%A9"' "$TMP/list.html"
-ids() { curl -s "${C[@]}" "$STUDIO_URL/conversas?$WIN&$1" | data | jq -c '[.[] | select(.conversa) | .conversa]'; }
+ids() { local query="$1"; studio_page "${C[@]}" "$STUDIO_URL/conversas?$WIN&$query" | data | jq -c '[.[] | select(.conversa) | .conversa]'; return $?; }
 check "filtro por host"                                test "$(ids host=oute-mac)" = '["conv-b","conv d/1&x=é"]'
 check "filtro por agente"                              test "$(ids agent=codex)" = '["conv-b"]'
 check "filtro por host e agente"                       test "$(ids 'host=oute-mac&agent=claude')" = '["conv d/1&x=é"]'
-check "filtro sem resultado: lista vazia, com aviso"   grep -q 'Nenhuma conversa nessa janela' <(curl -s "${C[@]}" "$STUDIO_URL/conversas?$WIN&host=oute-server&agent=codex")
+check "filtro sem resultado: lista vazia, com aviso"   grep -q 'Nenhuma conversa nessa janela' <(studio_page "${C[@]}" "$STUDIO_URL/conversas?$WIN&host=oute-server&agent=codex")
 check "filtros do cabeçalho oferecem os hosts e agentes da janela (links, #529)" bash -c 'grep -q "<a href=\"[^\"]*host=oute-mac[^\"]*\">oute-mac</a>" "$1" && grep -q "<a href=\"[^\"]*host=oute-server[^\"]*\">oute-server</a>" "$1" && grep -q "<a href=\"[^\"]*agent=codex[^\"]*\">codex</a>" "$1"' _ "$TMP/list.html"
-check "janela padrão (24 h): nada (hora do fato, não a de chegada)" grep -q 'Nenhuma conversa nessa janela' <(curl -s "${C[@]}" "$STUDIO_URL/conversas")
-check "janela só com o começo da conversa longa"       test "$(curl -s "${C[@]}" "$STUDIO_URL/conversas?from=2025-09-25&to=2025-09-26" | data | jq -c '[.[] | select(.conversa) | .conversa]')" = '["conv d/1&x=é"]'
+check "janela padrão (24 h): nada (hora do fato, não a de chegada)" grep -q 'Nenhuma conversa nessa janela' <(studio_page "${C[@]}" "$STUDIO_URL/conversas")
+check "janela só com o começo da conversa longa"       test "$(studio_page "${C[@]}" "$STUDIO_URL/conversas?from=2025-09-25&to=2025-09-26" | data | jq -c '[.[] | select(.conversa) | .conversa]')" = '["conv d/1&x=é"]'
 check "janela inválida: 400"                           test "$(code "${C[@]}" "$STUDIO_URL/conversas?from=ontem&to=2025-09-29")" = 400
 check "from sem to: 400"                               test "$(code "${C[@]}" "$STUDIO_URL/conversas?from=2025-09-27")" = 400
-check "hours inválido: 400, com a página de erro"      grep -q 'hours inválido' <(curl -s "${C[@]}" "$STUDIO_URL/conversas?hours=x")
+check "hours inválido: 400, com a página de erro"      grep -q 'hours inválido' <(studio_page "${C[@]}" "$STUDIO_URL/conversas?hours=x")
 check "lista com htmx (filtro troca só o conteúdo)"    grep -q 'hx-get="/conversas"' "$TMP/list.html"
 
 # ---------------------------------------------------------------- 4. detalhe: árvore de spans e logs
 check "detalhe: 200"                                   test "$(code "${C[@]}" "$STUDIO_URL/conversa?id=conv-a")" = 200
-check "conversa que não existe: 404"                   test "$(code "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe")" = 404
+check "conversa que não existe: 404"                   test "$(code "${C[@]}" "$STUDIO_URL/bloco/conversa/resumo?id=nao-existe")" = 404
 check "detalhe sem id: 400"                            test "$(code "${C[@]}" "$STUDIO_URL/conversa")" = 400
 DA="$(data < "$TMP/a.html")"
 S="$(jq -c '[.[] | select(.span)]' <<<"$DA")"
@@ -303,31 +303,31 @@ check "logs: o conteúdo aparece (corpo e atributos)"   jqe '.[0].text | test("c
 check "logs: nível e evento"                           jqe '.[2].text | test("17 claude_code.api_error falhou <b>feio</b>")' <<<"$G"
 check "conteúdo escapado: nenhum HTML do dado vira tag" bash -c '! grep -qE "<script>alert|<b>feio" "$1" && grep -q "&lt;script&gt;alert" "$1" && grep -q "&lt;b&gt;feio" "$1"' _ "$TMP/a.html"
 SPAN_URL="$STUDIO_URL/conversa/span?trace=00000000000000000000000000000001&span=00000000000000a"
-F="$(curl -s "${C[@]}" "${HX[@]}" "${SPAN_URL}3")"
+F="$(studio_page "${C[@]}" "${HX[@]}" "${SPAN_URL}3")"
 check "conteúdo do span (htmx): trecho, não página"    bash -c '! grep -qi "<html" <<<"$1" && grep -q "data-span-detalhe=\"00000000000000a3\"" <<<"$1"' _ "$F"
 check "conteúdo do span: atributos, resource e status" bash -c 'grep -q "tool_name" <<<"$1" && grep -q "host.name" <<<"$1" && grep -q "00000000000000a1" <<<"$1"' _ "$F"
-check "conteúdo do span: mensagem do status de erro"   grep -q 'comando falhou' <(curl -s "${C[@]}" "${HX[@]}" "${SPAN_URL}4")
-F1="$(curl -s "${C[@]}" "${HX[@]}" "${SPAN_URL}1")"
+check "conteúdo do span: mensagem do status de erro"   grep -q 'comando falhou' <(studio_page "${C[@]}" "${HX[@]}" "${SPAN_URL}4")
+F1="$(studio_page "${C[@]}" "${HX[@]}" "${SPAN_URL}1")"
 check "conteúdo do span: escapado"                     bash -c '! grep -q "<script>alert" <<<"$1" && grep -q "&lt;script&gt;alert" <<<"$1"' _ "$F1"
-check "conteúdo do span sem htmx: página inteira, com a volta" bash -c 'grep -qi "<html" <<<"$1" && grep -q "href=\"/conversa?id=conv-a\"" <<<"$1"' _ "$(curl -s "${C[@]}" "${SPAN_URL}3")"
-check "span que não existe: 404"                       test "$(code "${C[@]}" "${SPAN_URL}f")" = 404
+check "conteúdo do span sem htmx: página inteira, com a volta" bash -c 'grep -qi "<html" <<<"$1" && grep -q "href=\"/conversa?id=conv-a\"" <<<"$1"' _ "$(studio_page "${C[@]}" "${SPAN_URL}3")"
+check "span que não existe: 404"                       test "$(code "${C[@]}" "${SPAN_URL}f&full=1")" = 404
 check "span sem trace ou sem span: 400"                test "$(code "${C[@]}" "$STUDIO_URL/conversa/span?trace=1")$(code "${C[@]}" "$STUDIO_URL/conversa/span?span=1")" = 400400
 check "linha da árvore abre o conteúdo pelo htmx"      grep -q 'hx-get="/conversa/span?trace=00000000000000000000000000000001&amp;span=00000000000000a3" hx-target="next .conteudo"' "$TMP/a.html"
 
 # conv-b: 205 logs = página de 200 + "mais logs"
-curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-b" > "$TMP/b.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv-b" > "$TMP/b.html"
 GB="$(data < "$TMP/b.html" | jq -c '[.[] | select(.log)]')"
 check "logs: primeira página com 200, em ordem"        jqe 'length == 200 and (.[0].text | test("linha 000")) and (.[199].text | test("linha 199"))' <<<"$GB"
 check "logs: link para o resto"                        grep -q 'hx-get="/conversa/logs?id=conv-b&amp;offset=200"' "$TMP/b.html"
 check "conv-b: total de logs no título"                grep -q 'Logs (205)' "$TMP/b.html"
-M="$(curl -s "${C[@]}" "${HX[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=200")"
+M="$(studio_page "${C[@]}" "${HX[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=200")"
 check "mais logs (htmx): só as 5 linhas que faltavam"  bash -c '! grep -qi "<html\|<table" <<<"$1" && test "$(grep -c "<tr data-log" <<<"$1")" = 5 && grep -q "linha 204" <<<"$1"' _ "$M"
 check "mais logs: última página sem link"              bash -c '! grep -q "mais logs" <<<"$1"' _ "$M"
-check "mais logs sem htmx: página inteira"             bash -c 'grep -qi "<html" <<<"$1" && test "$(grep -c "<tr data-log" <<<"$1")" = 5' _ "$(curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=200")"
-check "mais logs além do fim: aviso, sem erro"         grep -q 'Sem mais logs' <(curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=900")
+check "mais logs sem htmx: página inteira"             bash -c 'grep -qi "<html" <<<"$1" && test "$(grep -c "<tr data-log" <<<"$1")" = 5' _ "$(studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=200")"
+check "mais logs além do fim: aviso, sem erro"         grep -q 'Sem mais logs' <(studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=900")
 check "mais logs: offset inválido ou sem id = 400"     test "$(code "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=x")$(code "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b&offset=-1")$(code "${C[@]}" "$STUDIO_URL/conversa/logs?offset=0")" = 400400400
-check "id com espaço, /, & e acento abre o detalhe"    grep -q 'data-calls="2"' <(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv%20d/1%26x%3D%C3%A9")
-check "conversa só com spans: aviso no lugar dos logs" grep -q 'Esta conversa não tem logs' <(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-c")
+check "id com espaço, /, & e acento abre o detalhe"    grep -q 'data-calls="2"' <(studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv%20d/1%26x%3D%C3%A9")
+check "conversa só com spans: aviso no lugar dos logs" grep -q 'Esta conversa não tem logs' <(studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv-c")
 check "a tela não derrubou o servidor (sem 500 no stderr)" bash -c '! grep -q "respondi 500\|Traceback" "$1"' _ "$TMP/s/stderr"
 # ---------------------------------------------------------------- 4b. receitas Kubo nas macros e nas páginas (#468)
 curl -s "$STUDIO_URL/static/copiar.js" > "$TMP/copiar.js"
@@ -352,7 +352,7 @@ want = {"a1": "workflow", "a2": "sparkles", "a3": "wrench", "a4": "terminal", "a
 sys.exit(0 if {k: icon(k) for k in want} == want else 1)' "$TMP/a.html"
 check "árvore: pai ausente em Badge de contorno; erro em Badge destrutivo na coluna Status; a linha sem class erro" bash -c 'grep -q "<span class=\"badge contorno\">pai ausente</span>" "$1" && [ "$(grep -o "<td><span class=\"badge destrutivo\">erro</span></td>" "$1" | wc -l)" = 1 ] && ! grep -q "<tr [^>]*class=\"erro\"" "$1"' _ "$TMP/a.html"
 check "árvore: Tokens ent / saí numa célula e o cache em segunda linha menor" bash -c 'grep -q "100 / 50<span class=\"fino\" title=\"tokens de cache: leitura / escrita\">cache 1.000 / 10</span>" "$1"' _ "$TMP/a.html"
-check "árvore: o conteúdo do span segue pelo htmx (hx-get, hx-target, linha de conteúdo)" bash -c '[ "$(grep -c "hx-target=\"next .conteudo\"" "$1")" = 7 ] && [ "$(grep -c "<tr class=\"conteudo-linha\"><td class=\"conteudo\" colspan=\"7\">" "$1")" = 7 ]' _ "$TMP/a.html"
+check "árvore: o conteúdo do span segue pelo htmx (hx-get, hx-target, linha de conteúdo)" bash -c '[ "$(grep -c "hx-target=\"next .conteudo\"" "$1")" = 7 ] && [ "$(grep -c "<tr class=\"conteudo-linha\"><td class=\"conteudo\" colspan=\"7\" data-inline-bloco=\"faixa\">" "$1")" = 7 ]' _ "$TMP/a.html"
 check "logs: tabela no cartão, nível em Badge (erro destrutivo, o resto de contorno), sem class erro na linha" bash -c 'grep -q "<table class=\"logs empilha\">" "$1" && grep -q "<span class=\"badge destrutivo\">" "$1" && grep -q "<span class=\"badge contorno\">" "$1" && ! grep -q "<tr [^>]*class=\"erro\"" "$1"' _ "$TMP/a.html"
 check "detalhe e logs: botão de voltar com o ícone, no lugar do link solto" bash -c 'grep -q "<a class=\"botao\" href=\"/conversas\">.*Conversas</a>" "$1" && grep -q "<a class=\"botao\" href=\"/conversa?id=conv-b\">" "$2"' _ "$TMP/a.html" "$TMP/logs.html"
 check "ícones das páginas novas todos no sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/a.html" "$TMP/list.html"
@@ -367,18 +367,18 @@ check "lista: conversa do Codex também tem nome"       grep -qF "<a href=\"/con
 check "detalhe: o mesmo nome, com o id inteiro abaixo" grep -qF "<span class=\"conv-nome\">$NA</span><span class=\"fino conv-id\">conv-a</span>" "$TMP/a.html"
 check "lista: selo de erros com link para os erros da conversa" grep -qF 'href="/conversa?id=conv-a&amp;erros=1"' "$TMP/list.html"
 check "lista: linha sem erro não tem link de erros"    bash -c '[ "$(grep -c "class=\"erros-link\"" "$1")" = 1 ]' _ "$TMP/list.html"
-curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-a&erros=1" > "$TMP/ae.html"
+studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv-a&erros=1" > "$TMP/ae.html"
 AE="$(data < "$TMP/ae.html")"
 check "filtrado: só o span com erro"                   jqe '[.[] | select(.span)] | map(.span[-2:]) == ["a4"]' <<<"$AE"
 check "filtrado: só o log ERROR ou acima"              jqe '[.[] | select(.log)] | map(.log) == ["1759000008000000000"]' <<<"$AE"
 check "filtrado: as somas seguem as da conversa inteira" jqe '.[] | select(has("resumo")) | .calls == "3"' <<<"$AE"
 check "filtrado: link de volta à conversa inteira"     grep -qF '<a href="/conversa?id=conv-a">Ver a conversa inteira</a>' "$TMP/ae.html"
 check "sem filtro: sem o link de volta"                bash -c '! grep -q "data-filtro-erros" "$1"' _ "$TMP/a.html"
-check "filtro que não é 1 (erros=0): conversa inteira" bash -c '[ "$(curl -s "${@:2}" "$1/conversa?id=conv-a&erros=0" | grep -c "<tr data-span=")" = 7 ]' _ "$STUDIO_URL" "${C[@]}"
-CBE="$(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=conv-b&erros=1")"
+check "filtro que não é 1 (erros=0): conversa inteira" bash -c '[ "$(studio_page "${@:2}" "$1/conversa?id=conv-a&erros=0" | grep -c "<tr data-span=")" = 7 ]' _ "$STUDIO_URL" "${C[@]}"
+CBE="$(studio_page "${C[@]}" "$STUDIO_URL/conversa?id=conv-b&erros=1")"
 check "filtrado, conversa sem erro: avisos e nenhuma linha" bash -c 'grep -q "não tem spans com erro" <<<"$1" && grep -q "não tem logs com erro" <<<"$1" && ! grep -q "<tr data-log" <<<"$1"' _ "$CBE"
-check "logs filtrados (htmx): só a linha com erro"     bash -c '[ "$(curl -s "${@:2}" -H "HX-Request: true" "$1/conversa/logs?id=conv-a&erros=1" | grep -c "<tr data-log")" = 1 ]' _ "$STUDIO_URL" "${C[@]}"
-check "logs filtrados: página inteira volta ao filtro" grep -qF 'href="/conversa?id=conv-a&amp;erros=1" title="Voltar"' <(curl -s "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-a&erros=1")
+check "logs filtrados (htmx): só a linha com erro"     bash -c '[ "$(studio_page "${@:2}" -H "HX-Request: true" "$1/conversa/logs?id=conv-a&erros=1" | grep -c "<tr data-log")" = 1 ]' _ "$STUDIO_URL" "${C[@]}"
+check "logs filtrados: página inteira volta ao filtro" grep -qF 'href="/conversa?id=conv-a&amp;erros=1" title="Voltar"' <(studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-a&erros=1")
 cat > "$TMP/names.py" <<'PY'
 import os, re, sys
 sys.path.insert(0, os.environ["PKG_PARENT"])

@@ -8,6 +8,7 @@
 {% block title %}{{ p.title or p.id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("resumo") %}
 <div class="pagina-topo">
   <div class="titulo-linha">
     <div>
@@ -15,7 +16,7 @@
         {% if p.state == "pendente" %}{{ badge("Gate · pendente" ~ ((" há " ~ p.proposed_at|ago) if p.proposed_at else ""), "gate", "hand") }}{% endif %}
         {% if p.as == "root" %}{{ badge("root (sudo no host)", "destrutivo", "shield-alert") }}{% elif p.as == "user" %}{{ badge("user (o usuário do host)", "secundario", "user") }}{% endif %}
       </div>
-      <h1>Pedido <code>{{ p.id }}</code></h1>
+      {% if loading_target is none %}<h1>Pedido <code>{{ p.id }}</code></h1>{% endif %}
       {% if p.title %}<p class="nota">{{ p.title }}</p>{% endif %}
     </div>
     <a class="botao" href="/pedidos">{{ icon("arrow-left", 14) }}Pedidos</a>
@@ -23,8 +24,10 @@
 </div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado do pedido (SurrealDB) não pôde ser lido:
   não dá para dizer aqui se ele está pendente ou decidido. A causa está no log do agent-studio.</p>{% endif %}
+{% endcall %}
 <div class="duas">
 <div class="pilha">
+{% call fragment("script") %}
 <h2 class="secao">Script</h2>
 {% if p.versions > 1 %}
 <p class="aviso erro" role="alert" data-versoes="{{ p.versions }}">Chegaram {{ p.versions|num }} versões diferentes deste pedido (eventos <code>oute.canal.proposed</code>
@@ -46,8 +49,10 @@
 {% else %}
 <p class="aviso" data-sem-script>O script deste pedido não chegou ao agent-studio (falta o evento <code>oute.canal.proposed</code>).</p>
 {% endif %}
+{% endcall %}
 </div>
 <div class="pilha">
+{% call fragment("eventos") %}
 <div class="cartao bloco">
 <dl class="resumo" data-resumo-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}"
     data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}"
@@ -70,6 +75,8 @@
   {% endif %}
 </dl>
 </div>
+{% endcall %}
+{% call fragment("comando") %}
 <div class="cartao bloco">
   <h2>Decidir no host</h2>
   {% if p.state == "pendente" and p.id is safe_cmd_id %}
@@ -82,6 +89,7 @@
   <p class="nota">Esta tela só mostra. Aprovar ou recusar é no host, com o <code>oute approve</code>, e o que vale é o script
     que ele mostra lá. A saída do script no host não vem para o agent-studio.</p>
 </div>
+{% endcall %}
 </div>
 </div>
 </div>

@@ -8,16 +8,20 @@
 {% block main %}
 {% set W = 600 %}{% set H = 180 %}
 <div class="pagina">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Ferramentas</h1>{{ filter("/ferramentas", windows, hours, range, hosts, host, agents, agent, repos, repo, custo_ctl=false) }}</div>
+  <div class="titulo-linha">{% if loading_target is none %}<h1>Ferramentas</h1>{% endif %}{{ filter("/ferramentas", windows, hours, range, hosts, host, agents, agent, repos, repo, custo_ctl=false) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · cada uso conta uma vez (o span <code>claude_code.tool</code>) · só o Claude Code manda span de ferramenta com nome; o Codex não</p>
 </div>
 
+{% endcall %}
+{% call fragment("total") %}
 <section class="cartao bloco" id="total" data-usos="{{ uses }}" data-erros="{{ errors }}" data-taxa="{{ '' if rate is none else rate }}">
   <div class="grafico-topo"><h2>Na janela</h2><span class="nota">{{ uses|num }} {{ "uso" if uses == 1 else "usos" }} · {{ errors|num }} {{ "erro" if errors == 1 else "erros" }} · taxa de erro {{ rate|pct(2) }}</span></div>
 </section>
+{% endcall %}
 
-{% if uses %}
+{% call fragment("usos") %}
 {% set s = series %}{% set n = s.points|length %}
 <section class="cartao bloco grafico" data-grafico="usos" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
   <div class="grafico-topo"><h2>Usos de ferramenta por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">total {{ s.total|num }} · tracejado = erros</span></div>
@@ -43,7 +47,10 @@
     <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
   </div>
 </section>
+{% endcall %}
 
+{% call fragment("ferramentas") %}
+{% if not uses %}<p class="aviso" id="vazio">Nenhum uso de ferramenta nessa janela e com esses filtros.</p>{% endif %}
 <section class="cartao bloco" id="ferramentas" data-ferramentas="{{ tools|length }}">
   <div class="grafico-topo"><h2>Por ferramenta</h2><span class="nota">p95 = duração da execução</span></div>
   <div class="rolagem">
@@ -64,7 +71,9 @@
   </table>
   </div>
 </section>
+{% endcall %}
 
+{% call fragment("repos") %}
 <section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ by_repo|length }}">
   <div class="grafico-topo"><h2>Usos por repositório</h2><span class="nota">usos de ferramenta · erros</span></div>
   {% for r in by_repo %}
@@ -75,8 +84,7 @@
   </div>
   {% endfor %}
 </section>
-{% else %}
-<p class="aviso" id="vazio">Nenhum uso de ferramenta nessa janela e com esses filtros.</p>
-{% endif %}
+{% endcall %}
+
 </div>
 {% endblock %}

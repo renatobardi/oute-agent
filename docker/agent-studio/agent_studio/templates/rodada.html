@@ -7,6 +7,7 @@
 {% block title %}Rodada {{ r.id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("resumo") %}
 <div class="pagina-topo">
   <div class="titulo-linha">
     <div>
@@ -16,7 +17,7 @@
         {% if r.record and r.record.label %}{{ badge("label " ~ r.record.label, "contorno", "tag") }}{% endif %}
         {% if r.cycle_url %}<a href="{{ r.cycle_url }}" data-ciclo>{{ badge("ciclo " ~ r.record.cycle, "contorno", "repeat") }}</a>{% endif %}
       </div>
-      <h1>Rodada <code>{{ r.id }}</code></h1>
+      {% if loading_target is none %}<h1>Rodada <code>{{ r.id }}</code></h1>{% endif %}
       <p class="nota">As etapas que o dispatcher publicou para o Bardi, conferidas por um revisor de outro modelo. Esta tela só mostra.</p>
     </div>
     <a class="botao" href="/rodadas">{{ icon("arrow-left", 14) }}Rodadas</a>
@@ -40,8 +41,15 @@
   {% endfor %}
   </ol>
 </nav>
+{% endcall %}
+{% call fragment("etapas") %}
 {% if not r.steps %}<p class="aviso" data-sem-etapas>Nenhuma etapa publicada nesta rodada.</p>{% endif %}
+{% if loading_target %}
+{% for s in r.steps %}{{ loading_slot("etapa-" ~ loop.index0, "faixa", s.anchor) }}{% endfor %}
+{% endif %}
+{% endcall %}
 {% for s in r.steps %}
+{% call fragment("etapa-" ~ loop.index0) %}
 <section class="cartao etapa" id="{{ s.anchor }}" data-etapa="{{ s.kind }}" data-key="{{ s.key }}" data-pos="{{ s.pos }}" data-total="{{ s.total }}" data-rev="{{ s.rev }}" data-review="{{ s.review }}" data-sha256="{{ s.sha256 }}">
   <div class="cartao-topo">
     <div>
@@ -59,6 +67,7 @@
   </nav>
   {% endif %}
 </section>
+{% endcall %}
 {% endfor %}
 </div>
 {% endblock %}

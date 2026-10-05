@@ -7,10 +7,11 @@
 {% block title %}Ciclo {{ c.id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("resumo") %}
 <div class="pagina-topo">
   <div class="titulo-linha">
     <div>
-      <h1>Ciclo <code>{{ c.id }}</code></h1>
+      {% if loading_target is none %}<h1>Ciclo <code>{{ c.id }}</code></h1>{% endif %}
       <p class="nota">O resumo do ciclo e as rodadas que a triagem ligou a ele, conferidos por um revisor de outro modelo. Esta tela só mostra.</p>
     </div>
     <a class="botao" href="/rodadas">{{ icon("arrow-left", 14) }}Rodadas</a>
@@ -18,6 +19,8 @@
 </div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido ou está vazio:
   a página mostra o que o DuckDB tem. A causa está no log do agent-studio.</p>{% endif %}
+{% endcall %}
+{% call fragment("etapa") %}
 {% set s = c.summary %}
 {% if s %}
 <section class="cartao etapa" id="{{ s.anchor }}" data-etapa="ciclo" data-rev="{{ s.rev }}" data-review="{{ s.review }}" data-sha256="{{ s.sha256 }}">
@@ -33,6 +36,8 @@
 {% else %}
 <p class="aviso" data-sem-resumo>O resumo deste ciclo ainda não foi publicado.</p>
 {% endif %}
+{% endcall %}
+{% call fragment("rodadas") %}
 <section class="cartao" data-rodadas-ciclo>
   <div class="cartao-topo"><h2>Rodadas do ciclo</h2></div>
   {% if c.rounds %}
@@ -58,5 +63,6 @@
   <p class="aviso" data-sem-rodadas>Nenhuma rodada ligou a triagem a este ciclo.</p>
   {% endif %}
 </section>
+{% endcall %}
 </div>
 {% endblock %}

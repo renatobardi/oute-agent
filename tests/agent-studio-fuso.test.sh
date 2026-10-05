@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 SP=America/Sao_Paulo
 
@@ -38,7 +38,7 @@ studio_prices "$TMP/prices.toml"
 { printf 'timezone = "%s"\n' "$SP"; cat "$TMP/prices.toml"; } > "$TMP/cfg-sp.toml"
 { echo 'timezone = "Marte/Olimpo"'; cat "$TMP/prices.toml"; } > "$TMP/cfg-ruim.toml"
 A=(-H "Authorization: Bearer $STUDIO_TOKEN")
-get() { curl -s "${A[@]}" "$STUDIO_URL$1"; }
+get() { studio_page "${A[@]}" "$STUDIO_URL$1"; }
 status() { curl -s -o /dev/null -w '%{http_code}' "${A[@]}" "$STUDIO_URL$1"; }
 WIN='from=2025-09-26T00:00:00Z&to=2025-09-29T00:00:00Z'
 CONV="/conversas?$WIN"

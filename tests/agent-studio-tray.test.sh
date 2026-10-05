@@ -14,10 +14,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -167,9 +167,9 @@ check "pedido: link do ver script (caminho estável por id)" jqe --arg p1 "$P1" 
 check "pedido: id estranho codificado no link"         jqe '.proposals.pending[0].url == "/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9"' <<<"$R"
 for i in 0 1; do
   U="$(jq -r ".proposals.pending[$i].url" <<<"$R")"
-  check "pedido $i: o link abre a página do pedido (200, com o script)" bash -c 'grep -q "data-script" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL$U")"
+  check "pedido $i: o link abre a página do pedido (200, com o script)" bash -c 'grep -q "data-script" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL$U")"
 done
-check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r '.proposals.pending[0].url' <<<"$R")\"" <<<"$(curl -s "${C[@]}" "$STUDIO_URL/pedidos")"
+check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r '.proposals.pending[0].url' <<<"$R")\"" <<<"$(studio_page "${C[@]}" "$STUDIO_URL/pedidos")"
 check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep -q "systemctl" "$1"' _ "$TMP/tray.json"
 
 # etapas das rodadas abertas (#508)
@@ -182,7 +182,7 @@ check "etapas: chave só no merge, nula nas outras"     jqe '[.steps.rows[].key]
 check "etapas: link da página da rodada, com a âncora da etapa" jqe '[.steps.rows[].url] == ["/rodada?id=swarm-1004-1100#etapa-fechamento", "/rodada?id=swarm-1004-1000#etapa-merge-13", "/rodada?id=swarm-1004-1000#etapa-merge-12", "/rodada?id=swarm-1004-1000#etapa-triagem"]' <<<"$R"
 check "etapas: idade em segundos desde a publicação (1 min, 90 s, 2 min, 48 min)" jqe '[.steps.rows[].age_seconds] as $a | ($a[0] >= 60 and $a[0] < 360) and ($a[1] >= 90 and $a[1] < 390) and ($a[2] >= 120 and $a[2] < 420) and ($a[3] >= 2900 and $a[3] < 3200)' <<<"$R"
 check "etapas: o texto da etapa não vem na resposta"   bash -c '! grep -q "segredo-da-etapa" "$1"' _ "$TMP/tray.json"
-check "etapas: cada link abre a página da rodada (200, com a etapa)" bash -c 'for u in $(jq -r ".steps.rows[].url" <<<"$1"); do b="$(curl -s -H "Authorization: Bearer $3" "$2${u%%#*}")"; grep -q "id=\"${u#*#}\"" <<<"$b" || exit 1; done' _ "$R" "$STUDIO_URL" "$STUDIO_TOKEN"
+check "etapas: cada link abre a página da rodada (200, com a etapa)" bash -c 'for u in $(jq -r ".steps.rows[].url" <<<"$1"); do b="$(studio_page -H "Authorization: Bearer $3" "$2${u%%#*}")"; grep -q "id=\"${u#*#}\"" <<<"$b" || exit 1; done' _ "$R" "$STUDIO_URL" "$STUDIO_TOKEN"
 check "etapas: o total do bloco = o que o /v1/rodada tem de etapa nas rodadas abertas" test "$(for r in swarm-1004-1000 swarm-1004-1100; do curl -s "${C[@]}" "$STUDIO_URL/v1/rodada?id=$r" | jq '.steps | length'; done | jq -s add)" = "$(jq '.steps.total' <<<"$R")"
 check "etapas: a barra do tray não conta etapa (só pedidos e alertas)" jqe '.bar | keys == ["alerts", "pending"]' <<<"$R"
 

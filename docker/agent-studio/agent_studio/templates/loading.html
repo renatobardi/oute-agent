@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import conv_name with context %}
+{% block title %}{{ titulo }} · Agent Studio{% endblock %}
+{% block head %}{% if nav == "pedidos" %}<script src="/static/copiar.js" defer></script>{% endif %}{% endblock %}
+{% block main %}
+<div class="pagina{% if nav == 'dashboard' %} dashboard{% endif %}">
+<div class="pagina-topo"><h1>{% if shell_path == "/conversa" %}Conversa {{ conv_name(id) }}{% else %}{{ titulo }}{% if detail and id %} <code>{{ id }}</code>{% endif %}{% endif %}</h1></div>
+<noscript><p class="aviso">Abra <a href="{{ full_url }}">a página inteira</a> para ver o conteúdo sem JavaScript.</p></noscript>
+{% for nome, forma in blocos %}
+{% if forma == "grafico" and (loop.first or blocos[loop.index0 - 1][1] != "grafico") %}<div class="graficos">{% endif %}
+{{ loading_slot(nome, forma) }}
+{% if forma == "grafico" and (loop.last or blocos[loop.index][1] != "grafico") %}</div>{% endif %}
+{% endfor %}
+</div>
+{% endblock %}

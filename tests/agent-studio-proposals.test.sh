@@ -13,11 +13,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/otlp.sh"
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 PKG="$ROOT/docker/agent-studio/agent_studio"
@@ -78,14 +78,14 @@ SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREA
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 C=(-H "Authorization: Bearer $STUDIO_TOKEN")
 HX=(-H "HX-Request: true")
-page() { curl -s "${C[@]}" "$STUDIO_URL$1"; }
+page() { studio_page "${C[@]}" "$STUDIO_URL$1"; }
 U1="/pedido?id=$P1"
 
 # ---------------------------------------------------------------- 1. antes de qualquer pedido; quem lê
 # antes do primeiro `oute.canal.*` a tabela `pedido` não existe no SurrealDB
 EMPTY="$(page /pedidos)"
 check "sem pedido nenhum: /pedidos 200, listas vazias" bash -c 'grep -q "Nenhum pedido pendente" <<<"$1" && grep -q "Nenhum pedido decidido" <<<"$1"' _ "$EMPTY"
-check "sem pedido nenhum: pedido = 404"                test "$(code "${C[@]}" "$STUDIO_URL$U1")" = 404
+check "sem pedido nenhum: pedido = 404"                test "$(code "${C[@]}" "$STUDIO_URL/bloco/pedido/resumo?id=$P1")" = 404
 check "sem dado nenhum: alerta de host sem dado no topo" jqe '[.[] | select(.alerta)] | length == 1 and .[0].alerta == "host_no_data" and .[0].host == "oute-server"' <<<"$(data <<<"$EMPTY")"
 check "host sem dado: o texto diz que não há registro" grep -q 'Host sem dado</strong> · oute-server:' <<<"$EMPTY"
 check "ingestão: logs = 200"                           test "$(post logs "$TMP/logs.json")" = 200
@@ -93,7 +93,7 @@ check "SurrealDB de exemplo: 5 registros pedido"       test "$(surreal_q 'SELECT
 check "pedidos sem login: 303 para o /login"           test "$(code "$STUDIO_URL/pedidos")$(hdr location "$STUDIO_URL/pedidos")" = "303/login?next=%2Fpedidos"
 check "pedido sem login: 303, com a volta"             test "$(hdr location "$STUDIO_URL$U1")" = "/login?next=%2Fpedido%3Fid%3D$P1"
 check "htmx sem login: 401 com HX-Redirect"            test "$(code "${HX[@]}" "$STUDIO_URL/pedidos")$(hdr hx-redirect "${HX[@]}" "$STUDIO_URL/pedidos")" = "401/login?next=%2Fpedidos"
-check "login: sem os alertas (só para quem entrou)"    bash -c '! grep -q "id=\"alertas\"" <<<"$1"' _ "$(curl -s "$STUDIO_URL/login")"
+check "login: sem os alertas (só para quem entrou)"    bash -c '! grep -q "id=\"alertas\"" <<<"$1"' _ "$(studio_page "$STUDIO_URL/login")"
 
 # ---------------------------------------------------------------- 2. lista: pendentes e recentes
 page /pedidos > "$TMP/list.html"
@@ -112,7 +112,7 @@ check "lista: id escapado na página e codificado no link" bash -c '! grep -q "<
 ids_of() { local st="$1"; data | jq -c --arg st "$st" '[.[] | select(.pedido and .state == $st) | .pedido]'; return $?; }
 check "decididos: a ordem inicial é a da hora da decisão, do mais novo (a de sempre)" test "$(page /pedidos | ids_of decidido)" = "$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
 check "decididos: ordenar por rc inverte nos dois sentidos (sem rc no fim)" test "$(page '/pedidos?ord_d=rc&dir_d=desc' | ids_of decidido)$(page '/pedidos?ord_d=rc&dir_d=asc' | ids_of decidido)" = "$(jq -cn --arg a "$P2" --arg b "$P4" --arg c "$P3" '[$a, $b, $c]')$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
-check "decididos: filtro por decisão deixa só a escolhida, com o rodapé 'N a M de total'" bash -c 'h="$(curl -s "${@:2}" "$1/pedidos?f_decision_d=recusado")"; grep -q "1 a 1 de 1 (filtrado, 3 no total)" <<<"$h" && [ "$(grep -c "data-decision=\"recusado\"" <<<"$h")" = 1 ] && ! grep -q "data-decision=\"executado\"" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
+check "decididos: filtro por decisão deixa só a escolhida, com o rodapé 'N a M de total'" bash -c 'h="$(studio_page "${@:2}" "$1/pedidos?f_decision_d=recusado")"; grep -q "1 a 1 de 1 (filtrado, 3 no total)" <<<"$h" && [ "$(grep -c "data-decision=\"recusado\"" <<<"$h")" = 1 ] && ! grep -q "data-decision=\"executado\"" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
 check "decididos: o filtro e a ordem abrem o <details> (a página recarregada mostra o que foi pedido)" bash -c 'grep -q "<details class=\"pilha decididos\" id=\"decididos\" open>" <<<"$1" && ! grep -q "<details class=\"pilha decididos\" id=\"decididos\">" <<<"$1"' _ "$(page '/pedidos?ord_d=rc&dir_d=asc')"
 check "decididos: os links da tabela levam a âncora #decididos e os dos pendentes não" bash -c 'grep -q "href=\"/pedidos?ord_d=[a-z]*&amp;dir_d=[a-z]*#decididos\"" <<<"$1" && ! grep -q "ord_p=[a-z]*&amp;dir_p=[a-z]*#decididos" <<<"$1"' _ "$(page /pedidos)"
 check "pendentes: filtro por 'roda como' vale só para a tabela dos pendentes" test "$(page '/pedidos?f_as_p=root' | ids_of pendente)$(page '/pedidos?f_as_p=root' | ids_of decidido | jq -c length)" = "$(jq -cn --arg a "$P1" '[$a]')3"
@@ -143,7 +143,7 @@ page "/pedido?id=$P4" > "$TMP/p4.html"
 check "decidido sem o proposed: 200, com o estado e o aviso de script ausente" bash -c 'grep -q "data-state=\"decidido\"" "$1" && grep -q data-sem-script "$1" && ! grep -q "data-script" "$1"' _ "$TMP/p4.html"
 P5U="/pedido?id=$(enc "$P5")"
 check "pedido com id estranho abre, com o id escapado" bash -c 'grep -q "data-state=\"pendente\"" <<<"$1" && ! grep -q "<b>5</b>" <<<"$1" && grep -q "p &lt;b&gt;5&lt;/b&gt;&amp;x=é" <<<"$1"' _ "$(page "$P5U")"
-check "pedido que não existe: 404"                     test "$(code "${C[@]}" "$STUDIO_URL/pedido?id=nao-existe")" = 404
+check "pedido que não existe: 404"                     test "$(code "${C[@]}" "$STUDIO_URL/bloco/pedido/resumo?id=nao-existe")" = 404
 check "pedido sem id: 400"                             test "$(code "${C[@]}" "$STUDIO_URL/pedido")" = 400
 
 # ---------------------------------------------------------------- 4. conferir o script exibido: sha256 e versões
@@ -215,7 +215,7 @@ check "sem alerta ativo: nenhum alerta na página"      bash -c 'grep -q "id=\"a
 check "ingestão: fila a 80% = 200"                     test "$(post metrics "$TMP/metrics-high.json")" = 200
 API="$(api)"
 check "/v1/alerts: fila acima de 50%"                  jqe 'length == 1 and .[0].type == "queue" and .[0].host == "oute-server" and .[0].value == 0.8' <<<"$API"
-for path in /conversas /sessoes /pedidos "/pedido?id=nao-existe" "/conversa?id=nao-existe" "/sessao?id=nao-existe"; do
+for path in /conversas /sessoes /pedidos; do
   check "alerta visível no topo de $path, igual ao do /v1/alerts" jqe --argjson api "$API" \
     'map({type: .alerta, host, value: (.value | tonumber), since}) == $api' <<<"$(alerts_of "$path")"
 done
@@ -229,7 +229,7 @@ check "alerta: texto com host, exporter, valor e limite" jqe '.[0].text | test("
 check "alerta: antes do conteúdo, fora do que o htmx troca" bash -c 'a="$(grep -n "id=\"alertas\"" "$1" | cut -d: -f1)"; m="$(grep -n "<main id=\"conteudo\">" "$1" | cut -d: -f1)"; test -n "$a" && test "$a" -lt "$m"' _ "$TMP/alert.html"
 check "alerta: faixa sob o cabeçalho, com o ícone siren (#467)" bash -c 'h="$(grep -n "</header>" "$1" | head -1 | cut -d: -f1)"; a="$(grep -n "id=\"alertas\"" "$1" | cut -d: -f1)"; test -n "$h" && test "$h" -lt "$a" && sed -n "${a},$((a+2))p" "$1" | grep -q "lucide.svg#siren"' _ "$TMP/alert.html"
 check "alerta: a página do pedido segue inteira"       cmp -s "$TMP/p1.sh" <(script_of < "$TMP/alert-pedido.html")
-check "trecho do htmx não leva os alertas"             bash -c '! grep -q "alertas" <<<"$1"' _ "$(curl -s "${C[@]}" "${HX[@]}" "$STUDIO_URL/conversa/logs?id=x")"
+check "trecho do htmx não leva os alertas"             bash -c '! grep -q "alertas" <<<"$1"' _ "$(studio_page "${C[@]}" "${HX[@]}" "$STUDIO_URL/conversa/logs?id=x")"
 check "ingestão: fila a 10% = 200"                     test "$(post metrics "$TMP/metrics-low.json")" = 200
 check "alerta desliga sozinho com o dado seguinte"     test "$(api)$(alerts_of "$U1")" = "[][]"
 
@@ -283,7 +283,7 @@ check "faixas: o limite é a chave band_recent_hours do [alerts] do config.toml,
 PAGES=("$TMP/list.html" "$TMP/p1.html" "$TMP/p2.html" "$TMP/p4.html" "$TMP/alert.html" "$TMP/alert-pedido.html" "$TMP/p6.html" "$TMP/p1-forjado.html")
 check "páginas: nenhum script, estilo ou link de fora" bash -c '! grep -hoiE "(src|href|action|hx-get)=\"[^\"]*\"" "$@" | grep -qE "=\"([a-z]+:)?//"' _ "${PAGES[@]}"
 check "páginas: sem script nem estilo inline"          bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@"' _ "${PAGES[@]}"
-check "páginas: script só do /static (htmx; o copiar.js nas páginas com Copiar)" test "$(grep -ho '<script[^>]*>' "${PAGES[@]}" | sort -u | paste -sd,)" = '<script src="/static/copiar.js" defer>,<script src="/static/htmx.min.js" defer>'
+check "páginas: script só do /static (htmx; o copiar.js nas páginas com Copiar)" test "$(grep -ho '<script[^>]*>' "${PAGES[@]}" | sort -u | paste -sd,)" = '<script src="/static/copiar.js" defer>,<script src="/static/htmx.min.js" defer>,<script src="/static/loading.js" defer>'
 check "páginas: o copiar.js aparece nas páginas com botão Copiar (lista e pedido)" test "$(grep -l 'copiar.js' "${PAGES[@]}" | wc -l)" -ge 2 -a "$(grep -l 'copiar.js' "$TMP/list.html" | wc -l)" = 1
 CSP="$(hdr content-security-policy "${C[@]}" "$STUDIO_URL$U1")"
 check "CSP: a mesma das conversas, no pedido e na lista" test "$CSP" = "$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/conversas")" -a "$CSP" = "$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/pedidos")"
@@ -318,14 +318,14 @@ surreal_q "DELETE pedido WHERE record::id(id) IN ['$P337', '$P337-b', '$P337-c']
 # ---------------------------------------------------------------- 8. SurrealDB fora
 surreal_stop
 page /pedidos > "$TMP/down.html"
-check "SurrealDB fora: /pedidos 503 (a lista é o estado)" test "$(code "${C[@]}" "$STUDIO_URL/pedidos")" = 503
+check "SurrealDB fora: /pedidos 503 (a lista é o estado)" test "$(code "${C[@]}" "$STUDIO_URL/bloco/pedidos/pendentes")" = 503
 check "SurrealDB fora: a página diz o que faltou, sem a causa" bash -c 'grep -q "O estado dos pedidos (SurrealDB) não pôde ser lido" "$1" && ! grep -qi "urlopen\|refused\|127\.0\.0\.1" "$1"' _ "$TMP/down.html"
 page "$U1" > "$TMP/down1.html"
 check "SurrealDB fora: página do pedido 200, com o script" bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" -H "$3" "$4")" = 200 && cmp -s "$2" <(python3 -c "import html, re, sys; sys.stdout.write(html.unescape(re.search(r\"data-script>(.*?)</pre>\", open(sys.argv[1]).read(), re.S).group(1)))" "$1")' _ "$TMP/down1.html" "$TMP/p1.sh" "${C[1]}" "$STUDIO_URL$U1"
 check "SurrealDB fora: aviso e estado desconhecido (nunca pendente por palpite)" bash -c 'grep -q data-estado-indisponivel "$1" && grep -q "data-state=\"\"" "$1" && grep -q "<dt>Estado</dt><dd>desconhecido</dd>" "$1"' _ "$TMP/down1.html"
 check "SurrealDB fora: título, como e agente vêm do evento" jqe '.as == "root" and .agent == "claude" and .host == "oute-server" and (.text | test("Título Reiniciar <b>nginx</b> & cia"))' <<<"$(data < "$TMP/down1.html" | jq -c '.[] | select(has("resumo-pedido"))')"
-check "SurrealDB fora: pedido só do SurrealDB = 404"   test "$(code "${C[@]}" "$STUDIO_URL/pedido?id=$P4")" = 404
-check "SurrealDB fora: aviso no stderr, sem 500"       bash -c 'grep -q "tela: lista de pedidos (SurrealDB) falhou" "$1" && grep -q "tela: estado do pedido (SurrealDB) falhou" "$1" && ! grep -q "respondi 500" "$1"' _ "$TMP/s/stderr"
+check "SurrealDB fora: pedido só do SurrealDB = 404"   test "$(code "${C[@]}" "$STUDIO_URL/bloco/pedido/resumo?id=$P4")" = 404
+check "SurrealDB fora: aviso no stderr, sem 500"       bash -c 'grep -q "tela: lista de pedidos (SurrealDB) falhou" "$1" && grep -q "tela: estado do pedido falhou" "$1" && ! grep -q "respondi 500" "$1"' _ "$TMP/s/stderr"
 studio_stop
 
 # ---------------------------------------------------------------- 9. lógica direto em Python
@@ -399,7 +399,7 @@ check("sem SurrealDB: pedido sem evento = 404", get(app, "/pedido", f"id={P4}")[
 Store.calls = 0
 status, body = get(app, "/conversa/logs", "id=x", headers=[("HX-Request", "true")])
 check("trecho do htmx: sem cálculo de alertas", status == 200 and Store.calls == 0 and "alertas" not in body)
-status, body = get(app, "/conversa/logs", "id=x")
+status, body = get(app, "/conversa/logs", "id=x&full=1")
 check("página de detalhe inteira: um cálculo de alertas, e a faixa não aparece (#467)", status == 200 and Store.calls == 1 and 'id="alertas"' not in body)
 Store.calls = 0
 status, body = get(app, "/pedidos")
@@ -417,7 +417,7 @@ check("alertas que falham: o detalhe do pedido sai inteiro e sem a faixa",
 class Broken(Store):
     def proposal(self, pid):
         raise RuntimeError("segredo-da-falha")
-status, body = get(create_app(Broken(), TOKEN), "/pedido", f"id={P1}")
+status, body = get(create_app(Broken(), TOKEN), "/pedido", f"id={P1}&full=1")
 check("leitura do DuckDB que falha: 500, sem a causa, com os alertas",
       status == 500 and "segredo-da-falha" not in body and "A consulta falhou" in body and 'id="alertas"' in body)
 # SurrealDB que responde fora do formato

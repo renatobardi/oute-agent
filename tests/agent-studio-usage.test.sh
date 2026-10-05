@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 usage() { curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/usage${1:-}"; }
 
@@ -158,7 +158,7 @@ check "borda: log na janela sem o span dele não é chamada" jqe '.totals.calls 
 # ---------------------------------------------------------------- 5. hora do fato × chegada
 check "últimas 24 h: nada (tudo chegou agora, fato em 2025)" jqe '.totals.calls == 0 and .rows == [] and .series == [] and .totals.cost.real_usd == null and .totals.latency_p95_ms == null' <<<"$(usage)"
 # ---------------------------------------------------------------- 5.1 os gráficos da tela /uso (#533)
-UH="$(curl -s "${A[@]}" "$STUDIO_URL/uso$WIN")"
+UH="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN")"
 G="$(data <<<"$UH")"
 check "/uso: os quatro gráficos"                       jqe '[.[] | select(.grafico) | .grafico] == ["uso-custo-dia", "uso-tokens-dia", "uso-custo-role", "uso-custo-phase"]' <<<"$G"
 check "/uso: custo por dia = um item por dia (2 dias, 2 colunas)" jqe '([.[] | select(.grafico == "uso-custo-dia")][0].days == "2") and ([.[] | select(.bucket and has("real-usd"))] | length == 2)' <<<"$G"
@@ -183,7 +183,7 @@ check "/uso: informado pela fonte × estimado distinguidos por texto e traço"  
 check "/uso: entrada, saída e cache distinguidos por texto e traço" bash -c 'for w in "Entrada (" "Saída (" "Cache, leitura" "t-ent" "t-sai" "t-cache"; do grep -q "$w" <<<"$1" || exit 1; done' _ "$UH"
 check "/uso: sem style= nas tags dos gráficos (CSP)"    bash -c '! grep -q "style=" <<<"$1"' _ "$UH"
 check "/uso: as tabelas por papel e por fase seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1' <<<"$G"
-GE="$(data <<<"$(curl -s "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")")"
+GE="$(data <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")")"
 check "/uso: janela vazia, gráficos sem coluna e sem barra" jqe '([.[] | select(.bucket or .nome)] | length) == 0 and ([.[] | select(.grafico)] | length) == 4' <<<"$GE"
 
 studio_stop

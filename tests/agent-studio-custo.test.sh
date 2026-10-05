@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo
@@ -117,7 +117,7 @@ check "/uso sem login: 303 para o /login"              test "$(code "$STUDIO_URL
 check "/uso com token: 200"                            test "$(code "${A[@]}" "$STUDIO_URL/uso?$WIN")" = 200
 check "/uso janela inválida: 400"                      test "$(code "${A[@]}" "$STUDIO_URL/uso?from=ontem&to=2025-09-29")" = 400
 check "POST no /uso: 405"                              test "$(code -X POST "${A[@]}" "$STUDIO_URL/uso")" = 405
-HTML="$(curl -s "${A[@]}" "$STUDIO_URL/uso?$WIN")"
+HTML="$(studio_page "${A[@]}" "$STUDIO_URL/uso?$WIN")"
 P="$(data <<<"$HTML")"
 check "tela: tabela por papel com as três linhas"      jqe '[.[] | select(.role) | .role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$P"
 check "tela: tabela por fase com as três linhas"       jqe '[.[] | select(.phase) | .phase] | sort == ["build", "desconhecida", "plan"]' <<<"$P"
@@ -129,7 +129,7 @@ check "tela: barras de papel somam o total (real e estimado)" bash -c 'jq -n -e 
   ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
   [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 2 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e / 2 - (\$c[\"estimated-usd\"] | tonumber)) | fabs) < 1e-9" >/dev/null' _ "$P"
 check "tela: menu com o link do uso"                   grep -q 'href="/uso"' <<<"$HTML"
-check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada ao modelo' <<<"$(curl -s "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")"
+check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada ao modelo' <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")"
 
 # ---------------------------------------------------------------- 5. nada novo na origem
 check "origem: oute-task/oute-emit/oute-swarm sem atributo de prompt, título ou caminho no evento da sessão" \

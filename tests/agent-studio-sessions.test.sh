@@ -12,10 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -134,7 +134,7 @@ studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio n
 C=(-H "Authorization: Bearer $STUDIO_TOKEN")
 HX=(-H "HX-Request: true")
 # antes de qualquer evento `oute.task.*`: a tabela `sessao` ainda não existe no SurrealDB
-check "sem evento nenhum: /sessoes 200, sem aviso"     bash -c 'grep -q "Nenhuma sessão nessa janela" <<<"$1" && ! grep -q data-estado-indisponivel <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN")"
+check "sem evento nenhum: /sessoes 200, sem aviso"     bash -c 'grep -q "Nenhuma sessão nessa janela" <<<"$1" && ! grep -q data-estado-indisponivel <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN")"
 check "ingestão: traces = 200"                         test "$(post traces "$TMP/traces.json")" = 200
 check "ingestão: logs = 200"                           test "$(post logs "$TMP/logs.json")" = 200
 check "SurrealDB de exemplo: 3 registros sessao"       test "$(surreal_q 'SELECT count() FROM sessao GROUP ALL' | jq -r '.[0].count')" = 3
@@ -146,7 +146,7 @@ check "htmx sem login: 401 com HX-Redirect"            test "$(code "${HX[@]}" "
 check "POST /sessoes: 405 (só leitura)"                test "$(code -X POST "${C[@]}" "$STUDIO_URL/sessoes")" = 405
 
 # ---------------------------------------------------------------- 2. lista: sessões com as conversas agrupadas
-curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN" > "$TMP/list.html"
+studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN" > "$TMP/list.html"
 ALL="$(data < "$TMP/list.html")"
 L="$(jq -c '[.[] | select(.sessao)]' <<<"$ALL")"
 srow() { jq -c --arg id "$1" '.[] | select(.sessao == $id)' <<<"$L"; }
@@ -155,7 +155,7 @@ check "lista: as 4 sessões da janela, da mais recente para a mais antiga (pelo 
 check "lista: hora do fato (sessão de janeiro fora)"   jqe 'all(.sessao | test("antiga") | not)' <<<"$L"
 check "lista: menu com conversas e sessões"            bash -c 'grep -qE "<a class=\"nav-item\" href=\"/conversas\"[^>]*>.*<span>Conversas</span></a>" "$1" && grep -qE "<a class=\"nav-item\" href=\"/sessoes\"[^>]*>.*<span>Sessões</span></a>" "$1"' _ "$TMP/list.html"
 # tabela com ordem e filtro por coluna (#529): o estado vem do SurrealDB e filtra pelo cabeçalho da coluna Sessão / conversa
-sess_of() { local qs="$1"; curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$qs" | data | jq -c '[.[] | select(.sessao) | .sessao]'; return $?; }
+sess_of() { local qs="$1"; studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$qs" | data | jq -c '[.[] | select(.sessao) | .sessao]'; return $?; }
 check "lista: filtro por estado (aberta) deixa só as abertas, na ordem de sempre" test "$(sess_of f_state=aberta)" = "$(jq -cn --arg a "$S4" --arg b "$S1" '[$a, $b]')"
 check "lista: filtro por estado (removida)" test "$(sess_of f_state=removida)" = "$(jq -cn --arg a "$S2" '[$a]')"
 check "lista: o cabeçalho oferece os estados que as sessões têm" bash -c 'sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">aberta</a>" && sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">removida</a>"' _ "$TMP/list.html"
@@ -205,7 +205,7 @@ check "sem sessão: uma linha por session.id, da mais recente para a mais antiga
 check "sem sessão: agente, modelo e custo de cada"     jqe ".[0].agent == \"codex\" and .[0].models == \"gpt-5-codex\" and $(usd '.[0]["estimated-usd"]') == 2500000 and $(usd '.[1]["real-usd"]') == 20000" <<<"$LOOSE"
 check "sem sessão: link do detalhe com o id codificado" grep -qF 'href="/conversa?id=solta%202/%26%C3%A9"' "$TMP/list.html"
 # os mesmos números do /v1/usage (#203): tudo o que a tela soma é o total da API na janela que cobre o ano
-curl -s "${C[@]}" "$STUDIO_URL/sessoes?from=2025-01-01&to=2026-01-01" | data > "$TMP/year.json"
+studio_page "${C[@]}" "$STUDIO_URL/sessoes?from=2025-01-01&to=2026-01-01" | data > "$TMP/year.json"
 U="$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?from=2025-01-01&to=2026-01-01" | jq -c .totals)"
 check "sessões + sem sessão = totais do /v1/usage"     jqe --argjson u "$U" \
   '[.[] | select(.sessao or (.conversa and .["da-sessao"] == ""))] as $g
@@ -215,21 +215,21 @@ check "sessões + sem sessão = totais do /v1/usage"     jqe --argjson u "$U" \
    and ($g | map(.input | tonumber) | add) == $u.tokens.input
    and ($g | map(.errors | tonumber) | add) == $u.errors.total' "$TMP/year.json"
 check "janela do ano: a sessão e a conversa de janeiro entram" jqe '([.[] | select(.sessao)] | length) == 5 and any(.[]; .conversa == "solta-jan")' "$TMP/year.json"
-ids() { curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$1" | data | jq -c '[.[] | select(.sessao or (.conversa and .["da-sessao"] == "")) | (.sessao // .conversa)]'; }
+ids() { local query="$1"; studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$query" | data | jq -c '[.[] | select(.sessao or (.conversa and .["da-sessao"] == "")) | (.sessao // .conversa)]'; return $?; }
 check "filtro por host"                                test "$(ids host=oute-mac)" = "[\"$S2\",\"solta 2/&é\"]"
 check "filtro por agente"                              test "$(ids agent=codex)" = "[\"$S2\",\"solta 2/&é\"]"
 check "filtro por host e agente"                       test "$(ids 'host=oute-server&agent=claude' | jq -c 'map(select(test("<b>") | not))')" = "[\"$S1\",\"solta-1\"]"
-check "filtro sem resultado: avisos, sem erro"         bash -c 'grep -q "Nenhuma sessão nessa janela" <<<"$1" && grep -q "Nenhuma conversa sem sessão" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&host=oute-mac&agent=claude")"
+check "filtro sem resultado: avisos, sem erro"         bash -c 'grep -q "Nenhuma sessão nessa janela" <<<"$1" && grep -q "Nenhuma conversa sem sessão" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN&host=oute-mac&agent=claude")"
 check "filtros do cabeçalho oferecem os hosts e agentes da janela (#529)"  bash -c 'grep -q "<a href=\"[^\"]*host=oute-mac[^\"]*\">oute-mac</a>" "$1" && grep -q "<a href=\"[^\"]*host=oute-server[^\"]*\">oute-server</a>" "$1" && grep -q "<a href=\"[^\"]*agent=codex[^\"]*\">codex</a>" "$1" && ! grep -q ">human</a>" "$1"' _ "$TMP/list.html"
-check "janela padrão (24 h): nada (hora do fato, não a de chegada)" grep -q 'Nenhuma sessão nessa janela' <(curl -s "${C[@]}" "$STUDIO_URL/sessoes")
-check "janela só com o começo da sessão longa"         test "$(curl -s "${C[@]}" "$STUDIO_URL/sessoes?from=2025-09-25&to=2025-09-26" | data | jq -c '[.[] | select(.sessao) | .calls]')" = '["4"]'
+check "janela padrão (24 h): nada (hora do fato, não a de chegada)" grep -q 'Nenhuma sessão nessa janela' <(studio_page "${C[@]}" "$STUDIO_URL/sessoes")
+check "janela só com o começo da sessão longa"         test "$(studio_page "${C[@]}" "$STUDIO_URL/sessoes?from=2025-09-25&to=2025-09-26" | data | jq -c '[.[] | select(.sessao) | .calls]')" = '["4"]'
 check "janela inválida: 400"                           test "$(code "${C[@]}" "$STUDIO_URL/sessoes?from=ontem&to=2025-09-29")" = 400
-check "hours inválido: 400, com a página de erro"      grep -q 'hours inválido' <(curl -s "${C[@]}" "$STUDIO_URL/sessoes?hours=x")
+check "hours inválido: 400, com a página de erro"      grep -q 'hours inválido' <(studio_page "${C[@]}" "$STUDIO_URL/sessoes?hours=x")
 check "lista com htmx (filtro troca só o conteúdo)"    grep -q 'hx-get="/sessoes"' "$TMP/list.html"
 check "SurrealDB lido: sem aviso de estado"            bash -c '! grep -q data-estado-indisponivel "$1"' _ "$TMP/list.html"
 
 # ---------------------------------------------------------------- 3. página da sessão
-curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S1" > "$TMP/s1.html"
+studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S1" > "$TMP/s1.html"
 D="$(data < "$TMP/s1.html")"
 RS="$(jq -c '.[] | select(has("resumo-sessao"))' <<<"$D")"
 check "sessão: 200"                                    test "$(code "${C[@]}" "$STUDIO_URL/sessao?id=$S1")" = 200
@@ -246,33 +246,33 @@ check "sessão: conteúdo do evento escapado"            bash -c '! grep -q "<sc
 # linha do tempo (#468): lista ordenada com um item por evento, pela hora do fato; ponto âmbar só nos eventos de Gate
 check "sessão: linha do tempo em <ol>, um <li> por evento" bash -c 'grep -q "<ol class=\"tempo\">" "$1" && [ "$(grep -c "<li data-log=" "$1")" = 4 ]' _ "$TMP/s1.html"
 check "sessão: ponto âmbar nos 2 eventos de Gate e só neles" bash -c '[ "$(grep -o "class=\"ponto gate\"" "$1" | wc -l)" = 2 ] && [ "$(grep -o "class=\"ponto\"" "$1" | wc -l)" = 2 ] && [ "$(grep -o "class=\"badge gate\"" "$1" | wc -l)" = 2 ]' _ "$TMP/s1.html"
-S2P="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2")"
+S2P="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2")"
 check "sessão sem evento de Gate: nenhum ponto âmbar" bash -c '! grep -q "ponto gate" <<<"$1" && grep -q "<ol class=\"tempo\">" <<<"$1"' _ "$S2P"
 check "sessão: Badges do cabeçalho (estado, rodada · worker, issue, fase aidlc:*)" bash -c 'grep -q "<span class=\"badge\">.*aberta</span>" "$1" && grep -qE "badge contorno\">.*rodada [^<]+ · worker 207-tela</span>" "$1" && grep -qE "badge contorno\">.*issue #207</span>" "$1" && grep -qE "badge contorno\">.*aidlc:build</span>" "$1"' _ "$TMP/s1.html"
 check "sessão avulsa: a fase vem do evento de abertura (aidlc:ops) e o Badge é avulsa" bash -c 'grep -qE "badge contorno\">.*aidlc:ops</span>" <<<"$1" && grep -q "badge contorno\">avulsa</span>" <<<"$1"' _ "$S2P"
-check "sessão sem a fase no evento: sem Badge aidlc" bash -c '! grep -q "aidlc:" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
+check "sessão sem a fase no evento: sem Badge aidlc" bash -c '! grep -q "aidlc:" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
 check "sessão: 4 StatTiles (conversas, chamadas, custo, p95), fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/s1.html"
-S2H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
-check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
+S2H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
+check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"
-S4H="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
+S4H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
 check "sessão sem conversa: aviso, com o evento de abertura" bash -c 'grep -q "Esta sessão não tem conversas" <<<"$1" && grep -q "oute.task.opened" <<<"$1"' _ "$S4H"
 S3U="$STUDIO_URL/sessao?id=$(enc "$S3")"
-check "sessão sem evento: aviso no lugar dos eventos"  grep -q 'Esta sessão não tem eventos' <(curl -s "${C[@]}" "$S3U")
+check "sessão sem evento: aviso no lugar dos eventos"  grep -q 'Esta sessão não tem eventos' <(studio_page "${C[@]}" "$S3U")
 check "id da sessão escapado na página e codificado no link" bash -c '! grep -q "<b>x</b>" "$1" && grep -q "repo &lt;b&gt;x&lt;/b&gt;&amp;y=é" "$1" && grep -qF "href=\"/sessao?id=repo%20%3Cb%3Ex%3C/b%3E%26y%3D%C3%A9\"" "$1"' _ "$TMP/list.html"
-check "sessão com id estranho abre"                    grep -q 'data-conversations="1"' <(curl -s "${C[@]}" "$S3U")
-check "sessão que não existe: 404"                     test "$(code "${C[@]}" "$STUDIO_URL/sessao?id=nao-existe")" = 404
+check "sessão com id estranho abre"                    grep -q 'data-conversations="1"' <(studio_page "${C[@]}" "$S3U")
+check "sessão que não existe: 404"                     test "$(code "${C[@]}" "$STUDIO_URL/bloco/sessao/resumo?id=nao-existe")" = 404
 check "sessão sem id: 400"                             test "$(code "${C[@]}" "$STUDIO_URL/sessao")" = 400
 # sessão que só o SurrealDB conhece (registro sem fato no DuckDB)
 surreal_q 'UPSERT type::record("sessao", "so-no-surreal") MERGE {repo: "lab", slug: "so", state: "aberta", agent: "claude"}' >/dev/null
-SO="$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=so-no-surreal")"
+SO="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=so-no-surreal")"
 check "sessão só no SurrealDB: 200, com o registro"    bash -c 'grep -q "lab · so" <<<"$1" && grep -q "Esta sessão não tem conversas" <<<"$1" && grep -q "data-calls=\"0\"" <<<"$1"' _ "$SO"
-check "conversa: a sessão vira link para a página dela" grep -qF "<a href=\"/sessao?id=$S1\">$S1</a>" <(curl -s "${C[@]}" "$STUDIO_URL/conversa?id=s1-a")
+check "conversa: a sessão vira link para a página dela" grep -qF "<a href=\"/sessao?id=$S1\">$S1</a>" <(studio_page "${C[@]}" "$STUDIO_URL/conversa?id=s1-a")
 
 # ---------------------------------------------------------------- 4. sem CDN, sem script inline, mesma CSP
 check "páginas: nenhum script, estilo ou link de fora" bash -c '! grep -hoiE "(src|href|action|hx-get)=\"[^\"]*\"" "$@" | grep -qE "=\"([a-z]+:)?//"' _ "$TMP/list.html" "$TMP/s1.html"
 check "páginas: sem script nem estilo inline"          bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@"' _ "$TMP/list.html" "$TMP/s1.html"
-check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "$TMP/list.html" "$TMP/s1.html" | sort -u)" = '<script src="/static/htmx.min.js" defer>'
+check "páginas: script só do /static"                  test "$(grep -ho '<script[^>]*>' "$TMP/list.html" "$TMP/s1.html" | sort -u)" = $'<script src="/static/htmx.min.js" defer>\n<script src="/static/loading.js" defer>'
 CSP="$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/sessoes")"
 check "CSP: a mesma das conversas"                     test "$CSP" = "$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/conversas")"
 check "CSP: script e estilo só deste servidor"         bash -c 'grep -q "default-src .none." <<<"$1" && grep -q "script-src .self.;" <<<"$1" && grep -q "style-src .self.;" <<<"$1"' _ "$CSP"
@@ -281,15 +281,15 @@ check "até aqui, nenhuma falha no stderr"              bash -c '! grep -q "resp
 
 # ---------------------------------------------------------------- 5. SurrealDB fora: a tela segue com o DuckDB
 surreal_stop
-curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN" > "$TMP/down.html"
+studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN" > "$TMP/down.html"
 DOWN="$(data < "$TMP/down.html" | jq -c '[.[] | select(.sessao)]')"
 check "SurrealDB fora: /sessoes 200"                   test "$(code "${C[@]}" "$STUDIO_URL/sessoes?$WIN")" = 200
 check "SurrealDB fora: aviso na página"                grep -q 'data-estado-indisponivel' "$TMP/down.html"
 check "SurrealDB fora: sessões, conversas e somas do DuckDB" jqe --argjson r "$R1" --arg s1 "$S1" \
   'length == 4 and (.[] | select(.sessao == $s1) | .calls == $r.calls and .["real-usd"] == $r["real-usd"] and .conversations == "3" and .state == "")' <<<"$DOWN"
 check "SurrealDB fora: a rodada segue (está no fato)"  jqe --arg s1 "$S1" --arg r "$RND" '.[] | select(.sessao == $s1) | .round == $r' <<<"$DOWN"
-check "SurrealDB fora: página da sessão 200, com aviso" bash -c 'grep -q data-estado-indisponivel <<<"$1" && grep -q "data-calls=\"4\"" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessao?id=$S1")"
-check "SurrealDB fora: sessão só do SurrealDB = 404"   test "$(code "${C[@]}" "$STUDIO_URL/sessao?id=so-no-surreal")" = 404
+check "SurrealDB fora: página da sessão 200, com aviso" bash -c 'grep -q data-estado-indisponivel <<<"$1" && grep -q "data-calls=\"4\"" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S1")"
+check "SurrealDB fora: sessão só do SurrealDB = 404"   test "$(code "${C[@]}" "$STUDIO_URL/bloco/sessao/resumo?id=so-no-surreal")" = 404
 check "SurrealDB fora: a causa não vai para a página"  bash -c '! grep -qi "urlopen\|refused\|127\.0\.0\.1" "$1"' _ "$TMP/down.html"
 check "SurrealDB fora: aviso no stderr, sem 500"       bash -c 'grep -q "estado das sessões (SurrealDB) falhou, segui sem ele" "$1" && ! grep -q "respondi 500" "$1"' _ "$TMP/s/stderr"
 studio_stop

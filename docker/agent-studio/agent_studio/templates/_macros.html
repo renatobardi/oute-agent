@@ -41,7 +41,7 @@
 {% endfor %}
 {% if next_offset is not none %}
 {% set more = "/conversa/logs?id=" ~ (id|urlencode) ~ "&offset=" ~ next_offset ~ ("&erros=1" if errors_only else "") %}
-<tr class="mais"><td colspan="4"><a href="{{ more }}" hx-get="{{ more }}" hx-target="closest tr" hx-swap="outerHTML">mais logs</a></td></tr>
+<tr class="mais" data-inline-bloco="tabela"><td colspan="4"><a href="{{ more }}" hx-get="{{ more }}" hx-target="closest tr" hx-swap="outerHTML">mais logs</a></td></tr>
 {% endif %}
 {% endmacro %}
 
