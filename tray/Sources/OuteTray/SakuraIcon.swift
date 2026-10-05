@@ -39,6 +39,19 @@ enum SakuraIcon {
         }
     }
 
+    /// A sakura como imagem de uma notificação: um PNG novo num arquivo temporário. O macOS move o arquivo anexado
+    /// para a guarda dele, então cada notificação precisa do seu. `nil` = sem imagem; a notificação sai igual.
+    static func notificationImage() -> URL? {
+        guard let png = appIconPNG(pixels: 256) else { return nil }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("oute-tray-sakura-\(UUID().uuidString).png")
+        do {
+            try png.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
     /// O ícone do app num quadrado de `pixels`: fundo claro de cantos redondos e a flor com a pétala rosa.
     private static func appIconPNG(pixels: Int) -> Data? {
         guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
