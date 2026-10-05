@@ -32,7 +32,7 @@ case "$1" in
              *" up "*) printf '%s\n' "ingest=${AGENT_STUDIO_INGEST_TOKEN:-}" "read=${AGENT_STUDIO_READ_TOKEN:-}" \
                          "pass=${AGENT_STUDIO_SURREAL_PASS:-}" "antigo=${AGENT_STUDIO_TOKEN:-}" "otel=${OUTE_OTEL_STUDIO:-}" \
                          "url=${AGENT_STUDIO_URL:-}" "profiles=${COMPOSE_PROFILES:-}" "bw=${BW_SESSION:-}" \
-                         "memkey=${OPENROUTER_MEMORY_API_KEY:-}" > "$F_ENV" ;;
+                         "memkey=${OPENROUTER_MEMORY_API_KEY:-}" "mark=${AGENT_STUDIO_MARK_TOKEN:-}" > "$F_ENV" ;;
            esac ;;
   image)   exit 0 ;;
   volume)  exit 1 ;;
@@ -92,7 +92,7 @@ gerados() { mkdir -p "$REPO/$OLDDIR"; for f in router.yaml config.yaml candidate
 oute_env() {
   env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
-    -u OPENROUTER_MEMORY_API_KEY -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
+    -u OPENROUTER_MEMORY_API_KEY -u AGENT_STUDIO_MARK_TOKEN -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
     -u OUTE_AGENT_STUDIO_URL -u OUTE_VAULT_FOLDER -u OUTE_VAULT_SERVICES_FOLDER -u GH_TOKEN -u GHCR_TOKEN \
     -u BW_SESSION -u BW_PASSWORD -u BW_CLIENTID -u BW_CLIENTSECRET -u OUTE_FUSE_PATHS \
     ${F_FUSE:+OUTE_FUSE_PATHS="$F_FUSE"} ${F_OCI:+OCI_S3_ACCESS_KEY="$F_OCI" OCI_S3_SECRET_KEY="$F_OCI" OCI_S3_ENDPOINT="$F_OCI" OCI_S3_REGION="$F_OCI"} \
@@ -587,5 +587,30 @@ oute up
 check "IP no range: rc != 0"                           [ "$RC" -ne 0 ]
 check "IP no range: aviso"                             has 'está dentro do range'
 check "IP no range: compose up não chamado"            bash -c '! grep -q -- " up -d" "$F_LOG"'
+
+# ================================================================ credencial de marcação das ações (#510)
+# a terceira credencial do agent-studio (item agent-studio da pasta oute-services) só chega ao compose, que a interpola só no
+# serviço agent-studio; o agent.env nunca a leva; sem ela o agent-studio sobe igual e a nota diz como ligar
+T_MARK="$(rnd)"
+rm -f "$AENV" "$SENV"
+printf 'OUTE_AGENT_STUDIO=1\n' > "$REPO/.env"
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_READ_TOKEN='%s'\n" "$T_GH" "$T_READ" > "$F_VAULT/oute-agent"
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\n" "$T_ING" "$S_NEW" > "$F_VAULT/oute-services"
+oute up --refresh-secrets
+check "marcação, sem a credencial: rc 0 e o agent-studio sobe (profile)" bash -c '[ "$1" -eq 0 ] && [ "$2" = "agent-studio" ]' _ "$RC" "$(cenv profiles)"
+check "marcação, sem a credencial: nada ao compose"     test -z "$(cenv mark)"
+check "marcação, sem a credencial: a nota diz como ligar" has 'nota: AGENT_STUDIO_MARK_TOKEN não está em .*item agent-studio da pasta oute-services'
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\nexport AGENT_STUDIO_MARK_TOKEN='%s'\n" "$T_ING" "$S_NEW" "$T_MARK" > "$F_VAULT/oute-services"
+oute up --refresh-secrets
+check "marcação, com a credencial: rc 0 e o compose a recebe" bash -c '[ "$1" -eq 0 ] && [ "$2" = "$3" ]' _ "$RC" "$(cenv mark)" "$T_MARK"
+check "marcação, com a credencial: services.env a guarda"  grep -qxF "export AGENT_STUDIO_MARK_TOKEN=$T_MARK" "$SENV"
+check "marcação, com a credencial: agent.env sem ela"      bash -c '! grep -qF -e AGENT_STUDIO_MARK -e "$1" "$0"' "$AENV" "$T_MARK"
+check "marcação, com a credencial: sem a nota e saída sem o valor" bash -c '! grep -q "nota: AGENT_STUDIO_MARK_TOKEN" <<<"$0" && ! grep -qF "$1" <<<"$0"' "$OUT" "$T_MARK"
+# esquecida na pasta oute-agent (nome de serviço): sai do agent.env e o services.env a guarda
+rm -f "$AENV" "$SENV" "$F_VAULT/oute-services"
+printf "export GH_TOKEN='%s'\nexport AGENT_STUDIO_MARK_TOKEN='%s'\n" "$T_GH" "$T_MARK" > "$F_VAULT/oute-agent"
+oute up --refresh-secrets
+check "marcação na pasta do agent: sai do agent.env"       bash -c '! grep -qF -e AGENT_STUDIO_MARK -e "$1" "$0"' "$AENV" "$T_MARK"
+check "marcação na pasta do agent: vai ao services.env"    grep -qxF "export AGENT_STUDIO_MARK_TOKEN=$T_MARK" "$SENV"
 
 check_end

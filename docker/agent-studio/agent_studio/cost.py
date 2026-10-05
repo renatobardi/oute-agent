@@ -36,6 +36,19 @@ MODEL_CALL_SQL = (f"name IN ({', '.join('?' * len(MODEL_CALL_SPANS))}) "
                   "AND (name = ? OR oute_agent IS DISTINCT FROM ?)")
 MODEL_CALL_PARAMS = (*MODEL_CALL_SPANS, DECISION_SPAN, ROUTER_AGENT)
 
+# Assinatura (#531): a telemetria não marca o tipo de conta. Chamada com `oute.agent` = claude ou codex é de assinatura
+# (CONTEXT.md, ADR-02); o resto é pago por uso. É a única definição: o `usage.aggregate` (modo efetivo) e o detalhe da
+# conversa a usam. Limite conhecido: erra se um dia o Claude ou o Codex rodar com chave de API.
+SUBSCRIPTION_AGENTS = ("claude", "codex")
+# SQL sem parâmetro: os nomes são constantes deste módulo, nunca entrada
+SUBSCRIPTION_SQL = f"COALESCE(oute_agent IN ({', '.join(repr(a) for a in SUBSCRIPTION_AGENTS)}), false)"
+
+
+def is_subscription(agent):
+    """`oute.agent` da chamada -> `True` se a chamada é de assinatura (conta 0 no custo efetivo)."""
+    return agent in SUBSCRIPTION_AGENTS
+
+
 # custo do Claude no log (#157): o span da chamada e o log `api_request` levam o mesmo `request_id`
 CLAUDE_CALL_SPAN = "claude_code.llm_request"
 API_REQUEST_EVENTS = ("api_request", "claude_code.api_request")  # `event.name` do Claude Code (e com o prefixo)
@@ -196,8 +209,9 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     return sql, [CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
 
 
-def window_spans_with_cost(from_ns, to_ns):
-    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga."""
-    return spans_with_cost("time_unix_nano >= ? AND time_unix_nano < ?", [from_ns, to_ns],
+def window_spans_with_cost(from_ns, to_ns, span_extra="", span_extra_params=()):
+    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga. `span_extra` =
+    condição a mais sobre os spans (` AND …`, com os parâmetros em `span_extra_params`): o filtro de repositório, #528."""
+    return spans_with_cost(f"time_unix_nano >= ? AND time_unix_nano < ?{span_extra}", [from_ns, to_ns, *span_extra_params],
                            "time_unix_nano >= ? AND time_unix_nano < ?",
                            [max(from_ns - LOG_COST_MARGIN_NS, 0), to_ns + LOG_COST_MARGIN_NS])

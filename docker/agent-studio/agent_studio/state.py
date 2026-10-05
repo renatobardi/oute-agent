@@ -9,8 +9,10 @@ valores do próprio fato: reenviar o mesmo lote, em qualquer ordem, dá o mesmo 
 
 Tabelas: `rodada` (id = rodada), `worker` (id = [rodada, slug]), `sessao` (id = `oute.task.id`), `pedido`
 (id = `oute.canal.id`), `conversa` (id = `session.id`), `etapa` (id = [rodada, tipo, chave], #507: a revisão vigente de uma
-etapa da rodada; a mais alta vence em qualquer ordem de chegada; o texto fica só no DuckDB). Ligações por record link:
-`worker.rodada`, `worker.sessao`, `sessao.rodada`, `sessao.worker`, `conversa.sessao`, `etapa.rodada`.
+etapa da rodada; a mais alta vence em qualquer ordem de chegada; o texto fica só no DuckDB), `acao` (id = [rodada, tipo, chave, id da
+ação], #510: o estado da marca do Bardi, derivado da tabela `action_marks` do DuckDB e não dos logs; a marca mais nova vence em
+qualquer ordem). Ligações por record link: `worker.rodada`, `worker.sessao`, `sessao.rodada`, `sessao.worker`,
+`conversa.sessao`, `etapa.rodada`, `acao.rodada`, `acao.etapa`.
 """
 import base64
 import re
@@ -23,12 +25,15 @@ TIMES = 'UPDATE type::record("{t}", $v.id) SET {sets};'
 
 # etapa da rodada (#507, ADR-08 "Página da rodada e do ciclo"): o evento `oute.swarm.step.published`
 STEP_EVENT = "oute.swarm.step.published"
-STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento")
+STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento", "ciclo")
+CYCLE_KIND = "ciclo"   # #509: o resumo do ciclo; a "rodada" dele é a pasta `ciclo-<dono>_<repo>-<n>` da sessão avulsa, não uma rodada
 STEP_REVIEWS = ("aprovado", "reprovado", "sem-revisor")
 STEP_REFCHECKS = ("ok", "falhou", "ausente")
 _STEP_TEXT = ("kind", "key", "sha256", "review", "writer", "reviewer", "refcheck", "cycle", "event", "host", "instance")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _STEP_KEY = re.compile(r"^[1-9]\d{0,8}$")
+STEP_KEY = _STEP_KEY   # a chave da etapa `merge` (número do PR); `marcar.py` confere o campo `etapa` com ela
+_CYCLE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+\Z", re.ASCII)   # `<dono>/<repo>#<n>`, a issue do ciclo
 # `IF … THEN { UPSERT … } END`: só grava se o `rev` do evento é maior ou igual ao da revisão que já está lá (a revisão mais
 # alta vence, em qualquer ordem de chegada). Texto em base64, decodificado no SurrealDB (#337)
 STEP_UPSERT = (
@@ -36,6 +41,37 @@ STEP_UPSERT = (
     'UPSERT type::record("etapa", $v.id) SET rev = $v.rev, '
     + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _STEP_TEXT)
     + ', published_at = <datetime> $v.t, rodada = type::record("rodada", $v.r); } END;')
+# #509: o ciclo da rodada é o da revisão vigente da triagem (sem ciclo, o campo sai): só grava depois do STEP_UPSERT, se a
+# revisão deste evento é a vigente, para o reenvio e a ordem de chegada não mudarem o resultado
+STEP_CYCLE = (
+    'IF (array::first(SELECT VALUE rev FROM [type::record("etapa", $v.id)]) ?? 0) = $v.rev THEN { '
+    'UPSERT type::record("rodada", $v.r) SET cycle = IF $v.c = "" THEN NONE ELSE <string>encoding::base64::decode($v.c) END; } END;')
+
+
+# marca de ação (#510, ADR-08 "Página da rodada e do ciclo"): vem da `action_marks`, não dos logs. `IF … THEN { UPSERT … } END`: só grava
+# se a marca é mais nova que a gravada (a mais nova vence, em qualquer ordem de chegada e no reenvio do `rebuild-state`)
+ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9]{0,15}\Z")
+MARK_STATES = ("feita", "pendente")
+_MARK_TEXT = ("kind", "key", "aid", "state", "by")
+ACAO_UPSERT = (
+    'IF (array::first(SELECT VALUE marked_ns FROM [type::record("acao", $v.id)]) ?? 0) <= $v.ns THEN { '
+    'UPSERT type::record("acao", $v.id) SET marked_ns = $v.ns, marked_at = <datetime> $v.t, '
+    + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _MARK_TEXT)
+    + ', rodada = type::record("rodada", $v.r), etapa = type::record("etapa", $v.e); } END;')
+
+
+def mark_statements(row):
+    """Uma linha da `action_marks` (`marks.COLUMNS`) -> statements do `acao`. Linha fora do formato (tipo, chave, id ou estado
+    inválidos) não vira estado: o fato continua no DuckDB."""
+    kind, key, aid, st = row["kind"], row["key"] or "", row["action_id"], row["state"]
+    if (kind not in STEP_KINDS or st not in MARK_STATES or not isinstance(aid, str) or not ACTION_ID_RE.match(aid)
+            or (kind == "merge") != bool(key) or (key and not _STEP_KEY.match(key))):
+        return []
+    rnd, ns = row["rodada"], int(row["marked_unix_nano"])
+    b64 = lambda v: base64.b64encode(str(v).encode()).decode()  # noqa: E731
+    fields = {"kind": kind, "key": key, "aid": aid, "state": st, "by": row["marked_by"]}
+    return [(ACAO_UPSERT, {"id": [rnd, kind, key, aid], "ns": ns, "t": iso(ns), "r": rnd, "e": [rnd, kind, key],
+                           "b": {k: b64(fields[k]) for k in _MARK_TEXT}})]
 
 
 def iso(ns):
@@ -101,7 +137,13 @@ def step_statements(rnd, a, t, ev, origin):
               "cycle": a("oute.swarm.cycle"), "event": ev, "host": origin.get("host"), "instance": origin.get("instance")}
     b64 = lambda v: base64.b64encode(("" if v is None else str(v)).encode()).decode()  # noqa: E731
     value = {"id": [rnd, kind, key], "rev": rev, "r": rnd, "t": iso(t), "b": {k: b64(fields[k]) for k in _STEP_TEXT}}
-    return upsert("rodada", rnd, origin) + [(STEP_UPSERT, value)]
+    if kind == CYCLE_KIND:
+        # o resumo do ciclo sem o ciclo não tem onde aparecer; e a pasta dele não é rodada (não ganha registro `rodada`)
+        return [(STEP_UPSERT, value)] if _CYCLE.match(fields["cycle"] or "") else []
+    out = upsert("rodada", rnd, origin) + [(STEP_UPSERT, value)]
+    if kind == "triagem":
+        out.append((STEP_CYCLE, {**value, "c": b64(fields["cycle"] if _CYCLE.match(fields["cycle"] or "") else "")}))
+    return out
 
 
 def _get(row, key):

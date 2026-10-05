@@ -14,10 +14,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -34,12 +34,16 @@ while s=$(( $(date +%s) % 86400 )); (( s < 120 || s > 86400 - 300 )); do sleep 2
 #   pedidos: P1 (pendente, root, claude, oute-server, há 5 min), P5 (pendente, user, codex, oute-mac, há 1 min, id
 #   com HTML) e P2 (decidido: não entra).
 #   alerta: fila do collector do oute-server a 80%.
+#   etapas (#508): TA (swarm-1004-1000, aberta): triagem há 48 min, merge do PR 12 (aprovado) e do PR 13 (sem-revisor);
+#   TB (swarm-1004-0900, fechada): fechamento, fora do tray; TC (swarm-1004-1100, sem evento de abertura): fechamento
+#   aprovado há 1 min, o mais novo. O texto de cada etapa leva um segredo de teste, que nunca pode sair no tray.
 #   oute-velho: um log com a hora do fato de 3 dias atrás, que chegou agora (máquina ativa pela hora de chegada).
 NOW="$(date +%s)"
 P1=20260930-120000-reiniciar-nginx; P2=20260930-110000-listar-backups; P5='p <b>5</b>&x=é'
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import json, sys
-from otlp_json import canal_decided, canal_proposed, claude_call, kv, queue_metrics, rl, rs, span
+import hashlib
+from otlp_json import canal_decided, canal_proposed, claude_call, event, kv, queue_metrics, rl, rs, span
 tmp, NOW = sys.argv[1], int(sys.argv[2])
 DAY = NOW // 86400 * 86400
 P1, P2, P5 = "20260930-120000-reiniciar-nginx", "20260930-110000-listar-backups", "p <b>5</b>&x=é"
@@ -48,6 +52,13 @@ codex = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name":
 # histórico até 2026-09-30 (#218): registro do jev-router, que saiu do stack; o custo gravado continua contando
 router = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "jev-router", "oute.agent": "router"}
 cl = lambda **a: {"model": "claude-sonnet-5", **a}
+def step(t, rnd, eid, kind, rev, review, key=None):
+    text = "## Decisão\n1. segredo-da-etapa-" + eid + "\n"
+    attrs = {"oute.swarm.round": rnd, "oute.swarm.step.kind": kind, "oute.swarm.step.rev": rev, "oute.swarm.step.review": review,
+             "oute.swarm.step.sha256": hashlib.sha256(text.encode()).hexdigest(), "oute.swarm.step.writer": "claude-sonnet-5-5",
+             "oute.swarm.step.reviewer": "claude-opus-5-5", "oute.swarm.step.refcheck": "ausente"}
+    if key: attrs["oute.swarm.step.key"] = key
+    return event(t, "oute.swarm.step.published", eid, attrs, text)
 cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,
                                "codex.turn.token_usage.output_tokens": o, "codex.turn.token_usage.cached_input_tokens": c}
 # Claude no formato de produção (#157): o custo real vem no log api_request de mesmo request_id
@@ -81,6 +92,15 @@ logs = {"resourceLogs": [
   rl(oute("oute-mac", "human"), [canal_decided(NOW - 3500, P2, "ev-d2", "executado", **{"oute.canal.rc": 0})]),
   rl(codex, [{"timeUnixNano": str((NOW - 15) * 10**9), "severityNumber": 17, "body": {"stringValue": "erro"}},
              {"timeUnixNano": str((NOW - 16) * 10**9), "severityNumber": 9, "body": {"stringValue": "info"}}]),
+  rl(oute("oute-server", "claude"), [
+    event(NOW - 3000, "oute.swarm.round.opened", "ev-ta-open", {"oute.swarm.round": "swarm-1004-1000", "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3}),
+    step(NOW - 2900, "swarm-1004-1000", "ev-ta-t", "triagem", 1, "aprovado"),
+    step(NOW - 120, "swarm-1004-1000", "ev-ta-m12", "merge", 1, "aprovado", key="12"),
+    step(NOW - 90, "swarm-1004-1000", "ev-ta-m13", "merge", 1, "sem-revisor", key="13"),
+    event(NOW - 2500, "oute.swarm.round.opened", "ev-tb-open", {"oute.swarm.round": "swarm-1004-0900", "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3}),
+    step(NOW - 2000, "swarm-1004-0900", "ev-tb-f", "fechamento", 1, "aprovado"),
+    event(NOW - 1000, "oute.swarm.round.closed", "ev-tb-close", {"oute.swarm.round": "swarm-1004-0900"}),
+    step(NOW - 60, "swarm-1004-1100", "ev-tc-f", "fechamento", 1, "aprovado")]),
   rl({"host.name": "oute-velho", "service.name": "oute"},
      [{"timeUnixNano": str((NOW - 3 * 86400) * 10**9), "severityNumber": 9, "body": {"stringValue": "atrasado"}}]),
 ]}
@@ -109,8 +129,9 @@ done
 
 # ---------------------------------------------------------------- 2. banco vazio: o menu inteiro, zerado
 E="$(tray)"
-check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "timezone"]' <<<"$E"
+check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$E"
 check "vazio: nenhum pedido (a tabela ainda não existe no SurrealDB)" jqe '.proposals == {available: true, total: 0, pending: []} and .bar.pending == 0' <<<"$E"
+check "vazio: nenhuma etapa (a tabela ainda não existe no SurrealDB)" jqe '.steps == {available: true, total: 0, rows: []}' <<<"$E"
 check "vazio: custo nulo (nunca zero), sem agente"     jqe '.cost_today | .usd == null and .real_usd == null and .estimated_usd == null and .estimated == false and .unpriced_calls == 0 and .agents == []' <<<"$E"
 check "vazio: nenhum erro"                             jqe '.errors_last_hour | .total == 0 and .rows == []' <<<"$E"
 check "vazio: o sempre ligado aparece parado, sem dado, e alerta" jqe '.machines == [{host: "oute-server", always_on: true, last_data: null, idle_seconds: null, state: "stopped"}] and ([.alerts[].type] == ["host_no_data"]) and .bar.alerts == 1' <<<"$E"
@@ -122,7 +143,7 @@ check "ingestão: métricas = 200"                       test "$(post metrics "$
 # ---------------------------------------------------------------- 3. contrato da resposta (o que o #158 consome)
 R="$(tray)"
 echo "$R" > "$TMP/tray.json"
-check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "timezone"]' <<<"$R"
+check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$R"
 check "at: a hora da resposta (UTC, ISO)"              jqe --argjson now "$NOW" '(.at | fromdateiso8601) as $t | $t >= $now and $t < $now + 300' <<<"$R"
 check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 1}' <<<"$R"
 check "bar: iguais ao tamanho dos blocos"              jqe '.bar.pending == .proposals.total and .bar.alerts == (.alerts | length)' <<<"$R"
@@ -146,10 +167,24 @@ check "pedido: link do ver script (caminho estável por id)" jqe --arg p1 "$P1" 
 check "pedido: id estranho codificado no link"         jqe '.proposals.pending[0].url == "/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9"' <<<"$R"
 for i in 0 1; do
   U="$(jq -r ".proposals.pending[$i].url" <<<"$R")"
-  check "pedido $i: o link abre a página do pedido (200, com o script)" bash -c 'grep -q "data-script" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL$U")"
+  check "pedido $i: o link abre a página do pedido (200, com o script)" bash -c 'grep -q "data-script" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL$U")"
 done
-check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r '.proposals.pending[0].url' <<<"$R")\"" <<<"$(curl -s "${C[@]}" "$STUDIO_URL/pedidos")"
+check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r '.proposals.pending[0].url' <<<"$R")\"" <<<"$(studio_page "${C[@]}" "$STUDIO_URL/pedidos")"
 check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep -q "systemctl" "$1"' _ "$TMP/tray.json"
+
+# etapas das rodadas abertas (#508)
+check "etapas: disponível, total e lista"              jqe '.steps | keys == ["available", "rows", "total"] and .available == true and .total == 4 and (.rows | length == 4)' <<<"$R"
+check "etapas: campos de cada uma, nenhum é o texto"   jqe '.steps.rows | all(keys == ["age_seconds", "key", "kind", "published_at", "rev", "review", "round", "title", "url"])' <<<"$R"
+check "etapas: da mais nova para a mais antiga; a rodada fechada (TB) fica fora; a sem estado (TC) conta" jqe '[.steps.rows[] | .round + ":" + .kind + ":" + (.key // "")] == ["swarm-1004-1100:fechamento:", "swarm-1004-1000:merge:13", "swarm-1004-1000:merge:12", "swarm-1004-1000:triagem:"]' <<<"$R"
+check "etapas: título fixo por tipo, com o PR no merge" jqe '[.steps.rows[].title] == ["Fechamento da rodada", "Pedido de merge #13", "Pedido de merge #12", "Triagem"]' <<<"$R"
+check "etapas: veredito do revisor e revisão"          jqe '[.steps.rows[] | [.review, .rev]] == [["aprovado", 1], ["sem-revisor", 1], ["aprovado", 1], ["aprovado", 1]]' <<<"$R"
+check "etapas: chave só no merge, nula nas outras"     jqe '[.steps.rows[].key] == [null, "13", "12", null]' <<<"$R"
+check "etapas: link da página da rodada, com a âncora da etapa" jqe '[.steps.rows[].url] == ["/rodada?id=swarm-1004-1100#etapa-fechamento", "/rodada?id=swarm-1004-1000#etapa-merge-13", "/rodada?id=swarm-1004-1000#etapa-merge-12", "/rodada?id=swarm-1004-1000#etapa-triagem"]' <<<"$R"
+check "etapas: idade em segundos desde a publicação (1 min, 90 s, 2 min, 48 min)" jqe '[.steps.rows[].age_seconds] as $a | ($a[0] >= 60 and $a[0] < 360) and ($a[1] >= 90 and $a[1] < 390) and ($a[2] >= 120 and $a[2] < 420) and ($a[3] >= 2900 and $a[3] < 3200)' <<<"$R"
+check "etapas: o texto da etapa não vem na resposta"   bash -c '! grep -q "segredo-da-etapa" "$1"' _ "$TMP/tray.json"
+check "etapas: cada link abre a página da rodada (200, com a etapa)" bash -c 'for u in $(jq -r ".steps.rows[].url" <<<"$1"); do b="$(studio_page -H "Authorization: Bearer $3" "$2${u%%#*}")"; grep -q "id=\"${u#*#}\"" <<<"$b" || exit 1; done' _ "$R" "$STUDIO_URL" "$STUDIO_TOKEN"
+check "etapas: o total do bloco = o que o /v1/rodada tem de etapa nas rodadas abertas" test "$(for r in swarm-1004-1000 swarm-1004-1100; do curl -s "${C[@]}" "$STUDIO_URL/v1/rodada?id=$r" | jq '.steps | length'; done | jq -s add)" = "$(jq '.steps.total' <<<"$R")"
+check "etapas: a barra do tray não conta etapa (só pedidos e alertas)" jqe '.bar | keys == ["alerts", "pending"]' <<<"$R"
 
 # custo de hoje
 DAY=$((NOW / 86400 * 86400))
@@ -180,6 +215,7 @@ surreal_stop
 D="$(tray)"
 check "SurrealDB fora: 200"                            test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 200
 check "SurrealDB fora: pedidos indisponíveis, contador nulo (nunca zero)" jqe '.proposals == {available: false, total: null, pending: []} and .bar.pending == null' <<<"$D"
+check "SurrealDB fora: etapas indisponíveis (nunca zero por palpite)" jqe '.steps == {available: false, total: null, rows: []}' <<<"$D"
 check "SurrealDB fora: o resto do menu igual"          jqe --argjson r "$R" '.bar.alerts == 1 and .cost_today == $r.cost_today and .errors_last_hour.rows == $r.errors_last_hour.rows and ([.machines[].host] == [$r.machines[].host]) and .alerts == $r.alerts' <<<"$D"
 # fixture do app do tray (#344): mesmas chaves e mesmos tipos da resposta real. Pedido local e de outro host, id com
 # caractere inválido, custo estimado e sem preço e alerta vêm de R; o contador nulo, de D (SurrealDB fora).
@@ -225,6 +261,8 @@ check "fixture: o mesmo bloco de alertas da API (title e text junto)" jqe '.aler
 check "fixture: pedido local, de outro host e de id inválido" jqe '[.proposals.pending[] | .host] | unique == ["oute-mac", "oute-server"]' < "$FIX/tray.json"
 check "fixture: o id inválido vai codificado no link" jqe '.proposals.pending[0] | (.id | test("[<>& ]")) and (.url | test("^/pedido\\?id=[A-Za-z0-9%/._-]+$"))' < "$FIX/tray.json"
 check "fixture: custo estimado e chamada sem preço"    jqe '.cost_today | .estimated == true and .unpriced_calls > 0 and (.agents | any(.real_usd == null))' < "$FIX/tray.json"
+check "fixture: etapas das rodadas, com o merge do PR e o veredito do revisor (#508)" jqe '.steps | .available == true and .total == (.rows | length) and ([.rows[].review] | unique | length) > 1 and (.rows | any(.kind == "merge" and .key != null and (.url | test("^/rodada\\?id=[A-Za-z0-9%._-]+#etapa-merge-[0-9]+$")))) and (.rows | any(.key == null))' < "$FIX/tray.json"
+check "fixture: sem o SurrealDB, etapas indisponíveis" jqe '.steps == {available: false, total: null, rows: []}' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: contador nulo só com o SurrealDB fora" jqe '.bar.pending == null and .proposals.available == false' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: contadores da barra batem com os blocos" jqe '.bar == {pending: .proposals.total, alerts: (.alerts | length)}' < "$FIX/tray.json"
 jq 'del(.alerts[0].text)' "$FIX/tray.json" > "$TMP/fix-sem-text.json"
@@ -233,6 +271,7 @@ check "sanidade do teste de forma: chave a menos na fixture falha" bash -c '! sh
 check "sanidade do teste de forma: tipo trocado na fixture falha" bash -c '! shape_cmp "$1" "$2" >/dev/null' _ "$TMP/fix-tipo.json" "$TMP/tray.json"
 studio_stop
 check "SurrealDB fora: causa só no stderr"             grep -q "tray: pedidos pendentes falhou" "$TMP/s/stderr"
+check "SurrealDB fora: a falha das etapas também só no stderr" grep -q "tray: etapas das rodadas falhou" "$TMP/s/stderr"
 check "SurrealDB fora: a resposta não leva a causa"    bash -c '! grep -qi "surreal\|refused\|urlopen" <<<"$1"' _ "$D"
 
 # ---------------------------------------------------------------- 5. lógica direto (hora escolhida, limites, falhas)
@@ -304,6 +343,17 @@ for name, surreal in (("resposta fora do formato", Odd()), ("este processo sem S
     status, body = get(create_app(Snap(), TOKEN, surreal), "/v1/tray")
     r = json.loads(body)
     out(f"{name}: 200, pedidos indisponíveis e o resto do menu", status == 200 and r["proposals"] == tray.UNAVAILABLE and r["bar"] == {"pending": None, "alerts": 2})
+    out(f"{name}: 200 e etapas indisponíveis (#508)", r["steps"] == tray.NO_STEPS)
+class Half:
+    """Os pedidos respondem; a consulta das etapas falha com um texto que nunca pode chegar ao cliente."""
+    def query(self, sql, variables):
+        if "etapa" in sql:
+            raise RuntimeError("segredo-da-falha-das-etapas")
+        return [{"status": "OK", "result": []}, {"status": "OK", "result": []}]
+status, body = get(create_app(Snap(), TOKEN, Half()), "/v1/tray")
+r = json.loads(body)
+out("só as etapas falham: 200, etapas indisponíveis e os pedidos seguem", status == 200 and r["steps"] == tray.NO_STEPS and r["proposals"] == {"available": True, "total": 0, "pending": []} and r["bar"]["pending"] == 0)
+out("só as etapas falham: a causa não vai na resposta", "segredo-da-falha-das-etapas" not in body)
 PY
 check_py_lines "$TMP/py.out"
 

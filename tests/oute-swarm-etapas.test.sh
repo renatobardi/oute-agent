@@ -15,20 +15,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm-otlp.sh"
 trap 'rcv_stop; rm -rf "$TMP"' EXIT
 
-# `claude` falso do revisor: grava argumentos, ambiente e stdin (o prompt) em $FAKE/rev/*.<n> e devolve o JSON do
-# `claude -p --output-format json` com o texto de $FAKE/rev/answer; $FAKE/rev/sleep dorme, $FAKE/rev/rc sai com erro
-RBIN="$TMP/rbin"; mkdir -p "$RBIN"
-cat > "$RBIN/claude" <<'SH'
-#!/usr/bin/env bash
-d="$FAKE/rev"; mkdir -p "$d"
-i=$(( $(cat "$d/n" 2>/dev/null || echo 0) + 1 )); echo "$i" > "$d/n"
-printf "%s\n" "$@" > "$d/args.$i"; env > "$d/env.$i"; pwd -P > "$d/pwd.$i"; stat -c %a "$(dirname "$PWD")" > "$d/perm.$i"; cat > "$d/stdin.$i"
-[[ ! -f "$d/mutate" ]] || printf 'texto trocado durante o review' > "$(cat "$d/mutate")"
-[[ ! -f "$d/sleep" ]] || /bin/sleep "$(cat "$d/sleep")"
-[[ ! -f "$d/rc" ]] || exit "$(cat "$d/rc")"
-jq -cn --rawfile r "$d/answer" --argjson c "$(cat "$d/cost" 2>/dev/null || echo 0.0123)" '{type: "result", result: $r, total_cost_usd: $c, is_error: false}'
-SH
-chmod +x "$RBIN/claude"
+. "$ROOT/tests/lib/swarm-reviewer.sh"
 # swr: como o `sw`, com o claude falso do revisor na frente do PATH
 swr() {
   OUT="$(env PATH="$RBIN:$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 \
@@ -419,7 +406,7 @@ check "--pr fora do merge: recusa"                       bash -c '[ "$1" -eq 1 ]
 swr step publish merge --pr abc
 check "--pr que não é número: recusa"                    bash -c '[ "$1" -eq 1 ] && grep -qF "etapa merge pede --pr" <<<"$2"' _ "$RC" "$ERR"
 swr step publish diagrama
-check "tipo desconhecido: recusa e lista os tipos"       bash -c '[ "$1" -eq 1 ] && grep -qF "tipo de etapa inválido: diagrama (use: triagem merge kaizen fechamento)" <<<"$2"' _ "$RC" "$ERR"
+check "tipo desconhecido: recusa e lista os tipos"       bash -c '[ "$1" -eq 1 ] && grep -qF "tipo de etapa inválido: diagrama (use: triagem merge kaizen fechamento ciclo)" <<<"$2"' _ "$RC" "$ERR"
 swr step publish fechamento --pr
 check "opção sem valor: recusa (sem laço)"               bash -c '[ "$1" -eq 1 ] && grep -qF -- "--pr pede um valor" <<<"$2"' _ "$RC" "$ERR"
 swr step publish

@@ -405,6 +405,18 @@ a.nota { text-decoration: underline; text-underline-offset: 3px; }
 .legenda { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
 .legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 .amostra { width: 8px; height: 8px; }
+.linha-grafico.larga { grid-template-columns: 64px minmax(0, 1fr); }
+.uso-svg { display: block; width: 100%; height: 180px; overflow: visible; }
+.uso-svg .grade { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.uso-svg .grade.tracejada { stroke-dasharray: 4 3; }
+.uso-svg .alvo { fill: transparent; }
+.uso-svg .coluna:hover .alvo { fill: var(--muted); }
+/* Distinção sem cor: custo real cheio e estimado tracejado; tokens com entrada cheia, saída tracejada e cache pontilhado. */
+.uso-svg .real, .amostra .t-ent { fill: var(--primary); }
+.uso-svg .t-ent { fill: var(--primary); }
+.uso-svg .estimado { fill: color-mix(in oklab, var(--primary) 30%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.uso-svg .t-sai, .amostra .t-sai { fill: color-mix(in oklab, var(--primary) 45%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.uso-svg .t-cache, .amostra .t-cache { fill: color-mix(in oklab, var(--primary) 15%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 1 2; vector-effect: non-scaling-stroke; }
 table.compacta th, table.compacta td { padding: 8px 6px; background: transparent; }
 table.compacta th:first-child, table.compacta td:first-child { padding-left: 0; }
 table.compacta th:last-child, table.compacta td:last-child { padding-right: 0; }
@@ -450,7 +462,14 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .barra-etapas .passo.atual > a { border-color: var(--foreground); font-weight: 600; }
 .barra-etapas .passo[data-review="reprovado"] > a { border-color: var(--destructive); color: var(--destructive); }
 .barra-etapas .passo[data-review="sem-revisor"] > a { border-style: dashed; border-color: var(--foreground); }
+@media (min-width: 720px) { .barra-etapas { position: sticky; top: 0; z-index: 2; } }  /* no celular a barra quebra em várias linhas e comeria a tela */
+.barra-etapas .passo-itens { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+.barra-etapas .passo-itens a { font-size: 12px; padding: 2px 8px; border-radius: 9999px; border: 1px solid var(--border); color: var(--foreground); text-decoration: none; }
 .etapa { scroll-margin-top: 16px; }
+@media (min-width: 720px) { .etapa { scroll-margin-top: 72px; } }
+.etapa-posicao { margin: 2px 0 0; font-size: 12px; color: var(--muted-foreground); }
+.etapa-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 20px 16px; }
+.etapa-nav .botao { max-width: 100%; }
 .etapa-aviso { margin: 0 20px 12px; }
 .etapa-texto { padding: 0 20px 16px; max-width: 760px; overflow-wrap: anywhere; }
 .etapa-texto h3 { margin: 1.25rem 0 .5rem; font-size: 15px; font-weight: 600; }
@@ -481,3 +500,53 @@ a.erros-link { text-decoration: none; }
 /* controle de período (#527): janelas prontas + De/Até com dia e hora; quebra em linhas no celular */
 .filtro input[type="datetime-local"] { min-width: 13rem; }
 @media (max-width: 640px) { .filtro { gap: .75rem; } .filtro label, .filtro input[type="datetime-local"] { width: 100%; } }
+
+/* ferramentas (#535) */
+.linha-svg .linha.erros { stroke: var(--destructive); stroke-dasharray: 4 3; }
+.barra-svg .erro { fill: var(--destructive); }
+tr.com-erro > td:first-child { box-shadow: inset 3px 0 0 var(--destructive); }
+.taxa-erro { color: var(--destructive); }
+tr.grupo-bash > td:first-child { padding-left: 28px; } /* #600: os grupos do Bash, recuados sob a linha dele */
+
+/* ações da etapa (#510): a caixa de marcar e o estado de cada ação */
+.acao-id { font-size: 12px; }
+.acao-form { display: inline; margin: 0; }
+.acao-caixa { padding: 2px 8px; font-size: 13px; }
+.acao-estado { color: var(--muted-foreground); font-size: 13px; }
+
+/* tabelas com ordem, filtro por coluna e página (#529): tudo link, sem script */
+th a.ordem { display: inline-flex; align-items: center; gap: 4px; color: inherit; }
+th a.ordem:hover { color: var(--foreground); text-decoration: none; }
+th[aria-sort="ascending"] a.ordem, th[aria-sort="descending"] a.ordem { color: var(--foreground); }
+.th-filtro { margin-top: 4px; font-weight: 400; }
+.th-filtro > summary { cursor: pointer; list-style: none; color: var(--muted-foreground); text-decoration: underline dotted; }
+.th-filtro > summary::-webkit-details-marker { display: none; }
+.th-filtro[open] > summary { color: var(--foreground); }
+.th-filtro ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.th-filtro li a[aria-current="true"] { font-weight: 600; color: var(--foreground); }
+.tabela-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 8px 0 24px; font-size: 13px; color: var(--muted-foreground); }
+.tabela-rodape a { display: inline-flex; align-items: center; gap: 2px; min-width: 28px; justify-content: center; padding: 4px 8px; border-radius: 9999px; color: var(--muted-foreground); }
+.tabela-rodape a:hover { text-decoration: none; color: var(--foreground); }
+.tabela-rodape a[aria-current] { background: var(--muted); color: var(--foreground); font-weight: 600; }
+.tabela-tamanho, .tabela-paginas { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+@media (max-width: 640px) {
+  /* no celular o cabeçalho segue à vista só como a barra de ordem e filtro (as linhas viram cartões) */
+  table.empilha[data-tabela] thead { display: block; }
+  table.empilha[data-tabela] thead tr { border-bottom: 1px solid var(--border); }
+  table.empilha[data-tabela] th, table.empilha[data-tabela] th:first-child, table.empilha[data-tabela] th:last-child { display: block; padding: 0; border: 0; background: transparent; }
+  table.empilha[data-tabela] th a.ordem { padding: 12px 0; }
+}
+
+/* #536: espaços por forma; só CSS local, inclusive com movimento reduzido. */
+.carregamento { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; }
+.shimmer { display: grid; gap: 12px; }
+.shimmer span { display: block; height: 18px; border-radius: 4px; background: linear-gradient(100deg, var(--muted) 20%, var(--background) 50%, var(--muted) 80%); background-size: 200% 100%; animation: studio-shimmer 1.6s linear infinite; }
+.shimmer span:last-child { width: 65%; }
+.carregamento.grafico .shimmer { height: 240px; align-content: end; }
+.carregamento.grafico .shimmer span { height: 35px; }
+.carregamento.tabela .shimmer { grid-template-columns: 2fr 1fr 1fr 1fr; min-height: 180px; align-content: start; }
+.carregamento.tabela .shimmer span { height: 150px; }
+.carregamento.indicadores .shimmer { grid-template-columns: repeat(4, 1fr); }
+.carregamento.indicadores .shimmer span { height: 100px; }
+@keyframes studio-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .shimmer span { animation: none; } }

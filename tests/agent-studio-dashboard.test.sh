@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 studio_init
 
 cat > "$TMP/config.toml" <<'TOML'
@@ -165,8 +165,8 @@ check("insights: a cor é o tom (Gate âmbar, erros e p95 destrutivos) e o Gate 
 
 # ------------------------------------------------------------------------------ gráficos
 sec = lambda name: re.search(rf'<section class="cartao bloco grafico" data-grafico="{name}".*?</section>', html, re.S).group(0)
-check("6 gráficos, um cartão cada", re.findall(r'data-grafico="([\w-]+)"', html) ==
-      ["chamadas", "custo-modelo", "latencia", "fases", "atividade", "sessoes"])
+check("8 gráficos, um cartão cada", re.findall(r'data-grafico="([\w-]+)"', html) ==
+      ["chamadas", "custo-modelo", "latencia", "fases", "atividade", "sessoes", "repos", "ferramentas"])
 pts = re.findall(r'<g class="ponto" data-bucket="([^"]*)" data-calls="(\d+)">', sec("chamadas"))
 check("1) série por hora: 48 baldes que somam as chamadas da janela", len(pts) == 48 and sum(int(c) for _, c in pts) == 27
       and 'data-unit="hour"' in sec("chamadas") and pts[0][0] == "2025-10-01 00")
@@ -182,7 +182,7 @@ check("2) barras: real e estimado em <rect> de classes diferentes (o estimado é
       sec("custo-modelo").count('class="real"') >= 2 and 'class="estimado"' in sec("custo-modelo")
       and re.search(r"\.estimado[^}]*stroke-dasharray", CSS) is not None)
 check("2) modelo sem preço diz 'sem preço' em vez de zero", "sem preço</span>" in sec("custo-modelo"))
-check("2) composição: real, estimado, % e as chamadas sem preço", "Real US$ 10,00 (62%)" in sec("custo-modelo")
+check("2) composição: informado pela fonte, estimado, % e as chamadas sem preço", "Informado pela fonte US$ 10,00 (62%)" in sec("custo-modelo")
       and "Estimado ≈ US$ 6,00 (38%)" in sec("custo-modelo") and "3 chamadas sem preço, fora da soma" in sec("custo-modelo"))
 lat = {m.group(1): m.group(0) for m in re.finditer(r'<tr data-modelo="([^"]*)" data-calls=.*?</tr>', sec("latencia"), re.S)}
 check("3) latência: um modelo por linha, do p95 mais alto ao mais baixo", list(lat) ==
@@ -209,10 +209,11 @@ check("6) sessão sem custo nem preço fica de fora (T-SEM)", "T-SEM" not in sec
 # ------------------------------------------------------------------------------ o que a página não pode ter
 body = html.split("<main", 1)[1]
 check("sem style= em lugar nenhum da página", "style=" not in html)
-check("nenhum script além do htmx", re.findall(r"<script[^>]*>", html) == ['<script src="/static/htmx.min.js" defer>'])
+check("scripts locais: htmx e tratamento de falha de bloco", re.findall(r"<script[^>]*>", html) == ['<script src="/static/htmx.min.js" defer>', '<script src="/static/loading.js" defer>'])
 check("nenhum recurso externo (http/https, @import, url())", not re.search(r"https?://|@import|url\(", body))
 check("o JS de gráfico não existe: só <svg>, <path>, <rect>, <line> e <title>", not re.search(r"<(canvas|iframe|object|embed)", html))
-check("só leitura: o único formulário é o do período, por GET (#527)", body.count("<form") == 1 and '<form class="filtro" method="get" action="/"' in body and body.count("<button") == 1)
+check("só leitura: só os formulários do período e do modelo, os dois por GET (#527, #532)", body.count("<form") == 2 and body.count('method="get"') == 2
+      and '<form class="filtro" method="get" action="/"' in body and body.count("<button") == 2)
 check("hover em CSS e <title>, nada de onmouse*/onclick", not re.search(r"\son\w+=", html))
 
 # ------------------------------------------------------------------------------ 24 h e 7 d (relativas a agora)
@@ -251,6 +252,97 @@ check("p95 não dispara com menos de 5 chamadas na janela anterior", 'data-insig
 check("um erro só não dispara o insight de erros", 'data-insight="tool_errors"' not in p3)
 check("pedido pendente há 2 min não dispara o Gate (limite de 10 min)", 'data-insight="gate"' not in p3 or "há 2 min" not in p3)
 check("sem chamadas sem preço, sem cache e sem custo: só os insights que valem", not re.search(r'data-insight="(unpriced|cache|model_cost)"', p3))
+
+# ------------------------------------------------------------------------------ modelo no gráfico de chamadas e chamadas por repositório (#532)
+from html.parser import HTMLParser
+from urllib.parse import urlencode
+
+
+class Form(HTMLParser):
+    """Os campos do formulário `data-modelo-form` como o navegador os envia: hidden pelo valor, select pelo `selected` (ou a 1ª opção)."""
+
+    def __init__(self):
+        super().__init__()
+        self.in_form, self.sel, self.fields, self.first, self.chosen = False, None, [], None, None
+
+    def handle_starttag(self, tag, a):
+        a = dict(a)
+        if tag == "form":
+            self.in_form = "data-modelo-form" in a
+        elif self.in_form and tag == "input" and a.get("name"):
+            self.fields.append((a["name"], a.get("value") or ""))
+        elif self.in_form and tag == "select":
+            self.sel = a["name"]
+        elif self.in_form and tag == "option" and self.sel:
+            if self.first is None:
+                self.first = a.get("value") or ""
+            if "selected" in a:
+                self.chosen = a.get("value") or ""
+
+    def handle_endtag(self, tag):
+        if tag == "select" and self.sel:
+            self.fields.append((self.sel, self.first if self.chosen is None else self.chosen))
+            self.sel = None
+        elif tag == "form":
+            self.in_form = False
+
+
+def model_form(app_, query, pick=None):
+    """Renderiza `/?query`, escolhe `pick` no seletor (se dado) e devolve (resposta ao GET do envio, campos enviados)."""
+    f = Form()
+    f.feed(get(app_, "/", query)[1])
+    sent = [(k, pick if k == "model" and pick is not None else v) for k, v in f.fields]
+    return get(app_, "/", urlencode(sent)), sent
+
+
+db10 = DB("repos")
+for i in range(5):
+    db10.span(F0 + (1 + i) * H, 2, model="claude-sonnet-5", task="A1", repo="renatobardi/repo-a", input=1000, output=100)
+for i in range(2):
+    db10.span(F0 + (10 + i) * H, 6, model="claude-opus-5", task="A1", repo="renatobardi/repo-a", input=10, cost_usd=3.0)
+for i in range(3):
+    db10.span(F0 + (20 + i) * H, 2, model="claude-sonnet-5", task="B1", repo="renatobardi/repo-b", input=1000, output=100)
+for i in range(2):
+    db10.span(F0 + (30 + i) * H, 4, model="gpt-5-codex", task="C1", agent="codex", input=1000, output=100)   # sem repositório
+app10 = create_app(db10.flush(), TOKEN, config=cfg)
+_, h10 = get(app10, "/", Q)
+c10 = re.search(r'data-grafico="chamadas".*?</section>', h10, re.S).group(0)
+r10 = re.search(r'data-grafico="repos".*?</section>', h10, re.S).group(0)
+rows = [(attrs(t)["repo"], attrs(t)["calls"], attrs(t)["real-usd"]) for t in re.findall(r'<div class="barra-linha"[^>]*>', r10)]
+check("seletor: Todos e cada modelo com chamada na janela", re.findall(r'<option value="([^"]*)"', c10) == ["", "claude-opus-5", "claude-sonnet-5", "gpt-5-codex"])
+check("sem modelo escolhido: a série soma as 12 chamadas", 'data-total="12"' in c10 and "total 12" in c10 and 'name="model"' in c10)
+_, o10 = get(app10, "/", Q + "&model=claude-opus-5")
+co = re.search(r'data-grafico="chamadas".*?</section>', o10, re.S).group(0)
+check("com modelo: a série e o total são só dele (2 chamadas, p95 de 6 s na dica)", 'data-total="2"' in co and "claude-opus-5 · total 2" in co
+      and sum(int(c) for c in re.findall(r'data-calls="(\d+)"', co)) == 2 and "· p95 6,0 s</title>" in co and "p95 2,0 s" not in co)
+check("o modelo escolhido fica marcado no seletor e no filtro de período, e nos links das janelas", '<option value="claude-opus-5" selected>' in co
+      and 'type="hidden" name="model" value="claude-opus-5"' in o10 and "model=claude-opus-5" in re.search(r'<nav class="janelas".*?</nav>', o10, re.S).group(0))
+check("o seletor muda só o gráfico de chamadas: o indicador e o gráfico por repositório seguem a janela", attrs(kpi(o10, "calls").split(">", 1)[0])["value"] == "12"
+      and re.search(r'data-grafico="repos"[^>]*data-total="(\d+)"', o10).group(1) == "12")
+check("modelo sem chamada na janela: série zerada, escolha mantida, 200", get(app10, "/", Q + "&model=nao-existe")[0] == 200
+      and 'data-total="0"' in get(app10, "/", Q + "&model=nao-existe")[1])
+check("modelo com HTML vai escapado", "<b>" not in get(app10, "/", Q + "&model=%3Cb%3Ex")[1])
+(st10, h_sent), sent10 = model_form(app10, Q, pick="claude-opus-5")
+check("formulário do seletor enviado como o navegador envia: janela e modelo vão, 200 e série do modelo",
+      st10 == 200 and ("model", "claude-opus-5") in sent10 and ("hours", "") not in sent10 and 'data-total="2"' in h_sent)
+(st11, h11), sent11 = model_form(app10, "hours=24")
+check("formulário sem escolher: Todos (model vazio) e a janela pronta segue", st11 == 200 and ("model", "") in sent11 and ("hours", "24") in sent11)
+(st12, h12), sent12 = model_form(app10, Q + "&repo=renatobardi%2Frepo-b", pick="claude-sonnet-5")
+check("o seletor leva o repositório escolhido (campo do formulário) e a série é do modelo nesse repositório", ("repo", "renatobardi/repo-b") in sent12
+      and 'data-total="3"' in h12)
+check("9) por repositório, do maior para o menor, com chamadas e custo; sem repositório tem linha própria",
+      rows == [("renatobardi/repo-a", "7", "6.0"), ("renatobardi/repo-b", "3", ""), ("", "2", "")] and "sem repositório" in r10)
+check("9) a soma por repositório bate com o indicador de chamadas da janela", sum(int(c) for _, c, _ in rows) == int(KPI10 := attrs(kpi(h10, "calls").split(">", 1)[0])["value"]) == 12)
+check("9) data-* do cartão: 3 linhas e o total", 'data-repos="3"' in r10 and 'data-total="12"' in r10)
+_, f10 = get(app10, "/", Q + "&repo=renatobardi%2Frepo-a")
+rf = re.search(r'data-grafico="repos".*?</section>', f10, re.S).group(0)
+cf = re.search(r'data-grafico="chamadas".*?</section>', f10, re.S).group(0)
+check("filtro de repositório: o gráfico por repositório mostra só ele e a série também", re.findall(r'data-repo="([^"]*)"', rf) == ["renatobardi/repo-a"]
+      and 'data-total="7"' in cf and re.findall(r'<option value="([^"]*)"', cf) == ["", "claude-opus-5", "claude-sonnet-5"])
+_, n10 = get(app10, "/", Q + "&repo=%28sem%29")
+check("filtro 'sem repositório': só a linha sem repositório (2 chamadas do codex)", re.findall(r'data-repo="([^"]*)" data-calls="(\d+)"', n10) == [("", "2")])
+_, p10 = get(app10, "/", "from=2025-10-01T00:00:00Z&to=2025-10-01T12:00:00Z")
+check("filtro de período: a janela de 12 h só tem as 7 chamadas das primeiras horas (repo-a)", re.findall(r'data-repo="([^"]*)" data-calls="(\d+)"', p10) == [("renatobardi/repo-a", "7")])
 
 # ------------------------------------------------------------------------------ banco vazio, decisão pendente, falhas
 app4 = create_app(DB("vazio").flush(), TOKEN, config=cfg)
@@ -329,5 +421,5 @@ ST.dash_mod.snapshot = real_snapshot
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 76
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 92
 check_end

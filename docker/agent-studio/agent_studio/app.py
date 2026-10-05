@@ -13,8 +13,12 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
 - `GET /v1/rodada?id=`: só leitura, credencial de leitura; as etapas publicadas da rodada (#507); sem id = 400, rodada desconhecida =
   404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
+  Cada etapa leva `actions` (#510): a lista de ações do texto aprovado, com o estado da marca do Bardi (`feita`/`pendente`). A marca é
+  dado, nunca instrução nem confirmação de merge, `close` ou ação no host (`docker/swarm.md`).
+- `POST /rodada/acao` (#510): a única escrita do navegador além do login; só com a credencial de marcação configurada (sem ela a rota
+  não existe), só com o cookie de marcação (`marcar.py`).
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
-  `proposals.available` = `false` (o resto do menu segue).
+  `proposals.available` = `false` e `steps.available` = `false` (o resto do menu segue); o bloco `steps` (#508) lê o SurrealDB à parte.
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
   (#206); a ingestão, só o `Bearer`.
 """
@@ -31,7 +35,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import (auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
+from . import (acoes as acoes_mod, auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
                tz as tz_mod, web)
 
 log = logging.getLogger("agent_studio")
@@ -64,9 +68,10 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None):
-    """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256)."""
-    auth = auth_mod.Auth(token, read_token)
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None):
+    """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256);
+    `mark_token` = a de marcação (#510; sem ela, `POST /rodada/acao` não existe)."""
+    auth = auth_mod.Auth(token, read_token, mark_token)
     tel = tel or telemetry.Noop()
     config = config or config_mod.Config()
 
@@ -230,6 +235,19 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             detail.exception("tray: pedidos pendentes falhou")
             return None
 
+    def _tray_steps(at_ns):
+        """Etapas das rodadas abertas (#508); `None` sem SurrealDB ou se a leitura falha (a causa só no stderr): o bloco sai
+        com `available: false` e os pedidos seguem."""
+        if surreal is None:
+            return None
+        try:
+            return etapas_mod.tray_steps(surreal, at_ns)
+        except Exception as e:  # noqa: BLE001
+            tel.warn("tray-steps-failed", "tray: etapas das rodadas (SurrealDB) falhou, respondi sem elas: %s",
+                     type(e).__name__, level=logging.ERROR)
+            detail.exception("tray: etapas das rodadas falhou")
+            return None
+
     @app.get("/v1/tray")
     async def v1_tray(request: Request):
         """Tudo o que o menu do tray mostra, numa chamada (ADR-08 §10, contrato na seção #205)."""
@@ -243,14 +261,14 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         at_ns = time.time_ns()
         try:
             # os dois bancos ao mesmo tempo: o SurrealDB lento não soma ao tempo do DuckDB
-            snap, pending = await asyncio.gather(
+            snap, pending, steps = await asyncio.gather(
                 run_in_threadpool(store.tray, at_ns, config.prices, config.alerts, zone),
-                run_in_threadpool(_tray_pending, at_ns))
+                run_in_threadpool(_tray_pending, at_ns), run_in_threadpool(_tray_steps, at_ns))
         except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
             tel.warn("tray-failed", "consulta do tray falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta do tray falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
-        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone))
+        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone, steps))
 
     # ------------------------------------------------ a rodada em JSON (#507)
     @app.get("/v1/rodada")
@@ -270,6 +288,10 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         if data is None:
             return JSONResponse({"message": "rodada não encontrada"}, status_code=404)
+        await run_in_threadpool(acoes_mod.collect, surreal, data)   # a lista de ações com o estado das marcas (#510); não levanta
+        if data["acoes_error"]:
+            tel.warn("rodada-state-failed", "rodada: estado das ações (SurrealDB) falhou, respondi sem ele: %s",
+                     data["acoes_error"], level=logging.ERROR)
         if data["state_error"]:
             tel.warn("rodada-state-failed", "rodada: estado (SurrealDB) falhou, respondi só com o DuckDB: %s",
                      data["state_error"], level=logging.ERROR)

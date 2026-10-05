@@ -1,36 +1,44 @@
 {% extends "base.html" %}
 {% set nav = "rodadas" %}
 {% set crumbs = [("Governança", none), ("Rodadas", none)] %}
-{% from "_macros.html" import badge, icon %}
+{% from "_macros.html" import badge, filter, icon, ta, tb, rodape, sem_linhas with context %}
 {% block title %}Rodadas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
-  <h1>Rodadas</h1>
+  <div class="titulo-linha">{% if loading_target is none %}<h1>Rodadas</h1>{% endif %}{{ filter("/rodadas", windows, hours, range, custo_ctl=false, hidden=keep, live=true) }}</div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
-{% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido: repositório e estado podem faltar. A causa está no log do agent-studio.</p>{% endif %}
-{% if rounds %}
+{% endcall %}
+{% call fragment("tabela") %}
+{% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido: o ciclo pode faltar. A causa está no log do agent-studio.</p>{% endif %}
+{% if t.rows %}
 <div class="cartao rolagem">
-<table class="rodadas empilha">
-  <thead><tr><th>Rodada</th><th>Repositório</th><th>Estado</th><th class="n">Etapas</th><th>Última etapa</th><th>Veredito</th><th>Em ({{ tzl() }})</th></tr></thead>
+<table class="rodadas empilha" data-tabela>
+  <thead><tr><th{{ ta(t, "rodada") }}>{{ tb(t, "rodada", "Rodada") }}</th><th{{ ta(t, "repo") }}>{{ tb(t, "repo", "Repositório") }}</th><th{{ ta(t, "opened") }}>{{ tb(t, "opened", "Aberta em (" ~ tzl() ~ ")") }}</th><th{{ ta(t, "state") }}>{{ tb(t, "state", "Estado") }}</th><th{{ ta(t, "sessions", "n") }}>{{ tb(t, "sessions", "Sessões") }}</th><th{{ ta(t, "prs", "n", "pedidos de merge publicados como etapa; sem etapa publicada, o número não existe") }}>{{ tb(t, "prs", "PRs") }}</th><th{{ ta(t, "steps", "n") }}>{{ tb(t, "steps", "Etapas") }}</th><th{{ ta(t, "cycle") }}>{{ tb(t, "cycle", "Ciclo") }}</th><th{{ ta(t, "kind") }}>{{ tb(t, "kind", "Última etapa") }}</th><th{{ ta(t, "review") }}>{{ tb(t, "review", "Veredito") }}</th></tr></thead>
   <tbody>
-  {% for x in rounds %}
-  <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-revisoes="{{ x.revisions }}" data-review="{{ x.review or '' }}" data-state="{{ x.state.state if x.state and x.state.state else '' }}">
-    <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{{ x.round }}</a></td>
-    <td class="sec">{{ x.state.repo if x.state and x.state.repo else "—" }}{% if x.state and x.state.label %} · {{ x.state.label }}{% endif %}</td>
-    <td class="sec">{{ x.state.state if x.state and x.state.state else "—" }}</td>
-    <td class="n">{{ x.steps|num }}</td>
+  {% for x in t.rows %}
+  <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-revisoes="{{ x.revisions }}" data-review="{{ x.review or '' }}" data-state="{{ x.status or '' }}" data-sessoes="{{ x.sessions }}" data-prs="{{ '' if x.prs is none else x.prs }}" data-aberta-ns="{{ '' if x.opened_ns is none else x.opened_ns }}" data-fechada-ns="{{ '' if x.closed_ns is none else x.closed_ns }}">
+    <td class="prim"><a href="{{ x.url }}"{% if not x.steps %} title="Sessões da rodada"{% endif %}>{{ x.round }}</a></td>
+    <td class="sec">{{ x.repo or "—" }}{% if x.label %} · {{ x.label }}{% endif %}</td>
+    <td class="hora sec">{{ x.opened_ns|ts if x.opened_ns else "—" }}</td>
+    <td class="sec">{% if x.status == "fechada" and x.closed_ns %}fechada em {{ x.closed_ns|ts }}{% else %}{{ x.status or "—" }}{% endif %}</td>
+    <td class="n sec">{{ x.sessions|num }}</td>
+    <td class="n sec">{{ "—" if x.prs is none else x.prs|num }}</td>
+    <td class="n">{% if x.steps %}{{ x.steps|num }}{% else %}<span class="fino" data-sem-etapas>sem etapas publicadas</span>{% endif %}</td>
+    <td class="sec">{% if x.cycle_url %}<a href="{{ x.cycle_url }}">{{ x.cycle }}</a>{% else %}—{% endif %}</td>
     <td class="sec">{{ x.kind or "—" }}</td>
     <td>{% if x.review == "aprovado" %}{{ badge("aprovado", "secundario", "check") }}{% elif x.review == "reprovado" %}{{ badge("reprovado", "destrutivo", "triangle-alert") }}{% elif x.review == "sem-revisor" %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% else %}—{% endif %}</td>
-    <td class="hora sec">{{ x.last_ns|ts }}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-{% if limit_reached %}<p class="aviso">Mostrando as {{ rounds|length|num }} rodadas mais recentes.</p>{% endif %}
+{{ rodape(t) }}
 {% else %}
-<p class="aviso" data-sem-rodadas>Nenhuma rodada publicou etapa ainda.</p>
+{% if t.filtered %}{{ sem_linhas(t, "Nenhuma rodada com este filtro.") }}{% else %}<p class="aviso" data-sem-rodadas>Nenhuma rodada nessa janela.</p>{% endif %}
 {% endif %}
+{% endcall %}
 </div>
 {% endblock %}

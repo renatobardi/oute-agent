@@ -61,7 +61,9 @@ SERVICES_FOLDER="${OUTE_VAULT_SERVICES_FOLDER:-oute-services}"
 # ainda não criada, item ainda na pasta oute-agent, agent.env gravado por versão antiga). AGENT_STUDIO_TOKEN é o
 # token único de antes da #256 (ingestão + leitura).
 # OPENROUTER_MEMORY_API_KEY (#459) é a chave do proxy do LLM do ai-memory: só ele a recebe.
-SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN OPENROUTER_MEMORY_API_KEY"
+# AGENT_STUDIO_MARK_TOKEN (#510) é a credencial de marcação das ações da página da rodada: só o agent-studio a recebe (o `agent`
+# tem a de leitura e alcança o studio pela rede docker; se a marcação aceitasse a leitura, aceitaria o agente).
+SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN OPENROUTER_MEMORY_API_KEY AGENT_STUDIO_MARK_TOKEN"
 
 # fallback de quem precisa de um segredo e não o tem no ambiente: só o agent.env, nunca o vault
 load_agent_env() {
@@ -250,8 +252,14 @@ agent_studio_up() {
       "${OUTE_VAULT_FOLDER:-oute-agent} do vault). O agent-studio sobe com uma credencial só: a tela e o tray leem" \
       "com a de ingestão e o agent fica sem leitura; crie o campo e rode: oute up --refresh-secrets" >&2
   fi
+  # credencial de marcação (#510): opcional. Sem ela o agent-studio sobe igual, sem `POST /rodada/acao` (a rota não existe)
+  if [[ -z "${AGENT_STUDIO_MARK_TOKEN:-}" ]]; then
+    echo "nota: AGENT_STUDIO_MARK_TOKEN não está em $SERVICES_ENV_FILE (item agent-studio da pasta $SERVICES_FOLDER do vault)." \
+      "O agent-studio sobe sem marcação de ações: as caixas da página da rodada ficam só para leitura. Para ligar, crie o campo" \
+      "e rode: oute up --refresh-secrets" >&2
+  fi
   export AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_READ_TOKEN="${AGENT_STUDIO_READ_TOKEN:-}" \
-    OUTE_OTEL_STUDIO=agent-studio
+    AGENT_STUDIO_MARK_TOKEN="${AGENT_STUDIO_MARK_TOKEN:-}" OUTE_OTEL_STUDIO=agent-studio
   COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}$STUDIO_PROFILE"
   export COMPOSE_PROFILES
 }

@@ -1,0 +1,4 @@
+{# Gráfico em degraus da tela Preços (#534): SVG gerado no servidor, sem JS e sem estilo na tag. `c` = o `chart` do modelo. #}
+{% macro degrau(c) %}<svg class="degrau-svg" viewBox="0 0 {{ c.w }} {{ c.h }}" preserveAspectRatio="none" role="img" aria-label="Preço de entrada e de saída ao longo do tempo, em degraus">
+      <path class="saida" d="{{ c.output }}"/><path class="entrada" d="{{ c.input }}"/>
+    </svg>{% endmacro %}

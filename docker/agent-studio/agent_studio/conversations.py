@@ -6,20 +6,28 @@ fato** (`time_unix_nano`), nunca pela de chegada. Chamadas, tokens e custo (real
 """
 import json
 
-from . import usage as usage_mod
-from .cost import LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, spans_with_cost
+from . import repo as repo_mod, usage as usage_mod
+from .tabela import Col, Table, usage_cols
+from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, is_subscription,
+                   spans_with_cost)
 
 LIST_LIMIT = 200    # conversas por página da lista (as mais recentes)
 SPAN_LIMIT = 5000   # spans na árvore de uma conversa (os primeiros, pela hora do fato)
 LOG_PAGE = 200      # logs por página do detalhe
 
+# a tabela da tela (#529): a ordem inicial é a de sempre (a mais recente primeiro); host e agente filtram pelos parâmetros que a lista já tinha
+TABLE = Table([Col("start", "time", lambda c: c["start_ns"]), Col("host", "text", lambda c: c["host"], lambda c: [c["host"]], "host"),
+               Col("agent", "text", lambda c: c["agent"], lambda c: [c["agent"]], "agent"), Col("conv", "text", lambda c: c["id"]),
+               Col("duration", "num", lambda c: c["duration_ns"]), *usage_cols(lambda c: c["usage"], detail=False),
+               Col("errors", "num", lambda c: c["usage"]["errors"]["total"])], default=("start", "desc"))
+
 # um fato por linha: spans e logs com conversa
 _FACTS = """
-    SELECT session_id, host_name, oute_instance, oute_agent, service_name, oute_task_id, oute_swarm_round,
+    SELECT session_id, host_name, oute_instance, oute_agent, service_name, oute_task_id, oute_swarm_round, {repo} AS repo,
            time_unix_nano AS t, COALESCE(end_unix_nano, time_unix_nano) AS e, TRUE AS is_span
     FROM spans WHERE session_id IS NOT NULL{where}
     UNION ALL
-    SELECT session_id, host_name, oute_instance, oute_agent, service_name, oute_task_id, oute_swarm_round,
+    SELECT session_id, host_name, oute_instance, oute_agent, service_name, oute_task_id, oute_swarm_round, {repo},
            time_unix_nano, time_unix_nano, FALSE
     FROM logs WHERE session_id IS NOT NULL{where}"""
 
@@ -33,7 +41,7 @@ _HEAD = f"""
     SELECT session_id AS id, min(t) AS start_ns, max(e) AS end_ns,
            {_first('host_name')} AS host, {_first('oute_agent')} AS agent,
            {_first('oute_instance')} AS instance, {_first('service_name')} AS service,
-           {_first('oute_task_id')} AS task_id, {_first('oute_swarm_round')} AS swarm_round,
+           {_first('oute_task_id')} AS task_id, {_first('oute_swarm_round')} AS swarm_round, {_first('repo')} AS repo,
            count(*) FILTER (WHERE is_span) AS spans, count(*) FILTER (WHERE NOT is_span) AS logs"""
 
 
@@ -42,38 +50,42 @@ def _dicts(cur):
     return [dict(zip(names, r)) for r in cur.fetchall()]
 
 
-def _with_usage(con, convs, prices):
+def _with_usage(con, convs, prices, effective=False):
     """Põe em cada conversa as somas do #203 (a conversa inteira, não só o trecho da janela)."""
     if not convs:
         return
     lo, hi = min(c["start_ns"] for c in convs), max(c["end_ns"] for c in convs) + 1
-    groups = usage_mod.aggregate(con, lo, hi, prices, ("conversation",))
+    groups = usage_mod.aggregate(con, lo, hi, prices, ("conversation",), effective=effective)
     for c in convs:
         c["duration_ns"] = c["end_ns"] - c["start_ns"]
         c["usage"] = usage_mod.rendered(groups, (c["id"],))
 
 
-def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT):
+def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, repo=None, effective=False):
     """Conversas com algum fato na janela [from_ns, to_ns), da mais recente para a mais antiga (pelo início).
 
-    `host`/`agent` filtram; `hosts`/`agents` são as opções do filtro (da janela inteira). Devolve no máximo
+    `host`/`agent`/`repo` filtram; `hosts`/`agents`/`repos` são as opções do filtro (da janela inteira); o repositório
+    da conversa é o primeiro que os fatos dela trazem (`repo.NONE` filtra as sem repositório). Devolve no máximo
     `limit` conversas; `total` diz quantas a janela e o filtro têm."""
     cur = con.execute(
-        f"WITH facts AS ({_FACTS.format(where='')}) {_HEAD}, "
+        f"WITH facts AS ({_FACTS.format(where='', repo=repo_mod.COL)}) {_HEAD}, "
         "count(*) FILTER (WHERE t >= ? AND t < ?) AS in_window "
         "FROM facts GROUP BY session_id HAVING in_window > 0 ORDER BY start_ns DESC, id",
         [from_ns, to_ns])
     convs = _dicts(cur)
     hosts = sorted({c["host"] for c in convs if c["host"]})
     agents = sorted({c["agent"] for c in convs if c["agent"]})
+    repos = sorted({c["repo"] for c in convs if c["repo"]})
+    if repo:
+        convs = [c for c in convs if (c["repo"] is None if repo == repo_mod.NONE else c["repo"] == repo)]
     if host:
         convs = [c for c in convs if c["host"] == host]
     if agent:
         convs = [c for c in convs if c["agent"] == agent]
     total = len(convs)
-    convs = convs[:limit]
-    _with_usage(con, convs, prices)
-    return {"conversations": convs, "total": total, "hosts": hosts, "agents": agents}
+    convs = convs[:limit] if limit else convs   # `limit=None`: todas (a tela pagina, #529)
+    _with_usage(con, convs, prices, effective)
+    return {"conversations": convs, "total": total, "hosts": hosts, "agents": agents, "repos": repos}
 
 
 def tree(spans):
@@ -115,23 +127,24 @@ def tree(spans):
     return out
 
 
-def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False):
+def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False, effective=False):
     """Cabeçalho, somas, árvore de spans e a primeira página de logs de uma conversa; `None` se ela não existe.
 
     `errors_only` (#530): só spans com status de erro e logs ERROR ou acima (o que o contador de erros soma); o
-    cabeçalho e as somas seguem sendo os da conversa inteira."""
+    cabeçalho e as somas seguem sendo os da conversa inteira. `effective` (#531): a chamada de assinatura custa 0, na
+    soma e na linha de cada span."""
     head = _dicts(con.execute(
-        f"WITH facts AS ({_FACTS.format(where=' AND session_id = ?')}) {_HEAD} FROM facts GROUP BY session_id",
+        f"WITH facts AS ({_FACTS.format(where=' AND session_id = ?', repo=repo_mod.COL)}) {_HEAD} FROM facts GROUP BY session_id",
         [session_id, session_id]))
     if not head:
         return None
     conv = head[0]
-    _with_usage(con, [conv], prices)
+    _with_usage(con, [conv], prices, effective)
     # custo efetivo de cada span (o do span ou o do log `api_request` da conversa, #157), pela regra do `cost.py`
     table, params = spans_with_cost("session_id = ?", [session_id], "session_id = ?", [session_id])
     spans = _dicts(con.execute(
         "SELECT trace_id, span_id, parent_span_id, name, time_unix_nano, duration_ns, model, input_tokens, "
-        f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, ({MODEL_CALL_SQL}) AS is_call "
+        f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, oute_agent, ({MODEL_CALL_SQL}) AS is_call "
         f"FROM {table}{' WHERE status_code = ?' if errors_only else ''} ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
         [*MODEL_CALL_PARAMS, *params, *([SPAN_STATUS_ERROR] if errors_only else []), span_limit]))
     for s in spans:
@@ -142,6 +155,8 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
                 s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]))
+            if effective and is_subscription(s["oute_agent"]):
+                s["cost_kind"], s["cost"] = "effective", 0.0
     if errors_only:
         # sem os pais a árvore não vale: uma lista plana, pela hora do fato
         for s in spans:

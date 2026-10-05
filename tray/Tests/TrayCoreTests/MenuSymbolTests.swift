@@ -25,4 +25,9 @@ final class MenuSymbolTests: XCTestCase {
     func testTodoSimboloTemNome() {
         XCTAssertTrue(MenuSymbol.allCases.allSatisfy { !$0.systemName.isEmpty })
     }
+
+    func testEtapasDeRodadaNaoUsamOAmbar() {
+        XCTAssertEqual(MenuSymbol.steps.tint, .mono)
+        XCTAssertEqual(MenuSymbol.step.tint, .mono)
+    }
 }

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "pedidos" %}
 {% set crumbs = [("Governança", none), ("Pedidos", none)] %}
-{% from "_macros.html" import badge, icon, copy_button %}
+{% from "_macros.html" import badge, icon, copy_button, ta, tb, rodape, sem_linhas %}
 {% block head %}<script src="/static/copiar.js" defer></script>{% endblock %}
 {% block title %}Pedidos · Agent Studio{% endblock %}
 {% macro proposal_data(p) %}data-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}" data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}" data-rc="{{ '' if p.rc is none else p.rc }}"{% endmacro %}
@@ -10,17 +10,17 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <h1>Pedidos</h1>
+  {% if loading_target is none %}<h1>Pedidos</h1>{% endif %}
 </div>
+{% call fragment("pendentes") %}
 <div class="pilha">
-<h2 class="secao">Pendentes ({{ pending_total|num }})</h2>
-{% if pending_total > pending|length %}<p class="aviso">Mostrando os {{ pending|length|num }} mais recentes de {{ pending_total|num }}.</p>{% endif %}
-{% if pending %}
+<h2 class="secao">Pendentes ({{ tp.unfiltered|num }})</h2>
+{% if tp.rows %}
 <div class="cartao rolagem">
-<table class="pedidos empilha">
-  <thead><tr><th class="n">Idade</th><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th><th>Proposto em ({{ tzl() }})</th><th>Comando</th></tr></thead>
+<table class="pedidos empilha" data-tabela>
+  <thead><tr><th{{ ta(tp, "idade", "n") }}>{{ tb(tp, "idade", "Idade") }}</th><th{{ ta(tp, "pedido") }}>{{ tb(tp, "pedido", "Pedido") }}</th><th{{ ta(tp, "as") }}>{{ tb(tp, "as", "Roda como") }}</th><th{{ ta(tp, "agent") }}>{{ tb(tp, "agent", "Agente") }}</th><th{{ ta(tp, "host") }}>{{ tb(tp, "host", "Host") }}</th><th{{ ta(tp, "proposto") }}>{{ tb(tp, "proposto", "Proposto em (" ~ tzl() ~ ")") }}</th><th>Comando</th></tr></thead>
   <tbody>
-  {% for p in pending %}
+  {% for p in tp.rows %}
   <tr {{ proposal_data(p) }}>
     <td class="n">{{ badge("há " ~ p.proposed_at|ago, "gate") }}</td>
     <td class="prim">{{ proposal_link(p) }}</td>
@@ -34,20 +34,23 @@
   </tbody>
 </table>
 </div>
+{{ rodape(tp) }}
 {% else %}
-<p class="aviso" id="sem-pendentes">Nenhum pedido pendente.</p>
+{{ sem_linhas(tp, "Nenhum pedido pendente.", "sem-pendentes") }}
 {% endif %}
 </div>
 
-<details class="pilha decididos" id="decididos">
-<summary class="secao">Decididos recentes ({{ recent|length|num }})</summary>
-{% if recent %}
+{% endcall %}
+{% call fragment("decididos") %}
+<details class="pilha decididos" id="decididos"{% if td.touched %} open{% endif %}>
+<summary class="secao">Decididos ({{ td.unfiltered|num }})</summary>
+{% if td.rows %}
 <div class="cartao rolagem">
-<table class="pedidos empilha">
-  <thead><tr><th>Pedido</th><th>Roda como</th><th>Agente</th><th>Host</th><th>Decisão</th>
-    <th class="n" title="código de saída do script no host">rc</th><th class="n">Duração</th><th>Aprovador</th><th>Decidido em ({{ tzl() }})</th></tr></thead>
+<table class="pedidos empilha" data-tabela>
+  <thead><tr><th{{ ta(td, "pedido") }}>{{ tb(td, "pedido", "Pedido") }}</th><th{{ ta(td, "as") }}>{{ tb(td, "as", "Roda como") }}</th><th{{ ta(td, "agent") }}>{{ tb(td, "agent", "Agente") }}</th><th{{ ta(td, "host") }}>{{ tb(td, "host", "Host") }}</th><th{{ ta(td, "decision") }}>{{ tb(td, "decision", "Decisão") }}</th>
+    <th{{ ta(td, "rc", "n", "código de saída do script no host") }}>{{ tb(td, "rc", "rc") }}</th><th{{ ta(td, "duration", "n") }}>{{ tb(td, "duration", "Duração") }}</th><th{{ ta(td, "approver") }}>{{ tb(td, "approver", "Aprovador") }}</th><th{{ ta(td, "decidido") }}>{{ tb(td, "decidido", "Decidido em (" ~ tzl() ~ ")") }}</th></tr></thead>
   <tbody>
-  {% for p in recent %}
+  {% for p in td.rows %}
   <tr {{ proposal_data(p) }}>
     <td class="prim">{{ proposal_link(p) }}</td>
     <td class="sec">{{ as_badge(p) }}</td>
@@ -63,9 +66,11 @@
   </tbody>
 </table>
 </div>
+{{ rodape(td) }}
 {% else %}
-<p class="aviso" id="sem-decididos">Nenhum pedido decidido.</p>
+{{ sem_linhas(td, "Nenhum pedido decidido.", "sem-decididos") }}
 {% endif %}
 </details>
+{% endcall %}
 </div>
 {% endblock %}

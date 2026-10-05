@@ -29,10 +29,10 @@ Pasta **`oute-services`** (#256; nunca vai ao `agent`):
 
 | item         | tipo | campos (custom fields) |
 |--------------|------|------------------------|
-| agent-studio | Note | AGENT_STUDIO_INGEST_TOKEN (credencial de ingestão: só o collector manda com ela, nos dois hosts); AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, só no oute-server) |
+| agent-studio | Note | AGENT_STUDIO_INGEST_TOKEN (credencial de ingestão: só o collector manda com ela, nos dois hosts); AGENT_STUDIO_SURREAL_PASS (root do SurrealDB, só no oute-server); AGENT_STUDIO_MARK_TOKEN (#510, opcional; campo oculto: credencial de **marcação**, a terceira, com que o Bardi marca uma ação da página da rodada como feita, `POST /rodada/acao`. Valor próprio, diferente da de ingestão e da de leitura (igual a uma delas, o agent-studio a descarta). Só o serviço `agent-studio` a recebe; **nunca o `agent`**, que tem a de leitura e alcança o studio pela rede docker. Sem ela o `oute up` sobe igual e a rota não existe: as caixas ficam só para leitura. O Bardi a cola uma vez por aparelho em `/marcar`, depois de entrar com a de leitura (Mac e celular); o cookie dela é `HttpOnly`, `Secure`, `SameSite=Strict`. Nunca em argumento, log, issue ou saída) |
 | openrouter-memoria | Note | OPENROUTER_MEMORY_API_KEY (#459): chave **nova** do OpenRouter, só para o LLM do ai-memory, com teto de gasto definido no OpenRouter. Só o serviço `llm-proxy` a recebe (profile `llm-proxy`, nos dois hosts): nem o `agent`, nem o `ai-memory`, nem o collector. Não confundir com `OPENROUTER_API_KEY`, que segue no `agent` e no `agent-studio`. Sem ela o `oute up` sobe igual, sem o proxy, e o ai-memory segue sem LLM. Nunca em argumento, log, span ou saída de erro |
 
-Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
+Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN`, `AGENT_STUDIO_MARK_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
 
 ### Rotação da senha root do SurrealDB (oute-server)
 

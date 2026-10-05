@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo (minutos antes de agora)
@@ -91,18 +91,18 @@ check "alerta: a decisão pendente não é alerta"        jqe 'all(.alerts[]; (.
 check "tray: round_stalled só de r-velha, junto da decisão" jqe '[.alerts[] | select(.type == "round_stalled") | .evidence.round] == ["r-velha"]' <<<"$R"
 
 # ---------------------------------------------------------------- 3. topo das telas
-PAGE="$(curl -s "${A[@]}" "$STUDIO_URL/conversas")"
+PAGE="$(studio_page "${A[@]}" "$STUDIO_URL/conversas")"
 # r-velha tem 120 min, no limite das 2 h da faixa (#524): aberta ou em "antigos", conforme o segundo; o que vale aqui é estar no bloco
 check "tela: bloco de decisões no topo, com 5 pendentes (abertas e em antigos)" bash -c 'grep -qF "id=\"decisoes\"" <<<"$1" && test "$(grep -cF "data-decisao=\"" <<<"$1")" = 5' _ "$PAGE"
 check "tela: r-pend com a pergunta e o host"           bash -c 'grep -A1 -F "data-decisao=\"r-pend\" data-host=\"oute-server\"" <<<"$1" | grep -qF "1. aprovar a triagem  2. cortar a #387"' _ "$PAGE"
 check "tela: respondida e fechada fora do bloco"       bash -c '! grep -qF "data-decisao=\"r-resp\"" <<<"$1" && ! grep -qF "data-decisao=\"r-fechada\"" <<<"$1"' _ "$PAGE"
 check "tela: texto 'Decisão pendente na rodada'"       bash -c 'grep -qF "Decisão pendente na rodada r-velha" <<<"$1"' _ "$PAGE"
 check "tela: o topo vem antes do conteúdo"             bash -c 'a="$(grep -bo "id=\"decisoes\"" <<<"$1" | head -1 | cut -d: -f1)"; b="$(grep -bo "id=\"conteudo\"" <<<"$1" | head -1 | cut -d: -f1)"; [ -n "$a" ] && [ "$a" -lt "$b" ]' _ "$PAGE"
-check "tela: pedido do htmx não leva o topo"           bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(curl -s "${A[@]}" -H 'HX-Request: true' "$STUDIO_URL/conversas")"
+check "tela: pedido do htmx não leva o topo"           bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(studio_page "${A[@]}" -H 'HX-Request: true' "$STUDIO_URL/bloco/conversas/tabela")"
 check "tela: a faixa tem o ícone hand e o link Ver pedidos (#467)" bash -c 'grep -q "lucide.svg#hand" <<<"$1" && grep -qF "<a class=\"faixa-link\" href=\"/pedidos\">Ver pedidos</a>" <<<"$1"' _ "$PAGE"
 check "tela: a faixa fica sob o cabeçalho, antes do conteúdo" bash -c 'h="$(grep -bo "</header>" <<<"$1" | head -1 | cut -d: -f1)"; d="$(grep -bo "id=\"decisoes\"" <<<"$1" | head -1 | cut -d: -f1)"; [ -n "$h" ] && [ "$h" -lt "$d" ]' _ "$PAGE"
-check "tela: nos detalhes (logs da conversa) a faixa some" bash -c '! grep -qF "id=\"decisoes\"" <<<"$1" && grep -qF "class=\"cabecalho\"" <<<"$1"' _ "$(curl -s "${A[@]}" "$STUDIO_URL/conversa/logs?id=x")"
-check "login: sem decisões no topo"                    bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(curl -s "$STUDIO_URL/login")"
+check "tela: nos detalhes (logs da conversa) a faixa some" bash -c '! grep -qF "id=\"decisoes\"" <<<"$1" && grep -qF "class=\"cabecalho\"" <<<"$1"' _ "$(studio_page "${A[@]}" "$STUDIO_URL/conversa/logs?id=x")"
+check "login: sem decisões no topo"                    bash -c '! grep -qF "id=\"decisoes\"" <<<"$1"' _ "$(studio_page "$STUDIO_URL/login")"
 studio_stop
 
 # ---------------------------------------------------------------- 4. a lógica direto: hora da consulta, limite e script de quem lê o banco

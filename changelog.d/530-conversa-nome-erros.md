@@ -1,2 +1,0 @@
-### Added
-- **Nome amigável da conversa e link para os erros dela** (#530). Em Conversas, Sessões e no detalhe, a conversa aparece como `Adjetivo_Substantivo` (ex.: `Flat_Bear`), tirado do próprio id, com o id inteiro em letra menor abaixo. O selo de erros da linha vira link para o detalhe filtrado (spans com erro e logs ERROR ou acima), com link de volta à conversa inteira. **Precisa de release** (o agent-studio vai na imagem).

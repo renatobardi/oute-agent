@@ -3,27 +3,31 @@
 {% set detail = true %}
 {% set back = "/conversas" %}
 {% set crumbs = [("Conversas", "/conversas"), (id|nome, none)] %}
-{% from "_macros.html" import cost, log_table, badge, tile, icon, span_icon, conv_name %}
+{% from "_macros.html" import cost, log_table, badge, tile, icon, span_icon, conv_name, aviso_custo with context %}
 {% set c = conversation %}
 {% set u = c.usage %}
 {% block title %}{{ id|nome }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
+{% call fragment("resumo") %}
 <div class="pagina-topo">
   <div class="titulo-linha">
-    <h1>Conversa {{ conv_name(id) }}</h1>
-    <a class="botao" href="/conversas">{{ icon("arrow-left", 14) }}Conversas</a>
+    {% if loading_target is none %}<h1>Conversa {{ conv_name(id) }}</h1>{% endif %}
+    <a class="botao" href="{{ com_custo("/conversas") }}">{{ icon("arrow-left", 14) }}Conversas</a>
   </div>
   {% if errors_only %}<p class="nota" data-filtro-erros>Só os erros: spans com status de erro e logs ERROR ou acima.
-    <a href="/conversa?id={{ id|urlencode }}">Ver a conversa inteira</a></p>{% endif %}
+    <a href="{{ com_custo("/conversa?id=" ~ (id|urlencode)) }}">Ver a conversa inteira</a></p>{% endif %}
 </div>
+{{ aviso_custo() }}
 <div class="tiles">
   {% call tile("Chamadas ao modelo", "activity") %}{{ u.calls|num }}{% endcall %}
   {% call tile("Tokens ent / saí", "arrow-left-right") %}{{ u.tokens.input|num }} / {{ u.tokens.output|num }}{% endcall %}
   {% call tile("Custo", "receipt") %}<span class="custo">{{ cost(u.cost) }}</span>{% endcall %}
   {% call tile("Duração", "timer") %}{{ c.duration_ns|dur }}{% endcall %}
 </div>
+{% endcall %}
 <div class="duas">
+{% call fragment("spans") %}
 <div class="cartao">
   <div class="cartao-topo">
     <div><h2>Spans{% if errors_only %} com erro ({{ u.errors.spans|num }}){% else %} ({{ c.spans|num }}){% endif %}</h2><p>Tokens e custo aparecem só nas chamadas ao modelo (o que entra nas somas). O nome do span abre o conteúdo.</p></div>
@@ -54,16 +58,17 @@
       {% if s.is_call %}
       <td class="n sec">{{ s.input_tokens|num }} / {{ s.output_tokens|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ s.cache_read_tokens|num }} / {{ s.cache_creation_tokens|num }}</span></td>
       <td class="n custo">
-        {% if s.cost_kind == "real" %}<span class="real" title="custo real, informado pela fonte">{{ s.cost|usd }}</span>
+        {% if s.cost_kind == "real" %}<span class="real" title="informado pela fonte (preço de lista, não gasto)">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
-        {% else %}<span class="semp" title="sem custo real e sem preço na tabela">sem preço</span>{% endif %}
+        {% elif s.cost_kind == "effective" %}<span class="real" title="custo efetivo: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
+        {% else %}<span class="semp" title="sem custo informado pela fonte e sem preço na tabela">sem preço</span>{% endif %}
       </td>
       {% else %}
       <td class="n sec">—</td><td class="n sec">—</td>
       {% endif %}
       <td>{% if s.error %}{{ badge("erro", "destrutivo") }}{% elif s.status_code == 1 %}ok{% else %}—{% endif %}</td>
     </tr>
-    <tr class="conteudo-linha"><td class="conteudo" colspan="7"></td></tr>
+    <tr class="conteudo-linha"><td class="conteudo" colspan="7" data-inline-bloco="faixa"></td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -71,8 +76,10 @@
   {% else %}
   <p class="aviso">{% if errors_only %}Esta conversa não tem spans com erro.{% else %}Esta conversa não tem spans.{% endif %}</p>
   {% endif %}
+{% endcall %}
 </div>
 <div class="pilha">
+{% call fragment("dados") %}
   <div class="cartao bloco">
     <h2>Resumo</h2>
     <dl class="resumo" data-resumo data-calls="{{ u.calls }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
@@ -80,7 +87,7 @@
         data-unpriced-calls="{{ u.cost.unpriced_calls }}">
       <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
       <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>
-      {% if c.task_id %}<dt>Sessão</dt><dd><a href="/sessao?id={{ c.task_id|urlencode }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
+      {% if c.task_id %}<dt>Sessão</dt><dd><a href="{{ com_custo("/sessao?id=" ~ (c.task_id|urlencode)) }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
       <dt>Início ({{ tzl() }})</dt><dd>{{ c.start_ns|ts }}</dd>
       <dt>Duração</dt><dd>{{ c.duration_ns|dur }}</dd>
       <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>
@@ -89,14 +96,17 @@
       <dt>Erros</dt><dd>{{ u.errors.spans|num }} spans · {{ u.errors.logs|num }} logs</dd>
     </dl>
   </div>
+{% endcall %}
 </div>
 </div>
 
+{% call fragment("logs") %}
 <h2>Logs{% if errors_only %} com erro ({{ u.errors.logs|num }}){% else %} ({{ c.logs|num }}){% endif %}</h2>
 {% if logs %}
 {{ log_table(logs, id, next_offset, errors_only) }}
 {% else %}
 <p class="aviso">{% if errors_only %}Esta conversa não tem logs com erro.{% else %}Esta conversa não tem logs.{% endif %}</p>
 {% endif %}
+{% endcall %}
 </div>
 {% endblock %}

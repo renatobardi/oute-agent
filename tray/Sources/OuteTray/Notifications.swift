@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// Notificação do macOS de pedido novo. Só funciona dentro do `.app` (o `oute tray install` monta): rodando o
+/// Notificação do macOS de pedido novo e de etapa nova de rodada (#508). Só funciona dentro do `.app` (o `oute tray install` monta): rodando o
 /// binário solto não há pacote, e o centro de notificações não existe.
 final class Notifications: NSObject, UNUserNotificationCenterDelegate {
     private var center: UNUserNotificationCenter? {
@@ -14,13 +14,13 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func post(id: String, title: String, body: String) {
+    func post(id: String, title: String, body: String, kind: String = "pedido") {
         guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        center.add(UNNotificationRequest(identifier: "pedido-\(id)", content: content, trigger: nil))
+        center.add(UNNotificationRequest(identifier: "\(kind)-\(id)", content: content, trigger: nil))
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,

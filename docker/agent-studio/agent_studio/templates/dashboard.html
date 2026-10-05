@@ -1,24 +1,30 @@
 {% extends "base.html" %}
 {% set nav = "dashboard" %}
 {% set crumbs = [("Dashboard", none)] %}
-{% from "_macros.html" import icon, badge, filter %}
+{% from "_macros.html" import icon, badge, filter, aviso_custo with context %}
+{% from "_graficos_barras.html" import barra, mini, amostra %}
+{% from "_graficos_linha.html" import linha %}
+{% from "_graficos_painel.html" import barra_modelo, composicao %}
 {# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem estilo na tag: a escala vem
    do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
-   distingue real de estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
+   distingue o informado pela fonte (ou efetivo) do estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
 {% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
 {% macro money(c) %}{% if c.real_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
 {% block title %}Dashboard · Agent Studio{% endblock %}
 {% block main %}
 {% set W = 600 %}{% set H = 180 %}
 <div class="pagina dashboard">
+{% call fragment("filtros") %}
 <div class="pagina-topo">
 <div class="titulo-linha">
-  <div><h1>Dashboard</h1>
+  <div>{% if loading_target is none %}<h1>Dashboard</h1>{% endif %}
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
-  {{ filter("/", windows, hours, range) }}
+  {{ filter("/", windows, hours, range, repos=repos, repo=repo, model=model) }}
 </div>
 </div>
+{% endcall %}
 
+{% call fragment("kpis") %}
 <section class="kpis" id="kpis" aria-label="Indicadores">
   {% for k in snap.kpis %}
   <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"{% if k.get("hint") %} title="{{ k.hint }}"{% endif %}
@@ -36,7 +42,9 @@
   </div>
   {% endfor %}
 </section>
+{% endcall %}
 
+{% call fragment("insights") %}
 <section class="cartao bloco" id="insights" data-insights="{{ insights|length }}">
   <div class="grafico-topo"><h2>{{ icon("sparkles") }} Insights</h2><span class="nota">regras fixas sobre a janela, sem LLM</span></div>
   {% if gates_read is not true %}
@@ -59,49 +67,49 @@
   <p class="nota" data-sem-insights>Nenhuma regra disparou nesta janela.</p>
   {% endif %}
 </section>
+{{ aviso_custo() }}
+{% endcall %}
 
 <div class="graficos">
 
 {# 1) chamadas por hora ou dia: linha + área #}
+{% call fragment("chamadas") %}
 {% set s = snap.series %}
 {% set n = s.points|length %}
 <section class="cartao bloco grafico" data-grafico="chamadas" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
-  <div class="grafico-topo"><h2>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">total {{ s.total|num }}</span></div>
+  <div class="grafico-topo"><h2>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">{% if model %}{{ model }} · {% endif %}total {{ s.total|num }}</span></div>
+  <form class="filtro filtro-modelo" method="get" action="/" data-modelo-form>
+    {% if range.from %}<input type="hidden" name="de" value="{{ range.from }}"><input type="hidden" name="ate" value="{{ range.to }}">{% else %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
+    {% if repo %}<input type="hidden" name="repo" value="{{ repo }}">{% endif %}
+    {% if custo == "efetivo" %}<input type="hidden" name="custo" value="efetivo">{% endif %}
+    <label>Modelo
+      <select name="model">
+        <option value="">Todos</option>
+        {% for m in snap.model_options %}<option value="{{ m }}"{% if m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}
+        {% if model and model not in snap.model_options %}<option value="{{ model }}" selected>{{ model }}</option>{% endif %}
+      </select>
+    </label>
+    <button type="submit">Aplicar</button>
+  </form>
   <div class="linha-grafico">
     <div class="eixo-y"><span>{{ s.max|num }}</span><span>{{ s.mid|num }}</span><span>0</span></div>
-    <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Chamadas ao modelo por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
-      <title>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</title>
-      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
-      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
-      <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
-      <path class="area" d="M{{ '%.1f'|format(s.points[0].x * W) }} {{ H }}{% for p in s.points %} L{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %} L{{ '%.1f'|format(s.points[-1].x * W) }} {{ H }} Z"/>
-      <path class="linha" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %}"/>
-      {% for p in s.points %}
-      <g class="ponto" data-bucket="{{ p.key }}" data-calls="{{ p.calls }}">
-        <rect class="alvo" x="{{ '%.1f'|format((p.x - 0.5 / n) * W) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
-        <line class="guia" x1="{{ '%.1f'|format(p.x * W) }}" x2="{{ '%.1f'|format(p.x * W) }}" y1="0" y2="{{ H }}"/>
-        <title>{{ p.label }} · {{ p.calls|calls }} · p95 {{ p.p95|ms }}</title>
-      </g>
-      {% endfor %}
-    </svg>
+    {% call(p, titulo) linha(s, n, W, H, "Chamadas ao modelo") %}{% if titulo %}{{ p.label }} · {{ p.calls|calls }} · p95 {{ p.p95|ms }}{% else %}data-bucket="{{ p.key }}" data-calls="{{ p.calls }}"{% endif %}{% endcall %}
     <span></span>
     <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
   </div>
 </section>
+{% endcall %}
 
-{# 2) custo por modelo: barras empilhadas, real (cheio) × estimado (tracejado) #}
+{# 2) custo por modelo: barras empilhadas, informado pela fonte (cheio) × estimado (tracejado) #}
+{% call fragment("custo-modelo") %}
 {% set comp = snap.composition %}
 <section class="cartao bloco grafico" data-grafico="custo-modelo" data-models="{{ snap.models_total }}">
-  <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">preço de lista · ≈ estimado</span></div>
+  <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">{{ "custo efetivo" if custo == "efetivo" else "preço de lista" }} · ≈ estimado</span></div>
   {% for m in snap.models %}
   <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
-       title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'custo real informado pela fonte' }}">
+       title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'informado pela fonte' }}">
     <span class="rotulo mono">{{ m.model }}</span>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
-      <title>{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}</title>
-      {% if m.real_frac %}<rect class="real" x="0" y="0" width="{{ '%.2f'|format([m.real_frac * 100, 1]|max) }}" height="14"/>{% endif %}
-      {% if m.est_frac %}<rect class="estimado" x="{{ '%.2f'|format([m.real_frac * 100, 0]|max) }}" y="0" width="{{ '%.2f'|format([m.est_frac * 100, 1]|max) }}" height="14"/>{% endif %}
-    </svg>
+    {% call barra_modelo(m) %}{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}{% endcall %}
     <span class="valor{% if m.estimated_usd is not none %} est{% endif %}">{% if m.cost is none %}sem preço{% else %}{{ money(m) }}{% endif %}</span>
   </div>
   {% else %}
@@ -111,19 +119,18 @@
     <span class="nota">Composição do custo</span>
     {% set real_f = (comp.real_usd or 0) / comp.total if comp.total else 0 %}
     {% set est_f = (comp.estimated_usd or 0) / comp.total if comp.total else 0 %}
-    <svg class="composicao-svg" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
-      <rect class="real" x="0" y="0" width="{{ '%.2f'|format(real_f * 100) }}" height="10"/>
-      <rect class="estimado" x="{{ '%.2f'|format(real_f * 100) }}" y="0" width="{{ '%.2f'|format(est_f * 100) }}" height="10"/>
-    </svg>
+    {{ composicao(real_f, est_f) }}
     <div class="legenda">
-      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>Real {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
-      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
+      <span>{{ amostra("real") }}{{ 'Efetivo' if custo == 'efetivo' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
+      <span>{{ amostra("estimado") }}Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
       {% if comp.unpriced_calls %}<span class="nota">{{ comp.unpriced_calls|num }} {{ "chamada sem preço" if comp.unpriced_calls == 1 else "chamadas sem preço" }}, fora da soma</span>{% endif %}
     </div>
   </div>
 </section>
+{% endcall %}
 
 {# 3) latência por modelo: percentis em tabela, mini-barra no p95 #}
+{% call fragment("latencia") %}
 <section class="cartao bloco grafico" data-grafico="latencia">
   <div class="grafico-topo"><h2>Latência das chamadas por modelo</h2><span class="nota">percentis</span></div>
   <div class="rolagem">
@@ -133,7 +140,7 @@
     {% for l in snap.latency %}
     <tr data-modelo="{{ l.model }}" data-calls="{{ l.n }}" data-p50-ms="{{ l.p50 }}" data-p90-ms="{{ l.p90 }}" data-p95-ms="{{ l.p95 }}" data-p99-ms="{{ l.p99 }}">
       <td class="mono">{{ l.model }}</td><td class="n">{{ l.n|num }}</td><td class="n sec">{{ l.p50|ms }}</td><td class="n sec">{{ l.p90|ms }}</td>
-      <td class="n p95"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>p95 {{ l.p95|ms }}</title><rect x="0" y="0" width="{{ '%.2f'|format([l.frac * 100, 2]|max) }}" height="6"/></svg>{{ l.p95|ms }}</td>
+      <td class="n p95">{% call mini(l.frac) %}p95 {{ l.p95|ms }}{% endcall %}{{ l.p95|ms }}</td>
       <td class="n sec">{{ l.p99|ms }}</td>
     </tr>
     {% else %}
@@ -143,14 +150,16 @@
   </table>
   </div>
 </section>
+{% endcall %}
 
 {# 4) tokens por fase AI-DLC #}
+{% call fragment("fases") %}
 <section class="cartao bloco grafico" data-grafico="fases">
   <div class="grafico-topo"><h2>Tokens por fase AI-DLC</h2><a class="nota" href="/uso?{{ window_qs }}">ver Uso</a></div>
   {% for f in snap.phases %}
   <div class="barra-linha fase" data-fase="{{ f.phase }}" data-tokens="{{ f.tokens }}" title="{{ f.phase }}: {{ f.tokens|num }} tokens em {{ f.calls|calls }}">
     <code>{{ f.phase }}</code>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ f.phase }} · {{ f.tokens|num }} tokens</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([f.frac * 100, 1]|max) }}" height="14"/></svg>
+    {% call barra(f.frac) %}{{ f.phase }} · {{ f.tokens|num }} tokens{% endcall %}
     <span class="valor">{{ f.tokens|compact }}</span>
   </div>
   {% else %}
@@ -158,8 +167,10 @@
   {% endfor %}
   <span class="nota">Entrada + saída; cache fora. Fase pelo label <code>aidlc</code> da sessão.</span>
 </section>
+{% endcall %}
 
 {# 5) atividade por dia da semana × hora: 5 degraus de --primary, sempre os 7 dias até agora #}
+{% call fragment("atividade") %}
 {% set heat = snap.heat %}
 <section class="cartao bloco grafico" data-grafico="atividade" data-peak="{{ heat.peak }}" data-total="{{ heat.total }}">
   <div class="grafico-topo"><h2>Atividade por dia e hora</h2><span class="nota">últimos 7 dias, {{ tzl() }}</span></div>
@@ -173,20 +184,57 @@
   </div>
   <div class="escala"><span>menos</span>{% for i in (0, 1, 2, 3, 4) %}<span class="calor-celula n{{ i }}"></span>{% endfor %}<span>mais chamadas</span></div>
 </section>
+{% endcall %}
 
 {# 6) sessões que mais custaram #}
+{% call fragment("sessoes") %}
 <section class="cartao bloco grafico" data-grafico="sessoes">
   <div class="grafico-topo"><h2>Sessões que mais custaram</h2><a class="nota" href="/sessoes?{{ window_qs }}">ver Sessões</a></div>
   {% for t in snap.top_sessions %}
-  <a class="top-sessao" href="/sessao?id={{ t.id|urlencode }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
+  <a class="top-sessao" href="{{ com_custo("/sessao?id=" ~ (t.id|urlencode)) }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
     <span class="top-linha"><span class="mono">{{ t.id }}</span><span class="valor{% if t.estimated %} est{% endif %}">{{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</span></span>
-    <span class="top-linha"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</title><rect x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 2]|max) }}" height="6"/></svg>
+    <span class="top-linha">{% call mini(t.frac) %}{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}{% endcall %}
       <span class="nota">{{ t.agents|join(", ") or "—" }} · {{ t.model or "—" }} · {{ t.calls|calls }}</span></span>
   </a>
   {% else %}
   <p class="nota">Nenhuma sessão com custo nesta janela.</p>
   {% endfor %}
 </section>
+{% endcall %}
+
+{# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa fora do oute-task #}
+{% call fragment("repos") %}
+<section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
+  <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>
+  {% for r in snap.by_repo %}
+  <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
+       title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
+    <span class="rotulo mono">{{ r.repo }}</span>
+    {% call barra(r.frac) %}{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}
+    <span class="valor">{{ r.calls|num }} · {% if r.cost is none %}sem preço{% else %}{{ money(r) }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
+  {% endfor %}
+</section>
+{% endcall %}
+
+{# 8) ferramentas mais usadas (#535): barra nos usos, o erro dela ao lado; o link leva à tela Ferramentas com a mesma janela e repositório #}
+{% call fragment("ferramentas") %}
+{% set tl = snap.tools %}
+<section class="cartao bloco grafico" data-grafico="ferramentas" data-ferramentas="{{ tl.rows|length }}" data-total="{{ tl.total }}" data-erros="{{ tl.errors }}">
+  <div class="grafico-topo"><h2>Ferramentas mais usadas</h2><a class="nota" href="/ferramentas?{{ window_qs }}">ver Ferramentas</a></div>
+  {% for t in tl.rows %}
+  <div class="barra-linha" data-ferramenta="{{ t.tool }}" data-usos="{{ t.uses }}" data-erros="{{ t.errors }}" title="{{ t.tool }}: {{ t.uses|num }} usos, {{ t.errors|num }} erros">
+    <span class="rotulo mono"><a href="/ferramenta?nome={{ t.tool|urlencode }}&amp;{{ window_qs }}">{{ t.tool }}</a></span>
+    {% call barra(t.frac) %}{{ t.tool }} · {{ t.uses|num }} usos · {{ t.errors|num }} erros{% endcall %}
+    <span class="valor">{{ t.uses|num }}{% if t.errors %} · {{ t.errors|num }} {{ "erro" if t.errors == 1 else "erros" }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhum uso de ferramenta nesta janela.</p>
+  {% endfor %}
+</section>
+{% endcall %}
 
 </div>
 </div>

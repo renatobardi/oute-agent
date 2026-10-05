@@ -1,4 +1,4 @@
-{% from "_macros.html" import icon, logo %}
+{% from "_macros.html" import icon, logo with context %}
 {# o casco (#467): barra lateral de 256 px, cabeçalho de 72 px com a trilha, e as faixas dos alertas e do Gate sob o cabeçalho.
    A página filha diz onde está: `nav` (item ativo da barra), `crumbs` (lista de (texto, link ou none)), `detail` (tela de
    detalhe: sem as faixas e, no celular, com o botão de voltar para `back`). Nada disso é o `#conteudo`: o htmx troca só ele. #}
@@ -7,7 +7,7 @@
 {% set _detail = detail is defined and detail %}
 {% set _groups = (
   ("Telemetria", (("conversas", "/conversas", "Conversas", "message-square"), ("sessoes", "/sessoes", "Sessões", "layers"))),
-  ("Análise", (("uso", "/uso", "Uso", "chart-column"), ("precos", "/precos", "Preços", "receipt"))),
+  ("Análise", (("uso", "/uso", "Uso", "chart-column"), ("ferramentas", "/ferramentas", "Ferramentas", "wrench"), ("precos", "/precos", "Preços", "receipt"))),
   ("Governança", (("pedidos", "/pedidos", "Pedidos", "shield-check"), ("rodadas", "/rodadas", "Rodadas", "repeat"))),
 ) %}
 <!doctype html>
@@ -19,6 +19,7 @@
 <title>{% block title %}Agent Studio{% endblock %}</title>
 <link rel="stylesheet" href="/static/studio.css">
 <script src="/static/htmx.min.js" defer></script>
+{% if authed|default(false) %}<script src="/static/loading.js" defer></script>{% endif %}
 {% block head %}{% endblock %}
 </head>
 <body>
@@ -29,19 +30,19 @@
 <div class="app">
   <aside class="barra" id="barra" aria-label="Menu">
     <div class="barra-topo">
-      <a class="marca" href="/">{{ logo(30) }}<span class="marca-texto"><strong>Agent Studio</strong><span>O painel de controle dos seus agentes de código.</span></span></a>
+      <a class="marca" href="{{ com_custo("/") }}">{{ logo(30) }}<span class="marca-texto"><strong>Agent Studio</strong><span>O painel de controle dos seus agentes de código.</span></span></a>
       <label class="botao icone-botao so-celular" for="menu" title="Fechar o menu"><span class="so-leitor">Fechar o menu</span>{{ icon("x") }}</label>
     </div>
     <div class="barra-nav">
       <nav class="nav-grupo" aria-label="Principal">
-        <a class="nav-item" href="/"{% if _nav == "dashboard" %} aria-current="page"{% endif %}>{{ icon("layout-dashboard") }}<span>Dashboard</span></a>
+        <a class="nav-item" href="{{ com_custo("/") }}"{% if _nav == "dashboard" %} aria-current="page"{% endif %}>{{ icon("layout-dashboard") }}<span>Dashboard</span></a>
       </nav>
       {% for label, items in _groups %}
       <div class="nav-bloco">
         <div class="nav-rotulo">{{ label }}</div>
         <nav class="nav-grupo" aria-label="{{ label }}">
           {% for key, href, text, glyph in items %}
-          <a class="nav-item" href="{{ href }}"{% if key == _nav %} aria-current="page"{% endif %}>{{ icon(glyph) }}<span>{{ text }}</span></a>
+          <a class="nav-item" href="{{ com_custo(href) }}"{% if key == _nav %} aria-current="page"{% endif %}>{{ icon(glyph) }}<span>{{ text }}</span></a>
           {% endfor %}
         </nav>
       </div>
@@ -57,14 +58,14 @@
 
   <div class="principal">
     <header class="cabecalho">
-      {% if _detail and back is defined %}<a class="botao icone-botao so-celular" href="{{ back }}" title="Voltar"><span class="so-leitor">Voltar</span>{{ icon("arrow-left") }}</a>{% endif %}
+      {% if _detail and back is defined %}<a class="botao icone-botao so-celular" href="{{ com_custo(back) }}" title="Voltar"><span class="so-leitor">Voltar</span>{{ icon("arrow-left") }}</a>{% endif %}
       {% if not (_detail and back is defined) %}<label class="botao icone-botao so-celular" for="menu" title="Abrir o menu"><span class="so-leitor">Abrir o menu</span>{{ icon("menu") }}</label>{% endif %}
       <label class="botao icone-botao so-desktop" for="menu" title="Mostrar ou esconder o menu"><span class="so-leitor">Mostrar ou esconder o menu</span>{{ icon("panel-left") }}</label>
       <span class="divisor so-desktop" aria-hidden="true"></span>
       <nav class="trilha" aria-label="Trilha">
         {% for text, link in _crumbs %}
         {% if not loop.last %}
-        {% if link %}<a class="trilha-pai" href="{{ link }}">{{ text }}</a>{% else %}<span class="trilha-pai">{{ text }}</span>{% endif %}
+        {% if link %}<a class="trilha-pai" href="{{ com_custo(link) }}">{{ text }}</a>{% else %}<span class="trilha-pai">{{ text }}</span>{% endif %}
         <span class="trilha-sep">{{ icon("chevron-right", 14) }}</span>
         {% else %}
         <span class="trilha-atual" aria-current="page">{{ text }}</span>
@@ -97,6 +98,8 @@
 {% endmacro %}
 {# faixas sob o cabeçalho (#467): só nas listas; nos detalhes (conversa, sessão, pedido) somem #}
 {# alertas do pipeline (#204) no topo de toda página de quem entrou; fora do #conteudo, que o htmx troca #}
+{% call fragment("alertas") %}
+{% if loading_shell and not _detail %}{{ loading_slot("alertas", "faixa") }}{% else %}
 {% if alerts_shown is defined and alerts_shown and not _detail %}
 {% if alerts is none %}
 <section class="alertas" id="alertas" data-alertas="" role="alert">
@@ -123,9 +126,13 @@
 <div id="alertas" data-alertas="0" hidden></div>
 {% endif %}
 {% endif %}
+{% endif %}
+{% endcall %}
 {# decisão pendente do Bardi (#386): rodada do swarm esperando resposta; fora do #conteudo, como os alertas #}
+{% call fragment("decisoes") %}
+{% if loading_shell and not _detail %}{{ loading_slot("decisoes", "faixa") }}{% else %}
 {% if decisions is defined and (decisions or decisions_old) and not _detail %}
-<section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" data-decisoes-antigas="{{ decisions_old|length }}" role="status">
+<section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" data-decisoes-antigas="{{ decisions_old|length }}" aria-live="polite">
   {{ icon("hand") }}
   <div class="faixa-corpo">
     {% if decisions %}
@@ -142,6 +149,9 @@
   <a class="faixa-link" href="/pedidos">Ver pedidos</a>
 </section>
 {% endif %}
+{% if loading_target == "decisoes" and decisions is none %}<p class="aviso erro" role="alert">As decisões pendentes não puderam ser lidas.</p>{% endif %}
+{% endif %}
+{% endcall %}
     <main id="conteudo">
 {% block main %}{% endblock %}
     </main>

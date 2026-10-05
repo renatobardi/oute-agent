@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% set crumbs = [("Marcar ações", none)] %}
+{% block title %}Marcar ações · Agent Studio{% endblock %}
+{% block main %}
+<div class="pagina">
+<h1>Marcar ações</h1>
+{% if active %}<p class="nota" data-marcacao="ativa">Este aparelho já tem o cookie de marcação.</p>{% endif %}
+<p class="nota">A credencial de marcação é a terceira do agent-studio (item <code>agent-studio</code> da pasta <code>oute-services</code> do vault). Ela só deixa marcar uma ação da página da rodada como feita: não faz merge, não fecha issue e não roda nada no host.</p>
+{% if failed %}<p class="aviso erro" role="alert">Credencial errada. Confira se copiou o campo inteiro, sem espaço no fim.</p>{% endif %}
+<form class="login" method="post" action="/marcar">
+  <div class="campo">
+    <div class="campo-rotulo"><label for="token">Credencial de marcação</label></div>
+    <div class="campo-entrada"><input id="token" name="token" type="password" autocomplete="off" required></div>
+  </div>
+  <input type="hidden" name="next" value="{{ next }}">
+  <button type="submit" class="botao primario">Guardar neste aparelho</button>
+</form>
+</div>
+{% endblock %}

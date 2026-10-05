@@ -33,6 +33,7 @@ studio_venv() {
   d="$(cache_dir)/agent-studio-$h"
   cache_publish "$d" studio_venv_ok studio_venv_build "$req" || return 1
   STUDIO_PY="$d/bin/python"
+  export STUDIO_PY STUDIO_LIB
 }
 studio_venv_ok() { "$1/bin/python" -c 'import duckdb, fastapi, uvicorn' 2>/dev/null; }
 studio_venv_build() {
@@ -103,3 +104,11 @@ studio_oute_up() {
   env_get() { sed -n \"s/^[[:space:]]*\$1=//p\" \"\$ROOT/.env\" 2>/dev/null | tail -1; }
   $FUNCS"$'\n'"agent_studio_up; $fim" 2>&1)"; RC=$?
 }
+
+# #536: lê o casco e seus blocos, pelo mesmo caminho de pedidos do navegador.
+studio_page() {
+  local first="${1:-}"
+  "$STUDIO_PY" "$STUDIO_LIB/studio_page.py" ${first:+"$first"} "${@:2}"
+  return $?
+}
+export -f studio_page

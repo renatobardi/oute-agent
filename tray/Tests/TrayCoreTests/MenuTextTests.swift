@@ -41,6 +41,23 @@ final class MenuTextTests: XCTestCase {
                        "swarm-1003-1211 · 1. aprovar a triagem  2. cortar a #387 · há 10 min")
     }
 
+    func testEtapaAprovadaDizTituloRodadaEIdadeSemVeredito() throws {
+        let etapas = try XCTUnwrap(try leitura().steps)
+        XCTAssertEqual(MenuText.step(etapas.rows[0]), "Fechamento da rodada · swarm-1003-1211 · há 2 min")
+    }
+
+    func testEtapaSemRevisorEReprovadaDizemOVeredito() throws {
+        let etapas = try XCTUnwrap(try leitura().steps)
+        XCTAssertEqual(MenuText.step(etapas.rows[1]), "Pedido de merge #12 · swarm-1003-1211 · sem revisor · há 5 min")
+        XCTAssertEqual(MenuText.step(etapas.rows[2]), "Triagem · swarm-1003-1211 · reprovada pelo revisor · há 40 min")
+    }
+
+    func testEtapasDizemQuantasHaOuQueEstaIndisponivel() throws {
+        XCTAssertEqual(MenuText.stepsHeader(try XCTUnwrap(try leitura().steps)), "Etapas das rodadas abertas: 3")
+        XCTAssertEqual(MenuText.stepsHeader(try XCTUnwrap(try leitura("tray-sem-surrealdb.json").steps)),
+                       "Etapas das rodadas: ? (estado indisponível)")
+    }
+
     func testPedidosSemSurrealDB() throws {
         XCTAssertEqual(MenuText.proposalsHeader(try leitura("tray-sem-surrealdb.json").proposals), "Pedidos pendentes: ? (estado indisponível)")
         XCTAssertEqual(MenuText.proposalsHeader(try leitura().proposals), "Pedidos pendentes: 3")

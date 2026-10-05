@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 usage() { curl -s -H "Authorization: Bearer $STUDIO_TOKEN" "$STUDIO_URL/v1/usage${1:-}"; }
 
@@ -157,6 +157,35 @@ check "borda: log na janela sem o span dele não é chamada" jqe '.totals.calls 
 
 # ---------------------------------------------------------------- 5. hora do fato × chegada
 check "últimas 24 h: nada (tudo chegou agora, fato em 2025)" jqe '.totals.calls == 0 and .rows == [] and .series == [] and .totals.cost.real_usd == null and .totals.latency_p95_ms == null' <<<"$(usage)"
+# ---------------------------------------------------------------- 5.1 os gráficos da tela /uso (#533)
+UH="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN")"
+G="$(data <<<"$UH")"
+check "/uso: os quatro gráficos"                       jqe '[.[] | select(.grafico) | .grafico] == ["uso-custo-dia", "uso-tokens-dia", "uso-custo-role", "uso-custo-phase"]' <<<"$G"
+check "/uso: custo por dia = um item por dia (2 dias, 2 colunas)" jqe '([.[] | select(.grafico == "uso-custo-dia")][0].days == "2") and ([.[] | select(.bucket and has("real-usd"))] | length == 2)' <<<"$G"
+check "/uso: soma do custo por dia = total da API (real e estimado)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
+  ([\$g[] | select(.bucket and has(\"real-usd\")) | (.[\"real-usd\"] | select(. != \"\") | tonumber)] | add) as \$r |
+  ([\$g[] | select(.bucket and has(\"real-usd\")) | (.[\"estimated-usd\"] | select(. != \"\") | tonumber)] | add) as \$e |
+  ((\$r - \$t.real_usd | fabs) < 1e-9) and ((\$e - \$t.estimated_usd | fabs) < 1e-9)" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
+for K in uso-custo-dia uso-custo-role uso-custo-phase; do
+  check "/uso: $K traz o total real e estimado da janela (= API)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" --arg k "$3" "
+    [\$g[] | select(.grafico == \$k)][0] | ((.[\"real-usd\"] | tonumber) - \$t.real_usd | fabs) < 1e-9 and ((.[\"estimated-usd\"] | tonumber) - \$t.estimated_usd | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$K"
+done
+check "/uso: barras de papel e de fase: 1 linha cada, com o custo do total (a API só tem avulsa e desconhecida)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
+  ([\$g[] | select(.nome)] | length == 2) and ([\$g[] | select(.nome) | ((.[\"real-usd\"] | tonumber) - \$t.real_usd | fabs) < 1e-9 and ((.[\"estimated-usd\"] | tonumber) - \$t.estimated_usd | fabs) < 1e-9] | all)" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
+check "/uso: tokens por dia = tokens da API (entrada, saída, cache)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
+  [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
+  (\$c.input | tonumber) == \$t.input and (\$c.output | tonumber) == \$t.output and (\$c[\"cache-read\"] | tonumber) == \$t.cache_read and (\$c[\"cache-creation\"] | tonumber) == \$t.cache_creation" >/dev/null' _ "$G" "$(jq -c '.totals.tokens' <<<"$R")"
+check "/uso: tokens: a soma das colunas = a do gráfico" bash -c 'jq -n -e --argjson g "$1" "
+  [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
+  ([\$g[] | select(.bucket and has(\"input\")) | (.input | tonumber) + (.output | tonumber) + (.[\"cache-read\"] | tonumber) + (.[\"cache-creation\"] | tonumber)] | add) ==
+  ((\$c.input | tonumber) + (\$c.output | tonumber) + (\$c[\"cache-read\"] | tonumber) + (\$c[\"cache-creation\"] | tonumber))" >/dev/null' _ "$G"
+check "/uso: informado pela fonte × estimado distinguidos por texto e traço"  bash -c 'grep -q "Informado pela fonte" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
+check "/uso: entrada, saída e cache distinguidos por texto e traço" bash -c 'for w in "Entrada (" "Saída (" "Cache, leitura" "t-ent" "t-sai" "t-cache"; do grep -q "$w" <<<"$1" || exit 1; done' _ "$UH"
+check "/uso: sem style= nas tags dos gráficos (CSP)"    bash -c '! grep -q "style=" <<<"$1"' _ "$UH"
+check "/uso: as tabelas por papel e por fase seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1' <<<"$G"
+GE="$(data <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")")"
+check "/uso: janela vazia, gráficos sem coluna e sem barra" jqe '([.[] | select(.bucket or .nome)] | length) == 0 and ([.[] | select(.grafico)] | length) == 4' <<<"$GE"
+
 studio_stop
 
 # ---------------------------------------------------------------- 6. lógica reusável (#204-#206), direto no módulo
@@ -286,6 +315,23 @@ g = usage.aggregate(st2.con, T0 * 10**9, (T0 + 60) * 10**9, cost.PriceTable({}),
 out("duas linhas do mesmo request_id: uma chamada, custo máximo; span sem request_id não junta",
     g["calls"] == 2 and g["real_calls"] == 1 and g["real_usd"] == 9.0 and g["unpriced_calls"] == 1)
 st2.close()
+# dados dos gráficos da tela (#533): dia sem chamada entra zerado, custo só estimado ou sem custo não quebra, 10+ dias afinam o eixo
+from agent_studio import usage_charts
+mk = lambda day, real, est, i=0: {"day": day, "calls": 1, "cost": {"real_usd": real, "estimated_usd": est},
+                                  "tokens": {"input": i, "output": 2, "cache_read": 3, "cache_creation": 4}}
+dc = usage_charts.days([mk("2025-09-27", 1.0, None, 10), mk("2025-09-27", None, 1.0, 5), mk("2025-09-29", None, 2.0)])
+out("gráficos: o dia sem chamada (28) entra zerado entre o primeiro e o último",
+    [p["key"] for p in dc["points"]] == ["2025-09-27", "2025-09-28", "2025-09-29"] and dc["points"][1]["tokens"] == 0 and dc["points"][1]["calls"] == 0)
+out("gráficos: custo do dia soma real e estimado; fração pelo maior dia",
+    dc["points"][0]["real_usd"] == 1.0 and dc["points"][0]["estimated_usd"] == 1.0 and dc["max_cost"] == 2.0
+    and dc["points"][0]["real_frac"] == 0.5 and dc["points"][2]["est_frac"] == 1.0)
+out("gráficos: tokens do dia somam entrada, saída e cache (leitura + escrita)",
+    dc["points"][0]["input"] == 15 and dc["points"][0]["cache"] == 14 and dc["points"][0]["tokens"] == 15 + 4 + 14)
+out("gráficos: sem série, nada a desenhar", usage_charts.days([]) == {"points": [], "max_cost": 0, "mid_cost": 0, "max_tokens": 0, "mid_tokens": 0})
+long = usage_charts.days([mk("2025-09-01", 1.0, None), mk("2025-09-30", 1.0, None)])["points"]
+out("gráficos: 30 dias, rótulo de um a cada 4 no eixo", len(long) == 30 and sum(1 for p in long if p["tick"]) == 8)
+sem = usage_charts.bars([{"role": "x", "calls": 1, "cost": {"real_usd": None, "estimated_usd": None}}], "role")
+out("gráficos: barra sem custo nenhum fica sem preço e sem largura", sem[0]["priced"] is False and sem[0]["real_frac"] == 0 and sem[0]["est_frac"] == 0)
 PY
 check_py_lines "$TMP/py.out"
 

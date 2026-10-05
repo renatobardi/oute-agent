@@ -1,2 +1,0 @@
-### Changed
-- **Regra do `rm` com variável aparece na lista de conferência antes de rodar comando** (#539). A regra da linha 14 sobre `"${VAR:?}"/…` é referenciada em uma nova lista "Antes de rodar um comando que use `rm` com variável" e na seção "Se um prompt de permissão aparecer mesmo assim", com a frase "a regra vale também para comando que você roda na aba, não só para o que vai no arquivo de teste". **Precisa de release** (`docker/swarm-worker.md` vai na imagem).
