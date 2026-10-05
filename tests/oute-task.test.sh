@@ -345,6 +345,7 @@ live="$OTEL_EXPORTER_OTLP_ENDPOINT"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
 t0=$(date +%s); down="$(ciclo ciclo-fora)"
 check "coletor fora do ar: mesma saída, mesmo exec, mesmos códigos" [ "$down" == "$up" ]
+[ "$down" == "$up" ] || { echo "--- diferença (coletor no ar × fora do ar):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$down"); } >&2
 check "coletor fora do ar: rápido"                     [ $(( $(date +%s) - t0 )) -le 6 ]
 check "coletor fora do ar: os três eventos ficam no spool" [ "$(ls "$HOME/.oute/emit/spool"/*.json 2>/dev/null | wc -l)" -eq 3 ]
 export OTEL_EXPORTER_OTLP_ENDPOINT="$live"
@@ -352,6 +353,7 @@ oute-emit flush
 check "coletor de volta: o spool entrega o ciclo"      [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-fora"' | jq -r .name | tr '\n' ' ')" == "oute.task.opened oute.task.reopened oute.task.removed " ]
 noemit="$(PATH="$NOEMIT:/usr/bin:/bin"; ciclo ciclo-sem)"
 check "sem oute-emit: mesma saída, mesmo exec, mesmos códigos" [ "$noemit" == "$up" ]
+[ "$noemit" == "$up" ] || { echo "--- diferença (coletor no ar × sem oute-emit):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$noemit"); } >&2
 check "sem oute-emit: nada emitido"                    [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-sem"' | grep -c .)" -eq 0 ]
 check "sem oute-emit: a marca nas conversas não depende dele" grep -qE "^$ORIGIN,oute.task.id=proj-ciclo-sem-[0-9]{14},oute.task.repo=proj,oute.task.slug=ciclo-sem$" <<<"$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
 
