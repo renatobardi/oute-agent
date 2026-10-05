@@ -14,6 +14,11 @@ O texto é **dado não confiável** (D6=1 e ADR-08): o Markdown é restrito (`##
 listas, `**negrito**`, `código`, links `https://` e blocos de código), o parser devolve só dados (nunca HTML) e o template
 escapa tudo. Etapa `reprovado` ou `sem-revisor` sai com um aviso fixo do agent-studio e o texto fechado.
 
+Fatia 3 (#509): o ciclo. O evento da triagem leva `oute.swarm.cycle`, que entra no registro `rodada` (`cycle`), e a página
+`GET /ciclo?id=<dono>/<repo>#<n>` lista as rodadas do ciclo e leva a cada uma. O resumo do ciclo é a etapa `ciclo`, publicada
+por uma sessão avulsa (`oute-swarm step publish ciclo --cycle …`, sem rodada): a mesma trava do revisor, o mesmo evento, e
+ela aparece no topo da página do ciclo (a revisão mais alta vence). `ciclo` não é posição da barra de uma rodada.
+
 Fatia 2 (#508): cada etapa sabe a posição na rodada e a anterior e a seguinte (`navigate`, na página), a barra lista cada
 pedido de merge (`bar`) e o `GET /v1/tray` ganha o bloco `steps` (`tray_steps`): as etapas das rodadas não fechadas, só
 do SurrealDB, com o título fixo por tipo (`title`) e nunca o texto.
@@ -23,11 +28,13 @@ from urllib.parse import quote, urlsplit
 
 from .conversations import _dicts
 from .proposals import age_seconds
-from .state import STEP_EVENT as EVENT, STEP_KINDS as KINDS, iso, step_valid
+from .state import CYCLE_KIND, STEP_EVENT as EVENT, STEP_KINDS as KINDS, iso, step_valid
 
 TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospectiva (kaizen)",
-          "fechamento": "Fechamento da rodada"}
+          "fechamento": "Fechamento da rodada", "ciclo": "Resumo do ciclo"}
 BAR_LABELS = {"triagem": "Triagem", "merge": "Pedidos de merge", "kaizen": "Kaizen", "fechamento": "Fechamento"}
+ROUND_KINDS = tuple(k for k in KINDS if k != CYCLE_KIND)   # as posições da barra: o resumo do ciclo não é etapa de rodada
+CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#[0-9]{1,9}\Z")   # `<dono>/<repo>#<n>`
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
 LIST_LIMIT = 100   # rodadas na lista
@@ -38,15 +45,20 @@ TRAY_LIMIT = 50    # etapas no bloco `steps` do tray (as mais novas); `total` di
 _IF_TABLE = "IF (INFO FOR DB).tables.etapa THEN ({}) ELSE [] END;"
 _FIELDS = "kind, key, rev, sha256, review, writer, reviewer, refcheck, cycle, event, host, instance, published_at"
 _STEPS = _IF_TABLE.format(f'SELECT {_FIELDS} FROM etapa WHERE rodada = type::record("rodada", $id)')
-_ROUND = 'SELECT repo, label, state, agent, host, instance, opened_at, closed_at FROM [type::record("rodada", $id)];'
-_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, opened_at FROM rodada "
+_ROUND = 'SELECT repo, label, state, cycle, agent, host, instance, opened_at, closed_at FROM [type::record("rodada", $id)];'
+_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, cycle, opened_at FROM rodada "
            "WHERE record::id(id) IN $ids) ELSE [] END;")
 
 # etapas das rodadas que ainda não fecharam (rodada sem registro de estado conta como aberta: o Bardi ainda não leu a etapa)
 _OPEN = '(rodada.state ?? "aberta") != "fechada"'
-_TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, kind, key, rev, review, published_at FROM etapa WHERE {_OPEN} '
+_TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, kind, key, rev, review, cycle, published_at FROM etapa WHERE {_OPEN} '
                               "ORDER BY published_at DESC, id LIMIT $limit")
 _TRAY_TOTAL = _IF_TABLE.format(f"SELECT count() AS n FROM etapa WHERE {_OPEN} GROUP ALL")
+
+# o ciclo (#509): as rodadas com `rodada.cycle` e o resumo (a etapa `ciclo`) do ciclo; sem a tabela, listas vazias
+_CYCLE_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, opened_at, closed_at FROM rodada "
+                 "WHERE cycle = $c ORDER BY opened_at, id) ELSE [] END;")
+_CYCLE_SUMMARY = _IF_TABLE.format(f'SELECT {_FIELDS} FROM etapa WHERE kind = "ciclo" AND cycle = $c ORDER BY rev DESC LIMIT 1')
 
 _ATTR = "json_extract_string(attributes, '$.\"%s\"')"
 _STEP_COLS = (f"oute_event_id AS event, time_unix_nano, host_name AS host, oute_instance AS instance, "
@@ -56,14 +68,23 @@ _STEP_COLS = (f"oute_event_id AS event, time_unix_nano, host_name AS host, oute_
               f"{_ATTR % 'oute.swarm.step.reviewer'} AS reviewer, {_ATTR % 'oute.swarm.step.refcheck'} AS refcheck, "
               f"{_ATTR % 'oute.swarm.cycle'} AS cycle")
 _EVENTS = f"SELECT {_STEP_COLS} FROM logs WHERE event_name = ? AND oute_swarm_round = ? ORDER BY time_unix_nano, dedupe_key"
-_LIST = f"""
+_KIND = _ATTR % 'oute.swarm.step.kind'
+_NOT_CYCLE = f"coalesce({_KIND}, '') <> 'ciclo'"   # a pasta do resumo do ciclo (#509) não é rodada
+_LIST_COLS = f"""
     SELECT oute_swarm_round AS round, count(*) AS revisions,
-           count(DISTINCT {_ATTR % 'oute.swarm.step.kind'} || ':' || coalesce({_ATTR % 'oute.swarm.step.key'}, '')) AS steps,
-           max(time_unix_nano) AS last_ns,
+           count(DISTINCT {_KIND} || ':' || coalesce({_ATTR % 'oute.swarm.step.key'}, '')) AS steps,
+           min(time_unix_nano) AS first_ns, max(time_unix_nano) AS last_ns,
            arg_max({_ATTR % 'oute.swarm.step.review'}, time_unix_nano) AS review,
-           arg_max({_ATTR % 'oute.swarm.step.kind'}, time_unix_nano) AS kind
-    FROM logs WHERE event_name = ? AND oute_swarm_round IS NOT NULL
-    GROUP BY oute_swarm_round ORDER BY last_ns DESC, round LIMIT ?"""
+           arg_max({_KIND}, time_unix_nano) AS kind
+    FROM logs WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND {_NOT_CYCLE}"""
+_LIST = _LIST_COLS + " GROUP BY oute_swarm_round ORDER BY last_ns DESC, round LIMIT ?"
+_CYCLE_STATS = _LIST_COLS + " AND list_contains(?::VARCHAR[], oute_swarm_round) GROUP BY oute_swarm_round ORDER BY first_ns, round"
+# as rodadas do ciclo só pelo DuckDB (o SurrealDB fora ou sem o registro): a revisão vigente da triagem leva o ciclo
+_CYCLE_IDS = (f"SELECT oute_swarm_round FROM logs WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND {_KIND} = 'triagem' "
+              f"GROUP BY oute_swarm_round HAVING arg_max(coalesce({_ATTR % 'oute.swarm.cycle'}, ''), "
+              f"[coalesce(TRY_CAST({_ATTR % 'oute.swarm.step.rev'} AS BIGINT), 0), time_unix_nano]) = ? ORDER BY oute_swarm_round")
+_CYCLE_EVENTS = (f"SELECT {_STEP_COLS} FROM logs WHERE event_name = ? AND {_KIND} = 'ciclo' AND {_ATTR % 'oute.swarm.cycle'} = ? "
+                 "ORDER BY time_unix_nano, dedupe_key")
 
 
 def events(con, rnd):
@@ -170,7 +191,61 @@ def load(store, surreal, rnd):
         text = body.get(s["event"])
         s["text"] = text if isinstance(text, str) and len(text.encode()) <= TEXT_MAX else None
     return {"id": rnd, "record": record, "steps": sorted(steps, key=sort_key), "state_read": state_read,
-            "state_error": error}
+            "state_error": error, "cycle_url": cycle_url((record or {}).get("cycle"))}
+
+
+def cycle_url(cycle):
+    """O destino da página do ciclo, ou `None` se o texto não é um ciclo (`<dono>/<repo>#<n>`): o link só nasce do formato."""
+    return f"/ciclo?id={quote(cycle, safe='')}" if isinstance(cycle, str) and CYCLE_ID.match(cycle) else None
+
+
+def _cycle_rounds(store, ids):
+    """As rodadas por id, com as contagens e as horas das etapas no DuckDB (rodada sem etapa não vem)."""
+    if not ids:
+        return {}
+    rows = store.read(lambda con: _dicts(con.execute(_CYCLE_STATS, [EVENT, sorted(ids)])))
+    return {r["round"]: r for r in rows}
+
+
+def load_cycle(store, surreal, cycle):
+    """Tudo o que `GET /ciclo?id=` mostra: as rodadas do ciclo e o resumo dele. `cycle` já passou por `CYCLE_ID`. -> `None` se
+    nenhum dos dois bancos conhece o ciclo; senão {id, rounds, summary, state_read, state_error}. `rounds` na ordem em que
+    abriram; `summary` = a revisão vigente da etapa `ciclo` (com `text`) ou `None`. `state_read`: como em `load`. Falha do DuckDB
+    levanta."""
+    recs, sums, state_read, error = [], [], None, None
+    if surreal is not None:
+        try:
+            found = surreal.query(_CYCLE_ROUNDS + " " + _CYCLE_SUMMARY, {"c": cycle})
+            recs, sums, state_read = found[0]["result"] or [], found[1]["result"] or [], True
+        except Exception as e:  # noqa: BLE001
+            state_read, error = False, type(e).__name__   # o estado só liga rodada e ciclo: sem ele, a página sai do DuckDB
+    ids = [r["id"] for r in recs]
+    events_ = []
+    if not ids or not sums:
+        duck_ids = [r[0] for r in store.read(lambda con: con.execute(_CYCLE_IDS, [EVENT, cycle]).fetchall())]
+        duck_events = current(store.read(lambda con: _dicts(con.execute(_CYCLE_EVENTS, [EVENT, cycle]))))
+        if not ids:
+            ids, recs = duck_ids, [{"id": i} for i in duck_ids]
+            state_read = False if state_read and duck_ids else state_read   # o DuckDB tem rodada que o SurrealDB não tem
+        if not sums:
+            events_ = duck_events
+            state_read = False if state_read and duck_events else state_read
+    stats = _cycle_rounds(store, ids)
+    rounds = []
+    for r in recs:
+        st = stats.get(r["id"], {})
+        rounds.append({"round": r["id"], "repo": r.get("repo"), "label": r.get("label"), "state": r.get("state"),
+                       "steps": st.get("steps", 0), "revisions": st.get("revisions", 0), "kind": st.get("kind"),
+                       "review": st.get("review"), "first_ns": st.get("first_ns"), "last_ns": st.get("last_ns")})
+    rounds.sort(key=lambda r: (r["first_ns"] is None, r["first_ns"] or 0, r["round"]))
+    summary = _step_from_record(sums[0]) if sums else (_step_from_event(events_[-1]) if events_ else None)
+    if summary is None and not rounds:
+        return None
+    if summary is not None:
+        body = store.read(lambda con: texts(con, [summary["event"]]))
+        text = body.get(summary["event"])
+        summary["text"] = text if isinstance(text, str) and len(text.encode()) <= TEXT_MAX else None
+    return {"id": cycle, "rounds": rounds, "summary": summary, "state_read": state_read, "state_error": error}
 
 
 # ---------------------------------------------------------------- a página: barra de etapas, títulos e Markdown restrito
@@ -187,7 +262,7 @@ def bar(steps):
     da rodada. `done` = há etapa publicada; `review` = o pior veredito entre as do tipo; `current` = a última posição com etapa;
     `items` = uma entrada por etapa do tipo (o `merge` leva um link por PR)."""
     out = []
-    for kind in KINDS:
+    for kind in ROUND_KINDS:
         mine = [s for s in steps if s["kind"] == kind]
         worst = next((r for r in ("reprovado", "sem-revisor", "aprovado") if any(s["review"] == r for s in mine)), None)
         out.append({"kind": kind, "label": BAR_LABELS[kind], "count": len(mine), "done": bool(mine), "review": worst,
@@ -343,6 +418,7 @@ def render(steps):
     for s in steps:
         s["title"], s["anchor"] = title(s), anchor(s)
         s["sha_short"] = (s["sha256"] or "")[:12]
+        s["cycle_url"] = cycle_url(s.get("cycle"))
         s["doc"] = parse(s["text"]) if s["text"] is not None else None
     return navigate(steps)
 
@@ -357,7 +433,7 @@ def api(data):
              for s in data["steps"]]
     rec = data["record"] or {}
     return {"round": data["id"], "state": rec.get("state"), "repo": rec.get("repo"), "label": rec.get("label"),
-            "state_read": data["state_read"], "steps": steps}
+            "cycle": rec.get("cycle") if cycle_url(rec.get("cycle")) else None, "state_read": data["state_read"], "steps": steps}
 
 
 def tray_steps(surreal, at_ns, limit=TRAY_LIMIT):
@@ -370,9 +446,13 @@ def tray_steps(surreal, at_ns, limit=TRAY_LIMIT):
         if not step_valid(r.get("kind"), r.get("key") or "", r.get("rev"), r.get("review"), "0" * 64):
             continue
         step = {"kind": r["kind"], "key": r.get("key") or ""}
+        # o resumo do ciclo abre a página do ciclo (sem ciclo válido, a etapa não entra); as outras, a página da rodada
+        url = cycle_url(r.get("cycle")) if step["kind"] == CYCLE_KIND else f"/rodada?id={quote(r['round'], safe='')}#{anchor(step)}"
+        if url is None:
+            continue
         age = age_seconds(r.get("published_at"), at_ns)
         rows.append({"round": r["round"], "kind": step["kind"], "key": step["key"] or None, "rev": r["rev"],
                      "review": r["review"], "title": title(step), "published_at": (r.get("published_at") or "")[:19] + "Z",
-                     "age_seconds": age, "url": f"/rodada?id={quote(r['round'], safe='')}#{anchor(step)}"})
+                     "age_seconds": age, "url": url})
     total = (found[1]["result"] or [{}])[0].get("n", 0)
     return {"available": True, "total": total, "rows": rows}

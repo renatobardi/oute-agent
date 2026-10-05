@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set nav = "rodadas" %}
+{% set detail = true %}
+{% set back = "/rodadas" %}
+{% set crumbs = [("Rodadas", "/rodadas"), ("Ciclo " ~ c.id, none)] %}
+{% from "_macros.html" import badge, icon, doc, review_badge %}
+{% block title %}Ciclo {{ c.id }} · Agent Studio{% endblock %}
+{% block main %}
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha">
+    <div>
+      <h1>Ciclo <code>{{ c.id }}</code></h1>
+      <p class="nota">O resumo do ciclo e as rodadas que a triagem ligou a ele, conferidos por um revisor de outro modelo. Esta tela só mostra.</p>
+    </div>
+    <a class="botao" href="/rodadas">{{ icon("arrow-left", 14) }}Rodadas</a>
+  </div>
+</div>
+{% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido ou está vazio:
+  a página mostra o que o DuckDB tem. A causa está no log do agent-studio.</p>{% endif %}
+{% set s = c.summary %}
+{% if s %}
+<section class="cartao etapa" id="{{ s.anchor }}" data-etapa="ciclo" data-rev="{{ s.rev }}" data-review="{{ s.review }}" data-sha256="{{ s.sha256 }}">
+  <div class="cartao-topo">
+    <div>
+      <h2>{{ s.title }}</h2>
+      <p>revisão {{ s.rev }} · publicada em {{ s.published_at|when }} {{ tzl() }} · autor {{ s.writer or "—" }} · revisor {{ s.reviewer or "—" }} · sha256 <code>{{ s.sha_short }}</code></p>
+    </div>
+    {{ review_badge(s.review) }}
+  </div>
+  {% if s.review == "reprovado" %}
+  <p class="aviso erro etapa-aviso" role="alert" data-aviso="reprovado">Etapa reprovada pelo revisor. O texto abaixo não foi aprovado e pode ter erro de fato, de fonte ou de forma. Abra só se quiser lê-lo assim mesmo.</p>
+  {% elif s.review == "sem-revisor" %}
+  <p class="aviso etapa-aviso" role="alert" data-aviso="sem-revisor">Etapa sem revisor. Nenhum outro modelo conferiu este texto (tempo esgotado ou revisor indisponível). Abra só se quiser lê-lo assim mesmo.</p>
+  {% endif %}
+  {% if s.doc is none %}
+  <p class="aviso etapa-aviso" data-sem-texto>O texto desta etapa não chegou ao agent-studio (falta o corpo do evento <code>oute.swarm.step.published</code> no DuckDB).</p>
+  {% elif s.review == "aprovado" %}
+  <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+  {% else %}
+  <details class="etapa-fechada" data-texto-fechado>
+    <summary>Abrir o texto sem revisão aprovada</summary>
+    <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+  </details>
+  {% endif %}
+  {% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}
+</section>
+{% else %}
+<p class="aviso" data-sem-resumo>O resumo deste ciclo ainda não foi publicado.</p>
+{% endif %}
+<section class="cartao" data-rodadas-ciclo>
+  <div class="cartao-topo"><h2>Rodadas do ciclo</h2></div>
+  {% if c.rounds %}
+  <div class="rolagem">
+  <table class="rodadas empilha">
+    <thead><tr><th>Rodada</th><th>Repositório</th><th>Estado</th><th class="n">Etapas</th><th>Última etapa</th><th>Veredito</th><th>Em ({{ tzl() }})</th></tr></thead>
+    <tbody>
+    {% for x in c.rounds %}
+    <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-review="{{ x.review or '' }}" data-state="{{ x.state or '' }}">
+      <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{{ x.round }}</a></td>
+      <td class="sec">{{ x.repo or "—" }}{% if x.label %} · {{ x.label }}{% endif %}</td>
+      <td class="sec">{{ x.state or "—" }}</td>
+      <td class="n">{{ x.steps|num }}</td>
+      <td class="sec">{{ x.kind or "—" }}</td>
+      <td>{% if x.review == "aprovado" %}{{ badge("aprovado", "secundario", "check") }}{% elif x.review == "reprovado" %}{{ badge("reprovado", "destrutivo", "triangle-alert") }}{% elif x.review == "sem-revisor" %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% else %}—{% endif %}</td>
+      <td class="hora sec">{% if x.last_ns %}{{ x.last_ns|ts }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="aviso" data-sem-rodadas>Nenhuma rodada ligou a triagem a este ciclo.</p>
+  {% endif %}
+</section>
+</div>
+{% endblock %}

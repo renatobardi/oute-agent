@@ -419,7 +419,7 @@ check "--pr fora do merge: recusa"                       bash -c '[ "$1" -eq 1 ]
 swr step publish merge --pr abc
 check "--pr que não é número: recusa"                    bash -c '[ "$1" -eq 1 ] && grep -qF "etapa merge pede --pr" <<<"$2"' _ "$RC" "$ERR"
 swr step publish diagrama
-check "tipo desconhecido: recusa e lista os tipos"       bash -c '[ "$1" -eq 1 ] && grep -qF "tipo de etapa inválido: diagrama (use: triagem merge kaizen fechamento)" <<<"$2"' _ "$RC" "$ERR"
+check "tipo desconhecido: recusa e lista os tipos"       bash -c '[ "$1" -eq 1 ] && grep -qF "tipo de etapa inválido: diagrama (use: triagem merge kaizen fechamento ciclo)" <<<"$2"' _ "$RC" "$ERR"
 swr step publish fechamento --pr
 check "opção sem valor: recusa (sem laço)"               bash -c '[ "$1" -eq 1 ] && grep -qF -- "--pr pede um valor" <<<"$2"' _ "$RC" "$ERR"
 swr step publish
