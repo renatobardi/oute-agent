@@ -1,0 +1,2 @@
+### Changed
+- **agent-studio: `/rodadas` sem parâmetro lista todas as rodadas** (#618). Antes, a tela abria com a janela de 24 horas, e as rodadas mais antigas só apareciam com a janela de 7, 30 ou 366 dias. Agora o padrão é "todas as rodadas", sem limite de data, e a tela diz isso. O filtro de período continua: uma janela pronta ou um intervalo De/Até restringe a lista. As outras telas seguem com 24 horas por padrão. **Precisa de release** (`docker/agent-studio/` vai na imagem).
