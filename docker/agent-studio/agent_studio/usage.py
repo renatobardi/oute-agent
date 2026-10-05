@@ -123,6 +123,33 @@ def _add(a, b):
     return b if a is None else a + b
 
 
+def _add_call(a, rec, prices, at_ns, effective):
+    """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço e, no efetivo, mesma conta) no acumulador `a`."""
+    a["calls"] += rec["calls"]
+    for t in a["tokens"]:
+        a["tokens"][t] += rec[t]
+    if effective and rec["sub"]:
+        # assinatura (#531): a chamada custa 0 (fica entre as "com custo": sem estimativa e sem "sem preço"); a soma de
+        # `real_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
+        a["real_calls"] += rec["calls"]
+        a["real_usd"] = _add(a["real_usd"], 0.0)
+        return
+    a["real_calls"] += rec["calls_real"]
+    if rec["cost_real"] is not None:
+        a["real_usd"] = _add(a["real_usd"], rec["cost_real"])
+    pending = rec["calls"] - rec["calls_real"]
+    if not pending:
+        return
+    est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"], rec["est_cache_creation"],
+                            prices.lookup(rec["model"], at_ns(rec["epoch"])))
+    if est is None:
+        a["unpriced_calls"] += pending
+        a["unpriced_models"].add(rec["model"])
+    else:
+        a["estimated_calls"] += pending
+        a["estimated_usd"] = _add(a["estimated_usd"], est)
+
+
 def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, effective=False):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
     depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
@@ -147,29 +174,7 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
 
     fine = keys if "model" in keys else keys + ("model",)
     for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, effective):
-        a = acc(rec)
-        a["calls"] += rec["calls"]
-        for t in a["tokens"]:
-            a["tokens"][t] += rec[t]
-        if effective and rec["sub"]:
-            # assinatura: a chamada custa 0 (fica entre as "com custo": sem estimativa e sem "sem preço"); a soma de
-            # `real_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
-            a["real_calls"] += rec["calls"]
-            a["real_usd"] = _add(a["real_usd"], 0.0)
-            continue
-        a["real_calls"] += rec["calls_real"]
-        if rec["cost_real"] is not None:
-            a["real_usd"] = _add(a["real_usd"], rec["cost_real"])
-        pending = rec["calls"] - rec["calls_real"]
-        if pending:
-            est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"],
-                                    rec["est_cache_creation"], prices.lookup(rec["model"], at_ns(rec["epoch"])))
-            if est is None:
-                a["unpriced_calls"] += pending
-                a["unpriced_models"].add(rec["model"])
-            else:
-                a["estimated_calls"] += pending
-                a["estimated_usd"] = _add(a["estimated_usd"], est)
+        _add_call(acc(rec), rec, prices, at_ns, effective)
     if p95:
         fill_p95(con, groups, keys, from_ns, to_ns, tz, repo)
     for rec in _spans(con, keys, from_ns, to_ns, tz, repo):
