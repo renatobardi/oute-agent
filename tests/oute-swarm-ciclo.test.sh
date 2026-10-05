@@ -14,16 +14,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm-otlp.sh"
 trap 'rcv_stop; rm -rf "$TMP"' EXIT
 
-# `claude` falso do revisor (o mesmo contrato do tema etapas): devolve o JSON de $FAKE/rev/answer
-RBIN="$TMP/rbin"; mkdir -p "$RBIN"
-cat > "$RBIN/claude" <<'SH'
-#!/usr/bin/env bash
-d="$FAKE/rev"; mkdir -p "$d"
-i=$(( $(cat "$d/n" 2>/dev/null || echo 0) + 1 )); echo "$i" > "$d/n"
-printf "%s\n" "$@" > "$d/args.$i"; env > "$d/env.$i"; cat > "$d/stdin.$i"
-jq -cn --rawfile r "$d/answer" '{type: "result", result: $r, total_cost_usd: 0.01, is_error: false}'
-SH
-chmod +x "$RBIN/claude"
+. "$ROOT/tests/lib/swarm-reviewer.sh"
 CYCLE=renatobardi/oute-agent#509
 CID=ciclo-renatobardi_oute-agent-509
 # swa <args>: a sessão avulsa: sem OUTE_SWARM_ID, fora de worktree de dispatcher e sem herdr; stdout em $OUT, stderr em $ERR

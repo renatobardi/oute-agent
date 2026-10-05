@@ -235,3 +235,22 @@
 {% if d.missing %}<p class="nota" data-secoes-faltando="{{ d.missing|join(',') }}">O texto não traz a seção {{ d.missing|join(", ") }}.</p>{% endif %}
 {% endmacro %}
 {% macro review_badge(review) %}{% if review == "aprovado" %}{{ badge("aprovado pelo revisor", "secundario", "check") }}{% elif review == "reprovado" %}{{ badge("reprovado pelo revisor", "destrutivo", "triangle-alert") }}{% else %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% endif %}{% endmacro %}
+{# o corpo de uma etapa (rodada e ciclo): aviso fixo de reprovada e de sem revisor, o texto (fechado sem aprovação) e o aviso da conferência de referência #}
+{% macro etapa_corpo(s) %}
+{% if s.review == "reprovado" %}
+<p class="aviso erro etapa-aviso" role="alert" data-aviso="reprovado">Etapa reprovada pelo revisor. O texto abaixo não foi aprovado e pode ter erro de fato, de fonte ou de forma. Abra só se quiser lê-lo assim mesmo.</p>
+{% elif s.review == "sem-revisor" %}
+<p class="aviso etapa-aviso" role="alert" data-aviso="sem-revisor">Etapa sem revisor. Nenhum outro modelo conferiu este texto (tempo esgotado ou revisor indisponível). Abra só se quiser lê-lo assim mesmo.</p>
+{% endif %}
+{% if s.doc is none %}
+<p class="aviso etapa-aviso" data-sem-texto>O texto desta etapa não chegou ao agent-studio (falta o corpo do evento <code>oute.swarm.step.published</code> no DuckDB).</p>
+{% elif s.review == "aprovado" %}
+<div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+{% else %}
+<details class="etapa-fechada" data-texto-fechado>
+  <summary>Abrir o texto sem revisão aprovada</summary>
+  <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+</details>
+{% endif %}
+{% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}
+{% endmacro %}

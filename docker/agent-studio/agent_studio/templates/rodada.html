@@ -3,7 +3,7 @@
 {% set detail = true %}
 {% set back = "/rodadas" %}
 {% set crumbs = [("Rodadas", "/rodadas"), (r.id, none)] %}
-{% from "_macros.html" import badge, icon, doc, review_badge %}
+{% from "_macros.html" import badge, icon, review_badge, etapa_corpo %}
 {% block title %}Rodada {{ r.id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
@@ -46,22 +46,7 @@
     </div>
     {{ review_badge(s.review) }}
   </div>
-  {% if s.review == "reprovado" %}
-  <p class="aviso erro etapa-aviso" role="alert" data-aviso="reprovado">Etapa reprovada pelo revisor. O texto abaixo não foi aprovado e pode ter erro de fato, de fonte ou de forma. Abra só se quiser lê-lo assim mesmo.</p>
-  {% elif s.review == "sem-revisor" %}
-  <p class="aviso etapa-aviso" role="alert" data-aviso="sem-revisor">Etapa sem revisor. Nenhum outro modelo conferiu este texto (tempo esgotado ou revisor indisponível). Abra só se quiser lê-lo assim mesmo.</p>
-  {% endif %}
-  {% if s.doc is none %}
-  <p class="aviso etapa-aviso" data-sem-texto>O texto desta etapa não chegou ao agent-studio (falta o corpo do evento <code>oute.swarm.step.published</code> no DuckDB).</p>
-  {% elif s.review == "aprovado" %}
-  <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
-  {% else %}
-  <details class="etapa-fechada" data-texto-fechado>
-    <summary>Abrir o texto sem revisão aprovada</summary>
-    <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
-  </details>
-  {% endif %}
-  {% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}
+  {{ etapa_corpo(s) }}
   {% if s.total > 1 %}
   <nav class="etapa-nav" aria-label="Etapa anterior e seguinte" data-etapa-nav>
     {% if s.prev %}<a class="botao" rel="prev" href="#{{ s.prev.anchor }}" data-nav="anterior">{{ icon("arrow-left", 14) }}<span>Anterior: {{ s.prev.title }}</span></a>{% else %}<span></span>{% endif %}

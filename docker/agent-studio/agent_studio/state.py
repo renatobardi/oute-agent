@@ -30,7 +30,7 @@ STEP_REFCHECKS = ("ok", "falhou", "ausente")
 _STEP_TEXT = ("kind", "key", "sha256", "review", "writer", "reviewer", "refcheck", "cycle", "event", "host", "instance")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _STEP_KEY = re.compile(r"^[1-9]\d{0,8}$")
-_CYCLE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+\Z")   # `<dono>/<repo>#<n>`, a issue do ciclo
+_CYCLE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+\Z", re.ASCII)   # `<dono>/<repo>#<n>`, a issue do ciclo
 # `IF … THEN { UPSERT … } END`: só grava se o `rev` do evento é maior ou igual ao da revisão que já está lá (a revisão mais
 # alta vence, em qualquer ordem de chegada). Texto em base64, decodificado no SurrealDB (#337)
 STEP_UPSERT = (

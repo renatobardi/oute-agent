@@ -34,7 +34,7 @@ TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospec
           "fechamento": "Fechamento da rodada", "ciclo": "Resumo do ciclo"}
 BAR_LABELS = {"triagem": "Triagem", "merge": "Pedidos de merge", "kaizen": "Kaizen", "fechamento": "Fechamento"}
 ROUND_KINDS = tuple(k for k in KINDS if k != CYCLE_KIND)   # as posições da barra: o resumo do ciclo não é etapa de rodada
-CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#[0-9]{1,9}\Z")   # `<dono>/<repo>#<n>`
+CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z", re.ASCII)   # `<dono>/<repo>#<n>`
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
 LIST_LIMIT = 100   # rodadas na lista
@@ -199,12 +199,46 @@ def cycle_url(cycle):
     return f"/ciclo?id={quote(cycle, safe='')}" if isinstance(cycle, str) and CYCLE_ID.match(cycle) else None
 
 
-def _cycle_rounds(store, ids):
-    """As rodadas por id, com as contagens e as horas das etapas no DuckDB (rodada sem etapa não vem)."""
-    if not ids:
-        return {}
-    rows = store.read(lambda con: _dicts(con.execute(_CYCLE_STATS, [EVENT, sorted(ids)])))
-    return {r["round"]: r for r in rows}
+def _cycle_from_state(surreal, cycle):
+    """(registros das rodadas, registros do resumo, `state_read`, tipo do erro) do SurrealDB. Falha do SurrealDB não levanta:
+    o estado só liga rodada e ciclo, e sem ele a página sai do DuckDB (`state_read` falso)."""
+    if surreal is None:
+        return [], [], None, None
+    try:
+        found = surreal.query(_CYCLE_ROUNDS + " " + _CYCLE_SUMMARY, {"c": cycle})
+        return found[0]["result"] or [], found[1]["result"] or [], True, None
+    except Exception as e:  # noqa: BLE001
+        return [], [], False, type(e).__name__
+
+
+def _cycle_round_rows(store, recs):
+    """As rodadas do ciclo, uma linha por registro, com as contagens e as horas das etapas no DuckDB (rodada sem etapa fica com
+    zeros), na ordem em que abriram."""
+    ids = [r["id"] for r in recs]
+    stats = {}
+    if ids:
+        stats = {r["round"]: r for r in store.read(lambda con: _dicts(con.execute(_CYCLE_STATS, [EVENT, sorted(ids)])))}
+    rounds = []
+    for r in recs:
+        st = stats.get(r["id"], {})
+        rounds.append({"round": r["id"], "repo": r.get("repo"), "label": r.get("label"), "state": r.get("state"),
+                       "steps": st.get("steps", 0), "revisions": st.get("revisions", 0), "kind": st.get("kind"),
+                       "review": st.get("review"), "first_ns": st.get("first_ns"), "last_ns": st.get("last_ns")})
+    return sorted(rounds, key=lambda r: (r["first_ns"] is None, r["first_ns"] or 0, r["round"]))
+
+
+def _cycle_summary(store, sums, events_):
+    """A revisão vigente do resumo do ciclo, com o texto lido no DuckDB, ou `None` se ninguém o publicou."""
+    if sums:
+        summary = _step_from_record(sums[0])
+    elif events_:
+        summary = _step_from_event(events_[-1])
+    else:
+        return None
+    body = store.read(lambda con: texts(con, [summary["event"]]))
+    text = body.get(summary["event"])
+    summary["text"] = text if isinstance(text, str) and len(text.encode()) <= TEXT_MAX else None
+    return summary
 
 
 def load_cycle(store, surreal, cycle):
@@ -212,39 +246,20 @@ def load_cycle(store, surreal, cycle):
     nenhum dos dois bancos conhece o ciclo; senão {id, rounds, summary, state_read, state_error}. `rounds` na ordem em que
     abriram; `summary` = a revisão vigente da etapa `ciclo` (com `text`) ou `None`. `state_read`: como em `load`. Falha do DuckDB
     levanta."""
-    recs, sums, state_read, error = [], [], None, None
-    if surreal is not None:
-        try:
-            found = surreal.query(_CYCLE_ROUNDS + " " + _CYCLE_SUMMARY, {"c": cycle})
-            recs, sums, state_read = found[0]["result"] or [], found[1]["result"] or [], True
-        except Exception as e:  # noqa: BLE001
-            state_read, error = False, type(e).__name__   # o estado só liga rodada e ciclo: sem ele, a página sai do DuckDB
-    ids = [r["id"] for r in recs]
+    recs, sums, state_read, error = _cycle_from_state(surreal, cycle)
     events_ = []
-    if not ids or not sums:
-        duck_ids = [r[0] for r in store.read(lambda con: con.execute(_CYCLE_IDS, [EVENT, cycle]).fetchall())]
-        duck_events = current(store.read(lambda con: _dicts(con.execute(_CYCLE_EVENTS, [EVENT, cycle]))))
-        if not ids:
-            ids, recs = duck_ids, [{"id": i} for i in duck_ids]
-            state_read = False if state_read and duck_ids else state_read   # o DuckDB tem rodada que o SurrealDB não tem
+    if not recs or not sums:
+        # o que o SurrealDB não tem sai do DuckDB: a triagem vigente de cada rodada e as revisões do resumo
+        duck_ids = [] if recs else [r[0] for r in store.read(lambda con: con.execute(_CYCLE_IDS, [EVENT, cycle]).fetchall())]
         if not sums:
-            events_ = duck_events
-            state_read = False if state_read and duck_events else state_read
-    stats = _cycle_rounds(store, ids)
-    rounds = []
-    for r in recs:
-        st = stats.get(r["id"], {})
-        rounds.append({"round": r["id"], "repo": r.get("repo"), "label": r.get("label"), "state": r.get("state"),
-                       "steps": st.get("steps", 0), "revisions": st.get("revisions", 0), "kind": st.get("kind"),
-                       "review": st.get("review"), "first_ns": st.get("first_ns"), "last_ns": st.get("last_ns")})
-    rounds.sort(key=lambda r: (r["first_ns"] is None, r["first_ns"] or 0, r["round"]))
-    summary = _step_from_record(sums[0]) if sums else (_step_from_event(events_[-1]) if events_ else None)
+            events_ = current(store.read(lambda con: _dicts(con.execute(_CYCLE_EVENTS, [EVENT, cycle]))))
+        recs = recs or [{"id": i} for i in duck_ids]
+        if state_read and (duck_ids or events_):
+            state_read = False   # o DuckDB tem o que o SurrealDB não tem (estado a remontar: `rebuild-state`)
+    rounds = _cycle_round_rows(store, recs)
+    summary = _cycle_summary(store, sums, events_)
     if summary is None and not rounds:
         return None
-    if summary is not None:
-        body = store.read(lambda con: texts(con, [summary["event"]]))
-        text = body.get(summary["event"])
-        summary["text"] = text if isinstance(text, str) and len(text.encode()) <= TEXT_MAX else None
     return {"id": cycle, "rounds": rounds, "summary": summary, "state_read": state_read, "state_error": error}
 
 
