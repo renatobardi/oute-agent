@@ -12,7 +12,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
-trap 'rcv_stop; chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+trap 'rcv_stop; chmod -R u+w "${TMP:?}" 2>/dev/null; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null && command -v git >/dev/null || die "precisa de jq, python3 e git"
 TASK="$ROOT/docker/oute-task"
@@ -191,7 +191,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. worktree sem id (anterior à #128) e falha ao gravar
-t old claude; rm -f "$(gitdir "$SP/proj-old")/oute-task"
+t old claude; task_gitdir="$(gitdir "$SP/proj-old")"; rm -f "${task_gitdir:?}/oute-task"
 t old claude
 oid="$(mark "$SP/proj-old" id)"
 check "sem id: a reabertura grava um id novo"          grep -qE '^proj-old-[0-9]{14}$' <<<"$oid"
@@ -203,7 +203,7 @@ t nogravo claude; t fixa claude; fid="$(mark "$SP/proj-fixa" id)"
 if [[ "$(id -u)" -eq 0 ]]; then
   echo "skip falha ao gravar o id: rodando como root (o chmod não barra a escrita)"
 else
-  gd="$(gitdir "$SP/proj-nogravo")"; rm -f "$gd/oute-task"; chmod a-w "$gd"
+  gd="$(gitdir "$SP/proj-nogravo")"; rm -f "${gd:?}/oute-task"; chmod a-w "${gd:?}"
   FAKE_RC=5 OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=de-outra" t nogravo claude "segue"
   chmod u+w "$gd"
   check "falha ao gravar o id: a sessão abre igual (exec e código)" [ "$RC" -eq 5 -a "$OUT" == "agente falso claude" -a "$(cat "$FAKE/claude.args")" == "${MS/ /$'\n'}"$'\n'"segue" ]
@@ -236,7 +236,7 @@ shim codex "$WS/proj" resume conv-cx
 check "restore do Codex: codex resume <id> marcado"    [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
 shim claude "$SP/proj-s1" -p "oi"
 check "agente aberto direto na worktree (-p): marcado" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '-p\noi')" ]
-t semid claude; rm -f "$(gitdir "$SP/proj-semid")/oute-task"; before=$((before + 1))
+t semid claude; task_gitdir="$(gitdir "$SP/proj-semid")"; rm -f "${task_gitdir:?}/oute-task"; before=$((before + 1))
 printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-semid" > "$HOME/.claude/projects/p/conv-semid.jsonl"
 shim claude "$WS/proj" --resume conv-semid
 check "restore em worktree sem id: só o repositório principal, sem oute.task.id (#599)" [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-semid" && pwd -P)" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.repo=proj" ]
@@ -388,7 +388,7 @@ check "clean --yes sem OTEL_*: rc 0 e a worktree removida" bash -c '[[ $1 -eq 0 
   "removida $SP/proj-semotel (sem commits além de origin/main)" "$OUT"
 check "clean --yes sem OTEL_*: removed com a origem do ~/.oute_env" jqe '.name == "oute.task.removed" and .attrs["oute.task.slug"] == "semotel"
   and .attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-server" and .res["oute.instance"] == "oute-agent"' <<<"$(last)"
-rm -f "$HOME/.oute_env"
+rm -f "${HOME:?}/.oute_env"
 
 check "nenhum oute.task.* com corpo (2ª parte)"        [ "$(task_ev '.body != null' | grep -c .)" -eq 0 -a "$(total)" -gt 10 ]
 check "todo oute.task.* com oute.event.id e event.name" [ "$(task_ev '(.attrs["oute.event.id"] | length) != 32 or .attrs["event.name"] != .name' | grep -c .)" -eq 0 ]
@@ -502,7 +502,7 @@ FAKE_RC=8 t 41-fora claude "p"
 check "gh fora: abre no Sonnet, com o código do agente" [ "$RC" -eq 8 -a "$(args claude)" == "--model claude-sonnet-5-5 p" -a -d "$SP/proj-41-fora" ]
 check "gh fora: aviso"                                 [ "$SELW" == "oute-select: aviso: o gh não respondeu para a issue #41; abrindo no padrão (claude-sonnet-5-5)" ]
 check "gh fora: origem padrao"                         sel_ev "" padrao claude claude-sonnet-5-5 ""
-rm "$FAKE/gh.down"
+rm "${FAKE:?}/gh.down"
 
 # 10d. escolha explícita: --agent, --model, codex posicional, --model nos argumentos do agente
 t 40-cx codex "p"
@@ -531,7 +531,7 @@ check "--phase plan: fase plan, origem padrao"         sel_ev plan padrao claude
 
 # 10e. escolha já resolvida pelo oute-swarm spawn (OUTE_SELECT_FILE): vale ela, sem outra leitura da issue
 echo '{"phase":"arch","origin":"label","agent":"codex","model":"gpt-6-astra","effort":"high","reason":"x"}' > "$TMP/sel.json"
-rm -f "$FAKE/gh-issue.log"
+rm -f "${FAKE:?}/gh-issue.log"
 OUTE_SELECT_FILE="$TMP/sel.json" t 43-arquivo claude "p"
 check "OUTE_SELECT_FILE: abre o agente e o modelo do arquivo" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6-astra -c model_reasoning_effort=high p" ]
 check "OUTE_SELECT_FILE: evento com a escolha do arquivo" sel_ev arch label codex gpt-6-astra high
@@ -704,7 +704,7 @@ rmark() { jqe '.attrs | has("oute.task.reserve") | not' <<<"$(last)"; }   # o ú
 t 40-normal claude "p"
 check "reserva: claude ok, sem reserve no evento"      rmark
 export FAKE_CLAUDE_AUTH_RC=1
-rm -f "$FAKE/codex.args" "$FAKE/codex.env" "$FAKE/claude.args"
+rm -f "${FAKE:?}/codex.args" "${FAKE:?}/codex.env" "${FAKE:?}/claude.args"
 t 40-reserva claude "faça a 40"
 check "reserva: abre o codex da linha build, com -m e esforço" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6.1-sol -c model_reasoning_effort=high faça a 40" ]
 check "reserva: o claude não é executado (só o auth status)" [ ! -e "$FAKE/claude.args" ]
@@ -714,7 +714,7 @@ check "reserva: o aviso do seletor sai"                grep -qF "abrindo no Code
 FAKE_RC=0 t 40-reserva claude "faça a 40"
 check "reserva, reabertura: reopened com agente codex e reserve" bash -c 'jq -e ".name == \"oute.task.reopened\" and .attrs[\"oute.task.agent\"] == \"codex\" and .attrs[\"oute.task.reserve\"] == \"indisponivel\"" <<<"$1" >/dev/null' _ "$(last)"
 # escolha explícita não cai na reserva
-rm -f "$FAKE/claude.args"
+rm -f "${FAKE:?}/claude.args"
 t --agent claude 40-explicito claude "p"
 check "explícito (--agent claude): abre o claude com o modelo da fase" [ "$RC" -eq 0 -a "$(args claude)" == "--model claude-sonnet-5-5 p" ]
 check "explícito (--agent claude): sem reserve, com aviso" bash -c 'grep -qF "explícita" <<<"$1"' _ "$SELW"
@@ -722,7 +722,7 @@ check "explícito (--agent claude): evento sem reserve"  rmark
 t 40-modelo claude --model claude-opus-5-5 "p"
 check "explícito (--model nos argumentos): abre o claude, sem reserve" bash -c '[ "$1" == "--model claude-opus-5-5 p" ]' _ "$(args claude)"
 check "explícito (--model nos argumentos): evento sem reserve" rmark
-rm -f "$FAKE/claude.args"
+rm -f "${FAKE:?}/claude.args"
 t --phase plan 40-fixa claude "p"
 check "fase fixa: abre o claude, sem reserve, com aviso" bash -c '[ "$1" == "--model claude-sonnet-5-5 p" ] && grep -qF "explícita" <<<"$2"' _ "$(args claude)" "$SELW"
 # os dois fora: abre no Claude, aviso, código 0
@@ -773,7 +773,7 @@ echo 6 > "$QB/sleep"
 t0=$(date +%s); FAKE_RC=5 OUTE_SELECT_QUOTA_TIMEOUT=0.3 t cota-2 claude "p"; dt=$(( $(date +%s) - t0 ))
 check "cota lenta: a abertura não espera a leitura ($dt s)" bash -c '[ "$1" -eq 5 ] && [ "$2" -le 4 ] && [ "$3" = "agente falso claude" ]' _ "$RC" "$dt" "$OUT"
 # oute-quota que falha (rc 2, sem saída): a abertura é a mesma
-rm -f "$QB/sleep"; echo 2 > "$QB/rc"; : > "$QB/json"
+rm -f "${QB:?}/sleep"; echo 2 > "${QB:?}/rc"; : > "${QB:?}/json"
 FAKE_RC=5 t cota-3 claude "p"
 check "cota com falha na leitura: abertura igual"      bash -c '[ "$1" -eq 5 ] && [ "$2" = "agente falso claude" ] && [ "$3" = "worktree $4/proj-cota-3 · branch sessao/cota-3 (de origin/main)" ]' _ "$RC" "$OUT" "$ERR" "$SP"
 check "cota com falha na leitura: o oute.task.opened sai" [ "$(task_ev '.attrs["oute.task.slug"] == "cota-3"' | grep -c .)" -eq 1 ]
@@ -813,7 +813,7 @@ t clean --yes
 check "clean --yes: o worker e o dispatcher da outra rodada ficam" [ -d "$SP11/proj-501-vivo" -a -d "$SP11/proj-swarm-0303-1001" ]
 check "clean --yes: o que não está em uso sai"              [ ! -d "$SP11/proj-502-morto" -a ! -d "$SP11/proj-503-fechado" -a ! -d "$SP11/proj-401-propria" -a ! -d "$SP11/proj-swarm-0303-1000" ]
 # herdr fora do ar: vale o spawned (a sessão não fechada fica); sem herdr e sem estado de rodada, o comportamento de antes
-rm -f "$FAKE/tabs"
+rm -f "${FAKE:?}/tabs"
 t clean
 check "herdr fora do ar: sessão não fechada do spawned fica" grep -qx "em uso  $SP11/proj-501-vivo (rodada swarm-0303-1001)" <<<"$OUT"
 # a worktree de quem chama o clean nunca é removida
@@ -939,7 +939,7 @@ else
   no_run "codex resume"        "$W" "$SHIMS/codex resume conv-x" codex
   no_run "codex mcp (subcomando)" "$W" "$SHIMS/codex mcp list" codex
   no_run "já sob run (AI_MEMORY_RUN_ID)" "$W" "AI_MEMORY_RUN_ID=outro $SHIMS/claude oi" claude
-  touch "$gw/oute-swarm-worker"; no_run "worker do swarm" "$W" "$SHIMS/claude oi" claude; rm -f "$gw/oute-swarm-worker"
+  touch "${gw:?}/oute-swarm-worker"; no_run "worker do swarm" "$W" "$SHIMS/claude oi" claude; rm -f "${gw:?}/oute-swarm-worker"
   amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" OUT="$(cd "$W" && "$SHIMS/claude" oi 2>&1 </dev/null)"
   check "run ligado, sem terminal: passa direto" [ -z "$(amlog)" -a -f "$FAKE/claude.args" ]
   no_run "fora de repo"        "$TMP" "$SHIMS/claude oi" claude
