@@ -286,8 +286,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as e:
             return error(request, 400, str(e))
         repo = q.get("repo", "")
+        model = q.get("model", "")
         snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz,
-                                  repo_mod.parse(repo))
+                                  repo_mod.parse(repo), model or None)
         if failed:
             return failed
         now = time.time_ns()
@@ -306,7 +307,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if repo:  # o repositório vai nos links para as outras telas (#528)
             qs += f"&repo={quote(repo, safe='')}"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
-                    gates=len(ages), window_qs=qs, repo=repo, repos=snap["repos"], **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
+                    gates=len(ages), window_qs=qs, repo=repo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
     # ------------------------------------------------ login
     @app.get("/login")

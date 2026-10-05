@@ -96,16 +96,17 @@
 {# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
 {# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela, o
    repositório (`repos` = none: sem ele) e, nas listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam repositório, host e agente; o intervalo vai em `de`/`ate`. #}
-{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="") %}
+{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="", model="") %}
 <form class="filtro" method="get" action="{{ action }}"{% if hosts is not none %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
       hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true"{% endif %}>
   <nav class="janelas" aria-label="Janela">
     {% for value, label in windows %}
-    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}
+    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}{% if model %}{% set _ = keep.update({"model": model}) %}{% endif %}
     <a href="{{ action }}?{{ keep|urlencode }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
   {% if not range.from %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
+  {% if model %}<input type="hidden" name="model" value="{{ model }}">{% endif %}
   <label>De ({{ tzl() }})<input type="datetime-local" name="de" value="{{ range.from }}"></label>
   <label>Até ({{ tzl() }})<input type="datetime-local" name="ate" value="{{ range.to }}"></label>
   {% if repos is not none %}

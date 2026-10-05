@@ -14,13 +14,14 @@ from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_S
                    estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
-KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase")
+KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo")
 ROLES = ("dispatcher", "worker", "avulsa")
 UNKNOWN_PHASE = "desconhecida"
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
-         "model": "model", "conversation": "session_id", "session": "oute_task_id", "role": "role", "phase": "phase"}
+         "model": "model", "conversation": "session_id", "session": "oute_task_id", "role": "role", "phase": "phase",
+         "repo": repo_mod.COL}
 _PER_SESSION = {"role", "phase"}
 # logs não têm modelo: agrupados por modelo, caem no modelo nulo
 _LOG_MODEL = {"model": "CAST(NULL AS VARCHAR)"}
