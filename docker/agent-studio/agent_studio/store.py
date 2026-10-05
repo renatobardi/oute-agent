@@ -10,7 +10,7 @@ import time
 import duckdb
 
 from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
-               repo as repo_mod, sessions as sess_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
+               repo as repo_mod, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -235,6 +235,7 @@ class Store:
                 timer.start()
                 try:
                     snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model)
+                    snap["tools"] = tools_mod.top(cur, from_ns, to_ns, repo)  # gráfico das ferramentas (#535)
                 finally:
                     timer.cancel()
                     cur.close()
@@ -262,6 +263,15 @@ class Store:
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None):
         with self.lock:
             return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo)
+
+    def tools(self, from_ns, to_ns, tz=tz_mod.UTC, repo=None, host=None, agent=None):
+        """Tela Ferramentas (#535), sob a mesma trava."""
+        with self.lock:
+            return tools_mod.snapshot(self.con, from_ns, to_ns, tz, repo, host, agent)
+
+    def tool_conversations(self, tool, from_ns, to_ns, repo=None, host=None, agent=None):
+        with self.lock:
+            return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent)
 
     def conversation(self, session_id, prices, errors_only=False):
         with self.lock:

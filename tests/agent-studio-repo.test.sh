@@ -23,8 +23,6 @@ TOML
 PYTHONPATH="$ROOT/tests/lib:$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP" > "$TMP/py.out" 2>&1 <<'PY'
 import re, sys, time
 from datetime import datetime, timezone
-from html.parser import HTMLParser
-from urllib.parse import urlencode
 
 import duckdb
 from agent_studio import config as CF, otlp, store as ST
@@ -32,6 +30,7 @@ from agent_studio.app import create_app
 from pycheck import check
 from studio_asgi import TOKEN, get
 from studio_db import StudioDB
+from studio_form import submit as form_submit
 
 tmp = sys.argv[1]
 cfg = CF.load(f"{tmp}/config.toml")
@@ -102,6 +101,19 @@ for repo, n in REPOS.items():
     dash = get(app, "/", q(repo))[1]
     check(f"Dashboard repo={repo}: KPI de chamadas = {n}", calls(dash) == n)
     check(f"Uso repo={repo}: total = {n} chamadas", uso(get(app, "/uso", q(repo))[1]) == n)
+# os gráficos da tela de Uso seguem o repositório (#533): chamadas das colunas e tokens de entrada do gráfico de tokens
+def chart_calls(html):
+    return sum(int(c) for c in re.findall(r'<g class="coluna" data-bucket="[^"]*" data-calls="(\d+)"', html))
+
+def chart_input(html):
+    m = re.search(r'data-grafico="uso-tokens-dia" data-days="\d+" data-input="(\d+)"', html)
+    return int(m.group(1)) if m else None
+INPUTS = {"alfa": 2000, "beta": 3000, NONE: 1000}
+for repo, n in REPOS.items():
+    h = get(app, "/uso", q(repo))[1]
+    check(f"Uso repo={repo}: gráfico de custo por dia soma {n} chamadas e o de tokens, {INPUTS[repo]} de entrada",
+          chart_calls(h) == n and chart_input(h) == INPUTS[repo])
+check("Uso: Todos = 6 chamadas nas colunas e 6000 de entrada", chart_calls(get(app, "/uso", Q)[1]) == 6 and chart_input(get(app, "/uso", Q)[1]) == 6000)
 check("Dashboard: chamadas dos repositórios somam o Todos", sum(calls(get(app, "/", q(r))[1]) for r in REPOS) == 6)
 check("Uso: papel e fase do repositório somam o total dele",
       all(sum(int(c) for c in re.findall(r'data-role="[^"]*" data-calls="(\d+)"', get(app, "/uso", q(r))[1])) == n for r, n in REPOS.items()))
@@ -156,35 +168,8 @@ st, via = get(app, "/uso", "hours=24&repo=beta")
 check("o link do Dashboard abre o Uso já com o repositório marcado", st == 200 and '<option value="beta" selected>' in via)
 
 # ---- o formulário renderizado, enviado como o navegador envia (lição do #553)
-class Fields(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.sent, self.in_form, self.select = [], False, None
-        self.chosen = {}
-
-    def handle_starttag(self, tag, a):
-        a = dict(a)
-        if tag == "form" and "filtro" in (a.get("class") or ""):
-            self.in_form = True
-        elif self.in_form and tag == "input" and a.get("name"):
-            self.sent.append((a["name"], a.get("value") or ""))
-        elif self.in_form and tag == "select":
-            self.select = a["name"]
-            self.chosen[self.select] = ""
-        elif self.in_form and tag == "option" and self.select and "selected" in a:
-            self.chosen[self.select] = a.get("value") or ""
-
-    def handle_endtag(self, tag):
-        if tag == "select":
-            self.select = None
-        elif tag == "form":
-            self.in_form = False
-
 def submit(path, query, **pick):
-    f = Fields()
-    f.feed(get(app, path, query)[1])
-    sent = f.sent + [(k, pick.get(k, v)) for k, v in f.chosen.items()]
-    return get(app, path, urlencode([(k, pick.get(k, v)) for k, v in sent])), sent
+    return form_submit(get, app, path, query, **pick)
 
 for p in PAGES:
     (st, html), sent = submit(p, "hours=168", repo="beta")
@@ -288,5 +273,5 @@ fresh.close()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 83
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 87
 check_end

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% set nav = "ferramentas" %}
+{% set crumbs = [("Análise", none), ("Ferramentas", none)] %}
+{% from "_macros.html" import filter, badge %}
+{# Ferramentas (#535): usos, erros e p95 por ferramenta, por repositório e no tempo. Só leitura; a regra do uso está no ADR-08.
+   Gráfico em SVG gerado aqui (sem JS, sem estilo na tag): a escala vem do viewBox e a dica de cada ponto, do <title>. #}
+{% block title %}Ferramentas · Agent Studio{% endblock %}
+{% block main %}
+{% set W = 600 %}{% set H = 180 %}
+<div class="pagina">
+<div class="pagina-topo">
+  <div class="titulo-linha"><h1>Ferramentas</h1>{{ filter("/ferramentas", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · cada uso conta uma vez (o span <code>claude_code.tool</code>) · só o Claude Code manda span de ferramenta com nome; o Codex não</p>
+</div>
+
+<section class="cartao bloco" id="total" data-usos="{{ uses }}" data-erros="{{ errors }}" data-taxa="{{ '' if rate is none else rate }}">
+  <div class="grafico-topo"><h2>Na janela</h2><span class="nota">{{ uses|num }} {{ "uso" if uses == 1 else "usos" }} · {{ errors|num }} {{ "erro" if errors == 1 else "erros" }} · taxa de erro {{ rate|pct(2) }}</span></div>
+</section>
+
+{% if uses %}
+{% set s = series %}{% set n = s.points|length %}
+<section class="cartao bloco grafico" data-grafico="usos" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
+  <div class="grafico-topo"><h2>Usos de ferramenta por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">total {{ s.total|num }} · tracejado = erros</span></div>
+  <div class="linha-grafico">
+    <div class="eixo-y"><span>{{ s.max|num }}</span><span>{{ s.mid|num }}</span><span>0</span></div>
+    <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Usos de ferramenta por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
+      <title>Usos de ferramenta por {{ "hora" if s.unit == "hour" else "dia" }}</title>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
+      <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
+      <path class="area" d="M{{ '%.1f'|format(s.points[0].x * W) }} {{ H }}{% for p in s.points %} L{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %} L{{ '%.1f'|format(s.points[-1].x * W) }} {{ H }} Z"/>
+      <path class="linha" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %}"/>
+      <path class="linha erros" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.err_frac * H) }}{% endfor %}"/>
+      {% for p in s.points %}
+      <g class="ponto" data-bucket="{{ p.key }}" data-usos="{{ p.uses }}" data-erros="{{ p.errors }}">
+        <rect class="alvo" x="{{ '%.1f'|format((p.x - 0.5 / n) * W) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
+        <line class="guia" x1="{{ '%.1f'|format(p.x * W) }}" x2="{{ '%.1f'|format(p.x * W) }}" y1="0" y2="{{ H }}"/>
+        <title>{{ p.label }} · {{ p.uses|num }} {{ "uso" if p.uses == 1 else "usos" }} · {{ p.errors|num }} {{ "erro" if p.errors == 1 else "erros" }}</title>
+      </g>
+      {% endfor %}
+    </svg>
+    <span></span>
+    <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
+  </div>
+</section>
+
+<section class="cartao bloco" id="ferramentas" data-ferramentas="{{ tools|length }}">
+  <div class="grafico-topo"><h2>Por ferramenta</h2><span class="nota">p95 = duração da execução</span></div>
+  <div class="rolagem">
+  <table class="compacta empilha">
+    <thead><tr><th>Ferramenta</th><th class="n">Usos</th><th class="n">Erros</th><th class="n">Taxa de erro</th><th class="n">p95</th></tr></thead>
+    <tbody>
+    {% for t in tools %}
+    <tr{% if t.errors %} class="com-erro"{% endif %} data-ferramenta="{{ t.tool }}" data-usos="{{ t.uses }}" data-erros="{{ t.errors }}" data-taxa="{{ t.rate }}" data-p95-ms="{{ '' if t.p95_ms is none else t.p95_ms }}">
+      <td class="prim mono"><a href="/ferramenta?nome={{ t.tool|urlencode }}&amp;{{ link_qs }}">{{ t.tool }}</a></td>
+      <td class="n">
+        <svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.tool }} · {{ t.uses|num }} usos</title><rect x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 2]|max) }}" height="6"/></svg>{{ t.uses|num }}</td>
+      <td class="n">{% if t.errors %}{{ badge(t.errors|num, "destrutivo") }}{% else %}0{% endif %}</td>
+      <td class="n{% if t.errors %} taxa-erro{% endif %}">{{ t.rate|pct(1) }}</td>
+      <td class="n sec">{{ t.p95_ms|ms }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ by_repo|length }}">
+  <div class="grafico-topo"><h2>Usos por repositório</h2><span class="nota">usos de ferramenta · erros</span></div>
+  {% for r in by_repo %}
+  <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-usos="{{ r.uses }}" data-erros="{{ r.errors }}" title="{{ r.repo }}: {{ r.uses|num }} usos, {{ r.errors|num }} erros">
+    <span class="rotulo mono">{{ r.repo }}</span>
+    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ r.repo }} · {{ r.uses|num }} usos · {{ r.errors|num }} erros</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([r.frac * 100, 1]|max) }}" height="14"/></svg>
+    <span class="valor">{{ r.uses|num }} · {{ r.errors|num }} {{ "erro" if r.errors == 1 else "erros" }}</span>
+  </div>
+  {% endfor %}
+</section>
+{% else %}
+<p class="aviso" id="vazio">Nenhum uso de ferramenta nessa janela e com esses filtros.</p>
+{% endif %}
+</div>
+{% endblock %}

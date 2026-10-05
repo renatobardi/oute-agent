@@ -16,15 +16,17 @@ class StudioDB:
         self.spans, self.logs = [], []
 
     def span(self, at_ns, dur_s, name="claude_code.llm_request", model=None, task=None, conv=None, host="oute-server",
-             agent="claude", err=False, attrs=None, repo=None, **tok):
+             agent="claude", err=False, attrs=None, repo=None, parent=None, **tok):
         self.n += 1
         row = {"dedupe_key": f"s:{self.n}", "time_unix_nano": at_ns, "end_unix_nano": at_ns + int(dur_s * SEC),
                "duration_ns": int(dur_s * SEC), "host_name": host, "oute_agent": agent, "session_id": conv, "oute_task_id": task,
-               "trace_id": f"{self.n:032x}", "span_id": f"{self.n:016x}", "name": name, "status_code": 2 if err else 0,
+               "trace_id": parent[0] if parent else f"{self.n:032x}", "span_id": f"{self.n:016x}",
+               "parent_span_id": parent[1] if parent else None, "name": name, "status_code": 2 if err else 0,
                "model": model, "received_unix_nano": at_ns, "attributes": json.dumps(attrs or {}), "oute_repo": repo,
                "resource_attributes": json.dumps({"oute.task.repo": repo} if repo else {})}
         row.update({f"{k}_tokens" if k != "cost_usd" else k: v for k, v in tok.items()})
         self.spans.append(row)
+        return row["trace_id"], row["span_id"]  # para o `parent=` de um filho (ex.: tool.execution)
 
     def log(self, at_ns, name, attrs, body="", task=None, rnd=None, host="oute-server", repo=None, conv=None, sev=9):
         self.n += 1
