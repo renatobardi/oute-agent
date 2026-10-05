@@ -1096,8 +1096,19 @@ step_parse_answer() {
   return 0
 }
 
+# step_round_repo <pasta de estado>: nome do repositório da rodada, do `repo=` do meta (o caminho do checkout principal),
+# como o oute-task o grava (só [A-Za-z0-9._-]). Vazio sem meta ou sem `repo=`
+step_round_repo() {
+  local state="$1" main=""
+  [[ -f "$state/meta" ]] || return 0
+  main="$(sed -n 's/^repo=//p' "$state/meta" | head -1)"
+  [[ -n "$main" ]] || return 0
+  printf '%s' "$(basename "$main")" | tr -c 'A-Za-z0-9._-' '-'
+  return 0
+}
+
 cmd_step_review() {
-  local sha pair agent model effort writer="" srcs=() src n rev t0 dt out err prompt nonce vf rc=0 cost parsed v why="" findings files runner=() t text k=0
+  local rrepo="" sha pair agent model effort writer="" srcs=() src n rev t0 dt out err prompt nonce vf rc=0 cost parsed v why="" findings files runner=() t text k=0
   step_resolve "$@"
   set -- ${S_ARGS[@]+"${S_ARGS[@]}"}
   while [[ $# -gt 0 ]]; do
@@ -1168,7 +1179,12 @@ cmd_step_review() {
     # dispatcher não herda as OTEL_* (#250): `oute-emit run` leva o ambiente de telemetria do ~/.oute_env ao agente headless,
     # com a rodada e a etapa na origem. Sem ferramenta nenhuma: o texto é dado, não pode agir
     if command -v oute-emit >/dev/null 2>&1; then
-      runner=(oute-emit run --attr "oute.swarm.round=$(basename "$S_STATE")" --attr "oute.swarm.step=$S_KIND" --)
+      runner=(oute-emit run --attr "oute.swarm.round=$(basename "$S_STATE")" --attr "oute.swarm.step=$S_KIND")
+      # o revisor roda numa pasta vazia, fora de repositório: leva o repositório da rodada (`repo=` do meta, #599). Etapa
+      # `ciclo` (sem meta) e meta sem `repo=` saem sem repositório
+      rrepo="$(step_round_repo "$S_STATE")"
+      [[ -z "$rrepo" ]] || runner+=(--attr "oute.task.repo=$rrepo")
+      runner+=(--)
     fi
     # pasta vazia como diretório de trabalho e sem as configurações do usuário, do projeto e do local: o revisor não lê o
     # CLAUDE.md nem o AGENTS.md da sessão, não roda os hooks do ai-memory e não carrega o MCP. Medido em 2026-10-04: o mesmo

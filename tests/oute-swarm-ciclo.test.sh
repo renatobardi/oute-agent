@@ -51,6 +51,7 @@ swa step review ciclo --cycle "$CYCLE" --writer $WR
 check "review do ciclo: aprovado, sem rodada nem OUTE_SWARM_ID" bash -c '[ "$1" -eq 0 ] && grep -qF "etapa ciclo r1: aprovado (revisor claude-opus-5-5," <<<"$2"' _ "$RC" "$OUT"
 check "review do ciclo: o veredito mora na pasta do ciclo, para o sha256 do texto" bash -c '[ "$(jq -r .sha256 "$1")" = "$2" ] && [ "$(jq -r .verdict "$1")" = aprovado ]' _ "$CD/etapas/ciclo.r1.review.json" "$SHA1"
 check "review do ciclo: o consumo do revisor leva a pasta do ciclo na origem" bash -c 'grep -q "^OTEL_RESOURCE_ATTRIBUTES=.*oute.swarm.round=$2,oute.swarm.step=ciclo" "$1"' _ "$FAKE/rev/env.1" "$CID"
+check "review do ciclo: sem meta de rodada, o consumo sai sem oute.task.repo (#599)" bash -c 'grep -qE "^OTEL_RESOURCE_ATTRIBUTES=.*,oute\.swarm\.step=ciclo$" "$1"' _ "$FAKE/rev/env.1"
 swa step publish ciclo
 check "publish do ciclo sem --cycle: recusa"                bash -c '[ "$1" -eq 1 ] && grep -qF "etapa ciclo pede --cycle" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$ERR" "$CD/log"
 swa step publish ciclo --cycle "$CYCLE" --pr 3
