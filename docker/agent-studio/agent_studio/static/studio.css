@@ -405,6 +405,18 @@ a.nota { text-decoration: underline; text-underline-offset: 3px; }
 .legenda { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
 .legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 .amostra { width: 8px; height: 8px; }
+.linha-grafico.larga { grid-template-columns: 64px minmax(0, 1fr); }
+.uso-svg { display: block; width: 100%; height: 180px; overflow: visible; }
+.uso-svg .grade { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.uso-svg .grade.tracejada { stroke-dasharray: 4 3; }
+.uso-svg .alvo { fill: transparent; }
+.uso-svg .coluna:hover .alvo { fill: var(--muted); }
+/* custo: real cheio, estimado tracejado; tokens: entrada cheio, saída tracejado, cache pontilhado (distinguíveis sem cor) */
+.uso-svg .real, .amostra .t-ent { fill: var(--primary); }
+.uso-svg .t-ent { fill: var(--primary); }
+.uso-svg .estimado { fill: color-mix(in oklab, var(--primary) 30%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.uso-svg .t-sai, .amostra .t-sai { fill: color-mix(in oklab, var(--primary) 45%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.uso-svg .t-cache, .amostra .t-cache { fill: color-mix(in oklab, var(--primary) 15%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 1 2; vector-effect: non-scaling-stroke; }
 table.compacta th, table.compacta td { padding: 8px 6px; background: transparent; }
 table.compacta th:first-child, table.compacta td:first-child { padding-left: 0; }
 table.compacta th:last-child, table.compacta td:last-child { padding-right: 0; }

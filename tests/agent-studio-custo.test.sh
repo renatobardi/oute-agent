@@ -124,6 +124,10 @@ check "tela: tabela por fase com as três linhas"       jqe '[.[] | select(.phas
 check "tela: linha do dispatcher = a da API"           jqe ".[] | select(.role == \"dispatcher\") | .calls == \"2\" and (.[\"real-usd\"] | $(usd .) == 800000)" <<<"$P"
 check "tela: mais cara primeiro (build antes de plan)" jqe '[.[] | select(.phase) | .phase] | index("build") < index("plan")' <<<"$P"
 check "tela: total da janela"                          jqe '.[] | select(.tag == "p" and .calls == "11")' <<<"$P"
+check "tela: gráfico por papel com as três linhas, por fase com as três" jqe '([.[] | select(.grafico == "uso-custo-role")] | length == 1) and ([.[] | select(.grafico == "uso-custo-phase")] | length == 1) and ([.[] | select(.nome)] | length == 6)' <<<"$P"
+check "tela: barras de papel somam o total (real e estimado)" bash -c 'jq -n -e --argjson g "$1" "
+  ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
+  [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 2 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e / 2 - (\$c[\"estimated-usd\"] | tonumber)) | fabs) < 1e-9" >/dev/null' _ "$P"
 check "tela: menu com o link do uso"                   grep -q 'href="/uso"' <<<"$HTML"
 check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada ao modelo' <<<"$(curl -s "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")"
 

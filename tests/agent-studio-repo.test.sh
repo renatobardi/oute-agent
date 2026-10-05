@@ -102,6 +102,19 @@ for repo, n in REPOS.items():
     dash = get(app, "/", q(repo))[1]
     check(f"Dashboard repo={repo}: KPI de chamadas = {n}", calls(dash) == n)
     check(f"Uso repo={repo}: total = {n} chamadas", uso(get(app, "/uso", q(repo))[1]) == n)
+# os gráficos da tela de Uso seguem o repositório (#533): chamadas das colunas e tokens de entrada do gráfico de tokens
+def chart_calls(html):
+    return sum(int(c) for c in re.findall(r'<g class="coluna" data-bucket="[^"]*" data-calls="(\d+)"', html))
+
+def chart_input(html):
+    m = re.search(r'data-grafico="uso-tokens-dia" data-days="\d+" data-input="(\d+)"', html)
+    return int(m.group(1)) if m else None
+INPUTS = {"alfa": 2000, "beta": 3000, NONE: 1000}
+for repo, n in REPOS.items():
+    h = get(app, "/uso", q(repo))[1]
+    check(f"Uso repo={repo}: gráfico de custo por dia soma {n} chamadas e o de tokens, {INPUTS[repo]} de entrada",
+          chart_calls(h) == n and chart_input(h) == INPUTS[repo])
+check("Uso: Todos = 6 chamadas nas colunas e 6000 de entrada", chart_calls(get(app, "/uso", Q)[1]) == 6 and chart_input(get(app, "/uso", Q)[1]) == 6000)
 check("Dashboard: chamadas dos repositórios somam o Todos", sum(calls(get(app, "/", q(r))[1]) for r in REPOS) == 6)
 check("Uso: papel e fase do repositório somam o total dele",
       all(sum(int(c) for c in re.findall(r'data-role="[^"]*" data-calls="(\d+)"', get(app, "/uso", q(r))[1])) == n for r, n in REPOS.items()))
@@ -288,5 +301,5 @@ fresh.close()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 83
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 87
 check_end

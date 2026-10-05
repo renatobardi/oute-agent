@@ -2,6 +2,7 @@
 {% set nav = "uso" %}
 {% set crumbs = [("Análise", none), ("Uso", none)] %}
 {% from "_macros.html" import cost, filter %}
+{% from "_graficos_uso.html" import custo_dia, custo_barras, tokens_dia %}
 {% macro usage_table(kind, label, rows) %}
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}">
@@ -34,6 +35,12 @@
 </div>
 <p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
   Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span></p>
+<div class="graficos" id="graficos-uso">
+{{ custo_dia(charts.days, totals.cost) }}
+{{ tokens_dia(charts.days, totals.tokens) }}
+{{ custo_barras("role", "Custo por papel", charts.roles, totals.cost) }}
+{{ custo_barras("phase", "Custo por fase", charts.phases, totals.cost) }}
+</div>
 <h2>Por papel</h2>
 {{ usage_table("role", "Papel", by_role) }}
 <h2>Por fase</h2>

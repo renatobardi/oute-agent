@@ -35,6 +35,7 @@ from starlette.staticfiles import StaticFiles
 from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
                sessions as sess_mod, tz as tz_mod)
 from . import alerts as alerts_mod
+from . import usage_charts as charts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -476,8 +477,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         def by_cost(rows):
             # o que mais custou primeiro (real + estimado); empate pela ordem da API
             return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
-        return page(request, "usage.html", totals=data["totals"], by_role=by_cost(data["by_role"]),
-                    by_phase=by_cost(data["by_phase"]), from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
+        by_role, by_phase = by_cost(data["by_role"]), by_cost(data["by_phase"])
+        return page(request, "usage.html", totals=data["totals"], by_role=by_role, charts=charts_mod.build(data, by_role, by_phase),
+                    by_phase=by_phase, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
                     **period(q, from_ns, to_ns, config.tz))
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura
