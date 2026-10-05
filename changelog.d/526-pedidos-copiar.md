@@ -1,2 +1,0 @@
-### Changed
-- **Pedidos: Copiar comando na linha, seções em sequência e decididos fechados** (#526). Cada pedido pendente de id seguro (`safe_cmd_id`) ganha na lista o comando `oute approve <id>` e o botão "Copiar comando" (o `/static/copiar.js` o mostra; só copia, a tela continua sem aprovar, recusar ou executar); id fora do padrão não ganha botão. "Pendentes" e "Decididos recentes" passam a seções uma abaixo da outra, e "Decididos recentes" abre fechado, com a contagem no título. **Precisa de release** (o agent-studio vai na imagem).

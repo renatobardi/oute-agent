@@ -1,2 +1,0 @@
-### Added
-- **agent-studio: gráfico e tendência na tela de Preços** (#534). Cada modelo ganha um gráfico em degrau do preço de entrada e do de saída, e um selo de alta ou de queda com a variação e a data da troca (ou "sem troca"). O topo resume quantos modelos subiram e quantos caíram nos últimos 30 dias. A tela segue só de leitura e o `GET /v1/prices` não muda. Precisa de release (o agent-studio vai na imagem).
