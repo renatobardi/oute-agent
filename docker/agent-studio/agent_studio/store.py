@@ -207,15 +207,15 @@ class Store:
         with self.lock:
             return repo_mod.options(self.con, from_ns, to_ns)
 
-    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
-        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528) faz parte da chave."""
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528) e o modelo (#532) fazem parte da chave."""
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute
-        key = ("live", to_ns - from_ns, tzk, repo) if live else (from_ns // minute, to_ns // minute, tzk, repo)
+        key = ("live", to_ns - from_ns, tzk, repo, model) if live else (from_ns // minute, to_ns // minute, tzk, repo, model)
         with self._dash_lock:
             hit = self._dash_cache.get(key)
             if hit and time.monotonic() - hit[0] < DASH_TTL_S:
@@ -223,18 +223,18 @@ class Store:
             if hit and live:
                 if not self._dash_refreshing.get(key):
                     self._dash_refreshing[key] = True
-                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo), daemon=True).start()
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model), daemon=True).start()
                 return hit[1]
-        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo)
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model)
 
-    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None):
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None):
         with self._dash_lock:
             try:
                 cur = self.con.cursor()
                 timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
                 timer.start()
                 try:
-                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo)
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model)
                 finally:
                     timer.cancel()
                     cur.close()

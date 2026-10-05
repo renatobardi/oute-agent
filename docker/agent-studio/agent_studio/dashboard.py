@@ -32,6 +32,7 @@ MODEL_MAX_CALLS_SHARE = 0.10   # modelo com menos que isto das chamadas…
 MODEL_MIN_COST_SHARE = 0.35    # …e mais que isto do custo
 TOOL_MIN_ERRORS = 2            # erros da mesma ferramenta no mesmo host
 NO_MODEL = "(sem modelo)"
+NO_REPO = "sem repositório"
 
 _WINDOW = "time_unix_nano >= ? AND time_unix_nano < ?"
 _CALL = f"{_WINDOW} AND {MODEL_CALL_SQL}"
@@ -211,14 +212,24 @@ def _tick(i, n, d, hourly):
     return text if i % (1 if n <= 8 else math.ceil(n / 6)) == 0 else ""
 
 
-def _series(con, from_ns, to_ns, tz, repo=None):
+def _model_clause(model):
+    """(SQL, parâmetros) do seletor de modelo do gráfico de chamadas (#532): `None` = Todos; `NO_MODEL` = chamada sem modelo."""
+    if model is None:
+        return "", []
+    if model == NO_MODEL:
+        return " AND model IS NULL", []
+    return " AND model = ?", [model]
+
+
+def _series(con, from_ns, to_ns, tz, repo=None, model=None):
     rsql, rparams = repo_mod.clause(repo)
+    msql, mparams = _model_clause(model)
     hourly = to_ns - from_ns <= HOURLY_MAX_NS
     fmt, keys = _bucket_keys(from_ns, to_ns, tz, hourly)
     found = {r["b"]: r for r in _rows(
         con, f"SELECT strftime({usage_mod.local_expr(tz)}, '{fmt}') AS b, count(*) AS calls, "
-             f"quantile_cont({_DUR}, 0.95) AS p95 FROM spans WHERE {_CALL}{rsql} GROUP BY b",
-        [from_ns, to_ns, *MODEL_CALL_PARAMS, *rparams])}
+             f"quantile_cont({_DUR}, 0.95) AS p95 FROM spans WHERE {_CALL}{rsql}{msql} GROUP BY b",
+        [from_ns, to_ns, *MODEL_CALL_PARAMS, *rparams, *mparams])}
     n = len(keys)
     points = []
     for i, (key, d) in enumerate(keys.items()):
@@ -230,6 +241,22 @@ def _series(con, from_ns, to_ns, tz, repo=None):
         p["frac"] = _div(p["calls"], top)
     return {"unit": "hour" if hourly else "day", "points": points, "max": top, "mid": top // 2,
             "total": sum(p["calls"] for p in points)}
+
+
+def _repos(by_repo, total_calls):
+    """Chamadas e custo por repositório (#532), do maior para o menor número de chamadas; a conversa sem repositório é a
+    linha `NO_REPO`. A soma das chamadas é a do indicador da janela (mesma população do `usage.aggregate`)."""
+    rows = []
+    for (name,), a in by_repo.items():
+        if not a["calls"]:
+            continue  # grupo que só tem erro de log ou span que não é chamada
+        rows.append({"repo": name or NO_REPO, "none": name is None, "calls": a["calls"], "real_usd": a["real_usd"],
+                     "estimated_usd": a["estimated_usd"], "cost": _cost(a), "unpriced_calls": a["unpriced_calls"],
+                     "calls_share": _div(a["calls"], total_calls)})
+    rows.sort(key=lambda r: (-r["calls"], -(r["cost"] or 0), r["repo"]))
+    for r in rows:
+        r["frac"] = _div(r["calls"], rows[0]["calls"])
+    return rows
 
 
 def _model_latency(con, from_ns, to_ns, repo=None):
@@ -372,7 +399,7 @@ def _p95_regression(con, latency, prev_latency, from_ns, to_ns, repo=None):
     worst["session"] = _worst_session(con, worst["model"], from_ns, to_ns, repo)
     return worst
 
-FINE = ("session", "agent", "model", "phase")
+FINE = ("session", "agent", "model", "phase", "repo")
 
 
 def _regroup(fine, keys):
@@ -381,10 +408,11 @@ def _regroup(fine, keys):
     return usage_mod.regroup(fine, FINE, keys)
 
 
-def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
+def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None):
     """Tudo o que a tela mostra, do DuckDB, na janela [from_ns, to_ns) e na anterior de mesmo tamanho. `repo` (#528) =
     só os fatos desse repositório (`repo.NONE` = sem repositório) em todos os blocos, nas duas janelas; `repos` = as
-    opções do filtro (da janela, sem filtrar)."""
+    opções do filtro (da janela, sem filtrar). `model` (#532) = só o gráfico de chamadas por hora ou dia, uma série só
+    (`None` = Todos); `model_options` = os modelos com chamada na janela (no filtro de repositório, sem o de modelo)."""
     span = to_ns - from_ns
     prev_from = from_ns - span
     fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False, repo=repo)
@@ -399,7 +427,9 @@ def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
     return {
         "from_ns": from_ns, "to_ns": to_ns, "span_ns": span, "prev_from_ns": prev_from,
         "totals": usage_mod.render((), cur, ()), "prev_totals": usage_mod.render((), prev, ()),
-        "repos": repo_mod.options(con, from_ns, to_ns), "kpis": _kpis(cur, prev, span), "series": _series(con, from_ns, to_ns, tz, repo),
+        "repos": repo_mod.options(con, from_ns, to_ns), "kpis": _kpis(cur, prev, span), "series": _series(con, from_ns, to_ns, tz, repo, model),
+        "model": model, "model_options": sorted({m["model"] for m in models}),
+        "by_repo": _repos(_regroup(fine, ("repo",)), cur["calls"]),
         "models": models[:MODELS_SHOWN], "models_total": len(models),
         "composition": {"real_usd": cur["real_usd"], "estimated_usd": cur["estimated_usd"], "total": total_cost,
                         "unpriced_calls": cur["unpriced_calls"]},
