@@ -271,9 +271,9 @@ class Store:
         with self.lock:
             return tools_mod.snapshot(self.con, from_ns, to_ns, tz, repo, host, agent)
 
-    def tool_conversations(self, tool, from_ns, to_ns, repo=None, host=None, agent=None):
+    def tool_conversations(self, tool, from_ns, to_ns, repo=None, host=None, agent=None, group=None):
         with self.lock:
-            return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent)
+            return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent, group)
 
     def conversation(self, session_id, prices, errors_only=False, effective=False):
         with self.lock:

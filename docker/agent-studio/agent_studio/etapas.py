@@ -22,6 +22,10 @@ ela aparece no topo da página do ciclo (a revisão mais alta vence). `ciclo` n�
 Fatia 2 (#508): cada etapa sabe a posição na rodada e a anterior e a seguinte (`navigate`, na página), a barra lista cada
 pedido de merge (`bar`) e o `GET /v1/tray` ganha o bloco `steps` (`tray_steps`): as etapas das rodadas não fechadas, só
 do SurrealDB, com o título fixo por tipo (`title`) e nunca o texto.
+
+Histórico (#601): a lista `GET /rodadas` sai dos eventos `oute.swarm.*` do DuckDB, e não só das etapas: entra toda rodada
+com `oute.swarm.round.opened` (e a rodada com etapa publicada cujo evento de abertura não chegou). A abertura, o fechamento,
+o repositório e o número de sessões vêm desses eventos; o SurrealDB só dá o ciclo e completa a rodada sem evento de abertura.
 """
 import re
 from urllib.parse import quote, urlsplit
@@ -40,18 +44,19 @@ CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z",
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
 LIST_LIMIT = 100   # rodadas na lista (a tela, que pagina, pede `tabela.ALL`)
+SWARM_PREFIX = "oute.swarm."
+OPENED, CLOSED, SPAWNED = "oute.swarm.round.opened", "oute.swarm.round.closed", "oute.swarm.session.spawned"
 TRAY_LIMIT = 50    # etapas no bloco `steps` do tray (as mais novas); `total` diz quantas há
 
-# a tabela da tela das rodadas (#529): a mais recente primeiro; estado e veredito filtram
-def _st(x, key):
-    return (x.get("state") or {}).get(key) or None
-
-
-TABLE = Table([Col("rodada", "text", lambda x: x["round"]), Col("repo", "text", lambda x: _st(x, "repo")),
-               Col("state", "text", lambda x: _st(x, "state"), lambda x: [_st(x, "state")]), Col("cycle", "text", lambda x: _st(x, "cycle")),
-               Col("steps", "num", lambda x: x["steps"]), Col("kind", "text", lambda x: x["kind"]),
-               Col("review", "text", lambda x: x["review"], lambda x: [x["review"]]), Col("last", "time", lambda x: x["last_ns"])],
-              default=("last", "desc"))
+# a tabela da tela das rodadas (#529, #601): a aberta mais recente primeiro; estado e veredito filtram. A ordem de `opened` é a
+# hora da abertura ou, sem o evento de abertura, a do primeiro evento da rodada
+TABLE = Table([Col("rodada", "text", lambda x: x["round"]), Col("repo", "text", lambda x: x["repo"]),
+               Col("opened", "time", lambda x: x["start_ns"]),
+               Col("state", "text", lambda x: x["status"], lambda x: [x["status"]]), Col("sessions", "num", lambda x: x["sessions"]),
+               Col("prs", "num", lambda x: x["prs"]), Col("steps", "num", lambda x: x["steps"]),
+               Col("cycle", "text", lambda x: x["cycle"]), Col("kind", "text", lambda x: x["kind"]),
+               Col("review", "text", lambda x: x["review"], lambda x: [x["review"]])],
+              default=("opened", "desc"))
 
 # ---------------------------------------------------------------- leitura
 # antes do primeiro evento a tabela não existe, e ler tabela que não existe é erro no SurrealDB: sem ela, lista vazia
@@ -90,7 +95,26 @@ _LIST_COLS = f"""
            arg_max({_ATTR % 'oute.swarm.step.review'}, time_unix_nano) AS review,
            arg_max({_KIND}, time_unix_nano) AS kind
     FROM logs WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND {_NOT_CYCLE}"""
-_LIST = _LIST_COLS + " GROUP BY oute_swarm_round ORDER BY last_ns DESC, round LIMIT ?"
+# o histórico (#601): uma linha por rodada, de todos os eventos `oute.swarm.*` dela. Entra a rodada com evento de abertura
+# ou com etapa publicada, que tem evento entre o início e o fim da janela (ou antes e depois dela: estava em andamento)
+_STEP = f"event_name = '{EVENT}' AND {_NOT_CYCLE}"
+_HISTORY = f"""
+    SELECT oute_swarm_round AS round,
+           min(time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS opened_ns,
+           max(time_unix_nano) FILTER (WHERE event_name = '{CLOSED}') AS closed_ns,
+           arg_min({_ATTR % 'oute.swarm.repo'}, time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS repo,
+           arg_min({_ATTR % 'oute.swarm.label'}, time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS label,
+           count(DISTINCT {_ATTR % 'oute.swarm.session'}) FILTER (WHERE event_name = '{SPAWNED}') AS sessions,
+           count(*) FILTER (WHERE {_STEP}) AS revisions,
+           count(DISTINCT {_KIND} || ':' || coalesce({_ATTR % 'oute.swarm.step.key'}, '')) FILTER (WHERE {_STEP}) AS steps,
+           count(DISTINCT {_ATTR % 'oute.swarm.step.key'}) FILTER (WHERE {_STEP} AND {_KIND} = 'merge') AS prs,
+           arg_max({_ATTR % 'oute.swarm.step.review'}, time_unix_nano) FILTER (WHERE {_STEP}) AS review,
+           arg_max({_KIND}, time_unix_nano) FILTER (WHERE {_STEP}) AS kind,
+           min(time_unix_nano) AS first_ns, max(time_unix_nano) AS last_ns
+    FROM logs WHERE starts_with(event_name, ?) AND oute_swarm_round IS NOT NULL
+    GROUP BY oute_swarm_round
+    HAVING (opened_ns IS NOT NULL OR revisions > 0) AND first_ns < ? AND last_ns >= ?
+    ORDER BY coalesce(opened_ns, first_ns) DESC, round LIMIT ?"""
 _CYCLE_STATS = _LIST_COLS + " AND list_contains(?::VARCHAR[], oute_swarm_round) GROUP BY oute_swarm_round ORDER BY first_ns, round"
 # as rodadas do ciclo só pelo DuckDB (o SurrealDB fora ou sem o registro): a revisão vigente da triagem leva o ciclo
 _CYCLE_IDS = (f"SELECT oute_swarm_round FROM logs WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND {_KIND} = 'triagem' "
@@ -118,10 +142,26 @@ def texts(con, event_ids):
     return out
 
 
-def listing(con, limit=LIST_LIMIT):
-    """Rodadas com etapa publicada, da mais recente para a mais antiga: quantas etapas e revisões, e o veredito e o tipo
-    da última."""
-    return _dicts(con.execute(_LIST, [EVENT, limit]))
+def listing(con, from_ns, to_ns, limit=LIST_LIMIT):
+    """O histórico das rodadas (#601) na janela [from_ns, to_ns), da aberta mais recente para a mais antiga: a abertura e o
+    fechamento (`None` = sem o evento), o repositório, quantas sessões, etapas, revisões e pedidos de merge, e o veredito e
+    o tipo da última etapa. Rodada sem etapa publicada entra, com zeros."""
+    return _dicts(con.execute(_HISTORY, [SWARM_PREFIX, to_ns, from_ns, limit]))
+
+
+def with_state(rows, states):
+    """Põe em cada linha do `listing` o que a tela mostra: `status` (`fechada` com o evento de fechamento, `aberta` com o de
+    abertura), `start_ns` (a ordem), `prs` (`None` sem etapa: só o pedido de merge publicado leva o PR) e, do registro do
+    SurrealDB (`states`, ou `None` se ele não foi lido), o ciclo e o que falta à rodada sem evento de abertura."""
+    for r in rows:
+        rec = (states or {}).get(r["round"]) or {}
+        r["repo"], r["label"] = r["repo"] or rec.get("repo"), r["label"] or rec.get("label")
+        r["status"] = "fechada" if r["closed_ns"] else "aberta" if r["opened_ns"] else rec.get("state")
+        r["start_ns"] = r["opened_ns"] or r["first_ns"]
+        r["prs"] = r["prs"] if r["steps"] else None
+        r["cycle"] = rec.get("cycle") if cycle_url(rec.get("cycle")) else None
+        r["cycle_url"] = cycle_url(rec.get("cycle"))
+    return rows
 
 
 def _int(value):

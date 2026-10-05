@@ -2,6 +2,7 @@
 {% set nav = "precos" %}
 {% set crumbs = [("Análise", none), ("Preços", none)] %}
 {% from "_macros.html" import badge, icon %}
+{% from "_graficos_precos.html" import degrau %}
 {% block title %}Preços · Agent Studio{% endblock %}
 {% macro cells(p) %}<td class="n">{{ p.input|usdm }}</td><td class="n">{{ p.output|usdm }}</td><td class="n">{{ p.cache_read|usdm }}</td><td class="n">{{ p.cache_creation|usdm }}</td>{% endmacro %}
 {% macro price_header(m) %}
@@ -56,9 +57,7 @@
 {{ price_header(m) }}
 {% call fragment("preco-" ~ loop.index0 ~ "-grafico") %}
   <figure class="grafico-preco" data-grafico>
-    <svg class="degrau-svg" viewBox="0 0 {{ m.chart.w }} {{ m.chart.h }}" preserveAspectRatio="none" role="img" aria-label="Preço de entrada e de saída ao longo do tempo, em degraus">
-      <path class="saida" d="{{ m.chart.output }}"/><path class="entrada" d="{{ m.chart.input }}"/>
-    </svg>
+    {{ degrau(m.chart) }}
     <figcaption><span class="leg entrada">entrada</span> <span class="leg saida">saída</span> · escala até {{ m.chart.top|usdm }}</figcaption>
   </figure>
 {% endcall %}

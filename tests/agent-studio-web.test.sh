@@ -14,6 +14,31 @@ trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 PKG="$ROOT/docker/agent-studio/agent_studio"
 
+# Regra (#588): <svg só na macro (_macros.html) e nos _graficos*.html; nenhuma tela leva <svg colado, com ou sem Jinja ao redor.
+# Falha também se a pasta não existe ou não tem nenhum .html (teste vazio não passa).
+svg_templates_valid() {
+  local templates="$1" template lidos=0
+  [[ -d "$templates" ]] || return 1
+  for template in "$templates"/*.html; do
+    [[ -f "$template" ]] || continue
+    lidos=$((lidos + 1))
+    case "${template##*/}" in
+      _macros.html | _graficos*.html) continue ;;
+      *) grep -q '<svg' "$template" && return 1 ;;
+    esac
+  done
+  [[ "$lidos" -gt 0 ]] || return 1
+  return 0
+}
+
+svg_templates_rejects_screen() {
+  local templates="$1"
+  if svg_templates_valid "$templates"; then
+    return 1
+  fi
+  return 0
+}
+
 
 # ---------------------------------------------------------------- DuckDB de exemplo
 # D1 = 2025-09-27T19:06:40Z. Tudo chega agora: só a hora do fato põe as conversas na janela de 2025.
@@ -197,7 +222,21 @@ studio_page "${C[@]}" "$STUDIO_URL/conversa/logs?id=conv-b" > "$TMP/logs.html"
 studio_page "${C[@]}" "$STUDIO_URL/conversa?id=nao-existe" > "$TMP/erro.html"
 curl -s -X POST --data-urlencode "token=${STUDIO_TOKEN}x" "$STUDIO_URL/login" > "$TMP/login-erro.html"
 check "páginas: todo ícone aponta para um símbolo do sprite" bash -c 'u="$(grep -ho "href=\"/static/lucide.svg#[^\"]*\"" "${@:2}" | sed "s/.*#//; s/\"//" | sort -u)"; [ -n "$u" ] && for g in $u; do grep -q "<symbol id=\"$g\" " "$1" || { echo "falta $g" >&2; exit 1; }; done' _ "$TMP/lucide.svg" "$TMP/list.html" "$TMP/a.html" "$TMP/logs.html" "$TMP/erro.html" "$TMP/login-erro.html" "$TMP/login.html"
-check "templates: <svg só na macro (icon e logo) e nos gráficos do dashboard (#469), dos preços (#534), da Uso (#533) e das ferramentas (#535), nunca colado nas outras telas" bash -c '! grep -l "<svg" "$1"/templates/*.html | grep -v "/_macros.html$" | grep -v "/dashboard.html$" | grep -v "/prices.html$" | grep -v "/_graficos_uso.html$" | grep -v "/tools.html$" && [ "$(grep -c "<svg" "$1/templates/_macros.html")" = 2 ]' _ "$PKG"
+check "templates: <svg só na macro ou em _graficos*.html" svg_templates_valid "$PKG/templates"
+check "macro _macros.html: exatamente 2 SVGs (icon e logo)" bash -c '[ "$(grep -c "<svg" "$1")" = 2 ]' _ "$PKG/templates/_macros.html"
+mkdir -p "$TMP/svg-regra" "$TMP/svg-vazia"
+printf '%s\n' '<svg></svg>' > "$TMP/svg-regra/tela.html"
+check "templates: a regra reprova <svg> colado numa tela" svg_templates_rejects_screen "$TMP/svg-regra"
+check "templates: a regra reprova pasta sem .html"        svg_templates_rejects_screen "$TMP/svg-vazia"
+check "templates: a regra reprova pasta que não existe"   svg_templates_rejects_screen "$TMP/svg-nao-existe"
+# teste do teste (#588): um <svg estático na primeira linha de cada tela, mesmo com Jinja no resto do arquivo, reprova
+for tela in "$PKG/templates"/*.html; do
+  nome="${tela##*/}"
+  case "$nome" in _macros.html | _graficos*.html) continue ;; *) : ;; esac
+  rm -rf "${TMP:?}/svg-mut" && cp -r "$PKG/templates" "$TMP/svg-mut"
+  { printf '%s\n' '<svg width="9"><circle r="1"/></svg>'; cat "$tela"; } > "$TMP/svg-mut/$nome"
+  check "templates: a regra reprova <svg estático colado em $nome" svg_templates_rejects_screen "$TMP/svg-mut"
+done
 check "templates: nenhum style= nem <style"            bash -c '! grep -rnE "style=|<style" "$1/templates"' _ "$PKG"
 check "macro icon(name, size=16): <use> do sprite, traço currentColor, escondido do leitor de tela" bash -c 'grep -q "macro icon(name, size=16" "$1" && grep -q "stroke=\"currentColor\"" "$1" && grep -q "aria-hidden=\"true\"><use href=\"/static/lucide.svg#{{ name }}\"/>" "$1"' _ "$PKG/templates/_macros.html"
 check "páginas: o ícone sai do sprite com o tamanho pedido" bash -c 'grep -q "<svg class=\"icone\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" [^>]*><use href=\"/static/lucide.svg#layers\"/></svg>" "$1" && grep -q "<svg class=\"icone\" width=\"14\" height=\"14\" [^>]*><use href=\"/static/lucide.svg#chevron-right\"/>" "$1"' _ "$TMP/list.html"
