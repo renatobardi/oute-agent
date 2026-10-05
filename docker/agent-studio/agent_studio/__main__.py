@@ -57,6 +57,8 @@ def main():
                           db=os.environ.get("AGENT_STUDIO_SURREAL_DB", "studio"))
     db = os.environ.get("AGENT_STUDIO_DB", "/data/agent-studio/agent-studio.duckdb")
     store = Store(db)
+    # quanto vale o resultado do tray e dos alertas (#570); 0 = sempre refaz (o padrão, e o dos testes)
+    store.read_ttl = float(os.environ.get("AGENT_STUDIO_READ_TTL_S", "0"))
     tel = telemetry.setup()
     # config/agent-studio/config.toml, montada só leitura (#203): problema nela não impede a subida
     config = config_mod.load()
