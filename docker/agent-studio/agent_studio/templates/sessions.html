@@ -1,44 +1,43 @@
 {% extends "base.html" %}
 {% set nav = "sessoes" %}
 {% set crumbs = [("Telemetria", none), ("Sessões", none)] %}
-{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning, aviso_custo with context %}
+{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning, aviso_custo, sem_linhas with context %}
 {% block title %}Sessões · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
-  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > sessions|length %} · Mostrando as {{ sessions|length }} mais recentes de {{ total }}{% endif %}</p>
+  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 {{ aviso_custo() }}
 {{ state_warning(state_read) }}
-{% if sessions %}
-{% call session_table() %}
-  {% for s in sessions %}
+{% if ts.rows %}
+{% call session_table(ts) %}
+  {% for s in ts.rows %}
   <tbody>
   {{ session_row(s) }}
   {% if s.hidden %}
-  <tr class="mais"><td colspan="10"><a href="{{ com_custo("/sessao?id=" ~ (s.id|urlencode)) }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
+  <tr class="mais"><td colspan="11"><a href="{{ com_custo("/sessao?id=" ~ (s.id|urlencode)) }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
   {% endif %}
   {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
   {% endfor %}
 {% endcall %}
 {% else %}
-<p class="aviso" id="vazio">Nenhuma sessão nessa janela.</p>
+{{ sem_linhas(ts, "Nenhuma sessão nessa janela.") }}
 {% endif %}
 
 <h2>Conversas sem sessão</h2>
 <p class="nota">Conversas sem <code>oute.task.id</code> (agente aberto fora do <code>oute-task</code>), uma por
-  <code>session.id</code>.
-  {% if loose_total > loose|length %}Mostrando as {{ loose|length }} mais recentes de {{ loose_total }}.{% endif %}</p>
-{% if loose %}
-{% call session_table() %}
+  <code>session.id</code>.</p>
+{% if tl.rows %}
+{% call session_table(tl) %}
   <tbody>
-  {% for c in loose %}{{ conversation_row(c) }}{% endfor %}
+  {% for c in tl.rows %}{{ conversation_row(c) }}{% endfor %}
   </tbody>
 {% endcall %}
 {% else %}
-<p class="aviso" id="vazio-sem-sessao">Nenhuma conversa sem sessão nessa janela.</p>
+{{ sem_linhas(tl, "Nenhuma conversa sem sessão nessa janela.", "vazio-sem-sessao") }}
 {% endif %}
 </div>
 {% endblock %}

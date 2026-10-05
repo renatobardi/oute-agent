@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from . import (acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
-               sessions as sess_mod, tools as tools_mod, tz as tz_mod)
+               sessions as sess_mod, tabela as tabela_mod, tools as tools_mod, tz as tz_mod, usage as usage_mod)
 from . import alerts as alerts_mod
 from . import marcar as marcar_mod
 from . import usage_charts as charts_mod
@@ -247,6 +247,18 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                                              authed=shown or bool(auth.reader(request)))
         return HTMLResponse(html, status_code=status, headers={**HEADERS, **(headers or {})})
 
+    def table_states(q, *tables):
+        """O pedido da URL para cada tabela da tela (#529), ou `ValueError` (400) com a mensagem para a tela: parâmetro de
+        ordem, direção, filtro, página ou tamanho fora da lista fixa. Roda antes de qualquer leitura."""
+        tabela_mod.check_params(q, tables)
+        return [tabela_mod.parse(t, q) for t in tables]
+
+    def table_ctx(q, path, *tabs):
+        """`tabs` = (tabela, pedido, linhas) -> as `View`s e os campos escondidos que o formulário do período leva (ordem,
+        direção, tamanho e filtros: a página volta à primeira)."""
+        tables = [t for t, _, _ in tabs]
+        return [tabela_mod.apply(t, st, rows, tabela_mod.foreign_pairs(q, [t], lambda k, v: k == "custo" and v != "efetivo"), path) for t, st, rows in tabs], tabela_mod.own_pairs(q, tables)
+
     def error(request, status, message):
         return page(request, "error.html", status, message=message, code=status)
 
@@ -428,13 +440,18 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
+        try:
+            (st,) = table_states(q, conv_mod.TABLE)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        repo = q.get("repo", "")
         data, failed = await read(request, "lista de conversas", store.conversations, from_ns, to_ns, config.prices,
-                                  host, agent, repo_mod.parse(repo), cost_mode(q) == "efetivo")
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "efetivo", None)
         if failed:
             return failed
-        return page(request, "conversations.html", **data, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent, repo=repo,
-                    windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
+        (t,), keep = table_ctx(q, "/conversas", (conv_mod.TABLE, st, data["conversations"]))
+        return page(request, "conversations.html", t=t, keep=keep, repos=data["repos"], from_ns=from_ns, to_ns=to_ns, repo=repo,
+                    windows=WINDOWS, **period(q, from_ns, to_ns, config.tz))
 
     @app.get("/conversa")
     async def conversation(request: Request):
@@ -510,14 +527,19 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
+        try:
+            st, st_loose = table_states(q, sess_mod.TABLE, sess_mod.LOOSE)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        repo = q.get("repo", "")
         data, failed = await read(request, "lista de sessões", store.sessions, from_ns, to_ns, config.prices,
-                                  host, agent, repo_mod.parse(repo), cost_mode(q) == "efetivo")
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "efetivo", None)
         if failed:
             return failed
-        state = await with_state(data["sessions"])
-        return page(request, "sessions.html", **data, state_read=state, from_ns=from_ns, to_ns=to_ns, host=host,
-                    agent=agent, repo=repo, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
+        state = await with_state(data["sessions"])   # o estado antes da tabela: ele é uma coluna de filtro
+        (ts, tl), keep = table_ctx(q, "/sessoes", (sess_mod.TABLE, st, data["sessions"]), (sess_mod.LOOSE, st_loose, data["loose"]))
+        return page(request, "sessions.html", ts=ts, tl=tl, keep=keep, repos=data["repos"], state_read=state, from_ns=from_ns, to_ns=to_ns,
+                    repo=repo, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz))
 
     @app.get("/sessao")
     async def session(request: Request):
@@ -547,6 +569,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
+        try:
+            st_role, st_phase = table_states(q, usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE)
+        except ValueError as e:
+            return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo),
                                   cost_mode(q) == "efetivo")
@@ -560,8 +586,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             # o que mais custou primeiro (real + estimado); empate pela ordem da API
             return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
         by_role, by_phase = by_cost(data["by_role"]), by_cost(data["by_phase"])
-        return page(request, "usage.html", totals=data["totals"], by_role=by_role, charts=charts_mod.build(data, by_role, by_phase),
-                    by_phase=by_phase, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
+        (t_role, t_phase), keep = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase))
+        return page(request, "usage.html", totals=data["totals"], t_role=t_role, t_phase=t_phase, keep=keep, charts=charts_mod.build(data, by_role, by_phase),
+                    from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
                     **period(q, from_ns, to_ns, config.tz))
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura
@@ -582,14 +609,20 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     async def proposals(request: Request):
         if (denied := await gate(request)) is not None:
             return denied
-        data, state_read = await proposal_state("lista de pedidos", prop_mod.listing)
+        try:
+            st_pending, st_recent = table_states(request.query_params, prop_mod.PENDING_TABLE, prop_mod.RECENT_TABLE)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        data, state_read = await proposal_state("lista de pedidos", prop_mod.listing, tabela_mod.ALL, tabela_mod.ALL)
         if not state_read:
             # a lista é o estado: sem o SurrealDB não há o que mostrar
             if state_read is None:
                 return error(request, 503, "Este agent-studio está sem SurrealDB: não há estado dos pedidos.")
             return error(request, 503, "O estado dos pedidos (SurrealDB) não pôde ser lido. A causa está no log do "
                                        "agent-studio.")
-        return page(request, "proposals.html", **data, pending_limit=prop_mod.PENDING_LIMIT)
+        (tp, td), _ = table_ctx(request.query_params, "/pedidos", (prop_mod.PENDING_TABLE, st_pending, data["pending"]),
+                                (prop_mod.RECENT_TABLE, st_recent, data["recent"]))
+        return page(request, "proposals.html", tp=tp, td=td)
 
     @app.get("/pedido")
     async def proposal(request: Request):
@@ -612,15 +645,19 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     async def rounds(request: Request):
         if (denied := await gate(request)) is not None:
             return denied
-        rows, failed = await read(request, "lista de rodadas", store.read, lambda con: etapas_mod.listing(con))
+        try:
+            (st,) = table_states(request.query_params, etapas_mod.TABLE)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        rows, failed = await read(request, "lista de rodadas", store.read, lambda con: etapas_mod.listing(con, tabela_mod.ALL))
         if failed:
             return failed
         states, state_read = await proposal_state("estado das rodadas", etapas_mod.round_states, [r["round"] for r in rows])
         for r in rows:
             r["state"] = (states or {}).get(r["round"])
             r["cycle_url"] = etapas_mod.cycle_url((r["state"] or {}).get("cycle"))
-        return page(request, "rodadas.html", rounds=rows, state_read=state_read,
-                    limit_reached=len(rows) >= etapas_mod.LIST_LIMIT)
+        (t,), _ = table_ctx(request.query_params, "/rodadas", (etapas_mod.TABLE, st, rows))
+        return page(request, "rodadas.html", t=t, state_read=state_read)
 
     @app.get("/rodada")
     async def round_page(request: Request):

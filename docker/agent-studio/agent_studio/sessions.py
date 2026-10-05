@@ -15,10 +15,33 @@ import json
 
 from . import repo as repo_mod, usage as usage_mod
 from .conversations import LIST_LIMIT, _dicts, _first, _pretty
+from .tabela import Col, Table, usage_cols
 
 CONV_LIMIT = 20     # conversas mostradas por sessão na lista (as mais recentes); a página da sessão mostra todas
 EVENT_LIMIT = 200   # eventos mostrados na página da sessão (os primeiros, pela hora do fato)
 _ALL = 2**63        # fim de janela que pega tudo (a hora do fato cabe em 63 bits: `app._parse_time`)
+
+# as tabelas da tela (#529): a das sessões e a das conversas sem sessão (sufixo `_c`); host, agente e modelo valem para as duas
+def _model_names(x):
+    return [m["model"] for m in x["models"] if m["model"]]
+
+
+def _filter_cols(state=False):
+    cols = [Col("host", "text", lambda x: x["host"], lambda x: [x["host"]], "host"),
+            Col("agent", "text", lambda x: ", ".join(x["agents"]) if "agents" in x else x["agent"],
+                lambda x: x["agents"] if "agents" in x else [x["agent"]], "agent"),
+            Col("model", "text", lambda x: ", ".join(_model_names(x)) or None, _model_names, "f_model")]
+    if state:
+        state_of = lambda s: (s["state"] or {}).get("state")   # noqa: E731
+        cols.append(Col("state", "text", state_of, lambda s: [state_of(s)], "f_state"))
+    return cols
+
+
+TABLE = Table([Col("start", "time", lambda x: x["start_ns"]), Col("session", "text", lambda x: x["id"]), *_filter_cols(state=True),
+               Col("duration", "num", lambda x: x["duration_ns"]), *usage_cols(lambda x: x["usage"])], default=("start", "desc"))
+LOOSE = Table([Col("start", "time", lambda x: x["start_ns"]), Col("session", "text", lambda x: x["id"]), *_filter_cols(),
+               Col("duration", "num", lambda x: x["duration_ns"]), *usage_cols(lambda x: x["usage"])], default=("start", "desc"),
+              suffix="_c")
 
 # um fato por linha: spans e logs com sessão ou com conversa
 _FACTS = """
@@ -139,7 +162,9 @@ def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT
         loose = [c for c in loose if c["agent"] == agent]
     recent = lambda x: (-x["start_ns"], x["id"])  # noqa: E731
     total, loose_total = len(sessions), len(loose)
-    sessions, loose = sorted(sessions, key=recent)[:limit], sorted(loose, key=recent)[:limit]
+    sessions, loose = sorted(sessions, key=recent), sorted(loose, key=recent)
+    if limit:   # `limit=None`: todas (a tela pagina, #529)
+        sessions, loose = sessions[:limit], loose[:limit]
     for s in sessions:
         s["hidden"] = max(0, len(s["conversations"]) - conv_limit)
         s["conversations"] = s["conversations"][s["hidden"]:]

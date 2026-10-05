@@ -262,9 +262,9 @@ class Store:
             return decisions_mod.pending(self.con, at_ns, cfg)
 
     # leituras da tela (#206), sob a mesma trava
-    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False):
+    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
         with self.lock:
-            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo, effective=effective)
+            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, effective=effective)
 
     def tools(self, from_ns, to_ns, tz=tz_mod.UTC, repo=None, host=None, agent=None):
         """Tela Ferramentas (#535), sob a mesma trava."""
@@ -288,9 +288,9 @@ class Store:
             return conv_mod.span(self.con, trace_id, span_id)
 
     # leituras da tela de sessões (#207), sob a mesma trava
-    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False):
+    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
         with self.lock:
-            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo, effective=effective)
+            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, effective=effective)
 
     def session(self, task_id, prices, effective=False):
         with self.lock:

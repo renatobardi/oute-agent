@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "rodadas" %}
 {% set crumbs = [("Governança", none), ("Rodadas", none)] %}
-{% from "_macros.html" import badge, icon %}
+{% from "_macros.html" import badge, icon, th, rodape, sem_linhas %}
 {% block title %}Rodadas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
@@ -9,12 +9,12 @@
   <h1>Rodadas</h1>
 </div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das rodadas (SurrealDB) não pôde ser lido: repositório e estado podem faltar. A causa está no log do agent-studio.</p>{% endif %}
-{% if rounds %}
+{% if t.rows %}
 <div class="cartao rolagem">
-<table class="rodadas empilha">
-  <thead><tr><th>Rodada</th><th>Repositório</th><th>Estado</th><th>Ciclo</th><th class="n">Etapas</th><th>Última etapa</th><th>Veredito</th><th>Em ({{ tzl() }})</th></tr></thead>
+<table class="rodadas empilha" data-tabela>
+  <thead><tr>{{ th(t, "rodada", "Rodada") }}{{ th(t, "repo", "Repositório") }}{{ th(t, "state", "Estado") }}{{ th(t, "cycle", "Ciclo") }}{{ th(t, "steps", "Etapas", "n") }}{{ th(t, "kind", "Última etapa") }}{{ th(t, "review", "Veredito") }}{{ th(t, "last", "Em (" ~ tzl() ~ ")") }}</tr></thead>
   <tbody>
-  {% for x in rounds %}
+  {% for x in t.rows %}
   <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-revisoes="{{ x.revisions }}" data-review="{{ x.review or '' }}" data-state="{{ x.state.state if x.state and x.state.state else '' }}">
     <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{{ x.round }}</a></td>
     <td class="sec">{{ x.state.repo if x.state and x.state.repo else "—" }}{% if x.state and x.state.label %} · {{ x.state.label }}{% endif %}</td>
@@ -29,9 +29,9 @@
   </tbody>
 </table>
 </div>
-{% if limit_reached %}<p class="aviso">Mostrando as {{ rounds|length|num }} rodadas mais recentes.</p>{% endif %}
+{{ rodape(t) }}
 {% else %}
-<p class="aviso" data-sem-rodadas>Nenhuma rodada publicou etapa ainda.</p>
+{% if t.filtered %}{{ sem_linhas(t, "Nenhuma rodada com este filtro.") }}{% else %}<p class="aviso" data-sem-rodadas>Nenhuma rodada publicou etapa ainda.</p>{% endif %}
 {% endif %}
 </div>
 {% endblock %}

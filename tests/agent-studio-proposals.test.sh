@@ -108,6 +108,17 @@ check "lista: recusado sem rc"                         jqe '.[4] | .decision == 
 check "lista: pedido sem o proposed aparece pelo id"   jqe --arg p4 "$P4" '.[2] | .decision == "executado" and .rc == "0" and (.text | test($p4))' <<<"$L"
 check "lista: link da página do pedido (URL estável por id)" grep -qF "<a href=\"/pedido?id=$P1\">" "$TMP/list.html"
 check "lista: id escapado na página e codificado no link" bash -c '! grep -q "<b>5</b>" "$1" && ! grep -q "<b>nginx</b>" "$1" && grep -qF "href=\"/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9\"" "$1"' _ "$TMP/list.html"
+# tabelas com ordem, filtro por coluna e página (#529): os pendentes (sufixo _p) e os decididos (_d) são duas tabelas, cada uma com os seus parâmetros
+ids_of() { data | jq -c --arg st "$1" '[.[] | select(.pedido and .state == $st) | .pedido]'; }
+check "decididos: a ordem inicial é a da hora da decisão, do mais novo (a de sempre)" test "$(page /pedidos | ids_of decidido)" = "$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
+check "decididos: ordenar por rc inverte nos dois sentidos (sem rc no fim)" test "$(page '/pedidos?ord_d=rc&dir_d=desc' | ids_of decidido)$(page '/pedidos?ord_d=rc&dir_d=asc' | ids_of decidido)" = "$(jq -cn --arg a "$P2" --arg b "$P4" --arg c "$P3" '[$a, $b, $c]')$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
+check "decididos: filtro por decisão deixa só a escolhida, com o rodapé 'N a M de total'" bash -c 'h="$(curl -s "${@:2}" "$1/pedidos?f_decision_d=recusado")"; grep -q "1 a 1 de 1 (filtrado, 3 no total)" <<<"$h" && [ "$(grep -c "data-decision=\"recusado\"" <<<"$h")" = 1 ] && ! grep -q "data-decision=\"executado\"" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
+check "decididos: o filtro e a ordem abrem o <details> (a página recarregada mostra o que foi pedido)" bash -c 'grep -q "<details class=\"pilha decididos\" id=\"decididos\" open>" <<<"$1" && ! grep -q "<details class=\"pilha decididos\" id=\"decididos\">" <<<"$1"' _ "$(page '/pedidos?ord_d=rc&dir_d=asc')"
+check "decididos: os links da tabela levam a âncora #decididos e os dos pendentes não" bash -c 'grep -q "href=\"/pedidos?ord_d=[a-z]*&amp;dir_d=[a-z]*#decididos\"" <<<"$1" && ! grep -q "ord_p=[a-z]*&amp;dir_p=[a-z]*#decididos" <<<"$1"' _ "$(page /pedidos)"
+check "pendentes: filtro por 'roda como' vale só para a tabela dos pendentes" test "$(page '/pedidos?f_as_p=root' | ids_of pendente)$(page '/pedidos?f_as_p=root' | ids_of decidido | jq -c length)" = "$(jq -cn --arg a "$P1" '[$a]')3"
+check "pendentes: ordenar por pedido (título ou id) de A a Z e invertido, as duas ordens opostas e com os dois pedidos" jqe --argjson a "$(page '/pedidos?ord_p=pedido&dir_p=asc' | ids_of pendente)" --argjson d "$(page '/pedidos?ord_p=pedido&dir_p=desc' | ids_of pendente)" '$a == ($d | reverse) and $a != $d and ($a | length) == 2' <<<"{}"
+check "pedidos: ordem, filtro, tamanho ou página fora da lista fixa = 400, de uma tabela ou da outra" bash -c 'for q in ord_p=nope dir_d=up tam_p=7 tam_d=abc pag_p=0 pag_d=x f_nada_p=1 f_decision_p=x f_as=root ord=rc; do [ "$(curl -s -o /dev/null -w "%{http_code}" "${@:2}" "$1/pedidos?$q")" = 400 ] || { echo "$q" >&2; exit 1; }; done' _ "$STUDIO_URL" "${C[@]}"
+check "pedidos: tamanho 50 e página 1 valem" test "$(code "${C[@]}" "$STUDIO_URL/pedidos?tam_p=50&tam_d=100&pag_d=1")" = 200
 check "lista: menu com os pedidos"                     grep -qE '<a class="nav-item" href="/pedidos"[^>]*>.*<span>Pedidos</span></a>' "$TMP/list.html"
 check "lista: a saída do host não aparece"             bash -c '! grep -q SAIDA-DO-HOST-CANARIO "$1"' _ "$TMP/list.html"
 
@@ -179,8 +190,8 @@ check "templates: nenhum pedido do htmx que não seja leitura" bash -c '! grep -
 check "pendente: o comando com o id só sai para id seguro (letras, números, ponto, hífen, sublinhado), escapado (#468)" bash -c 'grep -q "<code class=\"comando\" id=\"comando\">oute approve $2</code>" "$1"' _ "$TMP/p1.html" "$P1"
 check "pendente com id fora do padrão: a página não monta o comando, só avisa" bash -c '! grep -q "oute approve p" <<<"$1" && ! grep -q "id=\"comando\"" <<<"$1" && grep -q "data-id-fora-do-padrao" <<<"$1"' _ "$(page "$P5U")"
 # Kubo (#468): âmbar do Gate no pendente, Badges de root/user e de decisão, duas colunas, Copiar que só copia
-check "lista: seções em sequência (sem colunas), Pendentes antes de Decididos, tabelas em cartão que empilha no celular" bash -c 'grep -q "metades" "$1" && exit 1; [ "$(grep -o "<table class=\"pedidos empilha\">" "$1" | wc -l)" = 2 ] && [ "$(grep -o "<div class=\"cartao rolagem\">" "$1" | wc -l)" = 2 ] && [ "$(grep -n "Pendentes (" "$1" | head -1 | cut -d: -f1)" -lt "$(grep -n "Decididos recentes" "$1" | head -1 | cut -d: -f1)" ]' _ "$TMP/list.html"
-check "lista: Decididos recentes abre fechado (details sem open) e leva a contagem no título" bash -c 'grep -q "<details class=\"pilha decididos\" id=\"decididos\">" "$1" && grep -q "<summary class=\"secao\">Decididos recentes (3)</summary>" "$1" && ! grep -q "<details[^>]*open" "$1"' _ "$TMP/list.html"
+check "lista: seções em sequência (sem colunas), Pendentes antes de Decididos, tabelas em cartão que empilha no celular" bash -c 'grep -q "metades" "$1" && exit 1; [ "$(grep -o "<table class=\"pedidos empilha\" data-tabela>" "$1" | wc -l)" = 2 ] && [ "$(grep -o "<div class=\"cartao rolagem\">" "$1" | wc -l)" = 2 ] && [ "$(grep -n "Pendentes (" "$1" | head -1 | cut -d: -f1)" -lt "$(grep -n "Decididos (" "$1" | head -1 | cut -d: -f1)" ]' _ "$TMP/list.html"
+check "lista: Decididos abre fechado (details sem open) e leva a contagem no título" bash -c 'grep -q "<details class=\"pilha decididos\" id=\"decididos\">" "$1" && grep -q "<summary class=\"secao\">Decididos (3)</summary>" "$1" && ! grep -q "<details[^>]*open" "$1"' _ "$TMP/list.html"
 check "lista: Copiar comando só nos pendentes de id seguro, apontando para o comando do id (#526)" bash -c 'f="$1"; [ "$(grep -c "class=\"botao copiar\"" "$f")" = 1 ] && grep -qF "<code class=\"comando\" id=\"cmd-$2\">oute approve $2</code>" "$f" && grep -qF "aria-controls=\"cmd-$2\" hidden>" "$f" && grep -q "<span>Copiar comando</span>" "$f" && ! grep -qF "oute approve p " "$f" && ! grep -q "id=\"cmd-$3\"" "$f"' _ "$TMP/list.html" "$P1" "$P3"
 check "lista: pendente de id fora do padrão não ganha botão nem comando, e a nota aparece" bash -c 'f="$1"; [ "$(grep -c "id fora do padrão" "$f")" = 1 ] && [ "$(grep -c "oute approve " "$f")" -ge 1 ] && ! grep -q "oute approve p" "$f"' _ "$TMP/list.html"
 check "lista: carrega o copiar.js" grep -q '<script src="/static/copiar.js" defer>' "$TMP/list.html"
@@ -323,7 +334,7 @@ SURREAL_URL="$SURREAL_URL" SURREAL_TEST_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$R
   "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/p1.sh" > "$TMP/py.out" 2>&1 <<'PY'
 import os, re, sys
 import duckdb
-from agent_studio import alert_text, alerts, proposals, web
+from agent_studio import alert_text, alerts, proposals, tabela, web
 from agent_studio.app import create_app
 from agent_studio.surreal import Surreal
 from pycheck import check
@@ -337,8 +348,9 @@ P1, P4 = "20260930-120000-reiniciar-nginx", "20260930-130000-so-decidido"
 r = proposals.listing(sdb, pending_limit=1, recent_limit=2)
 check("lista: os limites cortam, o total de pendentes conta tudo",
       [p["id"] for p in r["pending"]] == ["p <b>5</b>&x=é"] and r["pending_total"] == 2 and len(r["recent"]) == 2)
-html = web._env().get_template("proposals.html").render(**r, pending_limit=1)
-check("lista: o corte dos pendentes aparece na página", "Mostrando os 1 mais recentes de 2" in html)
+views = [tabela.apply(t, tabela.parse(t, {}), rows, [], "/pedidos") for t, rows in ((proposals.PENDING_TABLE, r["pending"]), (proposals.RECENT_TABLE, r["recent"]))]
+html = web._env().get_template("proposals.html").render(tp=views[0], td=views[1])
+check("lista: o rodapé da tabela conta as linhas mostradas e o total (#529)", "1 a 1 de 1" in html and "1 a 2 de 2" in html)
 check("estado: pedido sem registro = None", proposals.state(sdb, "nao-existe") is None)
 check("estado: registro do pedido decidido", proposals.state(sdb, P4)["decision"] == "executado")
 check("evento: pedido sem evento no DuckDB = None", proposals.event(con, "nao-existe") is None and proposals.event(con, P4) is None)

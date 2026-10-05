@@ -512,3 +512,26 @@ tr.com-erro > td:first-child { box-shadow: inset 3px 0 0 var(--destructive); }
 .acao-form { display: inline; margin: 0; }
 .acao-caixa { padding: 2px 8px; font-size: 13px; }
 .acao-estado { color: var(--muted-foreground); font-size: 13px; }
+
+/* tabelas com ordem, filtro por coluna e página (#529): tudo link, sem script */
+th a.ordem { display: inline-flex; align-items: center; gap: 4px; color: inherit; }
+th a.ordem:hover { color: var(--foreground); text-decoration: none; }
+th[aria-sort="ascending"] a.ordem, th[aria-sort="descending"] a.ordem { color: var(--foreground); }
+.th-filtro { margin-top: 4px; font-weight: 400; }
+.th-filtro > summary { cursor: pointer; list-style: none; color: var(--muted-foreground); text-decoration: underline dotted; }
+.th-filtro > summary::-webkit-details-marker { display: none; }
+.th-filtro[open] > summary { color: var(--foreground); }
+.th-filtro ul { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.th-filtro li a[aria-current="true"] { font-weight: 600; color: var(--foreground); }
+.tabela-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 8px 0 24px; font-size: 13px; color: var(--muted-foreground); }
+.tabela-rodape a { display: inline-flex; align-items: center; gap: 2px; min-width: 28px; justify-content: center; padding: 4px 8px; border-radius: 9999px; color: var(--muted-foreground); }
+.tabela-rodape a:hover { text-decoration: none; color: var(--foreground); }
+.tabela-rodape a[aria-current] { background: var(--muted); color: var(--foreground); font-weight: 600; }
+.tabela-tamanho, .tabela-paginas { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+@media (max-width: 640px) {
+  /* no celular o cabeçalho segue à vista só como a barra de ordem e filtro (as linhas viram cartões) */
+  table.empilha[data-tabela] thead { display: block; }
+  table.empilha[data-tabela] thead tr { border-bottom: 1px solid var(--border); }
+  table.empilha[data-tabela] th, table.empilha[data-tabela] th:first-child, table.empilha[data-tabela] th:last-child { display: block; padding: 0; border: 0; background: transparent; }
+  table.empilha[data-tabela] th a.ordem { padding: 12px 0; }
+}

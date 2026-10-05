@@ -7,12 +7,19 @@ fato** (`time_unix_nano`), nunca pela de chegada. Chamadas, tokens e custo (real
 import json
 
 from . import repo as repo_mod, usage as usage_mod
+from .tabela import Col, Table, usage_cols
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, is_subscription,
                    spans_with_cost)
 
 LIST_LIMIT = 200    # conversas por página da lista (as mais recentes)
 SPAN_LIMIT = 5000   # spans na árvore de uma conversa (os primeiros, pela hora do fato)
 LOG_PAGE = 200      # logs por página do detalhe
+
+# a tabela da tela (#529): a ordem inicial é a de sempre (a mais recente primeiro); host e agente filtram pelos parâmetros que a lista já tinha
+TABLE = Table([Col("start", "time", lambda c: c["start_ns"]), Col("host", "text", lambda c: c["host"], lambda c: [c["host"]], "host"),
+               Col("agent", "text", lambda c: c["agent"], lambda c: [c["agent"]], "agent"), Col("conv", "text", lambda c: c["id"]),
+               Col("duration", "num", lambda c: c["duration_ns"]), *usage_cols(lambda c: c["usage"], detail=False),
+               Col("errors", "num", lambda c: c["usage"]["errors"]["total"])], default=("start", "desc"))
 
 # um fato por linha: spans e logs com conversa
 _FACTS = """
@@ -76,7 +83,7 @@ def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT
     if agent:
         convs = [c for c in convs if c["agent"] == agent]
     total = len(convs)
-    convs = convs[:limit]
+    convs = convs[:limit] if limit else convs   # `limit=None`: todas (a tela pagina, #529)
     _with_usage(con, convs, prices, effective)
     return {"conversations": convs, "total": total, "hosts": hosts, "agents": agents, "repos": repos}
 

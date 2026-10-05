@@ -10,10 +10,20 @@ dela diz (papel) ou em `desconhecida`/`avulsa`: nunca some do total.
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
 from . import repo as repo_mod, tz as tz_mod
+from .tabela import Col, Table, usage_cols
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
                    SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
+
+
+def _table(kind):
+    # as tabelas por papel e por fase da tela (#529): só a ordem (sem filtro nem página); a de sempre é a do que mais custou
+    return Table([Col("name", "text", lambda r: r[kind]), *usage_cols(lambda r: r, detail=False)], default=("cost", "desc"),
+                 suffix="_papel" if kind == "role" else "_fase", paginate=False)
+
+
+ROLE_TABLE, PHASE_TABLE = _table("role"), _table("phase")
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo")
 ROLES = ("dispatcher", "worker", "avulsa")
 UNKNOWN_PHASE = "desconhecida"

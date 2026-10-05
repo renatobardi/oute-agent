@@ -96,17 +96,18 @@
 {# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
 {# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela, o
    repositório (`repos` = none: sem ele) e, nas listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam repositório, host e agente; o intervalo vai em `de`/`ate`. #}
-{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="", model="", custo_ctl=true) %}
-<form class="filtro" method="get" action="{{ action }}"{% if hosts is not none %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
+{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="", model="", custo_ctl=true, hidden=(), live=false) %}
+<form class="filtro" method="get" action="{{ action }}"{% if hosts is not none or live %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
       hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true"{% endif %}>
   <nav class="janelas" aria-label="Janela">
     {% for value, label in windows %}
-    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}{% if model %}{% set _ = keep.update({"model": model}) %}{% endif %}{% if custo == "efetivo" %}{% set _ = keep.update({"custo": "efetivo"}) %}{% endif %}
+    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}{% if model %}{% set _ = keep.update({"model": model}) %}{% endif %}{% for k, v in hidden %}{% set _ = keep.update({k: v}) %}{% endfor %}{% if custo == "efetivo" %}{% set _ = keep.update({"custo": "efetivo"}) %}{% endif %}
     <a href="{{ action }}?{{ keep|urlencode }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
   {% if not range.from %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
   {% if model %}<input type="hidden" name="model" value="{{ model }}">{% endif %}
+  {% for k, v in hidden %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
   {% if custo_ctl %}
   <label>Custo
     <select name="custo">
@@ -147,6 +148,44 @@
 </form>
 {% endmacro %}
 
+{# ---- tabelas com ordem, filtro por coluna e página (#529; `t` = a `View` do tabela.py): tudo link, sem JavaScript ---- #}
+{# o cabeçalho de uma coluna: o rótulo é o link de ordem (o segundo clique inverte) e, na coluna de categoria, o filtro por valor #}
+{% macro th(t, key, label, cls="", title="", fkeys=none) %}
+{% set fk = [key] if fkeys is none else fkeys %}
+<th{% if cls %} class="{{ cls }}"{% endif %}{% if title %} title="{{ title }}"{% endif %} aria-sort="{{ t.aria_sort(key) }}" data-col="{{ key }}">
+  <a class="ordem" href="{{ t.sort_link(key) }}">{{ label }}{% if t.state.order == key %}{{ icon("chevron-up" if t.state.direction == "asc" else "chevron-down", 12) }}{% endif %}</a>
+  {% for f in fk if t.options.get(f) %}
+  <details class="th-filtro"{% if t.state.filters.get(f) %} open{% endif %} data-filtro="{{ f }}">
+    <summary title="Filtrar por {{ f }}">{% if t.state.filters.get(f) %}{{ t.state.filters[f] }}{% else %}filtrar{% if fk|length > 1 %} {{ f }}{% endif %}{% endif %}</summary>
+    <ul>
+      <li><a href="{{ t.url(**{f: ''}) }}"{% if not t.state.filters.get(f) %} aria-current="true"{% endif %}>todos</a></li>
+      {% for v in t.options[f] %}<li><a href="{{ t.url(**{f: v}) }}"{% if t.state.filters.get(f) == v %} aria-current="true"{% endif %}>{{ v }}</a></li>{% endfor %}
+    </ul>
+  </details>
+  {% endfor %}
+</th>
+{% endmacro %}
+
+{# o rodapé: "N a M de total", o tamanho da página (20, 50 ou 100) e os controles de página #}
+{% macro rodape(t) %}
+<nav class="tabela-rodape" aria-label="Paginação" data-rodape>
+  <span class="tabela-faixa" data-faixa>{{ t.first|num }} a {{ t.last|num }} de {{ t.total|num }}{% if t.filtered and t.total != t.unfiltered %} (filtrado, {{ t.unfiltered|num }} no total){% endif %}</span>
+  <span class="tabela-tamanho">Linhas:
+    {% for n in (20, 50, 100) %}<a href="{{ t.url(size=n) }}"{% if t.size == n %} aria-current="true"{% endif %}>{{ n }}</a>{% endfor %}
+  </span>
+  <span class="tabela-paginas">
+    {% if t.page > 1 %}<a href="{{ t.url(page=t.page - 1) }}" rel="prev">{{ icon("chevron-left", 14) }}anterior</a>{% endif %}
+    {% for n in t.page_links() %}{% if n is none %}<span>…</span>{% elif n == t.page %}<a href="{{ t.url(page=n) }}" aria-current="page">{{ n }}</a>{% else %}<a href="{{ t.url(page=n) }}">{{ n }}</a>{% endif %}{% endfor %}
+    {% if t.page < t.pages %}<a href="{{ t.url(page=t.page + 1) }}" rel="next">próxima{{ icon("chevron-right", 14) }}</a>{% endif %}
+  </span>
+</nav>
+{% endmacro %}
+
+{# a linha de "nada com este filtro" (a tabela fica, com os cabeçalhos, para tirar o filtro) #}
+{% macro sem_linhas(t, texto, id="vazio") %}
+<p class="aviso" id="{{ id }}">{{ texto }}{% if t.filtered %} <a href="{{ t.clear_url() }}">Limpar o filtro</a>{% endif %}</p>
+{% endmacro %}
+
 {# ---- sessões (#207): as mesmas colunas para a linha da sessão e para a linha de cada conversa ---- #}
 {% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
 
@@ -165,17 +204,25 @@
 {% endmacro %}
 
 {# a tabela das sessões e das conversas, com o cabeçalho, dentro do cartão; as linhas vêm de quem chama (`call`) #}
-{% macro session_table() %}
+{% macro session_table(t=none) %}
 <div class="cartao rolagem">
-<table class="sessoes empilha">
+<table class="sessoes empilha"{% if t is not none %} data-tabela{% endif %}>
   <thead><tr>
-    <th>Início ({{ tzl() }})</th><th>Sessão / conversa</th><th>Host</th><th>Agente · modelo</th><th class="n">Duração</th>
+  {% if t is none %}
+    <th>Início ({{ tzl() }})</th><th>Sessão / conversa</th><th>Host</th><th>Agente</th><th>Modelo</th><th class="n">Duração</th>
     <th class="n">Chamadas</th><th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
     <th class="n">Custo ({{ custo_nome() }})</th><th class="n" title="p95 da duração das chamadas ao modelo">p95</th><th class="n">Erros</th>
+  {% else %}
+    {{ th(t, "start", "Início (" ~ tzl() ~ ")") }}{{ th(t, "session", "Sessão / conversa", fkeys=("state",) if "state" in t.options else ()) }}{{ th(t, "host", "Host") }}{{ th(t, "agent", "Agente") }}
+    {{ th(t, "model", "Modelo") }}{{ th(t, "duration", "Duração", "n") }}
+    {{ th(t, "calls", "Chamadas", "n") }}{{ th(t, "tokens", "Tokens ent / saí", "n", "tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo") }}
+    {{ th(t, "cost", "Custo (" ~ custo_nome() ~ ")", "n") }}{{ th(t, "p95", "p95", "n", "p95 da duração das chamadas ao modelo") }}{{ th(t, "errors", "Erros", "n") }}
+  {% endif %}
   </tr></thead>
   {{ caller() }}
 </table>
 </div>
+{% if t is not none %}{{ rodape(t) }}{% endif %}
 {% endmacro %}
 
 {% macro conversation_row(c) %}
@@ -186,7 +233,8 @@
   <td class="prim{% if c.session %} da-sessao{% endif %}">{% if c.session %}{{ icon("corner-down-right", 14) }}{% endif %}{{ conv_name(c.id, com_custo("/conversa?id=" ~ (c.id|urlencode))) }}
     <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ c.usage.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
   <td class="sec">{{ c.host or "—" }}</td>
-  <td class="sec">{{ c.agent or "—" }} {{ model_list(c.models) }}</td>
+  <td class="sec">{{ c.agent or "—" }}</td>
+  <td class="sec">{{ model_list(c.models) }}</td>
   <td class="n sec">{{ c.duration_ns|dur }}</td>
   {{ usage_cells(c.usage, com_custo("/conversa?id=" ~ (c.id|urlencode) ~ "&erros=1")) }}
 </tr>
@@ -214,7 +262,8 @@
   <td class="prim"><a href="{{ com_custo("/sessao?id=" ~ (s.id|urlencode)) }}">{{ s.id }}</a> {{ session_tags(s) }}
     <span class="so-celular-linha">{{ s.start_ns|ts }} · {{ s.host or "—" }} · {{ s.agents|join(", ") or "—" }} · {{ s.usage.calls|num }} chamadas · {{ s.duration_ns|dur }}</span></td>
   <td class="sec">{{ s.host or "—" }}</td>
-  <td class="sec">{{ s.agents|join(", ") or (s.state.agent if s.state and s.state.agent else "—") }} {{ model_list(s.models) }}</td>
+  <td class="sec">{{ s.agents|join(", ") or (s.state.agent if s.state and s.state.agent else "—") }}</td>
+  <td class="sec">{{ model_list(s.models) }}</td>
   <td class="n sec">{{ s.duration_ns|dur }}</td>
   {{ usage_cells(s.usage) }}
 </tr>
