@@ -102,6 +102,8 @@ TABLES["metrics"] = [
 DERIVED = {"time": "time_unix_nano", "received_at": "received_unix_nano"}
 DASH_DEADLINE_S = 50   # prazo da consulta do Dashboard (abaixo do corte de 60 s do nginx)
 DASH_TTL_S = 60        # quanto o resultado da janela vale
+READ_DEADLINE_S = 50   # prazo de cada leitura fora da trava (#570), abaixo do corte de 60 s do nginx
+READ_SLOTS = 2         # leituras ao mesmo tempo (memória do DuckDB); a terceira espera a vez, sem prender a ingestão
 TS_UTC = "(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')"
 
 
@@ -149,6 +151,7 @@ class Store:
         self.con.execute("SET TimeZone = 'UTC'")
         self.lock = threading.Lock()
         self._dash_lock = threading.Lock()
+        self._read_slots = threading.BoundedSemaphore(READ_SLOTS)
         self._dash_cache = {}
         self._dash_refreshing = {}
         with self.lock:
@@ -199,16 +202,29 @@ class Store:
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)
 
+    def read_free(self, fn):
+        """`fn(cursor)` num cursor próprio, **fora da trava do escritor** (#570): a leitura lenta não segura a ingestão
+        (o collector desistia em 30 s e reenviava o lote) e a ingestão não segura a leitura. O DuckDB lê o estado
+        confirmado enquanto outra conexão grava. No máximo `READ_SLOTS` por vez; passado `READ_DEADLINE_S`, a consulta
+        é interrompida e a chamada levanta."""
+        with self._read_slots:
+            cur = self.con.cursor()
+            timer = threading.Timer(READ_DEADLINE_S, cur.interrupt)
+            timer.start()
+            try:
+                return fn(cur)
+            finally:
+                timer.cancel()
+                cur.close()
+
     def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
-        """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila. `repo`
-        (#528) e `effective` (#531, custo efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
-        with self.lock:
-            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz, repo, effective)
+        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528) e `effective` (#531, custo
+        efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
+        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective))
 
     def repos(self, from_ns, to_ns):
-        """Os repositórios com fato na janela (#528), para o filtro das telas."""
-        with self.lock:
-            return repo_mod.options(self.con, from_ns, to_ns)
+        """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns))
 
     def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
@@ -249,19 +265,16 @@ class Store:
                 self._dash_refreshing.pop(key, None)
 
     def alerts(self, at_ns, cfg):
-        """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
-        with self.lock:
-            return alerts_mod.evaluate(self.con, at_ns, cfg)
+        """Leitura do `/v1/alerts` (#204), fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg))
 
     def tray(self, at_ns, prices, cfg, tz=tz_mod.UTC):
-        """Leitura do `/v1/tray` (#205), sob a mesma trava: os blocos do DuckDB numa passada só."""
-        with self.lock:
-            return tray_mod.snapshot(self.con, at_ns, prices, cfg, tz)
+        """Leitura do `/v1/tray` (#205): os blocos do DuckDB numa passada só, fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz))
 
     def decisions(self, at_ns, cfg):
-        """Decisões pendentes do Bardi (#386), sob a mesma trava: o bloco do tray e o topo das telas."""
-        with self.lock:
-            return decisions_mod.pending(self.con, at_ns, cfg)
+        """Decisões pendentes do Bardi (#386): o bloco do tray e o topo das telas, fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg))
 
     # leituras da tela (#206), sob a mesma trava
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
