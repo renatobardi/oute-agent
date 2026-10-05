@@ -15,7 +15,7 @@
 <div class="titulo-linha">
   <div><h1>Dashboard</h1>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
-  {{ filter("/", windows, hours, range, repos=repos, repo=repo) }}
+  {{ filter("/", windows, hours, range, repos=repos, repo=repo, model=model) }}
 </div>
 </div>
 
@@ -66,7 +66,19 @@
 {% set s = snap.series %}
 {% set n = s.points|length %}
 <section class="cartao bloco grafico" data-grafico="chamadas" data-unit="{{ s.unit }}" data-total="{{ s.total }}">
-  <div class="grafico-topo"><h2>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">total {{ s.total|num }}</span></div>
+  <div class="grafico-topo"><h2>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</h2><span class="nota">{% if model %}{{ model }} · {% endif %}total {{ s.total|num }}</span></div>
+  <form class="filtro filtro-modelo" method="get" action="/" data-modelo-form>
+    {% if range.from %}<input type="hidden" name="de" value="{{ range.from }}"><input type="hidden" name="ate" value="{{ range.to }}">{% else %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
+    {% if repo %}<input type="hidden" name="repo" value="{{ repo }}">{% endif %}
+    <label>Modelo
+      <select name="model">
+        <option value="">Todos</option>
+        {% for m in snap.model_options %}<option value="{{ m }}"{% if m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}
+        {% if model and model not in snap.model_options %}<option value="{{ model }}" selected>{{ model }}</option>{% endif %}
+      </select>
+    </label>
+    <button type="submit">Aplicar</button>
+  </form>
   <div class="linha-grafico">
     <div class="eixo-y"><span>{{ s.max|num }}</span><span>{{ s.mid|num }}</span><span>0</span></div>
     <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Chamadas ao modelo por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
@@ -185,6 +197,21 @@
   </a>
   {% else %}
   <p class="nota">Nenhuma sessão com custo nesta janela.</p>
+  {% endfor %}
+</section>
+
+{# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa fora do oute-task #}
+<section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
+  <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · custo de lista</span></div>
+  {% for r in snap.by_repo %}
+  <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
+       title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
+    <span class="rotulo mono">{{ r.repo }}</span>
+    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([r.frac * 100, 1]|max) }}" height="14"/></svg>
+    <span class="valor">{{ r.calls|num }} · {% if r.cost is none %}sem preço{% else %}{{ money(r) }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
   {% endfor %}
 </section>
 

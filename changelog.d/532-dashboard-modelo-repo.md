@@ -1,0 +1,2 @@
+### Added
+- **Dashboard: seletor de modelo e gráfico de chamadas por repositório** (#532). O gráfico de chamadas por hora ou dia ganha um seletor com "Todos" e cada modelo com chamada na janela (a série, o total e o p95 da dica passam a ser só do modelo; fica na URL como `model=`). Um gráfico novo mostra, por repositório, as chamadas ao modelo e o custo de lista da janela, do maior para o menor, com a linha "sem repositório"; a soma bate com o indicador de chamadas. Os dois seguem o filtro de período e o de repositório. **Precisa de release** (o agent-studio vai na imagem).

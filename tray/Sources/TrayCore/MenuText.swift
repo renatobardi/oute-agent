@@ -23,6 +23,23 @@ public enum MenuText {
               proposal.ageSeconds.map(Age.text(seconds:))])
     }
 
+    public static func stepsHeader(_ steps: TraySnapshot.Steps) -> String {
+        guard steps.available else { return "Etapas das rodadas: ? (estado indisponível)" }
+        return "Etapas das rodadas abertas: \(steps.total ?? steps.rows.count)"
+    }
+
+    /// "Pedido de merge #12 · swarm-1003-1211 · sem revisor · há 5 min": o título é o fixo da API, e o veredito só
+    /// aparece quando a etapa não foi aprovada.
+    public static func step(_ step: TraySnapshot.Step) -> String {
+        let review: String?
+        switch step.review {
+        case "reprovado": review = "reprovada pelo revisor"
+        case "sem-revisor": review = "sem revisor"
+        default: review = nil
+        }
+        return join([step.title, step.round, review, step.ageSeconds.map(Age.text(seconds:))])
+    }
+
     public static func decision(_ decision: TraySnapshot.Decision) -> String {
         join([decision.round, decision.question, decision.ageSeconds.map(Age.text(seconds:))])
     }

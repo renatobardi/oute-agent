@@ -73,6 +73,45 @@
       }
     ]
   },
+  "steps": {
+    "available": true,
+    "total": 3,
+    "rows": [
+      {
+        "round": "swarm-1003-1211",
+        "kind": "fechamento",
+        "key": null,
+        "rev": 1,
+        "review": "aprovado",
+        "title": "Fechamento da rodada",
+        "published_at": "2026-10-03T13:58:00Z",
+        "age_seconds": 120,
+        "url": "/rodada?id=swarm-1003-1211#etapa-fechamento"
+      },
+      {
+        "round": "swarm-1003-1211",
+        "kind": "merge",
+        "key": "12",
+        "rev": 2,
+        "review": "sem-revisor",
+        "title": "Pedido de merge #12",
+        "published_at": "2026-10-03T13:55:00Z",
+        "age_seconds": 300,
+        "url": "/rodada?id=swarm-1003-1211#etapa-merge-12"
+      },
+      {
+        "round": "swarm-1003-1211",
+        "kind": "triagem",
+        "key": null,
+        "rev": 1,
+        "review": "reprovado",
+        "title": "Triagem",
+        "published_at": "2026-10-03T13:20:00Z",
+        "age_seconds": 2400,
+        "url": "/rodada?id=swarm-1003-1211#etapa-triagem"
+      }
+    ]
+  },
   "cost_today": {
     "day": "2026-10-03",
     "from": "2026-10-03T00:00:00Z",
