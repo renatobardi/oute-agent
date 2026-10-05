@@ -30,6 +30,11 @@
     "total": null,
     "pending": []
   },
+  "steps": {
+    "available": false,
+    "total": null,
+    "rows": []
+  },
   "cost_today": {
     "day": "2026-10-03",
     "from": "2026-10-03T00:00:00Z",

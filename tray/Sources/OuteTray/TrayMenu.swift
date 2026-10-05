@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TrayCore
 
-/// O menu: máquinas, pedidos, decisões do swarm, custo de hoje, erros da última hora e alertas. Os textos são do
+/// O menu: máquinas, pedidos, decisões do swarm, etapas das rodadas, custo de hoje, erros da última hora e alertas. Os textos são do
 /// `MenuText`; o que vem da API entra como texto puro. Os símbolos são do `MenuSymbol` (#473, Kubo): sem cor, com
 /// o âmbar só no pedido e na decisão pendentes.
 struct TrayMenu: View {
@@ -32,6 +32,7 @@ struct TrayMenu: View {
             machines(snapshot)
             proposals(snapshot)
             decisions(snapshot)
+            steps(snapshot)
             cost(snapshot)
             errorsAndAlerts(snapshot)
         }
@@ -75,6 +76,20 @@ struct TrayMenu: View {
             row("Decisões pendentes do swarm: \(decisions.pending.count)", .decisions)
             ForEach(Array(decisions.pending.enumerated()), id: \.offset) { _, decision in
                 row(MenuText.decision(decision), .pendingDecision)
+            }
+            Divider()
+        }
+    }
+
+    /// Etapas publicadas nas rodadas abertas (#508): cada linha abre a página da rodada na etapa. Lista vazia e lida não
+    /// aparece; lista que o agent-studio não conseguiu ler aparece como indisponível.
+    @ViewBuilder
+    private func steps(_ snapshot: TraySnapshot) -> some View {
+        if let steps = snapshot.steps, !steps.available || !steps.rows.isEmpty {
+            row(MenuText.stepsHeader(steps), .steps)
+            ForEach(Array(steps.rows.enumerated()), id: \.offset) { _, step in
+                Button { model.openStep(step) } label: { MenuLabel(MenuText.step(step), .step) }
+                    .disabled(model.stepURL(step) == nil)
             }
             Divider()
         }

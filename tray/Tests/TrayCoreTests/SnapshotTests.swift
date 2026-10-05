@@ -64,6 +64,40 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.alerts[0].host, "oute-server")
     }
 
+    func testEtapasDasRodadasAbertas() throws {
+        let etapas = try XCTUnwrap(try TraySnapshot.decode(Fixture.data("tray.json")).steps)
+        XCTAssertTrue(etapas.available)
+        XCTAssertEqual(etapas.total, 3)
+        XCTAssertEqual(etapas.rows.map(\.title), ["Fechamento da rodada", "Pedido de merge #12", "Triagem"])
+        XCTAssertEqual(etapas.rows.map(\.review), ["aprovado", "sem-revisor", "reprovado"])
+        XCTAssertNil(etapas.rows[0].key)
+        XCTAssertEqual(etapas.rows[1].key, "12")
+        XCTAssertEqual(etapas.rows[1].rev, 2)
+        XCTAssertEqual(etapas.rows[1].ageSeconds, 300)
+        XCTAssertEqual(etapas.rows[1].url, "/rodada?id=swarm-1003-1211#etapa-merge-12")
+    }
+
+    func testSemSurrealDBAsEtapasNaoEstaoDisponiveis() throws {
+        let etapas = try XCTUnwrap(try TraySnapshot.decode(Fixture.data("tray-sem-surrealdb.json")).steps)
+        XCTAssertFalse(etapas.available)
+        XCTAssertNil(etapas.total)
+        XCTAssertEqual(etapas.rows, [])
+    }
+
+    func testAgentStudioAnteriorAEtapasNaoTemOBloco() throws {
+        let json = """
+        {"bar": {"pending": 0, "alerts": 0}, "machines": [], "proposals": {"available": true, "total": 0, "pending": []},
+         "cost_today": {"usd": 0, "estimated": false, "agents": []}, "errors_last_hour": {"total": 0, "rows": []}, "alerts": []}
+        """
+        XCTAssertNil(try TraySnapshot.decode(Data(json.utf8)).steps)
+    }
+
+    func testIdDaEtapaTrazRodadaTipoChaveERevisao() throws {
+        let etapas = try XCTUnwrap(try TraySnapshot.decode(Fixture.data("tray.json")).steps)
+        XCTAssertEqual(etapas.rows[0].id, "swarm-1003-1211|fechamento||1")
+        XCTAssertEqual(etapas.rows[1].id, "swarm-1003-1211|merge|12|2")
+    }
+
     func testDecisoesPendentesDoSwarm() throws {
         let snapshot = try TraySnapshot.decode(Fixture.data("tray.json"))
         XCTAssertEqual(snapshot.decisions?.pending.map(\.question), ["1. aprovar a triagem  2. cortar a #387"])

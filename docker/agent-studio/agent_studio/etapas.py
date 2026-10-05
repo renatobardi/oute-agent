@@ -13,11 +13,16 @@
 O texto é **dado não confiável** (D6=1 e ADR-08): o Markdown é restrito (`## Decisão`, `## Ações`, `## Detalhe`, parágrafos,
 listas, `**negrito**`, `código`, links `https://` e blocos de código), o parser devolve só dados (nunca HTML) e o template
 escapa tudo. Etapa `reprovado` ou `sem-revisor` sai com um aviso fixo do agent-studio e o texto fechado.
+
+Fatia 2 (#508): cada etapa sabe a posição na rodada e a anterior e a seguinte (`navigate`, na página), a barra lista cada
+pedido de merge (`bar`) e o `GET /v1/tray` ganha o bloco `steps` (`tray_steps`): as etapas das rodadas não fechadas, só
+do SurrealDB, com o título fixo por tipo (`title`) e nunca o texto.
 """
 import re
 from urllib.parse import quote, urlsplit
 
 from .conversations import _dicts
+from .proposals import age_seconds
 from .state import STEP_EVENT as EVENT, STEP_KINDS as KINDS, iso, step_valid
 
 TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospectiva (kaizen)",
@@ -26,6 +31,7 @@ BAR_LABELS = {"triagem": "Triagem", "merge": "Pedidos de merge", "kaizen": "Kaiz
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
 LIST_LIMIT = 100   # rodadas na lista
+TRAY_LIMIT = 50    # etapas no bloco `steps` do tray (as mais novas); `total` diz quantas há
 
 # ---------------------------------------------------------------- leitura
 # antes do primeiro evento a tabela não existe, e ler tabela que não existe é erro no SurrealDB: sem ela, lista vazia
@@ -35,6 +41,12 @@ _STEPS = _IF_TABLE.format(f'SELECT {_FIELDS} FROM etapa WHERE rodada = type::rec
 _ROUND = 'SELECT repo, label, state, agent, host, instance, opened_at, closed_at FROM [type::record("rodada", $id)];'
 _ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, opened_at FROM rodada "
            "WHERE record::id(id) IN $ids) ELSE [] END;")
+
+# etapas das rodadas que ainda não fecharam (rodada sem registro de estado conta como aberta: o Bardi ainda não leu a etapa)
+_OPEN = '(rodada.state ?? "aberta") != "fechada"'
+_TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, kind, key, rev, review, published_at FROM etapa WHERE {_OPEN} '
+                              "ORDER BY published_at DESC, id LIMIT $limit")
+_TRAY_TOTAL = _IF_TABLE.format(f"SELECT count() AS n FROM etapa WHERE {_OPEN} GROUP ALL")
 
 _ATTR = "json_extract_string(attributes, '$.\"%s\"')"
 _STEP_COLS = (f"oute_event_id AS event, time_unix_nano, host_name AS host, oute_instance AS instance, "
@@ -172,13 +184,15 @@ def title(step):
 
 def bar(steps):
     """A barra fixa de etapas, desenhada pelo agent-studio (nenhum diagrama vem do modelo): uma posição por tipo, na ordem
-    da rodada. `done` = há etapa publicada; `review` = o pior veredito entre as do tipo; `current` = a última posição com etapa."""
+    da rodada. `done` = há etapa publicada; `review` = o pior veredito entre as do tipo; `current` = a última posição com etapa;
+    `items` = uma entrada por etapa do tipo (o `merge` leva um link por PR)."""
     out = []
     for kind in KINDS:
         mine = [s for s in steps if s["kind"] == kind]
         worst = next((r for r in ("reprovado", "sem-revisor", "aprovado") if any(s["review"] == r for s in mine)), None)
         out.append({"kind": kind, "label": BAR_LABELS[kind], "count": len(mine), "done": bool(mine), "review": worst,
-                    "anchor": anchor(mine[0]) if mine else None, "current": False})
+                    "anchor": anchor(mine[0]) if mine else None, "current": False,
+                    "items": [{"anchor": anchor(s), "label": f"#{s['key']}" if s["key"] else BAR_LABELS[kind]} for s in mine]})
     last = max((i for i, b in enumerate(out) if b["done"]), default=None)
     if last is not None:
         out[last]["current"] = True
@@ -311,13 +325,26 @@ def parse(text):
     return p.finish()
 
 
+def _near(steps, j):
+    """A etapa `j` como destino de link (âncora e título fixo), ou `None` fora da lista."""
+    return {"anchor": steps[j]["anchor"], "title": steps[j]["title"]} if 0 <= j < len(steps) else None
+
+
+def navigate(steps):
+    """Põe em cada etapa (já em ordem de rodada) a posição (`pos` de `total`) e a anterior e a seguinte (`prev`, `next`:
+    `{"anchor", "title"}` ou `None` nas pontas). Só âncoras e títulos fixos por tipo: nada vem do texto."""
+    for i, s in enumerate(steps):
+        s["pos"], s["total"], s["prev"], s["next"] = i + 1, len(steps), _near(steps, i - 1), _near(steps, i + 1)
+    return steps
+
+
 def render(steps):
-    """Põe em cada etapa o texto lido (`doc`) e o que a página mostra de fixo: título, âncora e sha256 curto."""
+    """Põe em cada etapa o texto lido (`doc`) e o que a página mostra de fixo: título, âncora, sha256 curto e a navegação."""
     for s in steps:
         s["title"], s["anchor"] = title(s), anchor(s)
         s["sha_short"] = (s["sha256"] or "")[:12]
         s["doc"] = parse(s["text"]) if s["text"] is not None else None
-    return steps
+    return navigate(steps)
 
 
 def api(data):
@@ -331,3 +358,21 @@ def api(data):
     rec = data["record"] or {}
     return {"round": data["id"], "state": rec.get("state"), "repo": rec.get("repo"), "label": rec.get("label"),
             "state_read": data["state_read"], "steps": steps}
+
+
+def tray_steps(surreal, at_ns, limit=TRAY_LIMIT):
+    """O bloco `steps` do `GET /v1/tray`: as `limit` etapas mais novas das rodadas que não fecharam e quantas há ao todo. Só
+    o SurrealDB (a revisão vigente de cada etapa); título fixo por tipo, `review` e `url` da página, nunca o texto. Erro do
+    SurrealDB levanta (SurrealError)."""
+    found = surreal.query(_TRAY_ROWS + " " + _TRAY_TOTAL, {"limit": limit})
+    rows = []
+    for r in found[0]["result"] or []:
+        if not step_valid(r.get("kind"), r.get("key") or "", r.get("rev"), r.get("review"), "0" * 64):
+            continue
+        step = {"kind": r["kind"], "key": r.get("key") or ""}
+        age = age_seconds(r.get("published_at"), at_ns)
+        rows.append({"round": r["round"], "kind": step["kind"], "key": step["key"] or None, "rev": r["rev"],
+                     "review": r["review"], "title": title(step), "published_at": (r.get("published_at") or "")[:19] + "Z",
+                     "age_seconds": age, "url": f"/rodada?id={quote(r['round'], safe='')}#{anchor(step)}"})
+    total = (found[1]["result"] or [{}])[0].get("n", 0)
+    return {"available": True, "total": total, "rows": rows}
