@@ -4,6 +4,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.42] - 2026-10-05
+
+### Added
+- **agent-studio: tempo por fase e threads com nome, para achar o gargalo da gravação** (#570). A telemetria própria ganha o histograma `agent_studio.phase.duration` com `phase` = `parse` (no laço de eventos), `lock_wait`, `existing`, `insert`, `surreal`, `commit` (gravação) e `read_wait`, `read` (leituras fora da trava); `label` = a tabela ou a leitura (`tray`, `usage`…). Fase acima de `AGENT_STUDIO_SLOW_S` (padrão 5 s) sai como aviso "lento: …", no máximo um por janela e por fase. A thread que grava passa a se chamar `studio-write` e a que lê, `studio-<leitura>`: aparecem assim no `py-spy dump` e no `top -H` (Linux), em vez de `python`. **Precisa de release** (o agent-studio vai na imagem).
+
+### Fixed
+- **A gravação do agent-studio é ~11× mais rápida e o tray deixa de refazer a mesma conta** (#570). Três custos de CPU achados no flamegraph (`py-spy`): (1) a gravação ia linha a linha (`executemany`, ~1,3 ms por linha, sob a trava do escritor: 3.000 métricas levavam ~4 s); agora é uma instrução por tabela, com as colunas em listas, e o mesmo lote entra em ~0,4 s, com os mesmos dados; (2) o DuckDB procurava o `pandas` no disco a cada consulta, e o studio não o usa: a subida põe um sentinela em `sys.modules` (só quando o `pandas` não está instalado); (3) o tray, a barra de alertas de cada tela e o `/v1/alerts` pediam os mesmos alertas ao mesmo tempo: com `AGENT_STUDIO_READ_TTL_S` (o compose liga em 5 s; padrão 0, sempre refaz) uma chamada só os refaz e as outras recebem o mesmo resultado. **Precisa de release** (o agent-studio vai na imagem; o `compose.yaml` entra com `git pull` + `oute down/up` do studio).
+
 ## [0.7.41] - 2026-10-05
 
 ### Added
