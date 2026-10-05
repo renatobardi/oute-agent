@@ -7,14 +7,14 @@
 {% block title %}Logs · {{ id }} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
-<div class="pagina-topo"><div class="titulo-linha">{% if loading_target is none %}<h1>Logs a partir do {{ offset + 1 }}º</h1>{% endif %}
 {% call fragment("conteudo") %}
+<div class="pagina-topo"><div class="titulo-linha">{% if loading_target is none %}<h1>Logs a partir do {{ offset + 1 }}º</h1>{% endif %}
   <a class="botao" href="{{ com_custo("/conversa?id=" ~ (id|urlencode)) }}">{{ icon("arrow-left", 14) }}Conversa {{ conv_name(id) }}</a></div></div>
 {% if logs %}
 {{ log_table(logs, id, next_offset, errors_only) }}
 {% else %}
 <p class="aviso">Sem mais logs.</p>
 {% endif %}
-</div>
 {% endcall %}
+</div>
 {% endblock %}

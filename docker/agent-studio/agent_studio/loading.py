@@ -1,6 +1,7 @@
 """Carregamento por bloco (#536): catálogo fixo, espaços e leituras de uma abertura.
 
-Não guarda HTML nem credenciais. Uma abertura vale 120 s, com no máximo 32 aberturas.
+Guarda query e resultados, sem receber cookie ou cabeçalho de autenticação.
+Uma abertura vale 120 s, com no máximo 32 aberturas.
 Os resultados de leituras simultâneas são compartilhados; falha não fica no cache.
 """
 import copy

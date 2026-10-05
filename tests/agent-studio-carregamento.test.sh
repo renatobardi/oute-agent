@@ -78,6 +78,12 @@ st, failed_body = raw_get(app, '/bloco/conversas/tabela', 'hours=168')
 check('falha chega no bloco com retentativa', st == 500 and 'data-bloco-erro' in failed_body
       and 'Tentar novamente' in failed_body and '<html' not in failed_body)
 check('outro bloco responde após falha', raw_get(app, '/bloco/conversas/decisoes', 'hours=168')[0] == 200)
+for path, query, row in (('/conversa/span', 'trace=t&span=s', False), ('/conversa/logs', 'id=c', True)):
+    st, failed_body = raw_get(create_app(Broken(), TOKEN), path, query, headers=(("HX-Request", "true"),))
+    check(path + ': falha ao clicar é local e preserva tipo do alvo', st == 500 and 'data-bloco-erro' in failed_body
+          and 'Tentar novamente' in failed_body and '<html' not in failed_body
+          and failed_body.lstrip().startswith('<tr' if row else '<div'))
+
 if loading is None:
     check('catálogo e cache de blocos existem', False)
     sys.exit(0)
@@ -108,7 +114,7 @@ store.conversations = counted
 
 def request_url(url):
     p = urlsplit(url)
-    return raw_get(app, p.path, p.query)
+    return raw_get(app, p.path, p.query, headers=(("HX-Request", "true"),))
 
 
 _, filters = request_url(slots['filtros'])
@@ -124,6 +130,24 @@ _, full = raw_get(app, '/conversas', 'hours=168&full=1')
 check('página inteira sem JS mostra conteúdo e não cria espaços', '<table' in full and 'data-bloco=' not in full and 'data-alertas' in full)
 check('parâmetro inválido falha antes da leitura', raw_get(app,'/conversas','pag=0')[0] == 400 and len(calls) == 2)
 check('bloco fora da lista não abre leitura', raw_get(app,'/bloco/conversas/inventado','hours=168')[0] == 404 and len(calls) == 2)
+
+def balanced(body):
+    stack = []
+    for closing, tag in re.findall(r'<(/?)(div|table|section)\b[^>]*>', body):
+        if closing:
+            if not stack or stack.pop() != tag:
+                return False
+        else:
+            stack.append(tag)
+    return not stack
+
+
+_, spans = raw_get(app, '/bloco/conversa/spans', 'id=c-00')
+span_id, trace = re.search(r'data-span="([^"]+)" data-trace="([^"]+)"', spans).groups()
+for path, query in (('/bloco/conversa/logs/conteudo', 'id=c-00'),
+                    ('/bloco/conversa/span/conteudo', 'trace='+trace+'&span='+span_id)):
+    st, fragment = raw_get(app, path, query, headers=(("HX-Request", "true"),))
+    check(path + ': fragmento tem raízes completas', st == 200 and balanced(fragment))
 
 # Erro de leitura não fica no cache e a retentativa recupera o mesmo bloco.
 status, shell = raw_get(app, '/conversas', 'hours=168')

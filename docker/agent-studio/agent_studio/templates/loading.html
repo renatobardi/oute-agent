@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import conv_name with context %}
 {% block title %}{{ titulo }} · Agent Studio{% endblock %}
-{% block head %}<script src="/static/loading.js" defer></script>{% if nav == "pedidos" %}<script src="/static/copiar.js" defer></script>{% endif %}{% endblock %}
+{% block head %}{% if nav == "pedidos" %}<script src="/static/copiar.js" defer></script>{% endif %}{% endblock %}
 {% block main %}
 <div class="pagina{% if nav == 'dashboard' %} dashboard{% endif %}">
 <div class="pagina-topo"><h1>{% if shell_path == "/conversa" %}Conversa {{ conv_name(id) }}{% else %}{{ titulo }}{% if detail and id %} <code>{{ id }}</code>{% endif %}{% endif %}</h1></div>

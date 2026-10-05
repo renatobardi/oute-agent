@@ -23,7 +23,7 @@ def fetch(path, query):
     sent = args.copy()
     sent[url_index] = origin + path + '?' + query
     # Os testes que conferem status usam curl diretamente; este apoio monta só o HTML.
-    r = subprocess.run(['curl', '-s', *sent], capture_output=True, check=True)
+    r = subprocess.run(['curl', '-s', '-H', 'HX-Request: true', *sent], capture_output=True, check=True)
     return 200, r.stdout.decode()
 
 

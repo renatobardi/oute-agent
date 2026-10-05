@@ -261,7 +261,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 return error(request, 404, "Bloco não encontrado.")
             title = re.search(r"<title>(.*?)</title>", html, re.S)
             html = "".join(found)
-            if target in ("resumo", "filtros") and title:
+            if target in ("resumo", "filtros", "conteudo") and title:
                 html += '<template data-document-title>' + title.group(1) + '</template>'
         return HTMLResponse(html, status_code=status, headers={**HEADERS, **(headers or {})})
 
@@ -279,9 +279,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         return [tabela_mod.apply(t, st, rows, tabela_mod.foreign_pairs(q, [t], lambda k, v: k == "custo" and v != "efetivo"), path) for t, st, rows in tabs], tabela_mod.own_pairs(q, tables)
 
     def error(request, status, message):
-        if hasattr(request.state, "block"):
+        if hasattr(request.state, "block") or hasattr(request.state, "inline_block"):
             html = env.get_template("loading_error.html").render(message=message,
                 retry=request.url.path + "?" + request.url.query, full_url=full_url(request), expired=status == 410,
+                row=getattr(request.state, "inline_block", "") == "tabela",
                 reopen=getattr(request.state, "screen_path", request.url.path) + "?" + urlencode(loading_mod.pairs(request.query_params)))
             return HTMLResponse(html, status_code=status, headers=HEADERS)
         return page(request, "error.html", status, message=message, code=status)
@@ -402,7 +403,11 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
             @app.get(path)
             async def shell(request: Request):
-                if request.query_params.get("full") == "1" or (path in ("/conversa/logs", "/conversa/span") and is_htmx(request)):
+                if path in ("/conversa/logs", "/conversa/span") and is_htmx(request):
+                    request.state.screen_path = path
+                    request.state.inline_block = "tabela" if path == "/conversa/logs" else "faixa"
+                    return await fn(request)
+                if request.query_params.get("full") == "1":
                     return await fn(request)
                 if (denied := await gate(request)) is not None:
                     return denied
@@ -635,7 +640,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         data, failed = await read(request, "logs da conversa", store.conversation_logs, session_id, offset, errors_only)
         if failed:
             return failed
-        return page(request, "log_rows.html" if is_htmx(request) else "logs.html", **data, id=session_id, offset=offset,
+        return page(request, "log_rows.html" if is_htmx(request) and not hasattr(request.state, "block") else "logs.html", **data, id=session_id, offset=offset,
                     errors_only=errors_only)
 
     @screen("/conversa/span")
@@ -651,7 +656,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return failed
         if data is None:
             return error(request, 404, "Span não encontrado.")
-        return page(request, "span_detail.html" if is_htmx(request) else "span.html", span=data)
+        return page(request, "span_detail.html" if is_htmx(request) and not hasattr(request.state, "block") else "span.html", span=data)
 
     # ------------------------------------------------ sessões (#207)
     async def with_state(sessions):

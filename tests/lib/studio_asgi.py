@@ -38,7 +38,7 @@ def get(app, path, query="", headers=(), method="GET"):
     from studio_loading import expand
     status, body = raw_get(app, path, query, headers, method)
     if status == 200 and method == "GET":
-        code, body = expand(body, lambda p, q: raw_get(app, p, q, headers))
+        code, body = expand(body, lambda p, q: raw_get(app, p, q, (*headers, ("HX-Request", "true"))))
         if code != 200:
             status = code
     return status, body

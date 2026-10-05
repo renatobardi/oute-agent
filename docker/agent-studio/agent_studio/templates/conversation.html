@@ -68,7 +68,7 @@
       {% endif %}
       <td>{% if s.error %}{{ badge("erro", "destrutivo") }}{% elif s.status_code == 1 %}ok{% else %}—{% endif %}</td>
     </tr>
-    <tr class="conteudo-linha"><td class="conteudo" colspan="7"></td></tr>
+    <tr class="conteudo-linha"><td class="conteudo" colspan="7" data-inline-bloco="faixa"></td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -1,7 +1,8 @@
-<div class="aviso erro" data-bloco-erro data-retry-url="{{ retry }}" role="alert">
+{% set row = row|default(false) %}
+{% if row %}<tr class="aviso erro" data-bloco-erro data-retry-url="{{ retry }}" role="alert"><td colspan="4">{% else %}<div class="aviso erro" data-bloco-erro data-retry-url="{{ retry }}" role="alert">{% endif %}
 <p>{{ message }}</p>
 {% if expired %}<a href="{{ reopen }}">Reabrir a tela</a>{% else %}
-<a href="{{ retry }}" hx-get="{{ retry }}" hx-target="closest div" hx-swap="outerHTML">Tentar novamente</a>
+<a href="{{ retry }}" hx-get="{{ retry }}" hx-target="{{ 'closest tr' if row else 'closest div' }}" hx-swap="outerHTML">Tentar novamente</a>
 {% endif %}
 <a data-full href="{{ full_url }}">Ver a página inteira</a>
-</div>
+{% if row %}</td></tr>{% else %}</div>{% endif %}

@@ -7,7 +7,14 @@ let titles = [];
 const document = {
   title: "",
   addEventListener: (name, fn) => listeners.set(name, fn),
-  createElement: () => ({setAttribute() {}, addEventListener(name, fn) { this[name] = fn; }}),
+  createElement: tag => ({tag, attrs: new Map(), children: [],
+    setAttribute(name, value) { this.attrs.set(name, value); },
+    getAttribute(name) { return this.attrs.get(name); },
+    append(...children) { this.children.push(...children); },
+    appendChild(child) { this.children.push(child); },
+    replaceChildren(...children) { this.children = children; },
+    addEventListener(name, fn) { this[name] = fn; },
+  }),
   querySelectorAll: () => titles,
 };
 vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), {document, htmx: {ajax: (...a) => requests.push(a)}});
@@ -48,4 +55,24 @@ listeners.get("htmx:afterSwap")({});
 check("JS: título recebido vira texto e a marca é removida", document.title === titles[0].content.textContent && removed);
 listeners.get("htmx:sendError")({detail: {elt: {closest: () => null}}});
 check("JS: falha de rede fora de bloco não altera a página", requests.length === 2);
+const cell = document.createElement("td");
+cell.matches = selector => selector === "[data-inline-bloco]";
+cell.closest = () => cell;
+cell.setAttribute("data-inline-bloco", "faixa");
+const anchor = document.createElement("a");
+anchor.setAttribute("hx-get", "/conversa/span?trace=t&span=s");
+listeners.get("htmx:beforeRequest")({detail: {target: cell, elt: anchor}});
+check("JS: clique em span mostra shimmer e estado ocupado", cell.attrs.get("aria-busy") === "true" && cell.children[0].children[0].children.length === 4);
+check("JS: clique preserva endereço e cria link sem JavaScript", cell.attrs.get("data-retry-url") === anchor.getAttribute("hx-get") && cell.children[0].children[1].getAttribute("href").endsWith("&full=1"));
+listeners.get("htmx:afterSwap")({detail: {target: cell}});
+check("JS: resposta do span encerra estado ocupado", cell.attrs.get("aria-busy") === "false");
+const row = document.createElement("tr");
+row.matches = selector => selector === "tr" || selector === "[data-inline-bloco]";
+row.closest = () => row;
+row.setAttribute("data-inline-bloco", "tabela");
+row.querySelector = selector => selector === "td" ? cell : link;
+listeners.get("htmx:beforeRequest")({detail: {target: row, elt: anchor}});
+check("JS: mais logs coloca shimmer dentro da célula", cell.children.length === 2 && row.children.length === 0);
+listeners.get("htmx:sendError")({detail: {target: row, elt: anchor}});
+check("JS: falha de mais logs preserva linha e célula", row.children[0].tag === "td" && row.children[0].attrs.get("colspan") === "4" && row.children[0].children[0].textContent.includes("não chegou"));
 process.exitCode = failed ? 1 : 0;

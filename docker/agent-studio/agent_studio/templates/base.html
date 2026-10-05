@@ -19,6 +19,7 @@
 <title>{% block title %}Agent Studio{% endblock %}</title>
 <link rel="stylesheet" href="/static/studio.css">
 <script src="/static/htmx.min.js" defer></script>
+{% if authed|default(false) %}<script src="/static/loading.js" defer></script>{% endif %}
 {% block head %}{% endblock %}
 </head>
 <body>
