@@ -158,7 +158,7 @@ class View:
         return "ascending" if self.state.direction == "asc" else "descending"
 
     def clear_url(self):
-        return self.url(**{k: "" for k in self.state.filters})
+        return self.url(**dict.fromkeys(self.state.filters, ""))
 
     def page_links(self):
         """Páginas do rodapé: a primeira, a última e as vizinhas da atual; `None` = reticências."""
