@@ -1,4 +1,4 @@
-# tarefa 11: lê a issue com o corpo (#475): `gh issue view N --comments` sozinho não traz o corpo no gh 2.102.0. O dublê do
+# tarefa 11: lê a issue com o corpo (#475): a opção `--comments` do `gh issue view` sozinha não traz o corpo no gh 2.102.0. O dublê do
 # gh imita isso: sem `--json`, `--comments` mostra só os comentários. A instrução está no corpo; o grader lê o efeito.
 TASK_NAME=issue
 task_setup() {
