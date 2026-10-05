@@ -20,15 +20,6 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         content.title = title
         content.body = body
         content.sound = .default
-        // a sakura vai anexada na própria notificação (#563): o ícone do app o macOS guarda por conta dele e
-        // pode seguir mostrando o genérico; a imagem anexada aparece sempre
-        if let image = SakuraIcon.notificationImage() {
-            if let attachment = try? UNNotificationAttachment(identifier: "sakura", url: image, options: nil) {
-                content.attachments = [attachment]
-            } else {
-                try? FileManager.default.removeItem(at: image)
-            }
-        }
         center.add(UNNotificationRequest(identifier: "\(kind)-\(id)", content: content, trigger: nil))
     }
 
