@@ -192,6 +192,18 @@ check("Uso: a legenda diz 'Informado pela fonte' (lista) ou 'Efetivo (assinatura
       and "Estimado ≈" in get(app, "/uso", EF)[1])
 check("Dashboard: a composição diz 'Informado pela fonte' (lista) ou 'Efetivo' (efetivo)", "Informado pela fonte US$" in dl and "Efetivo US$" in de)
 
+# ---- assinatura com modelo sem preço: no efetivo custa 0 (não vira "sem preço"); na lista segue "sem preço"; a paga por uso segue sem preço
+db2 = StudioDB(tmp, "np")
+db2.span(ts(f"{D}10:00:00"), 2, model="modelo-sem-preco", task="T-np", conv="c-np", agent="codex", name="session_task.turn", **tok)
+db2.span(ts(f"{D}10:10:00"), 2, model="modelo-sem-preco", task="T-np2", conv="c-np2", agent="ai-memory", name="ai_memory.llm_request", **tok)
+app2 = create_app(db2.flush(), TOKEN, config=cfg)
+u2l, u2e = (json.loads(get(app2, "/v1/usage", Q)[1])["totals"]["cost"], None)
+check("modelo sem preço, lista: as 2 chamadas ficam em 'sem preço' (API)", u2l["unpriced_calls"] == 2 and u2l["real_usd"] is None and u2l["estimated_usd"] is None)
+r_l, r_e = row(get(app2, "/sessoes", Q)[1], "sessao", "T-np"), row(get(app2, "/sessoes", EF)[1], "sessao", "T-np")
+check("modelo sem preço, sessão de assinatura: lista = sem preço; efetivo = US$ 0",
+      r_l["unpriced-calls"] == "1" and r_l["real-usd"] == "" and r_e["unpriced-calls"] == "0" and r_e["real-usd"] == "0.0")
+check("modelo sem preço, paga por uso: segue 'sem preço' no efetivo", row(get(app2, "/sessoes", EF)[1], "sessao", "T-np2")["unpriced-calls"] == "1")
+
 # ---- a API não muda: o `GET /v1/usage` ignora a escolha e traz o custo de lista
 ul = json.loads(get(app, "/v1/usage", Q)[1])
 ue = json.loads(get(app, "/v1/usage", EF)[1])
@@ -200,7 +212,7 @@ check("GET /v1/usage: igual com e sem custo=efetivo, e com o custo de lista (rea
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 68
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 71
 check "a regra de assinatura mora só no cost.py (nenhum outro módulo lista os agentes)" \
   bash -c '! grep -ln "SUBSCRIPTION_AGENTS\|\"claude\", \"codex\"" "$1"/docker/agent-studio/agent_studio/*.py | grep -v -e "/cost.py" -e "/prices.py" | grep -q .' _ "$ROOT"
 check_end
