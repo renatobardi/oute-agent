@@ -156,6 +156,7 @@ class Store:
                 self.con.execute(sql["create"])
             migrate(self.con)
             repo_infer.apply(self.con)   # histórico da conversa aberta direto numa pasta (#599)
+            repo_mod.apply_legacy(self.con)  # acerto único: o que sobrou sem repositório antes do corte (#617)
             prices_mod.create(self.con)  # histórico de preços (#339)
             marks_mod.create(self.con)   # marcas das ações do Bardi (#510): só de acréscimo, escrita só pela rota
 

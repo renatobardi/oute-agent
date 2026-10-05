@@ -7,6 +7,8 @@ nunca da hora de chegada: o mesmo registro reenviado pelo collector (pelo menos 
 import hashlib
 import json
 
+from . import repo as repo_mod
+
 # atributos que viram coluna fixa: procurados primeiro no registro, depois no resource
 FIXED = {
     "host_name": "host.name",
@@ -77,9 +79,10 @@ def text(v):
     return v if isinstance(v, str) else canon(v)
 
 
-def fixed(rec, res):
+def fixed(rec, res, time_ns):
     out = {col: text(rec[key] if rec.get(key) is not None else res.get(key)) for col, key in FIXED.items()}
-    out["oute_repo"] = out["oute_repo"] or None  # repositório vazio = sem repositório (#528)
+    # repositório vazio = sem repositório (#528); sem repositório antes do corte = o acerto único do histórico (#617)
+    out["oute_repo"] = repo_mod.legacy(out["oute_repo"] or None, time_ns)
     return out
 
 
@@ -132,11 +135,12 @@ def log_rows(payload, received_ns):
                         "body": body, "attributes": rec, "eventName": lr.get("eventName"),
                         "traceId": lr.get("traceId"), "spanId": lr.get("spanId"), "flags": lr.get("flags"),
                     })
+                at = fact_time(t, observed, received_ns)
                 row = {
                     "dedupe_key": key,
-                    "time_unix_nano": fact_time(t, observed, received_ns),
+                    "time_unix_nano": at,
                     "observed_unix_nano": observed or None,
-                    **fixed(rec, res),
+                    **fixed(rec, res, at),
                     "event_name": text(event_name),
                     "oute_event_id": text(event_id),
                     "severity_number": to_int(lr.get("severityNumber")) or None,
@@ -205,12 +209,13 @@ def span_rows(payload, received_ns):
                 rec = attrs(sp.get("attributes"))
                 start, end = to_int(sp.get("startTimeUnixNano")), to_int(sp.get("endTimeUnixNano"))
                 status = sp.get("status") or {}
+                at = start or end or received_ns
                 row = {
                     "dedupe_key": f"s:{trace_id.lower()}:{span_id.lower()}",
-                    "time_unix_nano": start or end or received_ns,
+                    "time_unix_nano": at,
                     "end_unix_nano": end or None,
                     "duration_ns": (end - start) if start and end >= start else None,
-                    **fixed(rec, res),
+                    **fixed(rec, res, at),
                     "trace_id": trace_id.lower(),
                     "span_id": span_id.lower(),
                     "parent_span_id": (sp.get("parentSpanId") or "").lower() or None,
@@ -272,11 +277,12 @@ def metric_rows(payload, received_ns):
                         "time": t, "start": start, "resource": res, "scope": scope_id, "name": m.get("name"),
                         "type": kind, "unit": m.get("unit"), "attributes": pa, "point": point,
                     })
+                    at = t or start or received_ns
                     rows.append({
                         "dedupe_key": key,
-                        "time_unix_nano": t or start or received_ns,
+                        "time_unix_nano": at,
                         "start_unix_nano": start or None,
-                        **fixed(pa, res),
+                        **fixed(pa, res, at),
                         "metric_name": m.get("name"),
                         "metric_type": METRIC_TYPES[kind],
                         "unit": m.get("unit") or None,
