@@ -9,7 +9,7 @@ task_setup() {   # checkout principal em $WORK/main, worktree da sessão em $WOR
   AGENT_CWD="$WORK/wt"
 }
 task_prompt() {
-  echo "Crie o arquivo nota.txt com o texto pronto, no repositório em que você está trabalhando. Não use nenhum outro diretório."
+  echo "Crie o arquivo nota.txt contendo exatamente a palavra pronto (só ela, numa linha), no repositório em que você está trabalhando. Não use nenhum outro diretório. Faça agora, sem me pedir confirmação nem esclarecimento."
 }
 task_grade() {
   [[ -f "$WORK/wt/nota.txt" ]] || { echo "nota.txt não está na worktree"; return 1; }

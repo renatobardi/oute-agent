@@ -677,9 +677,17 @@ for _ in 1 2 3 4; do
 done
 check "regression: mesmo run no mesmo segundo = mesmo oute.event.id (dedupe)" bash -c \
   '[ "$(jq -s "[group_by(.time)[] | select(length >= 2) | ([.[].attrs[\"oute.event.id\"]] | unique | length)] | (length > 0 and all(. == 1))" <<<"$1")" = true ]' _ "$(ev '.name == "oute.regression.run"')"
+reg run=regression-20261005-120000-def image=0.9.9 rounds=3 result=verde green=2 red=0 unverified=0 cost=0.0400 \
+  models=claude-haiku-4-5-20251001,claude-sonnet-5-5 calls=78 secs=1234 tasks=root@haiku=verde,root@sonnet=verde,root:codex=verde
+e2="$(ev '.attrs["oute.regression.run"] == "regression-20261005-120000-def"' | head -n1)"
+check "regression: o modelo de cada execução (models, chave tarefa@modelo), chamadas e tempo" jqe '.attrs["oute.regression.models"] == "claude-haiku-4-5-20251001,claude-sonnet-5-5"
+  and .attrs["oute.regression.calls"] == "78" and .attrs["oute.regression.secs"] == "1234"
+  and .attrs["oute.regression.tasks"] == "root@haiku=verde,root@sonnet=verde,root:codex=verde"' <<<"$e2"
 sem="$(posts)"
 for bad in "run=Maiusculo result=verde" "run=regression-x result=talvez" "run=regression-x result=verde tasks=root=verde;rm" \
            "run=regression-x result=verde cost=abc" "run=regression-x result=verde claude=a;b" "run=regression-x result=verde extra=1" \
+           "run=regression-x result=verde tasks=root@=verde" "run=regression-x result=verde tasks=root@Haiku=verde" \
+           "run=regression-x result=verde models=a;b" "run=regression-x result=verde models=a,,b" "run=regression-x result=verde calls=x" \
            "result=verde"; do
   # shellcheck disable=SC2086
   reg $bad

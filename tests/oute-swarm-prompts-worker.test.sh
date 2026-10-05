@@ -154,4 +154,11 @@ check "worker: grep identifica definições de função no diff (#585)" grep -qF
 check "worker: confere local em cada função nova (#585)" grep -qF 'todo parâmetro posicional deve ser atribuído a uma variável `local`' "$W"
 check "worker: confere return explícito em cada função nova (#585)" grep -qF 'deve haver um `return` explícito no fim' "$W"
 check "worker: informa a contagem e o resultado no corpo do PR (#585)" grep -qF 'No corpo do PR, informe: `Funções novas: N; todas com local e return.`' "$W"
+# 484. PR de prompt roda a regressão dos agentes antes de abrir; a recusa por cota vai no Falta
+check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` roda a regressão dos agentes antes de abrir (#484).** Rode `oute-regression` no container (13 tarefas, em Haiku e em Sonnet' "$W"
+check "484: worker: a saída inteira vai no corpo, na seção ## Regressão dos agentes" grep -qF 'na seção `## Regressão dos agentes`, com a linha `repetições:` que ela imprime' "$W"
+check "484: worker: saída 3 = trava de cota; não sobe o limite e declara no ## Falta" grep -qF 'Saída 3 é a trava de cota (`OUTE_REGRESSION_MAX_PCT`, padrão 60%): não suba o limite e não rode de outro jeito. Declare no `## Falta` do PR que a regressão não rodou' "$W"
+check "484: worker: o merge sem a regressão fica para o Bardi (decisão do Bardi)" grep -qF 'o merge fica para o Bardi decidir (a auditoria recomenda `decisão do Bardi`)' "$W"
+check "484: skill de auditoria: confere a saída da regressão e recomenda decisão do Bardi sem ela" bash -c 'grep -qF "**Regressão dos agentes (#484).**" "$1" && grep -qF "a ação recomendada é \`decisão do Bardi\`" "$1" && grep -qF -- "- \`decisão do Bardi\`: PR de prompt" "$1"' _ "$A"
+check "484: skill de auditoria: a ação decisão do Bardi está no modelo do relatório" grep -qF 'perguntar ao autor | decisão do Bardi | não fazer merge' "$A"
 check_end
