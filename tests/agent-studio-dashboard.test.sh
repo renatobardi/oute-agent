@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 studio_init
 
 cat > "$TMP/config.toml" <<'TOML'
@@ -209,7 +209,7 @@ check("6) sessão sem custo nem preço fica de fora (T-SEM)", "T-SEM" not in sec
 # ------------------------------------------------------------------------------ o que a página não pode ter
 body = html.split("<main", 1)[1]
 check("sem style= em lugar nenhum da página", "style=" not in html)
-check("nenhum script além do htmx", re.findall(r"<script[^>]*>", html) == ['<script src="/static/htmx.min.js" defer>'])
+check("scripts locais: htmx e tratamento de falha de bloco", re.findall(r"<script[^>]*>", html) == ['<script src="/static/htmx.min.js" defer>', '<script src="/static/loading.js" defer>'])
 check("nenhum recurso externo (http/https, @import, url())", not re.search(r"https?://|@import|url\(", body))
 check("o JS de gráfico não existe: só <svg>, <path>, <rect>, <line> e <title>", not re.search(r"<(canvas|iframe|object|embed)", html))
 check("só leitura: só os formulários do período e do modelo, os dois por GET (#527, #532)", body.count("<form") == 2 and body.count('method="get"') == 2

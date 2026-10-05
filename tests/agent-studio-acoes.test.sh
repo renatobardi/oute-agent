@@ -11,10 +11,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -65,7 +65,7 @@ acao() {
   return $?
 }
 form() { local rod="$1" etapa="$2" id="$3" est="$4" csrf="${5-$CSRF}"; printf 'rodada=%s&etapa=%s&acao=%s&estado=%s&csrf=%s' "$rod" "$etapa" "$id" "$est" "$csrf"; return 0; }
-page() { local path="$1"; shift; curl -s -H "$RC_" "$@" "$STUDIO_URL$path"; return $?; }
+page() { local path="$1"; shift; studio_page -H "$RC_" "$@" "$STUDIO_URL$path"; return $?; }
 
 # ---------------------------------------------------------------- 1. sem a credencial de marcação a rota não existe
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }

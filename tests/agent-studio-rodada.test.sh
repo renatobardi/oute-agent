@@ -12,10 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 PKG="$ROOT/docker/agent-studio/agent_studio"
@@ -70,14 +70,14 @@ PY
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml")
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 C=(-H "Authorization: Bearer $STUDIO_TOKEN")
-page() { local path="$1"; curl -s "${C[@]}" "$STUDIO_URL$path"; return $?; }
+page() { local path="$1"; studio_page "${C[@]}" "$STUDIO_URL$path"; return $?; }
 sr() { local q="$1"; surreal_q "$q"; return $?; }
 steps_of() { data | jq -c '[.[] | select(has("etapa"))]'; return $?; }
 
 # ---------------------------------------------------------------- 1. antes de qualquer etapa; quem lê
 EMPTY="$(page /rodadas)"
 check "sem etapa nenhuma: /rodadas 200 com a mensagem"  bash -c 'grep -q "data-sem-rodadas" <<<"$1"' _ "$EMPTY"
-check "sem etapa nenhuma: /rodada = 404"               test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = 404
+check "sem etapa nenhuma: /rodada = 404"               test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=$R1")" = 404
 check "sem id: /rodada = 400"                          test "$(code "${C[@]}" "$STUDIO_URL/rodada")" = 400
 check "sem etapa nenhuma: /v1/rodada = 404"            test "$(code "${C[@]}" "$STUDIO_URL/v1/rodada?id=$R1")" = 404
 check "sem id: /v1/rodada = 400"                       test "$(code "${C[@]}" "$STUDIO_URL/v1/rodada")" = 400
@@ -114,14 +114,14 @@ check "lista: o rodapé conta as rodadas ('1 a 5 de 5') e o tamanho 20 é o padr
 check "lista: ordenar pela rodada de A a Z e invertido" test "$(page '/rodadas?ord=rodada&dir=asc' | rounds_of)$(page '/rodadas?ord=rodada&dir=desc' | rounds_of)" = "$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$a, $b, $c, $d, $e]')$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$e, $d, $c, $b, $a]')"
 check "lista: ordenar pelo número de etapas começa pela rodada com mais etapas (a R5, cinco)" test "$(page '/rodadas?ord=steps&dir=desc' | rounds_of | jq -r '.[0]')" = "$R5"
 check "lista: o cabeçalho da coluna ordenada propõe a direção oposta no segundo clique" bash -c 'tr "\n" " " <<<"$1" | grep -q "data-col=\"steps\">[[:space:]]*<a class=\"ordem\" href=\"/rodadas?ord=steps&amp;dir=asc\""' _ "$(page '/rodadas?ord=steps&dir=desc')"
-check "lista: filtro por veredito deixa só as reprovadas (a R2) e o rodapé conta o filtrado" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=reprovado")"; grep -q "data-faixa>1 a 1 de 1 (filtrado, 5 no total)<" <<<"$h" && [ "$(grep -c "data-rodada=\"$2\"" <<<"$h")" = 1 ] && [ "$(grep -c "<tr data-rodada=" <<<"$h")" = 1 ]' _ "$STUDIO_URL" "$R2" "${C[@]}"
-check "lista: o filtro do cabeçalho de veredito oferece os valores da lista inteira" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=reprovado")"; sed -n "/data-filtro=\"review\"/,/<\/details>/p" <<<"$h" | grep -q ">aprovado</a>"' _ "$STUDIO_URL" "${C[@]}"
-check "lista: filtro sem rodada mostra o aviso com o link para limpar, não a mensagem de 'nenhuma rodada ainda'" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=sem-revisor-nenhum")"; grep -q "Limpar o filtro" <<<"$h" && ! grep -q "data-sem-rodadas" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
+check "lista: filtro por veredito deixa só as reprovadas (a R2) e o rodapé conta o filtrado" bash -c 'h="$(studio_page "${@:2}" "$1/rodadas?f_review=reprovado")"; grep -q "data-faixa>1 a 1 de 1 (filtrado, 5 no total)<" <<<"$h" && [ "$(grep -c "data-rodada=\"$2\"" <<<"$h")" = 1 ] && [ "$(grep -c "<tr data-rodada=" <<<"$h")" = 1 ]' _ "$STUDIO_URL" "$R2" "${C[@]}"
+check "lista: o filtro do cabeçalho de veredito oferece os valores da lista inteira" bash -c 'h="$(studio_page "${@:2}" "$1/rodadas?f_review=reprovado")"; sed -n "/data-filtro=\"review\"/,/<\/details>/p" <<<"$h" | grep -q ">aprovado</a>"' _ "$STUDIO_URL" "${C[@]}"
+check "lista: filtro sem rodada mostra o aviso com o link para limpar, não a mensagem de 'nenhuma rodada ainda'" bash -c 'h="$(studio_page "${@:2}" "$1/rodadas?f_review=sem-revisor-nenhum")"; grep -q "Limpar o filtro" <<<"$h" && ! grep -q "data-sem-rodadas" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
 check "lista: ordem, direção, tamanho, página ou filtro fora da lista fixa = 400" bash -c 'for q in ord=nope dir=up tam=7 tam=abc pag=0 pag=x f_nada=1 f_review_d=x ord_p=state; do [ "$(curl -s -o /dev/null -w "%{http_code}" "${@:2}" "$1/rodadas?$q")" = 400 ] || { echo "$q" >&2; exit 1; }; done' _ "$STUDIO_URL" "${C[@]}"
 
 # ---------------------------------------------------------------- 4. /rodada: a R1
 page "/rodada?id=$R1" > "$TMP/r1.html"
-check "R1: 200 (o texto da etapa tem link de host inválido, https://[abc)"  test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = 200
+check "R1: 200 (o texto da etapa tem link de host inválido, https://[abc)"  test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=$R1")" = 200
 S="$(steps_of < "$TMP/r1.html")"
 check "R1: três etapas, na ordem da rodada (merge, kaizen, fechamento)" jqe 'map(.etapa) == ["merge", "kaizen", "fechamento"]' <<<"$S"
 check "R1: fechamento = r2 aprovado (a revisão mais alta, não a mais recente a chegar)" jqe '.[2] | .rev == "2" and .review == "aprovado" and (.sha256 | length == 64)' <<<"$S"
@@ -150,9 +150,9 @@ page "/rodada?id=$R2" > "$TMP/r2.html"
 check "R2: fechamento reprovado: aviso fixo e texto fechado" bash -c 'grep -q "data-aviso=\"reprovado\"" "$1" && grep -q "data-texto-fechado" "$1" && grep -q "Texto que o revisor reprovou" "$1"' _ "$TMP/r2.html"
 page "/rodada?id=$R3" > "$TMP/r3.html"
 check "R3: sem o corpo do evento: avisa que o texto não chegou, sem texto" bash -c 'grep -q "data-sem-texto" "$1" && ! grep -q "data-texto" "$1"' _ "$TMP/r3.html"
-check "R4: só evento fora do formato: 404"              test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R4")" = 404
-check "rodada que não existe: 404"                      test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=nao-existe")" = 404
-check "rodada com HTML no id: 404, id nunca na página"  bash -c 'b="$(curl -s -H "Authorization: Bearer $2" "$1/rodada?id=%3Cb%3Ex%3C%2Fb%3E")"; ! grep -q "<b>x</b>" <<<"$b"' _ "$STUDIO_URL" "$STUDIO_TOKEN"
+check "R4: só evento fora do formato: 404"              test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=$R4")" = 404
+check "rodada que não existe: 404"                      test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=nao-existe")" = 404
+check "rodada com HTML no id: 404, id nunca na página"  bash -c 'b="$(studio_page -H "Authorization: Bearer $2" "$1/rodada?id=%3Cb%3Ex%3C%2Fb%3E")"; ! grep -q "<b>x</b>" <<<"$b"' _ "$STUDIO_URL" "$STUDIO_TOKEN"
 
 # ---------------------------------------------------------------- 4b. a R5 (#508): as quatro etapas, a posição e a navegação
 page "/rodada?id=$R5" > "$TMP/r5.html"
@@ -190,7 +190,7 @@ check "API: o corpo do reprovado (R2) não vaza"        bash -c '! grep -q "Text
 check "POST /rodada e /rodadas: 405 (só leitura)"       test "$(code -X POST "${C[@]}" "$STUDIO_URL/rodada?id=$R1")$(code -X POST "${C[@]}" "$STUDIO_URL/rodadas")" = 405405
 check "POST /v1/rodada: 405"                            test "$(code -X POST "${C[@]}" "$STUDIO_URL/v1/rodada?id=$R1")" = 405
 check "rodada: o único formulário é o de sair, nenhum campo, nenhum botão a mais" bash -c 'for f in "$@"; do [ "$(grep -ho "<form[^>]*>" "$f" | sort -u)" = "<form method=\"post\" action=\"/logout\">" ] && ! grep -hiE "<(input|select|textarea)" "$f" | grep -qv "menu-interruptor" || exit 1; done' _ "$TMP/r1.html" "$TMP/r2.html" "$TMP/list.html"
-check "rodada: sem script nem estilo inline, só o htmx do /static" bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@" && [ "$(grep -ho "<script[^>]*>" "$@" | sort -u)" = "<script src=\"/static/htmx.min.js\" defer>" ]' _ "$TMP/r1.html" "$TMP/r2.html" "$TMP/list.html"
+check "rodada: sem script nem estilo inline, scripts só do /static" bash -c '! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$@" && [ "$(grep -ho "<script[^>]*>" "$@" | sort -u)" = "$(printf '<script src=\"/static/htmx.min.js\" defer>\n<script src=\"/static/loading.js\" defer>')" ]' _ "$TMP/r1.html" "$TMP/r2.html" "$TMP/list.html"
 CSP="$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/rodada?id=$R1")"
 check "CSP: a mesma das outras telas"                   test "$CSP" = "$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/pedidos")" -a "$CSP" = "$(hdr content-security-policy "${C[@]}" "$STUDIO_URL/rodadas")"
 check "rodada: não vai para cache"                      test "$(hdr cache-control "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = no-store
@@ -199,7 +199,7 @@ check "rodada: a página de detalhe não leva as faixas de alerta" bash -c '! gr
 # ---------------------------------------------------------------- 7. SurrealDB fora: a página sai com o texto e um aviso
 surreal_stop
 page "/rodada?id=$R1" > "$TMP/r1-down.html"
-check "SurrealDB fora: /rodada 200"                     test "$(code "${C[@]}" "$STUDIO_URL/rodada?id=$R1")" = 200
+check "SurrealDB fora: /rodada 200"                     test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=$R1")" = 200
 check "SurrealDB fora: aviso, e o texto vem do DuckDB (a revisão mais alta)" bash -c 'grep -q "data-estado-indisponivel" "$1" && grep -q "data-etapa=\"fechamento\"" "$1" && grep -q "data-rev=\"2\"" "$1" && ! grep -q "versão antiga r1" "$1" && grep -q "<strong>swarm-1004-1306</strong>" "$1"' _ "$TMP/r1-down.html"
 check "SurrealDB fora: as três etapas e o veredito de cada uma" jqe 'map({etapa, review}) == [{"etapa":"merge","review":"aprovado"},{"etapa":"kaizen","review":"reprovado"},{"etapa":"fechamento","review":"aprovado"}]' <<<"$(steps_of < "$TMP/r1-down.html")"
 check "SurrealDB fora: a causa não vai à página"        bash -c '! grep -qiE "surreal ?db: |connection|Errno|Traceback" <<<"$(sed "s/SurrealDB/X/g" "$1")"' _ "$TMP/r1-down.html"

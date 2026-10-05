@@ -3,11 +3,12 @@ com um store ou um SurrealDB de mentira. `get(app, path, query)` -> (status, cor
 leitura falha (a causa, "segredo-da-falha", não pode chegar à página). `Odd`: SurrealDB que responde fora do
 formato. Uso: PYTHONPATH=tests/lib."""
 import asyncio
+import secrets
 
-TOKEN = "token-um"
+TOKEN = secrets.token_hex(16)
 
 
-def get(app, path, query="", headers=(), method="GET"):
+async def async_get(app, path, query="", headers=(), method="GET", response_headers=None):
     """`headers` = pares (nome, valor) a mais; o `Bearer` do TOKEN vai sempre."""
     msgs = []
     extra = [(k.lower().encode(), v.encode()) for k, v in headers]
@@ -22,8 +23,25 @@ def get(app, path, query="", headers=(), method="GET"):
     async def send(m):
         msgs.append(m)
 
-    asyncio.run(app(scope, receive, send))
+    await app(scope, receive, send)
+    if response_headers is not None:
+        response_headers.update((k.decode().lower(), v.decode()) for k, v in msgs[0].get("headers", []))
     return msgs[0]["status"], b"".join(m.get("body", b"") for m in msgs[1:]).decode()
+
+
+def raw_get(app, path, query="", headers=(), method="GET", response_headers=None):
+    return asyncio.run(async_get(app, path, query, headers, method, response_headers))
+
+
+def get(app, path, query="", headers=(), method="GET"):
+    """Abre o casco e lê cada bloco por sua rota. `raw_get` mede apenas uma resposta."""
+    from studio_loading import expand
+    status, body = raw_get(app, path, query, headers, method)
+    if status == 200 and method == "GET":
+        code, body = expand(body, lambda p, q: raw_get(app, p, q, headers))
+        if code != 200:
+            status = code
+    return status, body
 
 
 class Broken:

@@ -11,10 +11,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -65,16 +65,16 @@ PY
 SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml")
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 C_=(-H "Authorization: Bearer $STUDIO_TOKEN")
-page() { local path="$1"; curl -s "${C_[@]}" "$STUDIO_URL$path"; return $?; }
+page() { local path="$1"; studio_page "${C_[@]}" "$STUDIO_URL$path"; return $?; }
 sr() { local q="$1"; surreal_q "$q"; return $?; }
 rounds_of() { data | jq -c '[.[] | select(has("rodada")) | .rodada]'; return $?; }
 
 # ---------------------------------------------------------------- 1. antes de qualquer evento; quem lê; o id
-check "sem evento nenhum: /ciclo = 404"                 test "$(code "${C_[@]}" "$STUDIO_URL/ciclo?id=$CQ")" = 404
+check "sem evento nenhum: /ciclo = 404"                 test "$(code "${C_[@]}" "$STUDIO_URL/bloco/ciclo/resumo?id=$CQ")" = 404
 check "sem id: /ciclo = 400"                            test "$(code "${C_[@]}" "$STUDIO_URL/ciclo")" = 400
 check "sem login: /ciclo = 303 para o /login, com a volta" test "$(code "$STUDIO_URL/ciclo?id=$CQ")$(hdr location "$STUDIO_URL/ciclo?id=$CQ")" = "303/login?next=%2Fciclo%3Fid%3Drenatobardi%252Foute-agent%2523509"
 for bad in 'ZZlixo' '%3Cb%3EZZx%3C%2Fb%3E%2Fy%231' 'ZZa%2Fb' 'ZZa%2Fb%231%3Cscript%3E' 'ZZa%2Fb%23' 'ZZa%2Fb%231%0A' '..%2F..%2FZZx%2Fy%2312' "$(printf 'a%.0s' $(seq 1 200))%2Fb%231"; do
-  body="$(curl -s "${C_[@]}" "$STUDIO_URL/ciclo?id=$bad")"; rc="$(code "${C_[@]}" "$STUDIO_URL/ciclo?id=$bad")"
+  body="$(studio_page "${C_[@]}" "$STUDIO_URL/ciclo?id=$bad")"; rc="$(code "${C_[@]}" "$STUDIO_URL/ciclo?id=$bad")"
   check "id inválido ($bad): 400 e o id nunca volta na página" bash -c '[ "$1" = 400 ] && ! grep -qF "ZZ" <<<"$2" && ! grep -qF "<b>" <<<"$2" && ! grep -qF "<script>" <<<"$2" && grep -qF "O id do ciclo tem de ser" <<<"$2"' _ "$rc" "$body"
 done
 
@@ -101,14 +101,14 @@ check "ciclo C: etapas e veredito de cada rodada" jqe --arg a "$A" --arg b "$B" 
 check "ciclo C: o resumo é a r2 aprovada (a mais alta, não a mais recente a chegar), aberto e sem aviso" bash -c 'f="$1"; grep -q "data-etapa=\"ciclo\" data-rev=\"2\" data-review=\"aprovado\"" "$f" && grep -q "<h2>Resumo do ciclo</h2>" "$f" && grep -q "data-texto>" "$f" && ! grep -q "versão antiga" "$f" && ! grep -q "data-aviso\|data-texto-fechado" "$f"' _ "$TMP/c.html"
 check "ciclo C: o texto do resumo sai escapado, link https vira link" bash -c 'f="$1"; ! grep -q "<b>falso</b>\|<script>alert" "$f" && grep -q "&lt;b&gt;falso&lt;/b&gt;" "$f" && grep -q "&lt;script&gt;alert(&#39;ciclo&#39;)&lt;/script&gt;" "$f" && grep -q "<strong>509</strong>" "$f" && grep -q "href=\"https://github.com/renatobardi/oute-agent/pull/600\"" "$f"' _ "$TMP/c.html"
 check "ciclo C: revisão, autor e revisor no topo do resumo" bash -c 'grep -qE "revisão 2 · publicada em 20[0-9-]+ [0-9:]+ GMT-3 · autor claude-sonnet-5-5 · revisor claude-opus-5-5 · sha256 <code>[0-9a-f]{12}</code>" "$1"' _ "$TMP/c.html"
-check "ciclo C: só leitura, sem script nem estilo inline, mesma CSP" bash -c 'f="$1"; [ "$(grep -ho "<form[^>]*>" "$f" | sort -u)" = "<form method=\"post\" action=\"/logout\">" ] && ! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$f" && [ "$(grep -ho "<script[^>]*>" "$f" | sort -u)" = "<script src=\"/static/htmx.min.js\" defer>" ]' _ "$TMP/c.html"
+check "ciclo C: só leitura, sem script nem estilo inline, mesma CSP" bash -c 'f="$1"; [ "$(grep -ho "<form[^>]*>" "$f" | sort -u)" = "<form method=\"post\" action=\"/logout\">" ] && ! grep -hiE "<script(>| [^>]*>)[^<]|<style|[ \"]style=|[ \"]on[a-z]+=\"" "$f" && [ "$(grep -ho "<script[^>]*>" "$f" | sort -u)" = "$(printf '<script src=\"/static/htmx.min.js\" defer>\n<script src=\"/static/loading.js\" defer>')" ]' _ "$TMP/c.html"
 check "ciclo C: CSP igual à das outras telas, sem cache" test "$(hdr content-security-policy "${C_[@]}" "$STUDIO_URL/ciclo?id=$CQ")" = "$(hdr content-security-policy "${C_[@]}" "$STUDIO_URL/rodadas")" -a "$(hdr cache-control "${C_[@]}" "$STUDIO_URL/ciclo?id=$CQ")" = no-store
 check "POST /ciclo: 405 (só leitura)"                    test "$(code -X POST "${C_[@]}" "$STUDIO_URL/ciclo?id=$CQ")" = 405
 page "/ciclo?id=$EQ" > "$TMP/e.html"
 check "ciclo E (só o resumo): 200, o resumo e a mensagem de sem rodadas" bash -c 'grep -q "data-etapa=\"ciclo\"" "$1" && grep -q "data-sem-rodadas" "$1" && ! grep -q "data-sem-resumo" "$1"' _ "$TMP/e.html"
 page "/ciclo?id=$FQ" > "$TMP/f.html"
 check "ciclo F (só a rodada): 200, a rodada e a mensagem de sem resumo" bash -c 'grep -q "data-sem-resumo" "$1" && grep -q "data-rodada=\"swarm-1004-2500\"" "$1" && ! grep -q "data-etapa=\"ciclo\"" "$1"' _ "$TMP/f.html"
-check "ciclo que ninguém conhece (id válido): 404"       test "$(code "${C_[@]}" "$STUDIO_URL/ciclo?id=renatobardi%2Foute-agent%23999")" = 404
+check "ciclo que ninguém conhece (id válido): 404"       test "$(code "${C_[@]}" "$STUDIO_URL/bloco/ciclo/resumo?id=renatobardi%2Foute-agent%23999")" = 404
 
 # ---------------------------------------------------------------- 4. as outras telas
 page /rodadas > "$TMP/list.html"
@@ -120,7 +120,7 @@ page "/rodada?id=$Z" > "$TMP/rz.html"
 check "/rodada: ciclo fora do formato fica texto escapado, sem link" bash -c 'f="$1"; ! grep -q "href=\"/ciclo" "$f" && ! grep -q "href=\"javascript" "$f" && grep -q "ciclo javascript:alert(1)" "$f"' _ "$TMP/rz.html"
 check "/v1/rodada: o ciclo da rodada, só se tem o formato" jqe --arg c "$C" '.cycle == $c' <<<"$(page "/v1/rodada?id=$A")"
 check "/v1/rodada: Z sem ciclo (fora do formato)"        jqe '.cycle == null' <<<"$(page "/v1/rodada?id=$Z")"
-check "/rodada da pasta do resumo: sem barra de posição do ciclo (o resumo não é etapa de rodada)" bash -c 'b="$(curl -s -H "Authorization: Bearer $2" "$1/rodada?id=ciclo-renatobardi_oute-agent-509")"; ! grep -q "data-passo=\"ciclo\"" <<<"$b" && grep -q "<h2>Resumo do ciclo</h2>" <<<"$b"' _ "$STUDIO_URL" "$STUDIO_TOKEN"
+check "/rodada da pasta do resumo: sem barra de posição do ciclo (o resumo não é etapa de rodada)" bash -c 'b="$(studio_page -H "Authorization: Bearer $2" "$1/rodada?id=ciclo-renatobardi_oute-agent-509")"; ! grep -q "data-passo=\"ciclo\"" <<<"$b" && grep -q "<h2>Resumo do ciclo</h2>" <<<"$b"' _ "$STUDIO_URL" "$STUDIO_TOKEN"
 
 # ---------------------------------------------------------------- 5. tray: o resumo abre a página do ciclo
 T="$(curl -s "${C_[@]}" "$STUDIO_URL/v1/tray")"

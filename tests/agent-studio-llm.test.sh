@@ -77,7 +77,7 @@ check "soma por agente bate com o total (real, micro-US\$)" jqe "([.rows[].cost.
 check "soma por agente bate com o total (estimado)"         jqe "([.rows[].cost.estimated_usd // 0] | add | $(usd .)) == (.totals.cost.estimated_usd | $(usd .))" <<<"$R"
 
 # ---------------------------------------------------------------- 2. tela /uso: o consumo do ai-memory está nos totais
-P="$(curl -s "${A[@]}" "$STUDIO_URL/uso$WIN" | data)"
+P="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN" | data)"
 check "/uso: total da janela inclui as 5 chamadas do ai-memory" jqe '.[] | select(.tag == "p" and .calls == "6")' <<<"$P"
 check "/uso: custo real do total = o da API"                  jqe ".[] | select(.tag == \"p\" and .calls == \"6\") | (.[\"real-usd\"] | $(usd .)) == $(jq "(.totals.cost.real_usd | $(usd .))" <<<"$R")" <<<"$P"
 check "/uso: chamada do ai-memory (sem sessão) cai em avulsa" jqe '.[] | select(.role == "avulsa") | (.calls | tonumber) >= 5' <<<"$P"
