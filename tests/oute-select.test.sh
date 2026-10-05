@@ -476,7 +476,7 @@ unset FAKE_CLAUDE_AUTH_RC FAKE_CODEX_LOGIN_RC
 # (datas fixas e longe de hoje: o falso não olha o relógio, só o resets_in_s conta)
 qj() { jq -nc --argjson a "$1" --argjson b "$2" --argjson r "$3" --arg cs "$4" --argjson ca "$5" --argjson cb "$6" '
   def w($p; $s; $at): {used_pct: $p, resets_at: $at, resets_in_s: $s};
-  {schema: 1, max_pct: 90, reset_grace_s: 1200, agents: {
+  {schema: 1, max_pct: 98, reset_grace_s: 1200, agents: {
     claude: {status: "ok", reason: null, stale: false, age_s: 0,
              windows: {"5h": w($a; $r; "2030-01-01T15:00:00Z"), "7d": w($b; 300000; "2030-01-05T09:30:00Z")}},
     codex: (if $cs == "ok" then {status: "ok", reason: null, stale: false, age_s: 0,
@@ -492,33 +492,43 @@ qj 40 30 9000 ok 10 10; sel --issue 50
 check "cota folgada: Claude, reserve vazio, sem aviso" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && [ -z "$3" ]' _ "$RC" "$OUT" "$ERR"
 check "cota folgada: oute-quota lido uma vez, com --json" bash -c '[ "$(cat "$1")" == "--json" ]' _ "$FAKE/quota.args"
 # 89,9% fica abaixo do corte
-qj 89.9 89.9 9000 ok 10 10; sel --issue 50
-check "89,9% nas duas janelas: abaixo do corte, Claude" resv "" claude
+qj 97.9 97.9 9000 ok 10 10; sel --issue 50
+check "97,9% nas duas janelas: abaixo do corte, Claude" resv "" claude
+# #558: 97% no Claude fica no Claude; 98% vai para a reserva
+qj 97 97 9000 ok 10 10; sel --issue 50
+check "Claude em 97%: abre no Claude, sem reserva e sem aviso" bash -c 'jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$1" >/dev/null && [ -z "$2" ]' _ "$OUT" "$ERR"
+qj 98 10 9000 ok 10 10; sel --issue 50
+check "Claude em 98%: reserva por cota, Codex" resv cota codex
+# sem max_pct no JSON vale o padrão do seletor (98, #558)
+qj 97 10 9000 ok 10 10; jq 'del(.max_pct)' "$FAKE/quota.json" > "$FAKE/q2"; mv "$FAKE/q2" "$FAKE/quota.json"; sel --issue 50
+check "sem max_pct, Claude em 97%: padrão 98, Claude" resv "" claude
+qj 98 10 9000 ok 10 10; jq 'del(.max_pct)' "$FAKE/quota.json" > "$FAKE/q2"; mv "$FAKE/q2" "$FAKE/quota.json"; sel --issue 50
+check "sem max_pct, Claude em 98%: padrão 98, Codex" resv cota codex
 
-# janela de 5h em 93%, reset longe: Codex da linha build, reserve cota, hora do reset no aviso
-qj 93 40 9000 ok 10 10; sel --issue 50
-check "5h em 93%: Codex da linha build (gpt-6.1-sol, high)" is build label codex "$GPT" high
-check "5h em 93%: reserve = cota"                       rs cota
-check "5h em 93%: aviso diz a janela, o % e a hora do reset" bash -c 'grep -qF "5h em 93%" <<<"$1" && grep -qF "01/01 15:00 UTC" <<<"$1" && grep -qF "abrindo no Codex (reserva por cota)" <<<"$1"' _ "$ERR"
-check "5h em 93%: linha para ler mostra reserva cota"   bash -c '"$1" --repo "$2" --issue 50 2>/dev/null </dev/null | grep -qF "reserva cota"' _ "$SEL" "$TMP/repo"
-# janela de 7d em 95%: troca, e a exceção de 20 min não vale para ela
-qj 10 95 60 ok 10 10; sel --issue 50
-check "7d em 95%: Codex, reserve cota"                  resv cota codex
-check "7d em 95%: aviso com a hora do reset da 7d"      warnhas "7d em 95% (reseta 05/01 09:30 UTC)"
-qj 95 95 60 ok 10 10; sel --issue 50
-check "5h (reset em 60 s) e 7d em 95%: a 7d tira a exceção, Codex" resv cota codex
-check "5h e 7d no corte: aviso lista as duas janelas"   bash -c 'grep -qF "5h em 95%" <<<"$1" && grep -qF "7d em 95%" <<<"$1"' _ "$ERR"
-# exatamente no corte (90) conta
-qj 90 10 9000 ok 10 10; sel --issue 50
-check "5h em exatamente 90%: Codex"                     resv cota codex
+# janela de 5h em 99%, reset longe: Codex da linha build, reserve cota, hora do reset no aviso
+qj 99 40 9000 ok 10 10; sel --issue 50
+check "5h em 99%: Codex da linha build (gpt-6.1-sol, high)" is build label codex "$GPT" high
+check "5h em 99%: reserve = cota"                       rs cota
+check "5h em 99%: aviso diz a janela, o % e a hora do reset" bash -c 'grep -qF "5h em 99%" <<<"$1" && grep -qF "01/01 15:00 UTC" <<<"$1" && grep -qF "abrindo no Codex (reserva por cota)" <<<"$1"' _ "$ERR"
+check "5h em 99%: linha para ler mostra reserva cota"   bash -c '"$1" --repo "$2" --issue 50 2>/dev/null </dev/null | grep -qF "reserva cota"' _ "$SEL" "$TMP/repo"
+# janela de 7d em 99%: troca, e a exceção de 20 min não vale para ela
+qj 10 99 60 ok 10 10; sel --issue 50
+check "7d em 99%: Codex, reserve cota"                  resv cota codex
+check "7d em 99%: aviso com a hora do reset da 7d"      warnhas "7d em 99% (reseta 05/01 09:30 UTC)"
+qj 99 99 60 ok 10 10; sel --issue 50
+check "5h (reset em 60 s) e 7d em 99%: a 7d tira a exceção, Codex" resv cota codex
+check "5h e 7d no corte: aviso lista as duas janelas"   bash -c 'grep -qF "5h em 99%" <<<"$1" && grep -qF "7d em 99%" <<<"$1"' _ "$ERR"
+# exatamente no corte (98) conta
+qj 98 10 9000 ok 10 10; sel --issue 50
+check "5h em exatamente 98%: Codex"                     resv cota codex
 
-# exceção: 5h >= 90% e < 100%, a 7d abaixo, reset em menos de 20 min: só aviso, Claude
-qj 95 40 600 ok 10 10; sel --issue 50
+# exceção: 5h >= 98% e < 100%, a 7d abaixo, reset em menos de 20 min: só aviso, Claude
+qj 99 40 600 ok 10 10; sel --issue 50
 check "exceção 5h (reset em 10 min): Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
 check "exceção 5h: aviso diz que reseta em menos de 20 min e a hora" bash -c 'grep -qF "menos de 20 min" <<<"$1" && grep -qF "01/01 15:00 UTC" <<<"$1"' _ "$ERR"
-qj 95 40 1199 ok 10 10; sel --issue 50
+qj 99 40 1199 ok 10 10; sel --issue 50
 check "exceção 5h: 1199 s (< 1200) ainda é exceção"     resv "" claude
-qj 95 40 1200 ok 10 10; sel --issue 50
+qj 99 40 1200 ok 10 10; sel --issue 50
 check "5h com reset em 1200 s: não é exceção, Codex"    resv cota codex
 qj 100 40 600 ok 10 10; sel --issue 50
 check "5h em 100% com reset em 10 min: sem exceção, Codex" resv cota codex
@@ -529,7 +539,7 @@ sel --issue 50
 check "cota do Claude unknown: Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
 check "cota do Claude unknown: aviso"                   warnhas "cota do Claude está desconhecida"
 # oute-quota sai 1 (todos unknown) mas ainda imprime o JSON: o seletor lê o JSON, não o código
-echo '{"schema":1,"max_pct":90,"reset_grace_s":1200,"agents":{"claude":{"status":"unknown","reason":"rede","windows":{}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' > "$FAKE/quota.json"
+echo '{"schema":1,"max_pct":98,"reset_grace_s":1200,"agents":{"claude":{"status":"unknown","reason":"rede","windows":{}},"codex":{"status":"unknown","reason":"rede","windows":{}}}}' > "$FAKE/quota.json"
 FAKE_QUOTA_RC=1 sel --issue 50
 check "todos unknown (oute-quota sai 1): Claude, aviso"  bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF desconhecida <<<"$3"' _ "$RC" "$OUT" "$ERR"
 # leitura que falha: lixo, vazio, ausente, lenta
@@ -537,7 +547,7 @@ echo 'isto não é json' > "$FAKE/quota.json"; sel --issue 50
 check "saída inválida: Claude, aviso, código 0"         bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF "não li a cota" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 echo '{"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":"alto"}}}}}' > "$FAKE/quota.json"; sel --issue 50
 check "formato inesperado: trata como unknown, Claude"  bash -c 'jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$1" >/dev/null && grep -qF desconhecida <<<"$2"' _ "$OUT" "$ERR"
-qj 95 40 9000 ok 10 10
+qj 99 40 9000 ok 10 10
 FAKE_QUOTA_SLEEP=30 OUTE_SELECT_QUOTA_TIMEOUT=1 sel --issue 50
 check "oute-quota lento: teto, Claude, aviso, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF "não li a cota" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 check "oute-quota lento: o teto de 3 s não é alargado por env" bash -c 'T0=$SECONDS; FAKE_QUOTA_SLEEP=30 OUTE_SELECT_QUOTA_TIMEOUT=600 "$1" --json --repo "$2" --issue 50 >/dev/null 2>&1 </dev/null; [ $((SECONDS - T0)) -le 6 ]' _ "$SEL" "$TMP/repo"
@@ -547,18 +557,18 @@ OUT="$(PATH="$TMP/semquota" "$SEL" --json --repo "$TMP/repo" --issue 50 2>"$TMP/
 check "sem oute-quota no PATH: Claude, aviso, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF "não li a cota" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 
 # os dois esgotados: aviso claro, Claude
-qj 95 40 9000 ok 92 10; sel --issue 50
-check "Claude e Codex >= 90%: Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
-check "Claude e Codex >= 90%: aviso diz que a do Codex também" bash -c 'grep -qF "esgotada" <<<"$1" && grep -qF "do Codex também" <<<"$1" && grep -qF "5h em 92%" <<<"$1"' _ "$ERR"
-qj 10 95 9000 ok 10 99; sel --issue 50
+qj 99 40 9000 ok 98 10; sel --issue 50
+check "Claude e Codex >= 98%: Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
+check "Claude e Codex >= 98%: aviso diz que a do Codex também" bash -c 'grep -qF "esgotada" <<<"$1" && grep -qF "do Codex também" <<<"$1" && grep -qF "5h em 98%" <<<"$1"' _ "$ERR"
+qj 10 99 9000 ok 10 99; sel --issue 50
 check "7d do Codex em 99%: também esgotado, Claude"     resv "" claude
 # Codex desconhecido: troca, com aviso
-qj 95 40 9000 unknown 0 0; sel --issue 50
+qj 99 40 9000 unknown 0 0; sel --issue 50
 check "Codex unknown: troca para o Codex, reserve cota" bash -c 'jq -e ".agent == \"codex\" and .reserve == \"cota\" and .model == \"$2\"" <<<"$1" >/dev/null' _ "$OUT" "$GPT"
 check "Codex unknown: aviso diz que a cota do Codex está desconhecida" warnhas "a do Codex está desconhecida"
 
 # explícito e fase fixa não caem na reserva, nem leem a cota
-qj 95 95 9000 ok 10 10; : > "$FAKE/quota.args"
+qj 99 99 9000 ok 10 10; : > "$FAKE/quota.args"
 sel --issue 50 --agent claude
 check "cota alta + --agent claude: Claude, reserve vazio" bash -c 'jq -e ".agent == \"claude\" and .reserve == \"\" and .origin == \"manual\"" <<<"$1" >/dev/null' _ "$OUT"
 sel --issue 50 --model "$SONNET"

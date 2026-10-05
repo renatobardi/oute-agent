@@ -87,7 +87,7 @@ no_secret() { ! grep -qF -e "$CTOK" -e "$XJWT" -e "$XTOK_RAW" -e "$ACCT" "$@"; }
 reset_world; BEFORE="$(cred_state)"; TREE="$(tree_hash)"
 run --json
 check "200: saída 0" test "$RC" -eq 0
-check "200: JSON no contrato (schema, max_pct, reset_grace_s, read_at)" oj '.schema == 1 and .max_pct == 90 and .reset_grace_s == 1200 and (.read_at|test("^[0-9]{4}-.*Z$"))'
+check "200: JSON no contrato (schema, max_pct, reset_grace_s, read_at)" oj '.schema == 1 and .max_pct == 98 and .reset_grace_s == 1200 and (.read_at|test("^[0-9]{4}-.*Z$"))'
 check "200: claude ok, 5h 15% e 7d 34% com o reset em UTC" oj ".agents.claude | .status == \"ok\" and .reason == null and .stale == false and .age_s == 0 and .windows[\"5h\"].used_pct == 15 and .windows[\"5h\"].resets_at == \"$(iso $R5C)\" and .windows[\"7d\"].used_pct == 34 and .windows[\"7d\"].resets_at == \"$(iso $R7C)\""
 check "200: resets_in_s coerente (reset − agora)" oj '.agents.claude.windows["5h"].resets_in_s | . > 7000 and . <= 7200'
 check "200: codex ok, 5h 7% e 7d 21.5% (reset_at em epoch)" oj ".agents.codex | .status == \"ok\" and .windows[\"5h\"].used_pct == 7 and .windows[\"5h\"].resets_at == \"$(iso $R5X)\" and .windows[\"7d\"].used_pct == 21.5 and .windows[\"7d\"].resets_at == \"$(iso $R7X)\""
