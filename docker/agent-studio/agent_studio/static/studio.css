@@ -506,3 +506,9 @@ a.erros-link { text-decoration: none; }
 .barra-svg .erro { fill: var(--destructive); }
 tr.com-erro > td:first-child { box-shadow: inset 3px 0 0 var(--destructive); }
 .taxa-erro { color: var(--destructive); }
+
+/* ações da etapa (#510): a caixa de marcar e o estado de cada ação */
+.acao-id { font-size: 12px; }
+.acao-form { display: inline; margin: 0; }
+.acao-caixa { padding: 2px 8px; font-size: 13px; }
+.acao-estado { color: var(--muted-foreground); font-size: 13px; }

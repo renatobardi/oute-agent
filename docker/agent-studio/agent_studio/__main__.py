@@ -37,6 +37,13 @@ def main():
         read_token = ""
         print("agent-studio: aviso: sem credencial de leitura própria (AGENT_STUDIO_READ_TOKEN vazio ou igual à de "
               "ingestão); uma credencial só para ingestão e leitura (transição da #256)", file=sys.stderr)
+    # credencial de marcação (#510): terceira, só do navegador do Bardi (item agent-studio da pasta oute-services). Sem ela, ou igual a
+    # outra das duas, a rota `POST /rodada/acao` não existe
+    mark_token = os.environ.get("AGENT_STUDIO_MARK_TOKEN", "")
+    if mark_token and mark_token in (token, read_token):
+        print("agent-studio: aviso: AGENT_STUDIO_MARK_TOKEN igual à de ingestão ou à de leitura; sem marcação de ação "
+              "(a credencial de marcação precisa ser própria)", file=sys.stderr)
+        mark_token = ""
     # SurrealDB (#187): o compose sempre passa a URL; sem ela (só nos testes de ingestão), grava só no DuckDB
     surreal = None
     surreal_url = os.environ.get("AGENT_STUDIO_SURREAL_URL", "")
@@ -65,7 +72,7 @@ def main():
         price_job = prices_mod.Job(lambda: prices_mod.check(store, config, tel, urls=price_urls()),
                                    float(os.environ.get("AGENT_STUDIO_PRICE_INTERVAL", prices_mod.DAY_NS // 10**9)))
     app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config, read_token=read_token,
-                     price_job=price_job)
+                     price_job=price_job, mark_token=mark_token)
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% set crumbs = [("Marcar ações", none)] %}
+{% block title %}Ação marcada · Agent Studio{% endblock %}
+{% block main %}
+<div class="pagina">
+<h1>Ação marcada</h1>
+<p data-marcado="{{ marked }}">A ação <code>{{ action }}</code> ficou <strong>{{ marked }}</strong>. É só o registro: nada foi feito no host nem no GitHub.</p>
+<p><a class="botao" href="{{ back }}">Voltar à rodada</a></p>
+</div>
+{% endblock %}

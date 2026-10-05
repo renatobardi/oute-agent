@@ -34,6 +34,7 @@ TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospec
           "fechamento": "Fechamento da rodada", "ciclo": "Resumo do ciclo"}
 BAR_LABELS = {"triagem": "Triagem", "merge": "Pedidos de merge", "kaizen": "Kaizen", "fechamento": "Fechamento"}
 ROUND_KINDS = tuple(k for k in KINDS if k != CYCLE_KIND)   # as posições da barra: o resumo do ciclo não é etapa de rodada
+ROUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z", re.ASCII)   # o id de uma rodada (`swarm-1004-1944`), como a pasta dela
 CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z", re.ASCII)   # `<dono>/<repo>#<n>`
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
@@ -438,17 +439,25 @@ def render(steps):
     return navigate(steps)
 
 
+def actions_api(step):
+    """As ações da etapa (#510) para o JSON; `[]` se `acoes.collect` não rodou."""
+    from . import acoes   # `acoes` importa este módulo: o import fica aqui para não fechar o laço
+    return acoes.api(step) if "acoes" in step else []
+
+
 def api(data):
     """`GET /v1/rodada`: a rodada em JSON. O texto só vai nas etapas `aprovado` (D6: o texto reprovado ou sem revisor fica
     fechado também aqui); `url` leva à página."""
     steps = [{"kind": s["kind"], "key": s["key"] or None, "rev": s["rev"], "review": s["review"], "sha256": s["sha256"],
               "writer": s["writer"], "reviewer": s["reviewer"], "refcheck": s["refcheck"], "cycle": s["cycle"],
               "published_at": s["published_at"], "url": f"/rodada?id={quote(data['id'], safe='')}#{anchor(s)}",
-              "text": s["text"] if s["review"] == "aprovado" else None, "text_withheld": s["review"] != "aprovado"}
+              "text": s["text"] if s["review"] == "aprovado" else None, "text_withheld": s["review"] != "aprovado",
+              "actions": actions_api(s)}
              for s in data["steps"]]
     rec = data["record"] or {}
     return {"round": data["id"], "state": rec.get("state"), "repo": rec.get("repo"), "label": rec.get("label"),
-            "cycle": rec.get("cycle") if cycle_url(rec.get("cycle")) else None, "state_read": data["state_read"], "steps": steps}
+            "cycle": rec.get("cycle") if cycle_url(rec.get("cycle")) else None, "state_read": data["state_read"],
+            "actions_read": data.get("acoes_read"), "steps": steps}
 
 
 def tray_steps(surreal, at_ns, limit=TRAY_LIMIT):

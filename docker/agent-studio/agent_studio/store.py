@@ -9,7 +9,7 @@ import time
 
 import duckdb
 
-from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
+from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
                repo as repo_mod, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
@@ -156,6 +156,7 @@ class Store:
                 self.con.execute(sql["create"])
             migrate(self.con)
             prices_mod.create(self.con)  # histórico de preços (#339)
+            marks_mod.create(self.con)   # marcas das ações do Bardi (#510): só de acréscimo, escrita só pela rota
 
     def close(self):
         with self.lock:

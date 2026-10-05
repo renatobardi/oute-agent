@@ -93,21 +93,21 @@ wipe_surreal
 check "SurrealDB esvaziado: sem pedidos" test "$(sstate pedido)" = 0
 OUT="$("${REB[@]}" 2>"$TMP/err")"; RC=$?
 check "rebuild-state: rc 0" test "$RC" = 0
-check "antes: tudo zerado" has_line "antes: rodadas=0 workers=0 sessoes=0 pedidos=0 conversas=0 etapas=0"
-check "lidas: 14 logs e 1 span" has_line "lidas: logs=14 spans=1"
-check "depois: a contagem da ingestão" has_line "depois: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0"
+check "antes: tudo zerado" has_line "antes: rodadas=0 workers=0 sessoes=0 pedidos=0 conversas=0 etapas=0 acoes=0"
+check "lidas: 14 logs e 1 span" has_line "lidas: logs=14 spans=1 marcas=0"
+check "depois: a contagem da ingestão" has_line "depois: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0 acoes=0"
 snap "$TMP/remontado.json"
 check "o estado remontado é igual ao da ingestão (as cinco tabelas, todos os campos)" cmp -s "$TMP/ingestao.json" "$TMP/remontado.json"
 check "stderr vazio no caso feliz" test ! -s "$TMP/err"
 
 # ---------------------------------------------------------------- 3. idempotente, em blocos de 1 linha, sem apagar
 OUT="$(AGENT_STUDIO_REBUILD_CHUNK=1 "${REB[@]}" 2>&1)"; RC=$?
-check "de novo, blocos de 1 linha: rc 0 e a contagem de antes é a de depois" bash -c '[ "$1" = 0 ] && grep -qx "antes: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0" <<<"$2"' _ "$RC" "$OUT"
+check "de novo, blocos de 1 linha: rc 0 e a contagem de antes é a de depois" bash -c '[ "$1" = 0 ] && grep -qx "antes: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0 acoes=0" <<<"$2"' _ "$RC" "$OUT"
 snap "$TMP/de-novo.json"
 check "de novo: nada mudou" cmp -s "$TMP/ingestao.json" "$TMP/de-novo.json"
 surreal_q 'CREATE pedido:`so-no-surreal` SET state = "pendente"' >/dev/null
 OUT="$("${REB[@]}" 2>&1)"; RC=$?
-check "registro que só existe no SurrealDB não é apagado" bash -c '[ "$1" = 0 ] && grep -qx "depois: rodadas=1 workers=1 sessoes=2 pedidos=4 conversas=1 etapas=0" <<<"$2"' _ "$RC" "$OUT"
+check "registro que só existe no SurrealDB não é apagado" bash -c '[ "$1" = 0 ] && grep -qx "depois: rodadas=1 workers=1 sessoes=2 pedidos=4 conversas=1 etapas=0 acoes=0" <<<"$2"' _ "$RC" "$OUT"
 surreal_q 'DELETE pedido:`so-no-surreal`' >/dev/null
 # estado já atualizado no SurrealDB por fora volta ao do DuckDB onde o fato manda
 wipe_surreal
@@ -177,7 +177,7 @@ start_studio
 oute studio rebuild-state
 STUDIO_PID=""   # o `stop` falso derrubou o serviço
 check "rebuild-state pelo host: rc 0" test "$RC" = 0
-check "a saída traz antes, lidas e depois do one-off" bash -c 'grep -qx "antes: rodadas=0 workers=0 sessoes=0 pedidos=0 conversas=0 etapas=0" <<<"$1" && grep -qx "lidas: logs=14 spans=1" <<<"$1" && grep -qx "depois: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0" <<<"$1"' _ "$OUT"
+check "a saída traz antes, lidas e depois do one-off" bash -c 'grep -qx "antes: rodadas=0 workers=0 sessoes=0 pedidos=0 conversas=0 etapas=0 acoes=0" <<<"$1" && grep -qx "lidas: logs=14 spans=1 marcas=0" <<<"$1" && grep -qx "depois: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0 acoes=0" <<<"$1"' _ "$OUT"
 snap "$TMP/host.json"
 check "o estado remontado pelo comando é igual ao da ingestão" cmp -s "$TMP/ingestao.json" "$TMP/host.json"
 check "a ordem é stop, run, up" test "$(grep '^docker compose' "$F_LOG" | sed -E 's/.* (stop|run|up) .*/\1/' | tr '\n' ' ')" = "stop run up "

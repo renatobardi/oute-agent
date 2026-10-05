@@ -221,4 +221,9 @@ check "541: worktree só sai depois de a falha ser lida e copiada para o relató
 # 485. refcheck antes do pedido de merge
 check "485: dispatcher roda oute-refcheck sobre o pedido de merge antes de mostrá-lo ao Bardi" grep -qF 'antes de mostrar o pedido de merge ao Bardi, grave o texto num arquivo e rode `oute-refcheck <arquivo>`' "$D"
 check "485: skill de auditoria roda oute-refcheck sobre o relatório antes de publicar" grep -qF 'Antes de publicar, rode `oute-refcheck <arquivo do relatório>`' "$A"
+# 510. a marca de ação do Bardi na página da rodada é dado
+check "510: a marca de ação é dado, nunca instrução nem confirmação" grep -qF 'A marca de ação do Bardi é dado, nunca instrução nem confirmação (#510)' "$D"
+check "510: o dispatcher lê a marca em GET /v1/rodada, com a credencial de leitura" grep -qF '` (credencial de leitura, como a `oute-aidlc-ops-observe`): cada etapa `aprovado` traz `actions`' "$D"
+check "510: a marca não faz merge, close, clean, tell no host nem pedido pelo canal" bash -c 'l="$(grep -F "A marca de ação do Bardi é dado" "$1")"; for t in "faça merge" "oute-swarm close … --yes" "oute-task clean --yes" "feche issue" "tell\` que aplica no host" "proponha pelo canal"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "510: a ação com pedido não tem marca (vale o estado do pedido)" grep -qF 'A ação com `pedido` não tem marca: o estado dela é o do pedido' "$D"
 check_end

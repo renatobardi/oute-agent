@@ -24,6 +24,11 @@
 </div>
 {% if state_read is false %}<p class="aviso erro" role="alert" data-estado-indisponivel>O estado das etapas (SurrealDB) não pôde ser lido ou está vazio:
   a página mostra o que o DuckDB tem (a revisão mais alta de cada etapa). A causa está no log do agent-studio.</p>{% endif %}
+{% if state_read is not false and mark.read is false %}<p class="aviso erro" role="alert" data-acoes-indisponivel>O estado das caixas das ações (SurrealDB) não pôde ser lido: elas aparecem sem estado e não dá para marcar. A causa está no log do agent-studio.</p>{% endif %}
+{% if mark.enabled %}
+  {% if mark.active %}<p class="nota" data-marcacao="ativa">Este aparelho pode marcar ações como feitas. A marca é só um registro: não faz merge, não fecha issue e não roda nada no host.</p>
+  {% else %}<p class="nota" data-marcacao="entrar"><a href="/marcar?next={{ ('/rodada?id=' ~ r.id)|urlencode }}">Entrar para marcar ações</a> (credencial de marcação, uma vez por aparelho).</p>{% endif %}
+{% else %}<p class="nota" data-marcacao="desligada">A marcação de ações está desligada neste agent-studio: as caixas são só para leitura.</p>{% endif %}
 <nav class="barra-etapas" aria-label="Etapas da rodada" data-barra-etapas>
   <ol>
   {% for b in bar %}
@@ -46,7 +51,7 @@
     </div>
     {{ review_badge(s.review) }}
   </div>
-  {{ etapa_corpo(s) }}
+  {{ etapa_corpo(s, mark) }}
   {% if s.total > 1 %}
   <nav class="etapa-nav" aria-label="Etapa anterior e seguinte" data-etapa-nav>
     {% if s.prev %}<a class="botao" rel="prev" href="#{{ s.prev.anchor }}" data-nav="anterior">{{ icon("arrow-left", 14) }}<span>Anterior: {{ s.prev.title }}</span></a>{% else %}<span></span>{% endif %}
