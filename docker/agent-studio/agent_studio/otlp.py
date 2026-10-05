@@ -16,6 +16,7 @@ FIXED = {
     "session_id": "session.id",
     "oute_task_id": "oute.task.id",
     "oute_swarm_round": "oute.swarm.round",
+    "oute_repo": "oute.task.repo",
 }
 
 
@@ -77,7 +78,9 @@ def text(v):
 
 
 def fixed(rec, res):
-    return {col: text(rec[key] if rec.get(key) is not None else res.get(key)) for col, key in FIXED.items()}
+    out = {col: text(rec[key] if rec.get(key) is not None else res.get(key)) for col, key in FIXED.items()}
+    out["oute_repo"] = out["oute_repo"] or None  # repositório vazio = sem repositório (#528)
+    return out
 
 
 def _list(obj, key):

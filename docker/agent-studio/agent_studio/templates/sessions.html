@@ -6,7 +6,7 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent) }}</div>
+  <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > sessions|length %} · Mostrando as {{ sessions|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
 {{ state_warning(state_read) }}

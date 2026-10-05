@@ -195,8 +195,9 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     return sql, [CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
 
 
-def window_spans_with_cost(from_ns, to_ns):
-    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga."""
-    return spans_with_cost("time_unix_nano >= ? AND time_unix_nano < ?", [from_ns, to_ns],
+def window_spans_with_cost(from_ns, to_ns, span_extra="", span_extra_params=()):
+    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga. `span_extra` =
+    condição a mais sobre os spans (` AND …`, com os parâmetros em `span_extra_params`): o filtro de repositório, #528."""
+    return spans_with_cost(f"time_unix_nano >= ? AND time_unix_nano < ?{span_extra}", [from_ns, to_ns, *span_extra_params],
                            "time_unix_nano >= ? AND time_unix_nano < ?",
                            [max(from_ns - LOG_COST_MARGIN_NS, 0), to_ns + LOG_COST_MARGIN_NS])
