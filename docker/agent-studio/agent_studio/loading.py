@@ -26,7 +26,7 @@ SCREENS = {
     '/precos': ('Preços', 'precos', False, [('fontes', 'faixa'), ('resumo', 'indicadores'), ('modelos', 'faixa')]),
     '/pedidos': ('Pedidos', 'pedidos', False, [('pendentes', 'tabela'), ('decididos', 'tabela')]),
     '/pedido': ('Pedido', 'pedidos', True, [('resumo', 'faixa'), ('script', 'tabela'), ('eventos', 'tabela'), ('comando', 'faixa')]),
-    '/rodadas': ('Rodadas', 'rodadas', False, [('tabela', 'tabela')]),
+    '/rodadas': ('Rodadas', 'rodadas', False, [('filtros', 'faixa'), ('tabela', 'tabela')]),
     '/rodada': ('Rodada', 'rodadas', True, [('resumo', 'faixa'), ('etapas', 'tabela')]),
     '/ciclo': ('Ciclo', 'rodadas', True, [('resumo', 'faixa'), ('etapa', 'faixa'), ('rodadas', 'tabela')]),
     '/conversa': ('Conversa', 'conversas', True, [('resumo', 'indicadores'), ('spans', 'tabela'), ('dados', 'faixa'), ('logs', 'tabela')]),
