@@ -59,6 +59,8 @@ for p in PAGES:
 # a consulta usa o mesmo intervalo que a tela mostra: 12:30Z e 20:30Z (09:30 e 17:30 locais) entram; 11:30Z e 21:30Z não
 tot = re.search(r'id="total" data-calls="(\d+)"', H["/uso"][1])
 check("/uso: só as 2 chamadas dentro do intervalo local", tot and tot.group(1) == "2")
+check("/uso: os gráficos seguem o intervalo (2 chamadas nas colunas do custo por dia)",
+      sum(int(c) for c in re.findall(r'<g class="coluna" data-bucket="[^"]*" data-calls="(\d+)"', H["/uso"][1])) == 2)
 conv_ids = re.findall(r'data-conversa="([^"]*)"', H["/conversas"][1])
 check("/conversas: só as 2 conversas dentro do intervalo", sorted(conv_ids) == ["c-dentro", "c-dentro2"])
 dash = H["/"][1]
@@ -155,5 +157,5 @@ check("outro fuso: o link leva o UTC certo (04:00Z a 16:00Z)", 'from=2025-07-01T
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 52
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 53
 check_end
