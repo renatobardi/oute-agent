@@ -59,8 +59,8 @@ def make_rows(table, n, offset=0):
             if col in ST.DERIVED: continue
             r[col] = value(col, typ, i)
         r["dedupe_key"] = f"{table[0]}:{i}"
-        r["time_unix_nano"] = NOW + i * SEC
-        r["received_unix_nano"] = NOW + i * SEC
+        r["time_unix_nano"] = NOW + i * SEC + 422       # com nanossegundos, como o relógio do Linux
+        r["received_unix_nano"] = NOW + i * SEC + 7
         rows.append(r)
     return rows
 
@@ -84,7 +84,7 @@ for table in ST.TABLES:
         b = back[key]
         for col, typ in ST.TABLES[table]:
             if col in ST.DERIVED:
-                ok &= b[col] == r[ST.DERIVED[col]]
+                ok &= b[col] == r[ST.DERIVED[col]] // 1000 * 1000  # TIMESTAMPTZ guarda microssegundos
             elif typ.startswith("JSON"):
                 ok &= b[col] is None if r[col] is None else json.loads(b[col]) == json.loads(r[col])
             else:

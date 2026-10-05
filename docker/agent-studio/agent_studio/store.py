@@ -142,7 +142,8 @@ def _sql(table, cols):
         # chaves que já existem, com a lista inteira num parâmetro só
         "existing": f"SELECT dedupe_key FROM {table} WHERE list_contains(?::VARCHAR[], dedupe_key)",
         "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) SELECT {select} FROM (SELECT {unnest})",
-        "columns": [c for c, _ in plain],
+        "columns": names,
+        "plain": [c for c, _ in plain],  # as do `insert`, na ordem das listas: as derivadas saem do ns na seleção
     }
 
 
@@ -238,7 +239,7 @@ class Store:
         t = self._lap("existing", t, table)
         new = [uniq[k] for k in keys if k not in seen]
         if new:
-            self.con.execute(sql["insert"], [[r.get(c) for r in new] for c in sql["columns"]])
+            self.con.execute(sql["insert"], [[r.get(c) for r in new] for c in sql["plain"]])
             self._lap("insert", t, table)
         return len(new), len(rows) - len(new)
 
