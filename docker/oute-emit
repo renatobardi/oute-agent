@@ -8,7 +8,7 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                      sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session;
                                      escolha do seletor (#219): phase, origin, model, effort
-  oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366): run, image, claude, codex,
+  oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366, #484): run, image, claude, codex, models, calls, secs,
                                      rounds, result, green, red, unverified, cost, tasks, agent (quem causou)
   oute-emit quota <spawn|close|open> snapshot da cota das assinaturas (#347): lê `oute-quota --json` (teto de 8 s) e manda
                                      oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
@@ -756,7 +756,8 @@ def cmd_task(kind, caller, pairs):
 
 # ---------------------------------------------------------------- regressão dos agentes (#366)
 REGRESSION_VER = re.compile(r"[A-Za-z0-9._+-]{1,64}")
-REGRESSION_TASKS = re.compile(r"([a-z0-9-]+(:codex)?=(verde|vermelho|nao-verificado),)*[a-z0-9-]+(:codex)?=(verde|vermelho|nao-verificado)")
+REGRESSION_TASKS = re.compile(r"([a-z0-9-]+(@[a-z0-9-]+|:codex)?=(verde|vermelho|nao-verificado),)*[a-z0-9-]+(@[a-z0-9-]+|:codex)?=(verde|vermelho|nao-verificado)")
+REGRESSION_MODELS = re.compile(r"[A-Za-z0-9._+-]{1,64}(,[A-Za-z0-9._+-]{1,64}){0,7}")
 
 
 def cmd_regression(pairs):
@@ -767,7 +768,7 @@ def cmd_regression(pairs):
     for p in pairs:
         k, sep, v = p.partition("=")
         if not sep or k not in ("run", "image", "claude", "codex", "rounds", "result", "green", "red", "unverified",
-                                "cost", "tasks", "agent"):
+                                "cost", "tasks", "agent", "models", "calls", "secs"):
             raise Skip(f"campo de regressão inválido: {p}")
         f[k] = v
     if not re.fullmatch(r"[a-z0-9-]{1,64}", f.get("run", "")):
@@ -778,9 +779,9 @@ def cmd_regression(pairs):
     if f.get("result") not in ("verde", "vermelho"):
         raise Skip(f"resultado inválido: {f.get('result')}")
     attrs = {"oute.regression.run": f["run"], "oute.regression.result": f["result"]}
-    for k in ("rounds", "green", "red", "unverified"):
+    for k in ("rounds", "green", "red", "unverified", "calls", "secs"):
         if k in f:
-            if not re.fullmatch(r"[0-9]{1,3}", f[k]):
+            if not re.fullmatch(r"[0-9]{1,6}", f[k]):
                 raise Skip(f"número inválido em {k}")
             attrs[f"oute.regression.{k}"] = int(f[k])
     if "cost" in f:
@@ -791,6 +792,10 @@ def cmd_regression(pairs):
         if not REGRESSION_TASKS.fullmatch(f["tasks"]):
             raise Skip("tarefas fora do formato")
         attrs["oute.regression.tasks"] = f["tasks"]
+    if "models" in f:
+        if not REGRESSION_MODELS.fullmatch(f["models"]):
+            raise Skip("modelos fora do formato")
+        attrs["oute.regression.models"] = f["models"]
     for k, a in (("image", "image"), ("claude", "cli.claude"), ("codex", "cli.codex")):
         if k in f:
             attrs[f"oute.regression.{a}"] = f[k]
