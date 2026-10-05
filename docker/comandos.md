@@ -142,10 +142,14 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-swarm step publish <tipo> [--pr <n>] [--rev <n>] [--cycle <dono/repo#n>]
                                     (o dispatcher usa, #507) etapa = o texto que ele escreve para o Bardi, em
                                     ~/.oute/swarm/<rodada>/etapas/<tipo>[-<pr>].r<n>.md (tipos: triagem, merge, kaizen,
-                                    fechamento). review: outro modelo, em modo headless, confere o texto (até 300 s) e
+                                    fechamento, e ciclo). review: outro modelo, em modo headless, confere o texto (até 300 s) e
                                     grava o veredito para o sha256 dele; publish: só marca aprovado com esse veredito,
                                     recusa acima de 32 KiB (sem cortar) e texto com segredo, e emite o evento que o
                                     agent-studio mostra na página /rodada?id=
+  oute-swarm step dir ciclo --cycle <dono/repo#n>
+                                    (a sessão avulsa da learn-insights e da iter-roadmap usa, #509) imprime a pasta do
+                                    resumo do ciclo; o tipo ciclo roda review e publish com --cycle, sem rodada, e a
+                                    página /ciclo?id= mostra o resumo e as rodadas do ciclo
   oute-swarm close <n>-<slug>|--all [--yes]
                                     fecha a(s) aba(s) da rodada (sem --yes: só mostra); depois oute-task clean
   oute-swarm watch [--interval s] [--round ID] [--deliver]

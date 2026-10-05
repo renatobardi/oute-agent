@@ -19,9 +19,11 @@
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
 #   oute-swarm step review <tipo> [--pr <n>]        (usado pelo dispatcher, #507) etapa = o texto que ele escreve para o Bardi, em
 #              --writer <seu modelo> [--fontes <f>]  ~/.oute/swarm/<rodada>/etapas/<tipo>[-<pr>].r<n>.md (tipos: triagem, merge,
-#   oute-swarm step publish <tipo> [--pr <n>]        kaizen, fechamento). review: outro modelo, em modo headless, confere o texto (até
+#   oute-swarm step publish <tipo> [--pr <n>]        kaizen, fechamento, ciclo). review: outro modelo, em modo headless, confere o texto (até
 #              [--rev <n>] [--cycle <dono/repo#n>]   300 s); publish: só marca `aprovado` com veredito do mesmo sha256, recusa acima
 #                                                   de 32 KiB (sem cortar) e emite oute.swarm.step.published
+#   oute-swarm step dir ciclo --cycle <dono/repo#n> (#509) pasta do resumo do ciclo, para a sessão avulsa (learn-insights,
+#                                                   iter-roadmap): `step review|publish ciclo --cycle …` sem rodada nem dispatcher
 #   oute-swarm close <n>-<slug>|--all [--yes]      fecha a(s) aba(s) do herdr da rodada (encerra o agente). Sem --yes: só mostra
 #   oute-swarm watch [--interval s] [--round ID]    uma linha por mudança real da rodada (monitor do dispatcher Claude)
 #              [--deliver]                          --deliver: em vez de depender do harness, digita os eventos (agrupados, numa
@@ -51,6 +53,14 @@ slog() {
 quota_snapshot() {
   command -v oute-quota >/dev/null 2>&1 && command -v oute-emit >/dev/null 2>&1 || return 0
   ( oute-emit quota "$1" </dev/null >/dev/null 2>&1 & ) >/dev/null 2>&1 || true
+}
+# pasta da rodada mais recente: as pastas `ciclo-*` (etapa do resumo do ciclo, #509; não são rodada) ficam de fora
+latest_round_dir() {
+  local d
+  ls -dt "$STATE_ROOT"/*/ 2>/dev/null | while IFS= read -r d; do
+    [[ "$(basename "$d")" == ciclo-* ]] || { printf '%s' "${d%/}"; break; }
+  done
+  return 0
 }
 main_root() { local c; c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1; dirname "$c"; }
 
@@ -296,7 +306,7 @@ mark_closed() { is_closed "$1" "$2" || { printf '%s\n' "$2" >> "$1/closed"; slog
 round_dir() {
   local d
   if d="$(round_id)"; then d="$STATE_ROOT/$d"
-  else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; d="${d%/}"; fi
+  else d="$(latest_round_dir)"; fi
   [[ -n "$d" && -f "$d/spawned" ]] || die "nenhuma aba registrada (${d:-$STATE_ROOT})"
   printf '%s' "$d"
 }
@@ -465,7 +475,7 @@ cmd_tell() {
 ask_dir() {
   local d
   if d="$(round_id)"; then d="$STATE_ROOT/$d"
-  else d="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1 || true)"; d="${d%/}"; fi
+  else d="$(latest_round_dir)"; fi
   [[ -n "$d" && -f "$d/meta" ]] || die "nenhuma rodada (${d:-$STATE_ROOT})"
   printf '%s' "$d"
 }
@@ -842,7 +852,7 @@ cmd_watch() {
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval >= 10 )) || die "--interval inválido: $interval (mínimo 10 s)"
   [[ -n "$round" ]] || round="$(round_id || true)"
   if [[ -n "$round" ]]; then W_STATE="$STATE_ROOT/$round"
-  else W_STATE="$(ls -dt "$STATE_ROOT"/*/ 2>/dev/null | head -1)"; W_STATE="${W_STATE%/}"; fi
+  else W_STATE="$(latest_round_dir)"; fi
   [[ -n "$W_STATE" && -f "$W_STATE/meta" ]] || die "rodada não encontrada: ${W_STATE:-$STATE_ROOT}"
   main="$(sed -n 's/^repo=//p' "$W_STATE/meta")"; since="$(sed -n 's/^started=//p' "$W_STATE/meta")"
   [[ -d "$main" ]] || die "repo da rodada não encontrado: $main"
@@ -884,7 +894,7 @@ cmd_watch() {
 # veredito gravado para o mesmo sha256 (a trava mora aqui, não no prompt) e grava a linha `etapa …` no log, que o
 # oute-emit lê e emite como oute.swarm.step.published, com o texto no corpo.
 STEP_MAX=32768            # bytes por etapa (ADR-08): acima disso recusa, nunca corta
-STEP_KINDS="triagem merge kaizen fechamento"
+STEP_KINDS="triagem merge kaizen fechamento ciclo"
 STEP_SOURCES_MAX=65536    # bytes de fontes que o revisor recebe (--fontes), no total
 STEP_REJECTS=2            # reprovações por etapa; depois delas o publish aceita `reprovado`
 STEP_TIMEOUT_MAX=300      # teto do revisor, em segundos; OUTE_SWARM_REVIEW_TIMEOUT só abaixa (testes)
@@ -903,24 +913,39 @@ STEP_SECRETS=(
   'variavel-de-credencial~=(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|APIKEY|API_KEY|SENHA|CREDENTIAL)[A-Za-z0-9_]*.? *[=:] *.?[A-Za-z0-9+/=_.-]{12,}'
 )
 
-# step_resolve <tipo> [--pr <n>] [--rev <n>]: define S_STATE S_KIND S_KEY S_REV S_BASE S_FILE e S_ARGS (o que sobrou)
+# step_cycle_dir <dono/repo#n>: pasta da etapa do resumo do ciclo (#509). Não é rodada: a sessão avulsa da learn-insights ou da
+# iter-roadmap não tem rodada, e a etapa `ciclo` usa uma pasta própria em ~/.oute/swarm (id `ciclo-<dono>_<repo>-<n>`; o dono do
+# GitHub não tem `_`, então o id não é ambíguo), que o oute-emit lê como lê a de uma rodada. Sem `meta` e sem `spawned`.
+step_cycle_dir() {
+  local c="$1" owner repo n
+  [[ "$c" =~ ^([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)#([0-9]+)$ ]] || die "--cycle inválido: use <dono>/<repo>#<n>"
+  owner="${BASH_REMATCH[1]}"; repo="${BASH_REMATCH[2]}"; n="${BASH_REMATCH[3]}"
+  printf '%s' "$STATE_ROOT/ciclo-${owner}_${repo}-${n}"
+  return 0
+}
+
+# step_resolve <tipo> [--pr <n>] [--rev <n>] [--cycle <dono/repo#n>]: define S_STATE S_KIND S_KEY S_REV S_BASE S_FILE S_CYCLE e
+# S_ARGS (o que sobrou). A etapa `ciclo` pede --cycle e usa a pasta do ciclo no lugar da rodada
 step_resolve() {
   local kind="${1:-}" pr="" rev="" f r best=0
   [[ -n "$kind" ]] || die "uso: oute-swarm step publish|review <tipo> [--pr <n>] [--rev <n>]; tipos: $STEP_KINDS"
   shift
   [[ " $STEP_KINDS " == *" $kind "* ]] || die "tipo de etapa inválido: $kind (use: $STEP_KINDS)"
-  S_ARGS=()
+  S_ARGS=(); S_CYCLE=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --pr|--rev) [[ $# -ge 2 ]] || die "$1 pede um valor"
-                  if [[ "$1" == --pr ]]; then pr="$2"; else rev="$2"; fi; shift 2 ;;
+      --pr|--rev|--cycle) [[ $# -ge 2 ]] || die "$1 pede um valor"
+                  case "$1" in --pr) pr="$2" ;; --rev) rev="$2" ;; *) S_CYCLE="$2" ;; esac; shift 2 ;;
       *) S_ARGS+=("$1"); shift ;;
     esac
   done
+  [[ -z "$S_CYCLE" || "$S_CYCLE" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || die "--cycle inválido: use <dono>/<repo>#<n>"
+  [[ "$kind" != ciclo || -n "$S_CYCLE" ]] || die "etapa ciclo pede --cycle <dono>/<repo>#<n> (a issue do ciclo)"
   if [[ "$kind" == merge ]]; then [[ "$pr" =~ ^[1-9][0-9]{0,8}$ ]] || die "etapa merge pede --pr <n> (número do PR)"
   else [[ -z "$pr" ]] || die "--pr só vale na etapa merge"; fi
   [[ -z "$rev" || "$rev" =~ ^[1-9][0-9]{0,3}$ ]] || die "--rev inválido: $rev"
-  S_STATE="$(ask_dir)"; S_KIND="$kind"; S_KEY="$pr"
+  if [[ "$kind" == ciclo ]]; then S_STATE="$(step_cycle_dir "$S_CYCLE")"; mkdir -p "$S_STATE/etapas"; else S_STATE="$(ask_dir)"; fi
+  S_KIND="$kind"; S_KEY="$pr"
   S_BASE="$S_STATE/etapas/$kind${pr:+-$pr}"
   if [[ -z "$rev" ]]; then
     for f in "$S_BASE".r*.md; do
@@ -1082,6 +1107,7 @@ cmd_step_review() {
       *) die "opção desconhecida: $1" ;;
     esac
   done
+  [[ "$S_KIND" == ciclo || -z "$S_CYCLE" ]] || die "--cycle no step review só vale na etapa ciclo"
   [[ "$writer" =~ ^[A-Za-z0-9][]A-Za-z0-9._[-]{0,63}$ ]] || die "step review pede --writer <id do seu modelo> (ex.: claude-sonnet-5-5)"
   rev="$S_REV"; vf="$(step_verdict_file "$rev")"
   # sobra de um SIGKILL (o trap não roda): pastas .revisor.* com mais de 1 dia no estado da rodada saem (modo 700, mas com texto,
@@ -1180,16 +1206,10 @@ cmd_step_review() {
 }
 
 cmd_step_publish() {
-  local sha rev vf v n review writer reviewer cycle="" line kind key last
+  local sha rev vf v n review writer reviewer cycle line kind key last
   step_resolve "$@"
-  set -- ${S_ARGS[@]+"${S_ARGS[@]}"}
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --cycle) [[ $# -ge 2 ]] || die "--cycle pede um valor"; cycle="$2"; shift 2 ;;
-      *) die "opção desconhecida: $1" ;;
-    esac
-  done
-  [[ -z "$cycle" || "$cycle" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+$ ]] || die "--cycle inválido: use <dono>/<repo>#<n>"
+  [[ ${#S_ARGS[@]} -eq 0 ]] || die "opção desconhecida: ${S_ARGS[0]}"
+  cycle="$S_CYCLE"
   rev="$S_REV"; kind="$S_KIND"; key="${S_KEY:--}"
   step_check_text "$S_FILE"
   sha="$(step_sha "$S_FILE")"
@@ -1218,14 +1238,26 @@ cmd_step_publish() {
   return 0
 }
 
+# step dir ciclo --cycle <dono/repo#n> (#509): cria e imprime a pasta onde a sessão avulsa grava o texto do resumo do ciclo
+# (`ciclo.r<n>.md`); nada de rodada nem de dispatcher
+cmd_step_dir() {
+  local kind="${1:-}" flag="${2:-}" cycle="${3:-}" argc="$#" d
+  [[ "$kind" == ciclo && "$argc" -eq 3 && "$flag" == --cycle ]] || die "uso: oute-swarm step dir ciclo --cycle <dono>/<repo>#<n>"
+  d="$(step_cycle_dir "$cycle")/etapas"
+  mkdir -p "$d"
+  printf '%s\n' "$d"
+  return 0
+}
+
 cmd_step() {
   local sub="${1:-}"
-  [[ $# -ge 1 ]] || die "uso: oute-swarm step publish|review <tipo> [--pr <n>] [--rev <n>]"
+  [[ $# -ge 1 ]] || die "uso: oute-swarm step publish|review|dir <tipo> [--pr <n>] [--rev <n>]"
   shift
   case "$sub" in
     publish) cmd_step_publish "$@" ;;
     review) cmd_step_review "$@" ;;
-    *) die "uso: oute-swarm step publish|review <tipo> …" ;;
+    dir) cmd_step_dir "$@" ;;
+    *) die "uso: oute-swarm step publish|review|dir <tipo> …" ;;
   esac
   return $?
 }
@@ -1244,7 +1276,7 @@ cmd_list() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;

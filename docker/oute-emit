@@ -574,7 +574,7 @@ def read_text(path):
         return None
 
 
-STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento")
+STEP_KINDS = ("triagem", "merge", "kaizen", "fechamento", "ciclo")
 STEP_REVIEWS = ("aprovado", "reprovado", "sem-revisor")
 STEP_REFCHECKS = ("ok", "falhou", "ausente")
 STEP_MAX = 32768  # bytes; o mesmo teto do `oute-swarm step publish` (ADR-08)
@@ -598,6 +598,8 @@ def step_event(rdir, agent, ts, rest, base, fact):
         raise Skip("etapa com campo fora do formato")
     if (kind == "merge") != (key != "-"):
         raise Skip("etapa: a chave (PR) vale só no merge")
+    if kind == "ciclo" and cycle == "-":  # #509: a etapa `ciclo` leva sempre o ciclo (`<dono>/<repo>#<n>`)
+        raise Skip("etapa ciclo sem o ciclo")
     path = os.path.join(rdir, "etapas", f"{kind}{'' if key == '-' else '-' + key}.r{rev}.md")
     try:
         with open(path, "rb") as f:

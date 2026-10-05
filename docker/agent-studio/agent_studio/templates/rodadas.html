@@ -12,13 +12,14 @@
 {% if rounds %}
 <div class="cartao rolagem">
 <table class="rodadas empilha">
-  <thead><tr><th>Rodada</th><th>Repositório</th><th>Estado</th><th class="n">Etapas</th><th>Última etapa</th><th>Veredito</th><th>Em ({{ tzl() }})</th></tr></thead>
+  <thead><tr><th>Rodada</th><th>Repositório</th><th>Estado</th><th>Ciclo</th><th class="n">Etapas</th><th>Última etapa</th><th>Veredito</th><th>Em ({{ tzl() }})</th></tr></thead>
   <tbody>
   {% for x in rounds %}
   <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-revisoes="{{ x.revisions }}" data-review="{{ x.review or '' }}" data-state="{{ x.state.state if x.state and x.state.state else '' }}">
     <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{{ x.round }}</a></td>
     <td class="sec">{{ x.state.repo if x.state and x.state.repo else "—" }}{% if x.state and x.state.label %} · {{ x.state.label }}{% endif %}</td>
     <td class="sec">{{ x.state.state if x.state and x.state.state else "—" }}</td>
+    <td class="sec">{% if x.cycle_url %}<a href="{{ x.cycle_url }}">{{ x.state.cycle }}</a>{% else %}—{% endif %}</td>
     <td class="n">{{ x.steps|num }}</td>
     <td class="sec">{{ x.kind or "—" }}</td>
     <td>{% if x.review == "aprovado" %}{{ badge("aprovado", "secundario", "check") }}{% elif x.review == "reprovado" %}{{ badge("reprovado", "destrutivo", "triangle-alert") }}{% elif x.review == "sem-revisor" %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% else %}—{% endif %}</td>

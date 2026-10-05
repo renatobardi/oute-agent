@@ -64,7 +64,12 @@ Pronto quando: cada item tem motivo e evidência.
 - **Limpeza aprovada**, item a item: `gh issue edit <n> --add-label later` (ou troca de `aidlc:*`); `gh issue close <n> --reason "not planned" --comment "<motivo> (ciclo #<ciclo>)"`. Sem aprovação explícita do item, nada é feito.
 - **Temas novos aprovados:** liste-os para a `oute-aidlc-strat-opportunity`. Não crie a issue aqui.
 
-Pronto quando: a issue do ciclo existe, a limpeza aprovada foi aplicada e você deu o link ao Bardi.
+- **Resumo do ciclo na página (#509).** Com a issue criada (`<dono>/<repo>#<n>`, a do ciclo novo), publique o resumo do ciclo para o Bardi como etapa `ciclo`, com revisor de outro modelo, pelos comandos do `oute-swarm` (sem rodada nem dispatcher):
+  1. `D="$(oute-swarm step dir ciclo --cycle renatobardi/oute-agent#<n>)"`; escreva `$D/ciclo.r1.md` (a `learn` do fim do ciclo escreve a revisão seguinte). `## Decisão` (o ciclo aberto e o foco), `## Ações` (o que o Bardi faz agora) e `## Detalhe` (foco, issues, limpeza aplicada e fora do ciclo). Só o que você leu e fez, sem segredo e sem saída de host.
+  2. `oute-swarm step review ciclo --cycle renatobardi/oute-agent#<n> --writer <o id do seu modelo> --fontes <arquivo>` (a saída do `gh` das issues citadas) e, aprovado, `oute-swarm step publish ciclo --cycle renatobardi/oute-agent#<n>`. Reprovado: corrija, escreva a revisão seguinte e rode de novo (no máximo 2 reprovações; código 3 = sem revisor).
+  3. Link para o Bardi: `https://agent-studio.oute.pro/ciclo?id=renatobardi%2Foute-agent%23<n>`. Sem o `oute-swarm` ou o agent-studio, diga isso e siga: o link da issue basta.
+
+Pronto quando: a issue do ciclo existe, a limpeza aprovada foi aplicada, o resumo está publicado (ou a falta foi dita) e você deu o link ao Bardi.
 
 ### 5. Próximo passo
 - A triagem do swarm (`oute-swarm`, §1) ou a `oute-aidlc-plan-triage` pegam as issues do ciclo.
