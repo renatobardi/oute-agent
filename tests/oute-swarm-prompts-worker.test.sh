@@ -12,24 +12,28 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/oute-swarm-prompts.sh"
 
+WORKER_INSTR="instrução"
+WORKER_PROMPT_CHECK='[ "$1" -eq 0 ] && [ -s "$2" ]'
+NO_PLACEHOLDER_REGEX="{{[A-Z_]*}}"
+
 
 # 11f. sessão de issue sem arquivo alterado (#115): sem PR, proposta na issue, ok do Bardi, resultado na issue
 CASE=sem-pr; round "$CASE"
-sw spawn 115-sempr "instrução"
+sw spawn 115-sempr "$WORKER_INSTR"
 P="$STATE/115-sempr.prompt"
-check "worker sem PR: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sem PR: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker sem PR: sem arquivo alterado, não abre PR (#115)" grep -qF -- '- **Issue sem arquivo alterado** (a entrega é só uma ação no GitHub: labels, comentários, fechar ou editar issue): não abra PR' "$P"
 check "worker sem PR: proposta na issue, e para (#115)"  grep -qF 'Publique a proposta como comentário na issue #115 (o que vai aplicar, item por item) e pare, terminando com `BLOQUEADO #115: proposta em <url do comentário>, aplico com o ok do Bardi`.' "$P"
 check "worker sem PR: aplica só depois do ok e registra o resultado na issue (#115)" grep -qF 'Só depois do ok do Bardi (dele ou repassado pelo dispatcher) aplique, registre o resultado em outro comentário na issue e termine com `PRONTO #115: <url do comentário com o resultado> — sem PR`.' "$P"
 check "worker sem PR: não fecha a issue (#115)"          grep -qF 'Não feche a issue #115: quem fecha é o dispatcher, com o ok do Bardi.' "$P"
 check "worker sem PR: o PRONTO com PR continua (#115)"   grep -qF 'termine com uma linha `PRONTO #115: <url do PR>`' "$P"
-check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker sem PR: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11g. sessão de spike (#100): o pronto é o relatório no comentário final da issue, sem código de produção
 CASE=spike; round "$CASE"
-sw spawn 100-spike "instrução"
+sw spawn 100-spike "$WORKER_INSTR"
 P="$STATE/100-spike.prompt"
-check "worker spike: código 0, com o prompt da sessão"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker spike: código 0, com o prompt da sessão"   bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker spike: o pronto é o relatório, sem código de produção (#100)" grep -qF -- '- **Issue `spike`** (label `spike`: investigação): o pronto é o **relatório**, sem código de produção.' "$P"
 check "worker spike: não altera código do repo (#100)"   grep -qF 'Não altere código, script, config nem teste do repo;' "$P"
 check "worker spike: relatório no comentário final da issue (#100)" grep -qF 'Publique o relatório como comentário final na issue #100: a pergunta, o que foi conferido e como, os achados com evidência, a recomendação e o que ficou em aberto.' "$P"
@@ -38,39 +42,39 @@ check "worker spike: sem proposta nem espera do ok (#100)" grep -qF 'Aqui não h
 check "worker spike: PR de doc quando a instrução pede arquivo (#100)" grep -qF 'entregue por PR de doc (só o doc e o fragmento do changelog), com as regras de PR acima, e o comentário final na issue leva o resumo e o link do PR.' "$P"
 check "worker spike: não fecha a issue nem cria issue nova (#100)" grep -qF 'Não feche a issue #100 nem crie issue nova, salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
 check "worker spike: exceção para spike com critério (opção 1) (#356)" grep -qF 'salvo se a instrução do dispatcher mandar criar as issues do relatório' "$P"
-check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker spike: sem placeholder no prompt"          [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11h. regra de rm com variável protegida em teste e script (#358): evita prompt de permissão
 CASE=rm-var; round "$CASE"
-sw spawn 358-rmvar "instrução"
+sw spawn 358-rmvar "$WORKER_INSTR"
 P="$STATE/358-rmvar.prompt"
-check "worker rm var: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker rm var: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker rm var: regra sobre rm com variável (#358)" grep -qF -- '- **Em teste e script, `rm` com variável usa `"${VAR:?}"/…` ou caminho literal**' "$P"
 check "worker rm var: motivo da regra: não dispara prompt (#358)" grep -qF 'para não disparar o prompt de permissão' "$P"
 check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
 check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
-check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 539. regra do rm com variável aparece na lista de conferência antes de rodar comando
 CASE=539-rmvariavel; round "$CASE"
-sw spawn 539-rmvariavel "instrução"
+sw spawn 539-rmvariavel "$WORKER_INSTR"
 P="$STATE/539-rmvariavel.prompt"
-check "worker 539: código 0, com o prompt da sessão"  bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker 539: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker 539: regra do rm antes de rodar comando (#539)" grep -qF 'Antes de rodar um comando que use `rm` com variável, confira a regra da linha 14' "$P"
 check "worker 539: regra vale também na aba (#539)" grep -qF 'A regra vale também para comando que você roda na aba, não só para o que vai no arquivo de teste.' "$P"
-check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11i. sessão sem ação manual do Bardi (#373): diálogo de pergunta, esc do dispatcher, blocked na retrospectiva
 CASE=sem-acao-manual; round "$CASE"
-sw spawn 373-semacao "instrução"
+sw spawn 373-semacao "$WORKER_INSTR"
 P="$STATE/373-semacao.prompt"
-check "worker sem ação manual: código 0, com o prompt"   bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker sem ação manual: código 0, com o prompt"   bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF 'Não use o diálogo interativo de pergunta do harness' "$P"
 check "worker sem ação manual: dúvida em texto BLOQUEADO (#373)" grep -qF 'termina o turno com texto: `BLOQUEADO #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
 check "worker sem ação manual: regra se prompt aparecer mesmo assim (#373)" grep -qF 'Se um prompt de permissão aparecer mesmo assim, a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
 check "worker sem ação manual: rm com variável é caso mais comum (#373)" grep -qF 'a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
 check "worker spike: escopo de teste em serviço compartilhado (#378)" grep -qF 'use um escopo de teste fixo, com `workspace` e `project` próprios e `oute.task.slug` identificável' "$P"
-check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 opn --max 2
 D="$FAKE/oute-task.last"
 check "dispatcher: §4.1 aponta para regra que existe no swarm-worker (#451)" grep -qF "acrescentar o comando à regra de prompt de permissão do \`docker/swarm-worker.md\`" "$D"
@@ -81,44 +85,40 @@ check "dispatcher: esc nunca escolhe nem aprova (#373)"  grep -qF 'Nunca escolha
 check "dispatcher: pergunta do Bardi segue a ele (#373)" grep -qF 'o `esc` não substitui a decisão' "$D"
 check "dispatcher: regra nunca digite no pane com exceção do esc (#373)" grep -qF 'nunca digite no pane por outro meio (a única exceção é o `esc` acima)' "$D"
 check "dispatcher: retrospectiva lista blocked com causa (#373)" grep -qF -- '- **Sessões `blocked`:** liste-as com a causa de cada uma' "$D"
-check "dispatcher: sem placeholder no prompt"            [ -z "$(grep -o '{{[A-Z_]*}}' "$D")" ]
+check "dispatcher: sem placeholder no prompt"            [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$D")" ]
 
 # 11j. regra de check-lib quando altera testes (#401): rodar check-lib e dizer no corpo do PR
 CASE=check-lib; round "$CASE"
-sw spawn 401-checklib "instrução"
+sw spawn 401-checklib "$WORKER_INSTR"
 P="$STATE/401-checklib.prompt"
-check "worker check-lib: código 0, com o prompt da sessão" bash -c '[ "$1" -eq 0 ] && [ -s "$2" ]' _ "$RC" "$P"
+check "worker check-lib: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker check-lib: regra sobre check-lib (#401)"     grep -qF -- 'se o PR altera `tests/*.test.sh` ou `tests/lib/`' "$P"
 check "worker check-lib: roda check-lib nos dois ambientes (#401)" grep -qF 'rode também `bash tests/check-lib.test.sh` (no ambiente da sessão e no limpo)' "$P"
 check "worker check-lib: diz no corpo do PR (#401)"        grep -qF 'diga no corpo do PR que rodou' "$P"
 check "worker check-lib: falha no check-lib é falha do PR (#401)" grep -qF 'falha ali é falha do PR' "$P"
 check "worker check-lib: referência da issue (#401)"       grep -qF '#401' "$P"
-check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o '{{[A-Z_]*}}' "$P")" ]
+check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11j1. regra de parallel-lib quando altera testes (#450): rodar parallel-lib e dizer no corpo do PR
 CASE=parallel-lib; round "$CASE"
-INSTR_450="instrução"
-CODE_CHK='[ "$1" -eq 0 ] && [ -s "$2" ]'
-REGEX_NO_PH='{{[A-Z_]*}}'
-sw spawn 450-parallellib "$INSTR_450"
+INSTR_450="$WORKER_INSTR"
+sw spawn 450-parallellib "$WORKER_INSTR"
 P="$STATE/450-parallellib.prompt"
-check "worker parallel-lib: código 0, com o prompt da sessão" bash -c "$CODE_CHK" _ "$RC" "$P"
+check "worker parallel-lib: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker parallel-lib: regra sobre parallel-lib (#450)" grep -qF -- 'rode também `bash tests/parallel-lib.test.sh`' "$P"
 check "worker parallel-lib: nos dois ambientes (#450)"     grep -qF '(no ambiente da sessão e no limpo)' "$P"
 check "worker parallel-lib: diz no corpo do PR (#450)"     grep -qF 'diga no corpo do PR que rodou' "$P"
 check "worker parallel-lib: confere testes com serviço (#450)" grep -qF 'para conferir testes que sobem serviços em segundo plano' "$P"
 check "worker parallel-lib: referência da issue (#450)"    grep -qF '#450' "$P"
-check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o "$REGEX_NO_PH" "$P")" ]
+check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11k. conferência do diff contra SonarCloud antes de abrir PR (#540): evita gates reprovados
 CASE=sonar; round "$CASE"
-INSTR="instrução"
-CODE_CHECK='[ "$1" -eq 0 ] && [ -s "$2" ]'
-REGEX_PAT='{{[A-Z_]*}}'
+INSTR="$WORKER_INSTR"
 SCHEME="http"
-sw spawn 540-sonar "$INSTR"
+sw spawn 540-sonar "$WORKER_INSTR"
 P="$STATE/540-sonar.prompt"
-check "worker sonar: código 0, com o prompt da sessão" bash -c "$CODE_CHECK" _ "$RC" "$P"
+check "worker sonar: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker sonar: confere diff contra SonarCloud antes do PR (#540)" grep -qF 'confira o diff contra a lista do SonarCloud do `AGENTS.md`' "$P"
 check "worker sonar: cita a seção Validar antes do PR (#540)" grep -qF 'seção "Validar antes do PR"' "$P"
 check "worker sonar: lista função de shell nova com local (#540)" grep -qF 'função de shell nova com `local` e `return`' "$P"
@@ -126,7 +126,7 @@ check "worker sonar: lista sem http literal em arquivo novo (#540)" bash -c "gre
 check "worker sonar: lista sem regex com quantificador aninhado (#540)" grep -qF 'sem regex com quantificador aninhado' "$P"
 check "worker sonar: lista sem colchete aninhado (#540)" grep -qF 'sem `[x]` aninhado' "$P"
 check "worker sonar: corrija antes de esperar o gate (#540)" grep -qF 'Corrija o que encontrar em vez de esperar o gate reprovado' "$P"
-check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o "$REGEX_PAT" "$P")" ]
+check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
 A="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
