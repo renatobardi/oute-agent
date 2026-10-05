@@ -1,5 +1,0 @@
-### Added
-- **Conversa aberta direto numa pasta ganha o repositório da pasta** (#599). O shim de `claude`/`codex` marca `oute.task.repo` = o repositório principal da pasta (igual no checkout principal, numa subpasta e numa worktree sem a marca da sessão), sem `oute.task.id`. Fora de repositório, a conversa segue "sem repositório". O revisor (`oute-swarm step review`) leva o repositório da rodada (`repo=` do `meta`). No histórico, o agent-studio infere o repositório na subida, só pelo `file_path` dos spans de ferramenta, e grava só a coluna `oute_repo`. Regra no ADR-04, "Repositório da pasta". **Precisa de release** (o shim, o `oute-swarm` e o agent-studio vão na imagem).
-
-### Changed
-- **Fase `interativa` no agent-studio** (#599). Em Uso e no Dashboard, a conversa sem `oute.task.id` aparece em `interativa`. `desconhecida` fica só para a sessão com id e sem fase registrada. No `GET /v1/usage`, o `by_phase` passa a trazer `interativa`. **Precisa de release** (o agent-studio vai na imagem).

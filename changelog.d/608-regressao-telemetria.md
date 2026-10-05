@@ -1,2 +1,0 @@
-### Fixed
-- **`oute-regression`: as chamadas do `claude -p` voltam a aparecer no agent-studio** (#608). Quando rodada de dentro do shell do Bash tool do Claude Code, que não herda as `OTEL_*` (#250), o `claude -p` das tarefas não exportava nada, e o item `studio` ficava vermelho. Sem o endpoint no ambiente, a suíte se reexecuta sob `oute-emit run`, que leva o ambiente de telemetria do `~/.oute_env`. **Precisa de release** (o comando vai na imagem).
