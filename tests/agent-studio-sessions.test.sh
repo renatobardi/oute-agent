@@ -314,14 +314,14 @@ check("lista: conversas por sessão cortadas nas mais recentes, com as que falta
       [c["id"] for c in s1["conversations"]] == ["s1-a", "s1-b"] and s1["hidden"] == 1 and s1["conversation_count"] == 3)
 check("lista: o corte das conversas não muda as somas da sessão", s1["usage"]["calls"] == 4)
 html = web._env().get_template("sessions.html").render(
-    **r, state_read=None, from_ns=D1 - DAY, to_ns=D1 + DAY, host="", agent="", windows=web.WINDOWS, hours="24",
+    **r, state_read=None, from_ns=D1 - DAY, to_ns=D1 + DAY, host="", agent="", repo="", windows=web.WINDOWS, hours="24",
     range={"from": "", "to": ""}, limit=200)
 check("lista: sessão cortada leva o link para as conversas que faltam",
       f'<a href="/sessao?id={S1}">mais 1 conversas antes destas</a>' in html and 'data-conversa="s1-0"' not in html)
 check("lista: sem SurrealDB lido, sessão sem estado e sem rodada resolvida",
       s1["state"] is None and s1["round"] is None and s1["swarm_round"] == "swarm-0927-1900")
 check("lista: janela vazia", sessions.listing(con, 1, 2, none) ==
-      {"sessions": [], "total": 0, "loose": [], "loose_total": 0, "hosts": [], "agents": []})
+      {"sessions": [], "total": 0, "loose": [], "loose_total": 0, "hosts": [], "agents": [], "repos": []})
 
 d = sessions.detail(con, S1, none, event_limit=1)
 check("sessão: limite de eventos avisa o corte", d["events_truncated"] and len(d["events"]) == 1)

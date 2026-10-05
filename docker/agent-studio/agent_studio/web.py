@@ -32,8 +32,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, sessions as sess_mod,
-               tz as tz_mod)
+from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
+               sessions as sess_mod, tz as tz_mod)
 from . import alerts as alerts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -125,6 +125,7 @@ def _env(zone=tz_mod.UTC):
     env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago, usd2=_usd2, pct=_pct_in, compact=_compact, calls=_calls,
                        alert_title=alert_text.title, nome=names_mod.friendly, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     env.tests["safe_cmd_id"] = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v) is not None  # id que cabe num comando sem aspas
+    env.globals["repo_none"] = repo_mod.NONE  # o valor de "sem repositório" no filtro (#528)
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
 
@@ -284,7 +285,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz)
+        repo = q.get("repo", "")
+        snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz,
+                                  repo_mod.parse(repo))
         if failed:
             return failed
         now = time.time_ns()
@@ -300,8 +303,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs = f"from={quote(iso_utc(from_ns), safe='')}&to={quote(iso_utc(to_ns), safe='')}"
         else:
             qs = f"hours={quote(per['hours'], safe='')}"
+        if repo:  # o repositório vai nos links para as outras telas (#528)
+            qs += f"&repo={quote(repo, safe='')}"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
-                    gates=len(ages), window_qs=qs, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
+                    gates=len(ages), window_qs=qs, repo=repo, repos=snap["repos"], **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
     # ------------------------------------------------ login
     @app.get("/login")
@@ -343,12 +348,12 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        host, agent = q.get("host", ""), q.get("agent", "")
+        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "lista de conversas", store.conversations, from_ns, to_ns, config.prices,
-                                  host, agent)
+                                  host, agent, repo_mod.parse(repo))
         if failed:
             return failed
-        return page(request, "conversations.html", **data, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent,
+        return page(request, "conversations.html", **data, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent, repo=repo,
                     windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
 
     @app.get("/conversa")
@@ -424,14 +429,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        host, agent = q.get("host", ""), q.get("agent", "")
+        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "lista de sessões", store.sessions, from_ns, to_ns, config.prices,
-                                  host, agent)
+                                  host, agent, repo_mod.parse(repo))
         if failed:
             return failed
         state = await with_state(data["sessions"])
         return page(request, "sessions.html", **data, state_read=state, from_ns=from_ns, to_ns=to_ns, host=host,
-                    agent=agent, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
+                    agent=agent, repo=repo, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz), limit=conv_mod.LIST_LIMIT)
 
     @app.get("/sessao")
     async def session(request: Request):
@@ -460,7 +465,11 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             from_ns, to_ns = screen_window(q)
         except ValueError as e:
             return error(request, 400, str(e))
-        data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz)
+        repo = q.get("repo", "")
+        data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo))
+        if failed:
+            return failed
+        repos, failed = await read(request, "repositórios do uso", store.repos, from_ns, to_ns)
         if failed:
             return failed
 
@@ -468,7 +477,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             # o que mais custou primeiro (real + estimado); empate pela ordem da API
             return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
         return page(request, "usage.html", totals=data["totals"], by_role=by_cost(data["by_role"]),
-                    by_phase=by_cost(data["by_phase"]), from_ns=from_ns, to_ns=to_ns, windows=WINDOWS,
+                    by_phase=by_cost(data["by_phase"]), from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
                     **period(q, from_ns, to_ns, config.tz))
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura

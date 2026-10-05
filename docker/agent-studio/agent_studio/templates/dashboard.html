@@ -15,7 +15,7 @@
 <div class="titulo-linha">
   <div><h1>Dashboard</h1>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
-  {{ filter("/", windows, hours, range) }}
+  {{ filter("/", windows, hours, range, repos=repos, repo=repo) }}
 </div>
 </div>
 
