@@ -4,6 +4,8 @@ Tabelas nativas num arquivo `.duckdb`. Colunas fixas + JSON; `time` é a hora do
 chegada (`received_at` fica à parte). A chave de dedupe é a PRIMARY KEY: reenvio do mesmo registro não vira linha
 nova.
 """
+import ctypes
+import sys
 import threading
 import time
 
@@ -107,6 +109,16 @@ READ_SLOTS = 2         # leituras ao mesmo tempo (memória do DuckDB); a terceir
 TS_UTC = "(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')"
 
 
+def name_thread(label):
+    """Nome da thread no Python (`py-spy dump`) e no kernel (`top -H`, 15 caracteres): todas eram `python` (#570)."""
+    threading.current_thread().name = label
+    if sys.platform.startswith("linux"):
+        try:
+            ctypes.CDLL(None).prctl(15, label.encode()[:15], 0, 0, 0)  # PR_SET_NAME
+        except (OSError, AttributeError):
+            pass  # só o nome no Python
+
+
 def _sql(table, cols):
     names = [c for c, _ in cols]
     return {
@@ -152,6 +164,8 @@ class Store:
         self.lock = threading.Lock()
         self._dash_lock = threading.Lock()
         self._read_slots = threading.BoundedSemaphore(READ_SLOTS)
+        # tempo por fase (#570): `obs(fase, segundos, rótulo=None)`; o app liga na telemetria, sem ela não faz nada
+        self.obs = lambda phase, seconds, label=None: None
         self._dash_cache = {}
         self._dash_refreshing = {}
         with self.lock:
@@ -173,14 +187,20 @@ class Store:
         before_commit: chamado depois dos INSERTs e antes do COMMIT (o SurrealDB, #187); se levantar, rollback.
         Devolve {tabela: (gravadas, repetidas)}."""
         result = {}
+        t = time.monotonic()
         with self.lock:
+            t = self._lap("lock_wait", t)
+            name_thread("studio-write")
             self.con.execute("BEGIN TRANSACTION")
             try:
                 for table, rows in batch.items():
                     result[table] = self._insert(table, rows)
+                t = time.monotonic()
                 if before_commit:
                     before_commit()
+                    t = self._lap("surreal", t)
                 self.con.execute("COMMIT")
+                self._lap("commit", t)
             except BaseException:
                 self.con.execute("ROLLBACK")
                 raise
@@ -195,19 +215,31 @@ class Store:
             return 0, len(rows)
         sql = SQL[table]
         keys = list(uniq)
+        t = time.monotonic()
         seen = {k for (k,) in self.con.execute(sql["existing"], [keys]).fetchall()}
+        t = self._lap("existing", t, table)
         new = [uniq[k] for k in keys if k not in seen]
         if new:
             cols = sql["columns"]
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
+            self._lap("insert", t, table)
         return len(new), len(rows) - len(new)
 
-    def read_free(self, fn):
+    def _lap(self, phase, since, label=None):
+        """Reporta o tempo desde `since` e devolve o instante de agora, para a fase seguinte."""
+        now = time.monotonic()
+        self.obs(phase, now - since, label)
+        return now
+
+    def read_free(self, fn, label="read"):
         """`fn(cursor)` num cursor próprio, **fora da trava do escritor** (#570): a leitura lenta não segura a ingestão
         (o collector desistia em 30 s e reenviava o lote) e a ingestão não segura a leitura. O DuckDB lê o estado
         confirmado enquanto outra conexão grava. No máximo `READ_SLOTS` por vez; passado `READ_DEADLINE_S`, a consulta
-        é interrompida e a chamada levanta."""
+        é interrompida e a chamada levanta. `label` nomeia a thread (`studio-<label>`) e a fase reportada."""
+        t = time.monotonic()
         with self._read_slots:
+            t = self._lap("read_wait", t, label)
+            name_thread(f"studio-{label}")
             cur = self.con.cursor()
             timer = threading.Timer(READ_DEADLINE_S, cur.interrupt)
             timer.start()
@@ -216,15 +248,16 @@ class Store:
             finally:
                 timer.cancel()
                 cur.close()
+                self._lap("read", t, label)
 
     def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
         """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528) e `effective` (#531, custo
         efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
-        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective))
+        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective), "usage")
 
     def repos(self, from_ns, to_ns):
         """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns))
+        return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns), "repos")
 
     def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
@@ -266,15 +299,15 @@ class Store:
 
     def alerts(self, at_ns, cfg):
         """Leitura do `/v1/alerts` (#204), fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg))
+        return self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg), "alerts")
 
     def tray(self, at_ns, prices, cfg, tz=tz_mod.UTC):
         """Leitura do `/v1/tray` (#205): os blocos do DuckDB numa passada só, fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz))
+        return self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz), "tray")
 
     def decisions(self, at_ns, cfg):
         """Decisões pendentes do Bardi (#386): o bloco do tray e o topo das telas, fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg))
+        return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg), "decisions")
 
     # leituras da tela (#206), sob a mesma trava
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
