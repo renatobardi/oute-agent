@@ -35,6 +35,7 @@ cat > "$BIN/claude" <<'FAKE'
 # uma linha curta por chamada (o começo do prompt e as flags): o append de linha curta é atômico com várias chamadas ao mesmo
 # tempo; o prompt inteiro (o da closes-refs passa de 4 KB) poderia se intercalar
 line="-p ${2:0:40} ${*:3}"; printf '%s\n' "${line//$'\n'/ }" >> "$FAKE_LOG/claude.argv"
+printf '%s\n' "${OTEL_EXPORTER_OTLP_ENDPOINT:-vazio}" >> "$FAKE_LOG/claude.ep"
 printf 'cwd=%s\nora=%s\nmemory=%s\npropose=%s\nsudo=%s\n--\n' "$PWD" "${OTEL_RESOURCE_ATTRIBUTES:-}" \
   "$(tr '\n' ' ' < .ai-memory.toml 2>/dev/null)" "$(command -v oute-propose)" "$(command -v sudo)" >> "$FAKE_LOG/claude.env"
 [[ -z "${FAKE_CLAUDE_FAIL:-}" ]] || { echo "sem login" >&2; exit 1; }
@@ -133,6 +134,10 @@ FAKE
 cat > "$BIN/oute-emit" <<'FAKE'
 #!/usr/bin/env bash
 printf 'ARGS %s\n' "$*" >> "$FAKE_LOG/emit.calls"
+if [[ "${1:-}" = run ]]; then  # como o real: roda o comando com o endpoint do ~/.oute_env (FAKE_NO_ENDPOINT = ~/.oute_env sem ele)
+  shift 2; [[ -n "${FAKE_NO_ENDPOINT:-}" ]] || export OTEL_EXPORTER_OTLP_ENDPOINT="$FAKE_ENDPOINT"
+  exec "$@"
+fi
 [[ -z "${FAKE_EMIT_ERR:-}" ]] || [[ "${1:-}" = regression ]] || printf '%s\n' "$FAKE_EMIT_ERR" >&2
 exit 0
 FAKE
@@ -252,7 +257,7 @@ check "root: nomeia o comando fora da allowlist"        has 'chamou sudo fora da
 # ---------------------------------------------------------------- 3. o agente não roda
 FAKE_CLAUDE_FAIL=1 run
 check "claude falha em toda chamada: saída 2 (não rodou)" [ "$RC" -eq 2 ]
-check "…e não emite evento de resultado"                 [ ! -e "$LOG/emit.calls" ]
+check "…e não emite evento de resultado"                 bash -c '! grep -q "^ARGS regression" "$1" 2>/dev/null' _ "$LOG/emit.calls"
 FAKE_CLAUDE_ISERR=1 run --task select --model haiku
 check "claude devolve is_error em toda chamada: saída 2" [ "$RC" -eq 2 ]
 run --bogus
@@ -301,7 +306,7 @@ check "cota 5h em 60%: mensagem com a cota e o limite" has 'cota em 60% (claude,
 check "cota 5h em 60%: diz que o PR declara que a regressão não rodou" has 'declara que a regressão não rodou'
 FAKE_QUOTA="$(quota 10 75.5)" run
 check "cota 7d em 75,5%: não começa, saída 3"            [ "$RC" -eq 3 -a "$(nclaude)" -eq 0 ]
-check "cota alta: sem evento"                            [ ! -e "$LOG/emit.calls" ]
+check "cota alta: sem evento"                            bash -c '! grep -q "^ARGS regression" "$1" 2>/dev/null' _ "$LOG/emit.calls"
 FAKE_QUOTA='{"schema":1,"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":25},"7d":{"used_pct":2}}},"codex":{"status":"ok","windows":{"5h":{"used_pct":91},"7d":{"used_pct":39}}}}}' run
 check "janela mais alta é a do codex (91%): recusa, saída 3, nomeando o agente e a janela" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 91% (codex, janela 5h; limite 60%)" <<<"$2"' _ "$RC" "$OUT"
 OUTE_REGRESSION_MAX_PCT=5 run
@@ -465,5 +470,18 @@ AGENT_STUDIO_URL="$STUDIO_ADDR" AGENT_STUDIO_READ_TOKEN="$TOKEN" run --task root
 check "studio só pergunta pelas conversas das tarefas que rodaram" bash -c '[ "$(grep -c . "$1")" -eq 6 ] && ! grep -q -e select -e worktree -e emit "$1"' _ "$SD/requests.log"
 studio --json --rounds 1
 check "--json: objeto com versão, resultado e tarefas"   bash -c 'jq -e ".image == \"9.9.9-test\" and .claude == \"2.1.9\" and .rounds == 1 and .result == \"verde\" and .tasks[\"root@haiku\"] == \"verde\" and .tasks.studio == \"verde\" and .cost_usd == 0.08" <<<"$1" >/dev/null' _ "$STDOUT"
+
+# telemetria do claude -p (#608): sem o endpoint no ambiente a suíte se reexecuta sob `oute-emit run`
+export FAKE_ENDPOINT="coletor-falso:4318"
+run --task root --model haiku --rounds 1
+check "sem OTEL_*: reexecuta sob oute-emit run (uma vez)"  bash -c 'grep -c "^ARGS run -- " "$1" | grep -qx 1' _ "$LOG/emit.calls"
+check "sem OTEL_*: o claude -p recebe o endpoint"          bash -c '[ "$(sort -u "$1")" = "$2" ]' _ "$LOG/claude.ep" "$FAKE_ENDPOINT"
+check "sem OTEL_*: a suíte segue verde"                    [ "$RC" -eq 0 -a "$(verdict root@haiku)" = verde ]
+FAKE_NO_ENDPOINT=1 run --task root --model haiku --rounds 1
+check "~/.oute_env sem endpoint: não entra em laço, segue"  bash -c 'grep -c "^ARGS run -- " "$1" | grep -qx 1' _ "$LOG/emit.calls"
+check "~/.oute_env sem endpoint: o claude roda sem ele"     bash -c '[ "$(sort -u "$1")" = vazio ]' _ "$LOG/claude.ep"
+OTEL_EXPORTER_OTLP_ENDPOINT="$FAKE_ENDPOINT" run --task root --model haiku --rounds 1
+check "com o endpoint no ambiente: não chama o oute-emit run" bash -c '! grep -q "^ARGS run -- " "$1"' _ "$LOG/emit.calls"
+unset FAKE_ENDPOINT
 
 check_end

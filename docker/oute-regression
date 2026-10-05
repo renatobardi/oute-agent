@@ -46,6 +46,7 @@ die2() { printf 'oute-regression: %s\n' "$*" >&2; exit 2; }
 EXIT_QUOTA=3
 warn() { printf 'oute-regression: aviso: %s\n' "$*" >&2; }
 
+ORIG_ARGS=("$@")
 ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -60,6 +61,13 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+# o shell do Bash tool do Claude Code não herda as OTEL_* (#250): o `claude -p` das tarefas não exportaria nada e a conversa
+# não chegaria ao bucket nem ao agent-studio (#608). Sem o endpoint no ambiente, a suíte se reexecuta sob `oute-emit run`,
+# que leva o ambiente de telemetria do ~/.oute_env; OUTE_REGRESSION_TELEMETRY evita o laço se o ~/.oute_env também não o tem
+if [[ -z "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" && -z "${OUTE_REGRESSION_TELEMETRY:-}" ]] && command -v oute-emit >/dev/null 2>&1; then
+  OUTE_REGRESSION_TELEMETRY=1 exec oute-emit run -- "$0" "${ORIG_ARGS[@]}"
+fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="${OUTE_REGRESSION_DIR:-}"
