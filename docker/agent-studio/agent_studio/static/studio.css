@@ -450,7 +450,13 @@ table.compacta td.sec { color: var(--muted-foreground); }
 .barra-etapas .passo.atual > a { border-color: var(--foreground); font-weight: 600; }
 .barra-etapas .passo[data-review="reprovado"] > a { border-color: var(--destructive); color: var(--destructive); }
 .barra-etapas .passo[data-review="sem-revisor"] > a { border-style: dashed; border-color: var(--foreground); }
-.etapa { scroll-margin-top: 16px; }
+.barra-etapas { position: sticky; top: 0; z-index: 2; }
+.barra-etapas .passo-itens { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+.barra-etapas .passo-itens a { font-size: 12px; padding: 2px 8px; border-radius: 9999px; border: 1px solid var(--border); color: var(--foreground); text-decoration: none; }
+.etapa { scroll-margin-top: 72px; }
+.etapa-posicao { margin: 2px 0 0; font-size: 12px; color: var(--muted-foreground); }
+.etapa-nav { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 20px 16px; }
+.etapa-nav .botao { max-width: 100%; }
 .etapa-aviso { margin: 0 20px 12px; }
 .etapa-texto { padding: 0 20px 16px; max-width: 760px; overflow-wrap: anywhere; }
 .etapa-texto h3 { margin: 1.25rem 0 .5rem; font-size: 15px; font-weight: 600; }

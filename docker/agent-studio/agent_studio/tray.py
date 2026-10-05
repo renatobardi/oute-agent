@@ -12,6 +12,9 @@
   (`alert_text`, o mesmo texto da tela; #344).
 - **Decisões pendentes** (`decisions`, #386): rodada do swarm parada esperando uma resposta do Bardi
   (`decisions.pending`), com a pergunta e a idade; do DuckDB, junto dos pedidos.
+- **Etapas da rodada** (`steps`, #508): as etapas publicadas (`etapas.tray_steps`) das rodadas que não fecharam, as mais novas,
+  com o título fixo por tipo, o veredito do revisor e o caminho da página; nunca o texto da etapa. O tray avisa só da que
+  ainda não viu. Do SurrealDB, junto dos pedidos, mas falha à parte: sem ele `steps.available` = `false`.
 - **Barra** (`bar`): nº de pedidos pendentes e nº de alertas (as decisões pendentes têm o `decisions.total`).
 
 `snapshot` lê o DuckDB (uma passada, sob a trava do `store`); `pending` lê o SurrealDB; `response` junta os dois.
@@ -98,14 +101,16 @@ def pending(surreal, at_ns, limit=PENDING_LIMIT):
 
 NO_DECISIONS = {"total": 0, "pending": []}
 UNAVAILABLE = {"available": False, "total": None, "pending": []}
+NO_STEPS = {"available": False, "total": None, "rows": []}
 
 
-def response(at_ns, snap, proposals, config_errors, tz=tz_mod.UTC):
-    """A resposta do `GET /v1/tray`. `proposals` = o `pending(…)` ou `None` (sem SurrealDB ou leitura que falhou).
+def response(at_ns, snap, proposals, config_errors, tz=tz_mod.UTC, steps=None):
+    """A resposta do `GET /v1/tray`. `proposals` = o `pending(…)` ou `None` (sem SurrealDB ou leitura que falhou); `steps` =
+    o `etapas.tray_steps(…)` ou `None` (idem, `available` = `false`).
     `timezone` = o fuso do dia do `cost_today` (as horas seguem em ISO 8601 com `Z`)."""
     proposals = proposals or UNAVAILABLE
     return {"at": alerts_mod.iso(at_ns), "timezone": tz.key,
             "bar": {"pending": proposals["total"], "alerts": len(snap["alerts"])},
-            "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS, "cost_today": snap["cost_today"],
+            "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS, "steps": steps or NO_STEPS, "cost_today": snap["cost_today"],
             "errors_last_hour": snap["errors_last_hour"], "alerts": snap["alerts"],
             "config": {"errors": config_errors}}

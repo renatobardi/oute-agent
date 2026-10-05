@@ -46,6 +46,7 @@
   {% for b in bar %}
   <li class="passo{% if b.done %} feito{% endif %}{% if b.current %} atual{% endif %}" data-passo="{{ b.kind }}" data-feito="{{ 'sim' if b.done else 'nao' }}" data-review="{{ b.review or '' }}" data-total="{{ b.count }}"{% if b.current %} aria-current="step"{% endif %}>
     {% if b.done %}<a href="#{{ b.anchor }}">{{ icon("check", 14) }}<span>{{ b.label }}{% if b.kind == "merge" and b.count > 1 %} ({{ b.count }}){% endif %}</span></a>
+    {% if b.kind == "merge" and b.count > 1 %}<span class="passo-itens">{% for i in b["items"] %}<a href="#{{ i.anchor }}" data-barra-item>{{ i.label }}</a>{% endfor %}</span>{% endif %}
     {% else %}<span>{{ icon("minus", 14) }}<span>{{ b.label }}</span><span class="so-leitor"> (não publicada)</span></span>{% endif %}
   </li>
   {% endfor %}
@@ -53,10 +54,11 @@
 </nav>
 {% if not r.steps %}<p class="aviso" data-sem-etapas>Nenhuma etapa publicada nesta rodada.</p>{% endif %}
 {% for s in r.steps %}
-<section class="cartao etapa" id="{{ s.anchor }}" data-etapa="{{ s.kind }}" data-key="{{ s.key }}" data-rev="{{ s.rev }}" data-review="{{ s.review }}" data-sha256="{{ s.sha256 }}">
+<section class="cartao etapa" id="{{ s.anchor }}" data-etapa="{{ s.kind }}" data-key="{{ s.key }}" data-pos="{{ s.pos }}" data-total="{{ s.total }}" data-rev="{{ s.rev }}" data-review="{{ s.review }}" data-sha256="{{ s.sha256 }}">
   <div class="cartao-topo">
     <div>
       <h2>{{ s.title }}</h2>
+      <p class="etapa-posicao" data-posicao>Etapa {{ s.pos }} de {{ s.total }} da rodada</p>
       <p>revisão {{ s.rev }} · publicada em {{ s.published_at|when }} {{ tzl() }} · autor {{ s.writer or "—" }} · revisor {{ s.reviewer or "—" }} · sha256 <code>{{ s.sha_short }}</code>{% if s.cycle %} · ciclo {{ s.cycle }}{% endif %}</p>
     </div>
     {{ review_badge(s.review) }}
@@ -77,6 +79,12 @@
   </details>
   {% endif %}
   {% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}
+  {% if s.total > 1 %}
+  <nav class="etapa-nav" aria-label="Etapa anterior e seguinte" data-etapa-nav>
+    {% if s.prev %}<a class="botao" rel="prev" href="#{{ s.prev.anchor }}" data-nav="anterior">{{ icon("arrow-left", 14) }}<span>Anterior: {{ s.prev.title }}</span></a>{% else %}<span></span>{% endif %}
+    {% if s.next %}<a class="botao" rel="next" href="#{{ s.next.anchor }}" data-nav="seguinte"><span>Seguinte: {{ s.next.title }}</span>{{ icon("arrow-right", 14) }}</a>{% endif %}
+  </nav>
+  {% endif %}
 </section>
 {% endfor %}
 </div>
