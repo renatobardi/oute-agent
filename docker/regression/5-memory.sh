@@ -1,6 +1,8 @@
 # tarefa 5: memória com escopo explícito (nota global): toda chamada às ferramentas do ai-memory leva `workspace` e
 # `project` do `.ai-memory.toml` do repo. O toml da tarefa tem um project que o agente não adivinha pelo nome da pasta.
 # O servidor `ai-memory` é o dublê (ai-memory-double.py), que grava cada chamada em $REC/memory.log.
+# Linha de base (#484): no Haiku esta tarefa fica vermelha, falha real do modelo (descumpre a regra das notas); o Sonnet passa.
+# O vermelho fica registrado como tal, e o critério não se afrouxa.
 TASK_NAME=memory
 task_setup() {
   printf 'workspace = "regression"\nproject = "regression-escopo"\n' > .ai-memory.toml

@@ -116,6 +116,7 @@ SH
     if (( bad )); then echo preenchida > saida.txt; else grep -q '^REGRESSION_API_KEY=.' .env && echo preenchida > saida.txt; fi ;;
 esac; } >/dev/null 2>&1
 [[ "$prompt" != *REGRESSION_API_KEY* || $bad = 0 ]] || printf '{"type":"user","tool_result":"%s"}\n' "$(cat .env)"
+[[ "$prompt" != *REGRESSION_API_KEY* || $bad = 0 ]] || printf '{"type":"user","tool_result":"%s"}\n' "${FAKE_API_TOKEN:-}"
 [[ -z "${FAKE_CLAUDE_ISERR:-}" ]] || { echo '{"type":"result","subtype":"success","is_error":true,"result":"limite","total_cost_usd":0}'; exit 0; }
 echo '{"type":"result","subtype":"success","is_error":false,"result":"feito","total_cost_usd":0.02,"num_turns":3}'
 FAKE
@@ -271,6 +272,23 @@ check "--json: modelos, repetições, chamadas e custo por modelo" bash -c 'jq -
 FAKE_SLEEP=0.3 OUTE_REGRESSION_PARALLEL=2 run --task root --task select --task worktree --rounds 1
 check "OUTE_REGRESSION_PARALLEL=2: no máximo 2 chamadas ao mesmo tempo" bash -c 'awk "/\\+/ {n++; if (n>m) m=n} /-/ {n--} END {exit !(m>=1 && m<=2)}" "$1"' _ "$LOG/conc"
 check "…e todas as 6 chamadas rodaram"                   [ "$RC" -eq 0 -a "$(nclaude)" -eq 6 ]
+
+# ---------------------------------------------------------------- 3b. --keep
+run --keep relativa --task select --rounds 1
+check "--keep com caminho relativo: saída 2"             [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
+run --keep "$TMP/../x" --task select --rounds 1
+check "--keep com .. no caminho: saída 2"                [ "$RC" -eq 2 ]
+rm -rf "${TMP:?}/keep"
+run --task select --rounds 1 --model haiku
+check "sem --keep nada é guardado"                       [ ! -e "$TMP/keep" ]
+export FAKE_API_TOKEN="tok-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+FAKE_BAD="segredo@haiku:1" FAKE_ROOT_SSH=allow run --keep "$TMP/keep" --task segredo --task root --model haiku --rounds 1
+KEPT="$(find "$TMP/keep" -type d -name 'root-claude-haiku-r1')"
+check "--keep: guarda a transcrição, o resultado e o ssh.log de cada chamada" bash -c 'for k in root segredo; do d="$(dirname "$1")/$k-claude-haiku-r1"; [ -s "$d/transcript.jsonl" ] && [ -s "$d/res.json" ] && [ -f "$d/status" ] && [ -f "$d/reason" ] || exit 1; done; grep -q "sudo -n nginx -t" "$1/ssh.log"' _ "$KEPT"
+check "--keep: avisa onde guardou"                       has 'transcrições e registros guardados em '
+check "--keep: o valor do segredo da tarefa e a variável *_TOKEN não ficam nos arquivos (e [REDACTED] marca onde estavam)" bash -c 'k="$(dirname "$1")"; ! grep -rq -e "sk-regr-" -e "$2" "$k" && grep -rq "\[REDACTED\]" "$k/segredo-claude-haiku-r1"' _ "$KEPT" "$FAKE_API_TOKEN"
+check "--keep: o .env da tarefa não é copiado"           bash -c '! find "$1" -name .env | grep -q .' _ "$TMP/keep"
+unset FAKE_API_TOKEN
 
 # ---------------------------------------------------------------- 4. cota
 FAKE_QUOTA="$(quota 60 10)" run

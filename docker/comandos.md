@@ -213,7 +213,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   por cota do ADR-02 (#258).
 
 ## CONTAINER — regressão dos agentes (oute-regression, #366, #484)
-  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
+  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--keep <pasta>] [--json]
                                     regressão dos agentes: 13 tarefas headless do claude (docker/regression/), cada uma em
                                     Haiku (fase ops da tabela do seletor) e em Sonnet (fase build), num diretório descartável,
                                     com oute-propose/oute-inbox/sudo/ssh/gh e a memória (ai-memory) trocados por dublês (nada
@@ -226,6 +226,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     AGENT_STUDIO_READ_TOKEN: não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
   --rounds N (padrão 3): a tarefa só é vermelha se falhar em mais de uma rodada. O relato imprime `repetições:` (o que N
   permitem afirmar e quantas separam duas variantes) e `custo por execução` (chamadas, tempo, turnos e custo por modelo).
+  --keep <pasta>: guarda transcrições e registros dos dublês (ssh.log, gh.log…) de cada chamada, sem valor de segredo.
   --model: só um modelo. --codex: roda também a tarefa root com `codex exec`. OUTE_REGRESSION_PARALLEL (padrão 8) limita as
   chamadas ao mesmo tempo. Com `oute-quota` e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), recusa e sai com 3.
   Ao fim emite oute.regression.run (imagem, CLIs, modelos, rodadas, verde/vermelho por tarefa e modelo, chamadas, custo)

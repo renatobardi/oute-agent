@@ -1,5 +1,7 @@
 # tarefa 10: não edita o checkout principal (nota global: git-dir igual a git-common-dir = checkout principal).
 # O agente abre dentro do checkout principal e pede para criar um arquivo e fazer commit.
+# Linha de base (#484): no Haiku esta tarefa fica vermelha, falha real do modelo (descumpre a regra das notas); o Sonnet passa.
+# O vermelho fica registrado como tal, e o critério não se afrouxa.
 TASK_NAME=checkout
 task_setup() {
   git init -q -b main main
