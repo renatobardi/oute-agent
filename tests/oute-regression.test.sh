@@ -302,13 +302,27 @@ unset FAKE_API_TOKEN
 # ---------------------------------------------------------------- 4. cota
 FAKE_QUOTA="$(quota 60 10)" run
 check "cota 5h em 60%: não começa, saída 3 (própria)"    [ "$RC" -eq 3 -a "$(nclaude)" -eq 0 ]
-check "cota 5h em 60%: mensagem com a cota e o limite" has 'cota em 60% (claude, janela 5h; limite 60%): a suíte não começou'
+check "cota 5h em 60%: mensagem com a cota e o limite" has 'cota em 60% (assinatura claude, janela 5h; limite 60%): a suíte não começou'
 check "cota 5h em 60%: diz que o PR declara que a regressão não rodou" has 'declara que a regressão não rodou'
 FAKE_QUOTA="$(quota 10 75.5)" run
 check "cota 7d em 75,5%: não começa, saída 3"            [ "$RC" -eq 3 -a "$(nclaude)" -eq 0 ]
 check "cota alta: sem evento"                            bash -c '! grep -q "^ARGS regression" "$1" 2>/dev/null' _ "$LOG/emit.calls"
-FAKE_QUOTA='{"schema":1,"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":25},"7d":{"used_pct":2}}},"codex":{"status":"ok","windows":{"5h":{"used_pct":91},"7d":{"used_pct":39}}}}}' run
-check "janela mais alta é a do codex (91%): recusa, saída 3, nomeando o agente e a janela" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 91% (codex, janela 5h; limite 60%)" <<<"$2"' _ "$RC" "$OUT"
+# a trava conta só as janelas da assinatura que a execução usa (#598): sem --codex, a suíte roda só no Claude
+QX='{"schema":1,"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":25},"7d":{"used_pct":2}}},"codex":{"status":"ok","windows":{"5h":{"used_pct":91},"7d":{"used_pct":39}}}}}'
+FAKE_QUOTA="$QX" run --task select --rounds 1
+check "Codex em 91% e Claude em 25%: a suíte roda (a cota do Codex não trava o Claude)" [ "$RC" -eq 0 -a "$(nclaude)" -eq 2 ]
+check "Codex em 91% e Claude em 25%: sem recusa na saída" bash -c '! grep -q "a suíte não começou" <<<"$1"' _ "$OUT"
+FAKE_QUOTA="$QX" run --codex --task select --rounds 1
+check "--codex com o Codex em 91%: recusa, saída 3, nomeando a assinatura e a janela" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 91% (assinatura codex, janela 5h; limite 60%)" <<<"$2"' _ "$RC" "$OUT"
+check "--codex com o Codex em 91%: nada rodou" bash -c '[ "$1" -eq 0 ] && [ ! -e "$2" ]' _ "$(nclaude)" "$LOG/codex.argv"
+FAKE_QUOTA='{"schema":1,"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":70},"7d":{"used_pct":2}}},"codex":{"status":"ok","windows":{"5h":{"used_pct":1},"7d":{"used_pct":1}}}}}' run --codex --task select --rounds 1
+check "--codex com o Claude em 70% e o Codex em 1%: recusa nomeando o Claude" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 70% (assinatura claude, janela 5h" <<<"$2"' _ "$RC" "$OUT"
+# terceira assinatura fictícia (não usada pela suíte): a cota dela, alta, não trava
+FAKE_QUOTA='{"schema":1,"agents":{"claude":{"status":"ok","windows":{"5h":{"used_pct":5},"7d":{"used_pct":5}}},"fict":{"status":"ok","windows":{"5h":{"used_pct":99},"7d":{"used_pct":99}}}}}' run --task select --rounds 1
+check "terceira assinatura em 99%, Claude em 5%: a suíte roda" [ "$RC" -eq 0 -a "$(nclaude)" -eq 2 ]
+# Claude ilegível e Codex alto: não há leitura da assinatura usada: aviso, segue
+FAKE_QUOTA='{"schema":1,"agents":{"claude":{"status":"unknown","reason":"rede","windows":{}},"codex":{"status":"ok","windows":{"5h":{"used_pct":99},"7d":{"used_pct":99}}}}}' run --task select --rounds 1
+check "Claude sem leitura e Codex em 99%: segue, com o aviso de cota desconhecida" bash -c '[ "$1" -eq 0 ] && grep -q "cota desconhecida" <<<"$2"' _ "$RC" "$OUT"
 OUTE_REGRESSION_MAX_PCT=5 run
 check "OUTE_REGRESSION_MAX_PCT=5 com 20%: saída 3"       [ "$RC" -eq 3 ]
 FAKE_QUOTA="$(quota 59 10)" run --task select --rounds 1
