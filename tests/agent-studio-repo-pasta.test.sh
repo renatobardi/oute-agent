@@ -5,6 +5,7 @@
 # sem fase. No histórico, o repositório é inferido só pelo `file_path` dos spans de ferramenta (`repo_infer`): checkout
 # principal, subpasta, worktree (formato novo e antigo) e a pasta codificada do harness; caminho fora de repositório,
 # empate, conversa sem `file_path` e o texto do comando não dão repositório. Sem Docker e sem processo em segundo plano.
+# As datas ficam depois de 2026-10-06 (o corte do acerto do histórico, #617), para valer a regra normal.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,8 +36,8 @@ tmp = sys.argv[1]
 cfg = CF.load(f"{tmp}/config.toml")
 SEC = 10**9
 ts = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp()) * SEC
-D = "2025-10-01T"
-Q = "from=2025-10-01T00%3A00%3A00Z&to=2025-10-02T00%3A00%3A00Z"
+D = "2026-11-01T"
+Q = "from=2026-11-01T00%3A00%3A00Z&to=2026-11-02T00%3A00%3A00Z"
 NONE = "(sem)"
 tok = dict(input=1000, output=100)
 

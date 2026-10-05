@@ -4,6 +4,7 @@
 # vale para todos os blocos do Dashboard, fica na URL e vai nos links entre telas, "Todos" dá os números de sempre e o
 # histórico gravado antes da coluna `oute_repo` aparece filtrado do mesmo jeito (migração da subida). Chama o app pelo ASGI
 # (tests/lib/studio_asgi.py) sobre um DuckDB de exemplo; sem servidor, sem rede e sem Docker.
+# As datas ficam depois de 2026-10-06 (o corte do acerto do histórico, #617), para valer a regra normal.
 # Uso: tests/agent-studio-repo.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -36,8 +37,8 @@ tmp = sys.argv[1]
 cfg = CF.load(f"{tmp}/config.toml")
 SEC, H = 10**9, 3600 * 10**9
 ts = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timestamp()) * SEC
-D = "2025-10-01T"
-Q = "from=2025-10-01T00%3A00%3A00Z&to=2025-10-02T00%3A00%3A00Z"
+D = "2026-11-01T"
+Q = "from=2026-11-01T00%3A00%3A00Z&to=2026-11-02T00%3A00%3A00Z"
 NONE = "(sem)"
 
 # Dois repositórios com fato na janela (alfa, beta), uma conversa sem repositório e um repositório (gama) só fora da janela.
@@ -52,7 +53,7 @@ for i in range(3):
 for i in range(2):
     db.span(ts(f"{D}12:{i}0:00"), 1, name="claude_code.tool", task="T-beta", conv="c-b1", repo="beta", err=True, attrs={"tool_name": "Bash"})
 db.span(ts(f"{D}13:00:00"), 3, model="claude-sonnet-5", conv="c-solta", **tok)  # fora do oute-task: sem sessão e sem repositório
-db.span(ts("2025-09-20T10:00:00"), 2, model="claude-sonnet-5", task="T-gama", conv="c-g1", repo="gama", **tok)
+db.span(ts("2026-10-20T10:00:00"), 2, model="claude-sonnet-5", task="T-gama", conv="c-g1", repo="gama", **tok)
 app = create_app(db.flush(), TOKEN, config=cfg)
 
 def body(html):
@@ -214,7 +215,7 @@ def payload(res_attrs, rec_attrs=()):
     kv = lambda d: [{"key": k, "value": {"stringValue": v}} for k, v in d]
     return {"resourceSpans": [{"resource": {"attributes": kv(res_attrs)}, "scopeSpans": [{"spans": [{
         "traceId": "a" * 32, "spanId": "b" * 16, "name": "claude_code.llm_request", "kind": 1,
-        "startTimeUnixNano": "1759312800000000000", "endTimeUnixNano": "1759312801000000000", "attributes": kv(rec_attrs)}]}]}]}
+        "startTimeUnixNano": "1793527200000000000", "endTimeUnixNano": "1793527201000000000", "attributes": kv(rec_attrs)}]}]}]}
 
 row = lambda *a: otlp.span_rows(payload(*a), 1)[0]["oute_repo"]
 check("ingestão: oute.task.repo do resource vira oute_repo", row([("oute.task.repo", "alfa")]) == "alfa")

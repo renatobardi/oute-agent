@@ -305,6 +305,13 @@ Desenho e medida anterior: [comentário da #536](https://github.com/renatobardi/
 - **Coluna fixa, não JSON a cada consulta:** `oute_repo` (de `oute.task.repo`, do registro, senão do resource) em `spans`, `logs` e `metrics`. Medido num banco sintético de 1,16 GB: o Dashboard de 7 d com filtro levou mediana 3,3 s com a coluna e 5,7 s lendo o JSON (a `main` sem filtro: 3,9 s). Detalhe na issue #528.
 - **Histórico:** na subida, `store.migrate` põe a coluna nas tabelas que ainda não a têm e a preenche do `resource_attributes`, numa transação (24 s no banco sintético de 1,16 GB, uma vez). Banco novo já nasce com a coluna.
 - **Conversa e sessão** pegam o primeiro repositório presente nos fatos delas; o filtro dos totais (Dashboard, Uso) é por fato.
+- **Acerto único do histórico sem repositório (#617):** fato sem repositório e com hora do fato antes de `2026-10-06T00:00:00Z` (a data de corte) fica com `oute-agent` na coluna `oute_repo`. **Isto não é regra:** é um acerto de uma vez, pedido pelo Bardi em 2026-10-05, para o relatório não ter histórico em "sem repositório". O valor pode estar errado: parte desse histórico é de outro repositório ou de pasta fora de repositório.
+  - **Onde vale, com a mesma data:** na ingestão (`repo.legacy`, chamada pelo `otlp.fixed`; o `oute studio replay` passa por ela) e na subida (`repo.apply_legacy`, no `store.py`, depois do `repo_infer`). Com as duas pontas, o replay do bucket (§7) não traz o "sem repositório" de volta.
+  - **O que não muda:** o fato com repositório próprio; o que o `repo_infer` já gravou; o fato da hora do corte em diante, que segue a regra normal (repositório da pasta, ou "sem repositório"); o JSON `resource_attributes`; e o bucket.
+  - **Tabelas:** `spans`, `logs` e `metrics`, numa transação. Rodar de novo não acha linha. Falha na subida = nada muda, um aviso no log e o serviço sobe.
+  - **Limite conhecido:** num banco remontado pelo replay, o fato antigo sem repositório já entra com `oute-agent`, e o `repo_infer` não o reavalia. A conversa antiga que o `repo_infer` poria em outro repositório fica em `oute-agent` nesse banco.
+  - **Desfazer:** o fato do acerto se reconhece (coluna `oute-agent`, hora antes do corte, JSON sem `oute.task.repo`), mas o que o `repo_infer` gravou como `oute-agent` tem a mesma forma.
+  - Teste: `tests/agent-studio-repo-corte.test.sh` e a seção 11 do `tests/agent-studio-replay.test.sh`.
 - **Código:** `agent_studio/repo.py` (cláusula SQL e opções), `usage.aggregate(repo=)`, `dashboard.snapshot(repo=)`, `conversations.listing`/`sessions.listing(repo=)`. Teste: `tests/agent-studio-repo.test.sh`.
 
 ### Tela: Ferramentas e uso de ferramenta (#535)

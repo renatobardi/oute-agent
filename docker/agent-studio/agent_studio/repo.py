@@ -8,10 +8,57 @@ não tem repositório: é a opção "sem repositório". No histórico, o `repo_i
 - **Na URL:** `repo=<nome>`; ausente ou vazio = "Todos"; `repo=(sem)` = "sem repositório". `(sem)` não é nome possível de
   repositório do GitHub, então não colide com nenhum.
 - **No SQL:** o valor vai sempre em parâmetro; `COL` é uma constante deste módulo, nunca entrada.
+- **Acerto único do histórico (#617, ADR-08 "Filtro de repositório"):** fato sem repositório e com hora do fato antes de
+  `LEGACY_CUTOFF` fica com `LEGACY_REPO` na coluna. Não é regra: é um acerto de uma vez, a pedido do Bardi, para o
+  relatório não ter histórico "sem repositório"; o valor pode estar errado. Vale na ingestão (`legacy`, chamada pelo
+  `otlp.fixed`; o replay passa por ela) e na subida (`apply_legacy`, depois do `repo_infer`), com a mesma data. Só a
+  coluna muda: o JSON `resource_attributes` e o bucket ficam como chegaram. Fato com repositório nunca é trocado, e
+  fato de depois do corte segue a regra normal.
 """
+import logging
+from datetime import datetime, timezone
+
+log = logging.getLogger("agent_studio")
+
 NONE = "(sem)"
 COL = "oute_repo"
 JSON_PATH = "$.\"oute.task.repo\""
+LEGACY_REPO = "oute-agent"
+LEGACY_CUTOFF = datetime(2026, 10, 6, tzinfo=timezone.utc)  # 2026-10-06T00:00:00Z; o fato desta hora em diante fica fora
+LEGACY_CUTOFF_NS = int(LEGACY_CUTOFF.timestamp()) * 10**9
+LEGACY_TABLES = ("spans", "logs", "metrics")
+
+
+def legacy(repo, time_ns):
+    """Repositório da coluna na ingestão (#617): sem repositório e com hora do fato antes do corte = `LEGACY_REPO`; o
+    resto sai como entrou."""
+    if repo is None and time_ns < LEGACY_CUTOFF_NS:
+        return LEGACY_REPO
+    return repo
+
+
+def apply_legacy(con):
+    """Na subida (#617): grava `LEGACY_REPO` nos fatos sem repositório de antes do corte, numa transação só. Rodar de
+    novo não acha linha. Falha = nada muda, um aviso no log (só o tipo do erro) e a subida segue. Devolve as linhas
+    alteradas por tabela, ou `None` na falha."""
+    rows = dict.fromkeys(LEGACY_TABLES, 0)
+    try:
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for table in LEGACY_TABLES:
+                n = con.execute(f"UPDATE {table} SET {COL} = ? WHERE {COL} IS NULL AND time_unix_nano < ?",
+                                [LEGACY_REPO, LEGACY_CUTOFF_NS]).fetchone()
+                rows[table] = n[0] if n else 0
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    except Exception as e:  # noqa: BLE001 (o acerto do histórico nunca derruba a subida)
+        log.warning("repo: acerto do histórico falhou (%s); o histórico de antes do corte segue sem repositório", type(e).__name__)
+        return None
+    if any(rows.values()):
+        log.info("repo: histórico sem repositório de antes do corte gravado como %s, linhas: %s", LEGACY_REPO, rows)
+    return rows
 
 
 def clause(repo, col=None):
