@@ -212,20 +212,25 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Saída: 0 leitura feita (mesmo com unknown), 1 todos os agentes lidos ficaram unknown, 2 uso. A fonte da reserva
   por cota do ADR-02 (#258).
 
-## CONTAINER — regressão dos agentes (oute-regression, #366)
-  oute-regression [--rounds N] [--codex] [--task <nome>]… [--json]
-                                    nível 1 de regressão: tarefas headless do claude em Haiku (a tabela do seletor, fase ops),
-                                    cada uma num diretório descartável, com oute-propose/oute-inbox/sudo/ssh trocados por
-                                    dublês (nada chega ao canal de aprovação nem ao host). Tarefas: root (propõe com --root,
-                                    não chama sudo), select (oute-select igual ao direto), worktree (escrita cai na worktree),
-                                    emit (oute-emit do Bash tool entrega ou vai ao spool) e studio (a conversa chegou ao
-                                    agent-studio com o oute.task.id do teste; sem AGENT_STUDIO_URL/AGENT_STUDIO_READ_TOKEN:
-                                    não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
-  --rounds N (padrão 3): a tarefa só é vermelha se falhar em mais de uma rodada. --codex: roda também a tarefa root com
-  `codex exec` (sem a flag o Codex não é chamado). Com `oute-quota` e qualquer janela >= 60%, não começa (aviso).
-  Ao fim emite oute.regression.run (imagem, CLIs, rodadas, verde/vermelho por tarefa, custo) pelo oute-emit, sem texto de
-  prompt nem de resposta. Rode depois de uma release com mudança de imagem ou de um upgrade dos CLIs (~2 min, centavos de
-  dólar por rodada). Nunca em CI e nunca bloqueia merge. Saída: 0 verde, 1 alguma tarefa vermelha, 2 não rodou.
+## CONTAINER — regressão dos agentes (oute-regression, #366, #484)
+  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
+                                    regressão dos agentes: 13 tarefas headless do claude (docker/regression/), cada uma em
+                                    Haiku (fase ops da tabela do seletor) e em Sonnet (fase build), num diretório descartável,
+                                    com oute-propose/oute-inbox/sudo/ssh/gh e a memória (ai-memory) trocados por dublês (nada
+                                    chega ao canal, ao host, ao GitHub nem à memória). Tarefas: root, select, worktree, emit,
+                                    memory (workspace e project explícitos), branch (renomeia antes do push), duplicada (procura
+                                    issue aberta), remove (script com # RESUMO, dependentes e # CUIDADO:), ptbr (texto para o
+                                    Bardi em pt-BR com fonte), checkout (não edita o checkout principal), issue (lê a issue com
+                                    corpo), closes-refs (Refs e ## Falta; o prompt é o swarm-worker.md) e segredo (não imprime
+                                    o valor); mais a studio (a conversa chegou ao agent-studio; sem AGENT_STUDIO_URL/
+                                    AGENT_STUDIO_READ_TOKEN: não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
+  --rounds N (padrão 3): a tarefa só é vermelha se falhar em mais de uma rodada. O relato imprime `repetições:` (o que N
+  permitem afirmar e quantas separam duas variantes) e `custo por execução` (chamadas, tempo, turnos e custo por modelo).
+  --model: só um modelo. --codex: roda também a tarefa root com `codex exec`. OUTE_REGRESSION_PARALLEL (padrão 8) limita as
+  chamadas ao mesmo tempo. Com `oute-quota` e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), recusa e sai com 3.
+  Ao fim emite oute.regression.run (imagem, CLIs, modelos, rodadas, verde/vermelho por tarefa e modelo, chamadas, custo)
+  pelo oute-emit, sem texto de prompt nem de resposta. Obrigatória em todo PR que muda agent-notes.md, swarm.md ou
+  swarm-worker.md (regra do swarm-worker.md). Nunca em CI. Saída: 0 verde, 1 alguma tarefa vermelha, 2 não rodou, 3 cota.
 
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
