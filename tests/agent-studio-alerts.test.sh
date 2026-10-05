@@ -62,16 +62,18 @@ sf += [(AT + 40 * M, START2, 2, STUDIO_TRACES)]
 # awss3/traces: 7 parado desde antes da janela lida (sem subida)
 sf += [(t, AT - 10 * 3600, 7, S3_TRACES) for t in server_times]
 # cota (#347): snapshot = used_pct + reset_in_seconds na mesma hora, por agente e janela. Todos em AT-10m, salvo "volta"
-#   claude   5h 95% (reset em 2 h) e 7d 40%        -> alerta (5h)
+#   claude   5h 99% (reset em 2 h) e 7d 40%        -> alerta (5h)
 #   codex    5h 50%                                -> abaixo do corte
-#   volta    5h 95% em AT-30m, 40% em AT-5m        -> alerta só até o ponto de 40%
-#   velho    7d 96%, reset em 30 min (AT+20m)      -> alerta até o reset; depois, ponto velho
-#   ex-reset 5h 92%, reset em 25 min (AT+15m), 7d 40% -> exceção a menos de 20 min do reset (AT-5m a AT+15m)
-#   ex-sem7d 5h 92%, reset em 25 min, sem a 7d     -> a exceção vale sem ponto da 7d
+#   volta    5h 99% em AT-30m, 40% em AT-5m        -> alerta só até o ponto de 40%
+#   velho    7d 99%, reset em 30 min (AT+20m)      -> alerta até o reset; depois, ponto velho
+#   ex-reset 5h 98%, reset em 25 min (AT+15m), 7d 40% -> exceção a menos de 20 min do reset (AT-5m a AT+15m)
+#   ex-sem7d 5h 98%, reset em 25 min, sem a 7d     -> a exceção vale sem ponto da 7d
 #   ex-100   5h 100%, reset em 25 min              -> 100%: sem exceção
-#   ex-7d    5h 92% (reset em 25 min) e 7d 95%     -> a 7d acima do corte: sem exceção na 5h, e a 7d alerta
-#   w7d-soon 7d 95%, reset em 25 min               -> a exceção não vale para a 7d
-#   sem-par  5h 95% sem oute.quota.reset_in_seconds -> sem como saber se ainda vale: não alerta
+#   ex-7d    5h 98% (reset em 25 min) e 7d 99%     -> a 7d acima do corte: sem exceção na 5h, e a 7d alerta
+#   w7d-soon 7d 99%, reset em 25 min               -> a exceção não vale para a 7d
+#   p97      5h 97% (reset em 2 h)                 -> abaixo do corte de 98: não alerta (#558)
+#   p98      5h 98% (reset em 2 h)                 -> exatamente no corte: alerta (#558)
+#   sem-par  5h 99% sem oute.quota.reset_in_seconds -> sem como saber se ainda vale: não alerta
 def qrm(agent, snaps):  # snaps = [(t, janela, %, reset_in_s ou None)]
     used = [(t, p, {"oute.quota.window": w}) for t, w, p, r in snaps]
     rst = [(t, r, {"oute.quota.window": w}) for t, w, p, r in snaps if r is not None]
@@ -79,16 +81,18 @@ def qrm(agent, snaps):  # snaps = [(t, janela, %, reset_in_s ou None)]
     return rm("oute-server", ms, {"oute.agent": agent})
 Q, H, D3 = AT - 10 * M, 7200, 3 * 86400
 quota = [
-    qrm("claude", [(Q, "5h", 95, H), (Q, "7d", 40, D3)]),
+    qrm("claude", [(Q, "5h", 99, H), (Q, "7d", 40, D3)]),
     qrm("codex", [(Q, "5h", 50, H)]),
-    qrm("volta", [(AT - 30 * M, "5h", 95, H), (AT - 5 * M, "5h", 40, H)]),
-    qrm("velho", [(Q, "7d", 96, 1800)]),
-    qrm("ex-reset", [(Q, "5h", 92, 1500), (Q, "7d", 40, D3)]),
-    qrm("ex-sem7d", [(Q, "5h", 92, 1500)]),
+    qrm("volta", [(AT - 30 * M, "5h", 99, H), (AT - 5 * M, "5h", 40, H)]),
+    qrm("velho", [(Q, "7d", 99, 1800)]),
+    qrm("ex-reset", [(Q, "5h", 98, 1500), (Q, "7d", 40, D3)]),
+    qrm("ex-sem7d", [(Q, "5h", 98, 1500)]),
     qrm("ex-100", [(Q, "5h", 100, 1500)]),
-    qrm("ex-7d", [(Q, "5h", 92, 1500), (Q, "7d", 95, D3)]),
-    qrm("w7d-soon", [(Q, "7d", 95, 1500)]),
-    qrm("sem-par", [(Q, "5h", 95, None)]),
+    qrm("ex-7d", [(Q, "5h", 98, 1500), (Q, "7d", 99, D3)]),
+    qrm("w7d-soon", [(Q, "7d", 99, 1500)]),
+    qrm("p97", [(Q, "5h", 97, H)]),
+    qrm("p98", [(Q, "5h", 98, H)]),
+    qrm("sem-par", [(Q, "5h", 99, None)]),
 ]
 # Mac: fila a 90% e última métrica em AT-60m
 mac_t = [AT - 65 * M, AT - 60 * M]
@@ -233,12 +237,14 @@ check "spool dropped desliga: fora da janela (20 min no config do teste)" jqe "$
 # qa <agente>: os alertas de cota daquele agente
 qa() { printf '[.alerts[] | select(.type == "quota" and .evidence.agent == "%s")]' "$1"; }
 check "cota ligada no checks"                          jqe '.checks.quota == true' <<<"$R0"
-check "cota: Claude 5h 95% alerta (corte 90, desde AT-10m, reset em 2 h)" jqe --arg s "$(T -10)" --arg r "$(T 110)" "$(qa claude)"' | length == 1 and (.[0] | .host == "oute-server" and .value == 95 and .unit == "pct" and .limit == 90 and .since == $s and .evidence.metric == "oute.quota.used_pct" and .evidence.attributes == "{\"oute.quota.window\":\"5h\"}" and .evidence.resets_at == $r)' <<<"$R0"
+check "cota: Claude 5h 99% alerta (corte 98, desde AT-10m, reset em 2 h)" jqe --arg s "$(T -10)" --arg r "$(T 110)" "$(qa claude)"' | length == 1 and (.[0] | .host == "oute-server" and .value == 99 and .unit == "pct" and .limit == 98 and .since == $s and .evidence.metric == "oute.quota.used_pct" and .evidence.attributes == "{\"oute.quota.window\":\"5h\"}" and .evidence.resets_at == $r)' <<<"$R0"
+check "cota: 97% não alerta (corte 98, #558)"          jqe "$(qa p97) | length == 0" <<<"$R0"
+check "cota: 98% exatos alertam"                       jqe "$(qa p98)"' | length == 1 and .[0].value == 98 and .[0].limit == 98' <<<"$R0"
 check "cota: a 7d do Claude em 40% não alerta (corte por janela)" jqe "$(qa claude) | length == 1" <<<"$R0"
 check "cota: Codex em 50% não alerta"                  jqe "$(qa codex) | length == 0" <<<"$R0"
 check "cota: sem o par do reset não alerta"            jqe "$(qa sem-par) | length == 0" <<<"$R0"
 check "cota: último ponto abaixo do corte desliga (40% em AT-5m)" jqe "$(qa volta) | length == 0" <<<"$R0"
-check "cota: antes do ponto de 40% ainda alertava"     jqe --arg s "$(T -30)" "$(qa volta)"' | length == 1 and .[0].since == $s and .[0].value == 95' <<<"$(at -10)"
+check "cota: antes do ponto de 40% ainda alertava"     jqe --arg s "$(T -30)" "$(qa volta)"' | length == 1 and .[0].since == $s and .[0].value == 99' <<<"$(at -10)"
 check "cota: 7d com reset adiante alerta"              jqe "$(qa velho) | length == 1" <<<"$(at 19)"
 check "cota: ponto velho (reset em AT+20m já passou) some" jqe "$(qa velho) | length == 0" <<<"$(at 21)"
 check "cota: Claude ainda alerta uma hora depois (reset em 2 h)" jqe "$(qa claude) | length == 1" <<<"$(at 60)"
@@ -269,7 +275,7 @@ C = alerts.AlertConfig
 c = config.load(repo_cfg)
 out("config do repo: [alerts] sem erro, oute-server sempre ligado", not c.errors and c.alerts.always_on_hosts == ("oute-server",))
 out("config do repo: limites da issue (50%, 15 min, 30 min, 40 MiB)", (c.alerts.queue_max_ratio, c.alerts.refused_window_minutes, c.alerts.no_data_minutes, c.alerts.spool_max_bytes) == (0.5, 15, 30, 40 * 2**20))
-out("config do repo: cota ligada, corte 90% e exceção de 20 min", c.alerts.quota_enabled is True and c.alerts.quota_max_pct == 90 and c.alerts.quota_reset_grace_minutes == 20)
+out("config do repo: cota ligada, corte 98% e exceção de 20 min", c.alerts.quota_enabled is True and c.alerts.quota_max_pct == 98 and c.alerts.quota_reset_grace_minutes == 20)
 out("config do repo = padrões do código", c.alerts == C())
 out("config ausente: alertas com os padrões", config.load("/nao/existe.toml").alerts == C())
 for raw, why in (({"always_on_hosts": "oute-server"}, "hosts não lista"), ({"no_data_minutes": 0}, "zero"),
@@ -285,7 +291,7 @@ con = duckdb.connect(db, read_only=True)
 at = AT * 10**9
 r = alerts.evaluate(con, at, dataclasses.replace(C(), quota_enabled=True))
 q = [a for a in r["alerts"] if a["type"] == "quota"]
-out("cota ligada: Claude 95% alerta, Codex 50% não", any(a["evidence"]["agent"] == "claude" and a["value"] == 95 for a in q) and not any(a["evidence"]["agent"] == "codex" for a in q) and r["checks"]["quota"])
+out("cota ligada: Claude 99% alerta, Codex 50% não", any(a["evidence"]["agent"] == "claude" and a["value"] == 99 for a in q) and not any(a["evidence"]["agent"] == "codex" for a in q) and r["checks"]["quota"])
 r = alerts.evaluate(con, at, dataclasses.replace(C(), quota_enabled=False))
 out("cota desligada: sem alerta de cota e checks.quota falso", not any(a["type"] == "quota" for a in r["alerts"]) and r["checks"]["quota"] is False)
 no_round = lambda r: [a["type"] for a in r["alerts"] if not a["type"].startswith("round_")]
