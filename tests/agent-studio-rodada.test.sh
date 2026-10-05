@@ -209,8 +209,8 @@ check "DuckDB: os 12 eventos de etapa com corpo, o texto inteiro" test "$(studio
 REB=(env AGENT_STUDIO_DB="$DB" AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio.rebuild_state)
 OUT="$("${REB[@]}" 2>"$TMP/err")"; RC=$?
 check "rebuild-state: rc 0 e o stderr vazio"            bash -c '[ "$1" = 0 ] && [ ! -s "$2" ]' _ "$RC" "$TMP/err"
-check "rebuild-state: depois, 10 etapas"                has " etapas=10$"
-check "rebuild-state: antes, o SurrealDB sem etapa (etapas=0)" has "^antes: .* etapas=0$"
+check "rebuild-state: depois, 10 etapas"                has " etapas=10 acoes=0$"
+check "rebuild-state: antes, o SurrealDB sem etapa (etapas=0)" has "^antes: .* etapas=0 acoes=0$"
 check "rebuild-state: a etapa remontada é a vigente (r2 aprovado)" jqe '.[0].rev == 2 and .[0].review == "aprovado" and .[0].event == "ev-f2"' <<<"$(sr "SELECT rev, review, event FROM $SK")"
 check "rebuild-state: o merge e o kaizen remontados"    jqe '.[0].key == "12"' <<<"$(sr "SELECT key FROM etapa:['$R1','merge','12']")"
 sr "SELECT * FROM etapa ORDER BY id" > "$TMP/etapas-1.json"

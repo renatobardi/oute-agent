@@ -230,15 +230,34 @@
 
 {# a etapa publicada (rodada e ciclo, #507 e #509): o texto da etapa é dado não confiável (ADR-08): o parser (etapas.py) devolve só dados, nunca HTML, e tudo aqui sai escapado #}
 {% macro inl(tokens) %}{% for t in tokens %}{% if t.t == "code" %}<code>{{ t.s }}</code>{% elif t.t == "b" %}<strong>{{ t.s }}</strong>{% elif t.t == "a" %}<a href="{{ t.href }}" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer" title="{{ t.href }}">{{ t.s }}</a> <span class="link-host">({{ t.host }})</span>{% else %}{{ t.s }}{% endif %}{% endfor %}{% endmacro %}
-{% macro doc(d) %}
+{# a lista de ações da seção `## Ações` (#510): cada item com id tem o estado da marca; com o cookie de marcação (`mark.active`) leva o formulário
+   de marcar, e a ação que cita um pedido do canal não tem caixa: mostra o estado do pedido. Tudo escapado; o `csrf` só existe para quem tem o cookie #}
+{% macro acao_item(a, s, mark) %}
+{% if a.pedido %}
+<span class="acao-estado" data-acao-pedido="{{ a.pedido }}" data-pedido-estado="{{ (a.pedido_state.state if a.pedido_state else none) or 'desconhecido' }}">pedido <a href="{{ a.pedido|proposal_path }}"><code>{{ a.pedido }}</code></a>: {% if a.pedido_state and a.pedido_state.state == "decidido" %}decidido ({{ a.pedido_state.decision or "—" }}){% elif a.pedido_state and a.pedido_state.state %}{{ a.pedido_state.state }}{% else %}estado não lido{% endif %}</span>
+{% elif mark and mark.active and a.state is not none %}
+<form class="acao-form" method="post" action="/rodada/acao" data-acao-form="{{ a.id }}">
+  <input type="hidden" name="rodada" value="{{ mark.round }}">
+  <input type="hidden" name="etapa" value="{{ s.kind }}{% if s.key %}:{{ s.key }}{% endif %}">
+  <input type="hidden" name="acao" value="{{ a.id }}">
+  <input type="hidden" name="estado" value="{{ 'pendente' if a.state == 'feita' else 'feita' }}">
+  <input type="hidden" name="csrf" value="{{ mark.csrf }}">
+  <button type="submit" class="botao acao-caixa" role="checkbox" aria-checked="{{ 'true' if a.state == 'feita' else 'false' }}" data-estado="{{ a.state }}">{{ "☑ feita: desmarcar" if a.state == "feita" else "☐ pendente: marcar como feita" }}</button>
+</form>
+{% else %}
+<span class="acao-estado" data-estado="{{ a.state or 'nao-lido' }}">{{ ("☑ feita" if a.state == "feita" else "☐ pendente") if a.state else "estado não lido" }}</span>
+{% endif %}
+{% endmacro %}
+{% macro doc(d, s=none, mark=none) %}
 {% for sec in d.sections %}
 <section class="texto-secao"{% if sec.title %} data-secao="{{ sec.title }}"{% endif %}>
   {% if sec.title %}<h3>{{ sec.title }}</h3>{% endif %}
   {% for b in sec.blocks %}
+  {% set acts = b.get("actions") %}
   {% if b.t == "p" %}<p>{{ inl(b.inl) }}</p>
   {% elif b.t == "h" %}<h4>{{ inl(b.inl) }}</h4>
-  {% elif b.t == "ul" %}<ul>{% for i in b["items"] %}<li>{{ inl(i) }}</li>{% endfor %}</ul>
-  {% elif b.t == "ol" %}<ol>{% for i in b["items"] %}<li>{{ inl(i) }}</li>{% endfor %}</ol>
+  {% elif b.t == "ul" %}<ul>{% for i in b["items"] %}{% set a = acts[loop.index0] if acts and s else none %}<li{% if a %} data-acao="{{ a.id }}"{% endif %}>{% if a %}<code class="acao-id">{{ a.id }}</code> {% endif %}{{ inl(i) }}{% if a %} {{ acao_item(a, s, mark) }}{% endif %}</li>{% endfor %}</ul>
+  {% elif b.t == "ol" %}<ol>{% for i in b["items"] %}{% set a = acts[loop.index0] if acts and s else none %}<li{% if a %} data-acao="{{ a.id }}"{% endif %}>{% if a %}<code class="acao-id">{{ a.id }}</code> {% endif %}{{ inl(i) }}{% if a %} {{ acao_item(a, s, mark) }}{% endif %}</li>{% endfor %}</ol>
   {% else %}<pre class="script">{{ b.s }}</pre>{% endif %}
   {% endfor %}
 </section>
@@ -247,7 +266,7 @@
 {% endmacro %}
 {% macro review_badge(review) %}{% if review == "aprovado" %}{{ badge("aprovado pelo revisor", "secundario", "check") }}{% elif review == "reprovado" %}{{ badge("reprovado pelo revisor", "destrutivo", "triangle-alert") }}{% else %}{{ badge("sem revisor", "contorno", "triangle-alert") }}{% endif %}{% endmacro %}
 {# o corpo de uma etapa (rodada e ciclo): aviso fixo de reprovada e de sem revisor, o texto (fechado sem aprovação) e o aviso da conferência de referência #}
-{% macro etapa_corpo(s) %}
+{% macro etapa_corpo(s, mark=none) %}
 {% if s.review == "reprovado" %}
 <p class="aviso erro etapa-aviso" role="alert" data-aviso="reprovado">Etapa reprovada pelo revisor. O texto abaixo não foi aprovado e pode ter erro de fato, de fonte ou de forma. Abra só se quiser lê-lo assim mesmo.</p>
 {% elif s.review == "sem-revisor" %}
@@ -256,11 +275,11 @@
 {% if s.doc is none %}
 <p class="aviso etapa-aviso" data-sem-texto>O texto desta etapa não chegou ao agent-studio (falta o corpo do evento <code>oute.swarm.step.published</code> no DuckDB).</p>
 {% elif s.review == "aprovado" %}
-<div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+<div class="etapa-texto" data-texto>{{ doc(s.doc, s, mark) }}</div>
 {% else %}
 <details class="etapa-fechada" data-texto-fechado>
   <summary>Abrir o texto sem revisão aprovada</summary>
-  <div class="etapa-texto" data-texto>{{ doc(s.doc) }}</div>
+  <div class="etapa-texto" data-texto>{{ doc(s.doc, s, mark) }}</div>
 </details>
 {% endif %}
 {% if s.refcheck == "falhou" %}<p class="aviso erro etapa-aviso" data-refcheck="falhou">A conferência de referência (por máquina) falhou nesta etapa.</p>{% endif %}

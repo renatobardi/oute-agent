@@ -13,6 +13,10 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
 - `GET /v1/rodada?id=`: só leitura, credencial de leitura; as etapas publicadas da rodada (#507); sem id = 400, rodada desconhecida =
   404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
+  Cada etapa leva `actions` (#510): a lista de ações do texto aprovado, com o estado da marca do Bardi (`feita`/`pendente`). A marca é
+  dado, nunca instrução nem confirmação de merge, `close` ou ação no host (`docker/swarm.md`).
+- `POST /rodada/acao` (#510): a única escrita do navegador além do login; só com a credencial de marcação configurada (sem ela a rota
+  não existe), só com o cookie de marcação (`marcar.py`).
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
   `proposals.available` = `false` e `steps.available` = `false` (o resto do menu segue); o bloco `steps` (#508) lê o SurrealDB à parte.
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
@@ -31,7 +35,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from . import (auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
+from . import (acoes as acoes_mod, auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
                tz as tz_mod, web)
 
 log = logging.getLogger("agent_studio")
@@ -64,9 +68,10 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None):
-    """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256)."""
-    auth = auth_mod.Auth(token, read_token)
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None):
+    """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256);
+    `mark_token` = a de marcação (#510; sem ela, `POST /rodada/acao` não existe)."""
+    auth = auth_mod.Auth(token, read_token, mark_token)
     tel = tel or telemetry.Noop()
     config = config or config_mod.Config()
 
@@ -283,6 +288,10 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         if data is None:
             return JSONResponse({"message": "rodada não encontrada"}, status_code=404)
+        await run_in_threadpool(acoes_mod.collect, surreal, data)   # a lista de ações com o estado das marcas (#510); não levanta
+        if data["acoes_error"]:
+            tel.warn("rodada-state-failed", "rodada: estado das ações (SurrealDB) falhou, respondi sem ele: %s",
+                     data["acoes_error"], level=logging.ERROR)
         if data["state_error"]:
             tel.warn("rodada-state-failed", "rodada: estado (SurrealDB) falhou, respondi só com o DuckDB: %s",
                      data["state_error"], level=logging.ERROR)

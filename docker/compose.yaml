@@ -189,6 +189,9 @@ services:
       # leitura (pasta oute-agent; agente, tray e tela). Sem a de leitura, uma só para tudo (transição).
       AGENT_STUDIO_INGEST_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}
       AGENT_STUDIO_READ_TOKEN: ${AGENT_STUDIO_READ_TOKEN:-}
+      # terceira credencial (#510, ADR-08 §6): a de marcação das ações da página da rodada (`POST /rodada/acao`). Pasta oute-services
+      # do vault; só o agent-studio a recebe, nunca o agent. Sem ela (ou igual a uma das outras), a rota não existe.
+      AGENT_STUDIO_MARK_TOKEN: ${AGENT_STUDIO_MARK_TOKEN:-}
       # nome de antes da #256: imagem antiga (até a release desta mudança) só conhece este; a nova ignora
       AGENT_STUDIO_TOKEN: ${AGENT_STUDIO_INGEST_TOKEN:-}
       AGENT_STUDIO_DB: /data/agent-studio/agent-studio.duckdb

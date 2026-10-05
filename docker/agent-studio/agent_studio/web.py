@@ -32,9 +32,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
-from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
+from . import (acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
                sessions as sess_mod, tools as tools_mod, tz as tz_mod)
 from . import alerts as alerts_mod
+from . import marcar as marcar_mod
 from . import usage_charts as charts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -638,7 +639,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             tel.warn("web-state-failed", "tela: estado das etapas (SurrealDB) falhou, segui com o DuckDB: %s",
                      data["state_error"], level=logging.ERROR)
         etapas_mod.render(data["steps"])
-        return page(request, "rodada.html", r=data, bar=etapas_mod.bar(data["steps"]), state_read=data["state_read"])
+        await run_in_threadpool(acoes_mod.collect, surreal, data)   # as ações do texto, com o estado das marcas (#510); não levanta
+        if data["acoes_error"]:
+            tel.warn("web-state-failed", "tela: estado das ações (SurrealDB) falhou, segui sem ele: %s", data["acoes_error"],
+                     level=logging.ERROR)
+        # a marcação (#510): `enabled` = há credencial de marcação; `active` = este navegador tem o cookie dela (só então o formulário leva o `csrf`)
+        mark = {"enabled": auth.mark, "active": auth.marker(request), "round": rnd, "csrf": auth.mark_csrf if auth.marker(request) else "",
+                "read": data["acoes_read"]}
+        return page(request, "rodada.html", r=data, bar=etapas_mod.bar(data["steps"]), state_read=data["state_read"], mark=mark)
 
     @app.get("/ciclo")
     async def cycle_page(request: Request):
@@ -661,6 +669,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if data["summary"] is not None:
             etapas_mod.render([data["summary"]])
         return page(request, "ciclo.html", c=data, state_read=data["state_read"])
+
+    # ------------------------------------------------ marcar ação (#510): a única escrita do navegador além do login; só com a credencial de marcação
+    if auth.mark:
+        marcar_mod.mount(app, store, auth, tel, surreal, page, error, gate, safe_next, HEADERS)
 
     # ------------------------------------------------ preços (#340): só leitura
     @app.get("/precos")

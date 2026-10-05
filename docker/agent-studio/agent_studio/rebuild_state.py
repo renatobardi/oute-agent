@@ -10,8 +10,8 @@ Idempotente: rodar de novo não muda o resultado.
 - Ambiente (o do serviço no compose): `AGENT_STUDIO_DB`, `AGENT_STUDIO_SURREAL_URL`, `AGENT_STUDIO_SURREAL_PASS`
   (e, se fugirem do padrão, `AGENT_STUDIO_SURREAL_USER|NS|DB`). Costura para os testes: `AGENT_STUDIO_REBUILD_CHUNK`
   (linhas por bloco, padrão 2000).
-- Saída (stdout), três linhas: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n>`,
-  `lidas: logs=<n> spans=<n>` e `depois: …` (a contagem do SurrealDB antes e depois). O stderr diz só o tipo do erro,
+- Saída (stdout), três linhas: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n> acoes=<n>`,
+  `lidas: logs=<n> spans=<n> marcas=<n>` (marcas = linhas da `action_marks`, #510) e `depois: …` (a contagem do SurrealDB antes e depois). O stderr diz só o tipo do erro,
   nunca texto de linha do DuckDB nem de resposta do SurrealDB.
 - Sai 0 se aplicou tudo; 1 se o DuckDB não abre ou o SurrealDB falha (o que já entrou fica: rodar de novo termina);
   2 se faltar a URL ou a senha do SurrealDB.
@@ -22,12 +22,12 @@ import sys
 
 import duckdb
 
-from . import state
+from . import marks, state
 from .surreal import Surreal, SurrealError
 
-TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa")
+TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa", "acao")
 COUNT_NAMES = {"rodada": "rodadas", "worker": "workers", "sessao": "sessoes", "pedido": "pedidos",
-               "conversa": "conversas", "etapa": "etapas"}
+               "conversa": "conversas", "etapa": "etapas", "acao": "acoes"}
 ORDER = "ORDER BY received_unix_nano, time_unix_nano, dedupe_key"
 LOGS = ("SELECT time_unix_nano, host_name, oute_instance, oute_agent, service_name, session_id, oute_task_id, "
         f"event_name, oute_event_id, trace_id, attributes, resource_attributes FROM logs {ORDER}")
@@ -73,13 +73,18 @@ def line(label, c):
 
 
 def rebuild(con, surreal, chunk=2000):
-    """-> (linhas de logs, linhas de spans) lidas; levanta SurrealError se o SurrealDB recusar."""
+    """-> (linhas de logs, de spans e de marcas) lidas; levanta SurrealError se o SurrealDB recusar. As marcas (`action_marks`,
+    #510) são a fonte do `acao`, depois de `logs` e `spans`: o replay do bucket não as traz."""
     read = {"logs": 0, "spans": 0}
     for table in ("logs", "spans"):
         for block in rows(con, table, chunk):
             read[table] += len(block)
             surreal.apply(state.statements(table, block))
-    return read["logs"], read["spans"]
+    marked = 0
+    for block in marks.rows(con, chunk):
+        marked += len(block)
+        surreal.apply([s for row in block for s in state.mark_statements(row)])
+    return read["logs"], read["spans"], marked
 
 
 def main():
@@ -102,8 +107,8 @@ def main():
     try:
         con.execute("SET TimeZone = 'UTC'")
         print(line("antes", counts(surreal)))
-        logs, spans = rebuild(con, surreal, chunk)
-        print(f"lidas: logs={logs} spans={spans}")
+        logs, spans, marked = rebuild(con, surreal, chunk)
+        print(f"lidas: logs={logs} spans={spans} marcas={marked}")
         print(line("depois", counts(surreal)))
     except (SurrealError, duckdb.Error) as e:
         print(f"rebuild-state: falhou ({type(e).__name__}); o que já entrou fica, rode de novo", file=sys.stderr)
