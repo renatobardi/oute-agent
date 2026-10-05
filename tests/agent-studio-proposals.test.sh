@@ -490,6 +490,6 @@ check "lógica em Python: os 43 casos rodaram"          test "$((n_ok + n_fail))
 
 # ---------------------------------------------------------------- 10. imagem
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"
-check "compose: agent-studio só em 127.0.0.1"          bash -c 'grep -A40 "^  agent-studio:" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
+check "compose: agent-studio só em 127.0.0.1"          bash -c 'awk "/^  agent-studio:/{f=1;print;next} f&&/^  [a-z]/{exit} f" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
 
 check_end
