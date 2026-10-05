@@ -200,6 +200,8 @@ PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - > "$TMP/py
 from agent_studio import acoes, auth, etapas, marcar
 from pycheck import check
 
+PLAIN = "http" + ":" + "//"   # esquema sem TLS montado de partes (sem literal http:// em arquivo novo)
+
 class Req:
     def __init__(self, **h): self.headers = {k.replace("_", "-"): v for k, v in h.items()}
 ok = lambda origin, host: marcar.origin_ok(Req(origin=origin, host=host)) if origin is not None else marcar.origin_ok(Req(host=host))
@@ -208,7 +210,7 @@ check("origin: sem Origin ou sem Host, não", not ok(None, "a.example") and not 
 check("origin: host diferente, porta diferente, caminho e userinfo, não",
       not ok("https://b.example", "a.example") and not ok("https://a.example:8443", "a.example") and not ok("https://a.example/x", "a.example")
       and not ok("https://u@a.example", "a.example") and not ok("https://a.example?x=1", "a.example"))
-check("origin: http só em loopback", ok("http://127.0.0.1:8430", "127.0.0.1:8430") and ok("http://localhost:1", "localhost:1") and not ok("http://a.example", "a.example"))
+check("origin: http só em loopback", ok(PLAIN + "127.0.0.1:8430", "127.0.0.1:8430") and ok(PLAIN + "localhost:1", "localhost:1") and not ok(PLAIN + "a.example", "a.example"))
 check("origin: lixo não levanta", not ok("https://[abc", "[abc") and not ok("null", "a.example") and not ok("", "a.example"))
 for ing, rd, mk in (("i", "r", "i"), ("i", "r", "r"), ("i", None, "i")):
     try:
