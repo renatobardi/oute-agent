@@ -48,14 +48,14 @@ case "$OTEL_RESOURCE_ATTRIBUTES" in *oute.task.slug=regression-*) task="${OTEL_R
 bad=0; for b in ${FAKE_BAD:-}; do [[ "$b" = "$task:$round" || "$b" = "$task@$al:$round" ]] && bad=1; done
 [[ -z "${FAKE_SLEEP:-}" ]] || { echo + >> "$FAKE_LOG/conc"; sleep "$FAKE_SLEEP"; echo - >> "$FAKE_LOG/conc"; }
 echo '{"type":"system","subtype":"init"}'
-mem() { # projeto → uma chamada memory_write_page ao dublê do ai-memory, como o claude faria pelo MCP
-  local ws="" pr="" py log
-  ws="$(sed -n 's/^workspace = "\(.*\)"$/\1/p' .ai-memory.toml)"; pr="$1"
-  py="$(jq -r '.mcpServers["ai-memory"].args[0]' "$mcp")"; log="$(jq -r '.mcpServers["ai-memory"].args[1]' "$mcp")"
+mem() { # projeto → uma chamada memory_write_page ao dublê do ai-memory, iniciado como está no --mcp-config
+  local ws="" pr="$1" cmd
+  ws="$(sed -n 's/^workspace = "\(.*\)"$/\1/p' .ai-memory.toml)"
+  cmd="$(jq -r '.mcpServers["ai-memory"] | [.command] + .args | @sh' "$mcp")"
   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"memory_write_page\",\"arguments\":{\"workspace\":\"$ws\",\"project\":\"$pr\"}}}" \
-    | python3 "$py" "$log"
+    | eval "$cmd"
   return $?
 }
 { case "$prompt" in
@@ -310,19 +310,16 @@ task_grade() {
 TASK
 OUTE_REGRESSION_DIR="$PROBE" run --rounds 1 --model haiku
 check "dublê do gh: merge 77, --comments sem corpo, --json com corpo, --body e --body-file -" bash -c '[ "$1" -eq 0 ] && grep -q "probe@haiku  *verde" <<<"$2"' _ "$RC" "$OUT"
-MEMLOG="$TMP/memory-double.log"; rm -f "$MEMLOG"
+mkdir -p "$TMP/memdir"; MEMLOG="$TMP/memdir/memory.log"
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_write_page","arguments":{"workspace":"w","project":"p"}}}' \
   'lixo que não é json' '{"jsonrpc":"2.0","id":4,"method":"ping"}' '{"jsonrpc":"2.0","id":5,"method":"nao/existe"}' \
-  | python3 "$ROOT/docker/regression/ai-memory-double.py" "$MEMLOG" > "$TMP/memory-double.out"
-for badlog in "relativo.log" "$TMP/../x.log" "$TMP/pasta-que-nao-existe/x.log" "$TMP"; do
-  echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | python3 "$ROOT/docker/regression/ai-memory-double.py" "$badlog" >/dev/null 2>&1
-  check "dublê do ai-memory: recusa o log '${badlog#"$TMP"}' (relativo, com .., sem pasta ou pasta)" [ $? -ne 0 ]
-done
+  | (cd "$TMP/memdir" && python3 "$ROOT/docker/regression/ai-memory-double.py") > "$TMP/memory-double.out"
 check "dublê do ai-memory: initialize responde com o protocolo pedido" jqe 'select(.id == 1) | .result.protocolVersion == "2025-06-18" and .result.serverInfo.name == "ai-memory"' < "$TMP/memory-double.out"
 check "dublê do ai-memory: lista memory_write_page e memory_query" bash -c 'jq -e "select(.id == 2) | [.result.tools[].name] | (index(\"memory_write_page\") != null and index(\"memory_query\") != null)" "$1" >/dev/null' _ "$TMP/memory-double.out"
 check "dublê do ai-memory: grava a chamada com os argumentos e responde ok" bash -c '[ "$(cat "$1")" = "{\"tool\": \"memory_write_page\", \"args\": {\"workspace\": \"w\", \"project\": \"p\"}}" ] && jq -e "select(.id == 3) | .result.isError == false" "$2" >/dev/null' _ "$MEMLOG" "$TMP/memory-double.out"
+check "dublê do ai-memory: não lê caminho da linha de comando (o log é memory.log na pasta de trabalho)" bash -c '! grep -q "argv" "$1" && grep -q "^LOG_NAME = \"memory.log\"" "$1"' _ "$ROOT/docker/regression/ai-memory-double.py"
 check "dublê do ai-memory: ping ok, método desconhecido = erro, lixo ignorado, notificação sem resposta" bash -c 'jq -e "select(.id == 4) | .result == {}" "$1" >/dev/null && jq -e "select(.id == 5) | .error.code == -32601" "$1" >/dev/null && [ "$(wc -l < "$1")" -eq 5 ]' _ "$TMP/memory-double.out"
 
 # ---------------------------------------------------------------- 5. --codex

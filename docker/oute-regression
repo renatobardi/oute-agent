@@ -201,8 +201,8 @@ exit 0
 STUB
   chmod +x "$bin"/*
   # a memória: servidor MCP `ai-memory` de mentira (grava cada chamada em $rec/memory.log), no lugar do real
-  jq -n --arg py "$DIR/ai-memory-double.py" --arg log "$rec/memory.log" \
-    '{mcpServers: {"ai-memory": {command: "python3", args: [$py, $log]}}}' > "$rec/mcp.json"
+  jq -n --arg py "$DIR/ai-memory-double.py" --arg rec "$rec" \
+    '{mcpServers: {"ai-memory": {command: "sh", args: ["-c", "cd \"$1\" && exec python3 \"$2\"", "sh", $rec, $py]}}}' > "$rec/mcp.json"
 }
 
 # --- uma chamada ao agente (task, round, agent, alias): resultado em $TMP/<chave>/{status,reason,cost,secs,turns,id}
