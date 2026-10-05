@@ -178,6 +178,7 @@ Decisão do Bardi (2026-10-05, #599): a conversa aberta direto numa pasta, sem o
   - Entra a conversa em que nenhum fato tem repositório. Cada `file_path` que aponta um repositório que o banco já conhece dá um voto.
   - Caminhos que votam: `/workspace/<repo>/…`; `/workspace/.worktrees/<espaço>/<repo>-<slug>/…` (e o formato antigo, sem `<espaço>`); e a pasta em que a conversa abriu, como o harness a grava em `/tmp/claude-<uid>/<pasta>/…` e em `~/.claude/projects/<pasta>/…`.
   - Vale o repositório com mais da metade dos votos. Empate, caminho ambíguo ou conversa sem voto: segue "sem repositório".
+  - O que sobra "sem repositório" com hora do fato antes de `2026-10-06T00:00:00Z` fica com `oute-agent`: acerto único do histórico, que não é regra (ADR-08, "Filtro de repositório", #617).
   - O agent-studio grava só a coluna `oute_repo` dos fatos da conversa. O `resource_attributes` e o bucket não mudam. O fato inferido se reconhece: coluna preenchida e JSON sem `oute.task.repo`.
   - Ler conteúdo (o `cd <pasta>` do comando) para cobrir o resto é decisão do Bardi e está pendente (#599).
 - Opções descartadas: criar `oute.task.id` para a conversa interativa (fora de escopo da #599: ela não é sessão); marcar pelo nome da pasta da worktree (dois nomes para o mesmo repositório no filtro); mudar o `oute-task` (fora de escopo da #599).
