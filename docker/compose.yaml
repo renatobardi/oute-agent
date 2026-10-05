@@ -202,6 +202,9 @@ services:
       # conferência diária dos preços (#339, ADR-08): única chamada do agent-studio à internet, `GET https://` sem
       # credencial a models.dev e OpenRouter (duas URLs fixas no código). A tabela do seletor lista os modelos a conferir.
       AGENT_STUDIO_PRICE_CHECK: "1"
+      # o tray e os alertas valem por 5 s (#570): o tray de cada Mac, a barra de alertas de cada tela e o /v1/alerts pediam a
+      # mesma conta ao mesmo tempo; uma chamada só a refaz. 0 = sempre refaz
+      AGENT_STUDIO_READ_TTL_S: "5"
       AGENT_STUDIO_SELECT_TABLE: /etc/oute/select/models.toml
       # estado derivado (#187): o SurrealDB pela rede studio (#256); os dois bancos juntos ou nenhum (503)
       AGENT_STUDIO_SURREAL_URL: http://surrealdb:8000

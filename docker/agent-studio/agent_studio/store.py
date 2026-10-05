@@ -5,11 +5,17 @@ chegada (`received_at` fica à parte). A chave de dedupe é a PRIMARY KEY: reenv
 nova.
 """
 import ctypes
+import importlib.util
 import sys
 import threading
 import time
 
 import duckdb
+
+# O DuckDB procura o `pandas` no disco a cada execute; sem ele instalado (o studio não o usa), isso era ~17% do tempo com
+# o GIL no flamegraph (#570). O sentinela faz a busca falhar na hora; instalado de verdade, nada muda.
+if importlib.util.find_spec("pandas") is None:
+    sys.modules["pandas"] = None
 
 from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
                repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
@@ -119,15 +125,24 @@ def name_thread(label):
             pass  # só o nome no Python
 
 
+def _base(typ):
+    return typ.split()[0]  # "VARCHAR PRIMARY KEY" -> "VARCHAR"
+
+
 def _sql(table, cols):
     names = [c for c, _ in cols]
+    plain = [(c, _base(t)) for c, t in cols if c not in DERIVED]
+    # uma instrução por lote, as colunas em listas (`unnest`): o `executemany` fazia uma execução por linha (~1,3 ms)
+    # e segurava a trava do escritor (#570). Os JSON entram como texto e voltam a JSON na seleção; a hora vem do ns.
+    unnest = ", ".join(f"unnest(?::{t if t != 'JSON' else 'VARCHAR'}[]) AS {c}" for c, t in plain)
+    select = ", ".join(f"(make_timestamp_ns({DERIVED[c]}::BIGINT) AT TIME ZONE 'UTC')" if c in DERIVED
+                       else f"{c}::JSON" if t == "JSON" else c for c, t in [(c, _base(t)) for c, t in cols])
     return {
         "create": f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(f'{c} {t}' for c, t in cols)})",
         # chaves que já existem, com a lista inteira num parâmetro só
         "existing": f"SELECT dedupe_key FROM {table} WHERE list_contains(?::VARCHAR[], dedupe_key)",
-        "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) "
-                  f"VALUES ({', '.join(TS_UTC if c in DERIVED else '?' for c in names)})",
-        "columns": names,
+        "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) SELECT {select} FROM (SELECT {unnest})",
+        "columns": [c for c, _ in plain],
     }
 
 
@@ -164,6 +179,9 @@ class Store:
         self.lock = threading.Lock()
         self._dash_lock = threading.Lock()
         self._read_slots = threading.BoundedSemaphore(READ_SLOTS)
+        # quanto vale o resultado do tray e dos alertas (#570): 0 = sempre refaz; o app liga com AGENT_STUDIO_READ_TTL_S
+        self.read_ttl = 0.0
+        self._cache, self._cache_lock = {}, threading.Lock()
         # tempo por fase (#570): `obs(fase, segundos, rótulo=None)`; o app liga na telemetria, sem ela não faz nada
         self.obs = lambda phase, seconds, label=None: None
         self._dash_cache = {}
@@ -220,10 +238,22 @@ class Store:
         t = self._lap("existing", t, table)
         new = [uniq[k] for k in keys if k not in seen]
         if new:
-            cols = sql["columns"]
-            self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
+            self.con.execute(sql["insert"], [[r.get(c) for r in new] for c in sql["columns"]])
             self._lap("insert", t, table)
         return len(new), len(rows) - len(new)
+
+    def _cached(self, key, fn):
+        """Resultado de `fn()` por `read_ttl` s. Uma chamada só o refaz: as outras esperam e recebem o mesmo (o tray, a
+        barra de alertas de cada tela e o `/v1/alerts` pediam a mesma conta ao mesmo tempo)."""
+        if self.read_ttl <= 0:
+            return fn()
+        with self._cache_lock:
+            hit = self._cache.get(key)
+            if hit and time.monotonic() - hit[0] < self.read_ttl:
+                return hit[1]
+            value = fn()
+            self._cache[key] = (time.monotonic(), value)
+            return value
 
     def _lap(self, phase, since, label=None):
         """Reporta o tempo desde `since` e devolve o instante de agora, para a fase seguinte."""
@@ -299,11 +329,12 @@ class Store:
 
     def alerts(self, at_ns, cfg):
         """Leitura do `/v1/alerts` (#204), fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg), "alerts")
+        return self._cached(("alerts",), lambda: self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg), "alerts"))
 
     def tray(self, at_ns, prices, cfg, tz=tz_mod.UTC):
         """Leitura do `/v1/tray` (#205): os blocos do DuckDB numa passada só, fora da trava do escritor (#570)."""
-        return self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz), "tray")
+        return self._cached(("tray", getattr(tz, "key", str(tz))),
+                            lambda: self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz), "tray"))
 
     def decisions(self, at_ns, cfg):
         """Decisões pendentes do Bardi (#386): o bloco do tray e o topo das telas, fora da trava do escritor (#570)."""
