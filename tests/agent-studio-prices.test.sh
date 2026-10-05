@@ -90,7 +90,7 @@ sel, _ = P.select_models(f"{root}/config/select/models.toml")
 cfg_models = set(tomllib.load(open(f"{root}/config/agent-studio/config.toml", "rb"))["prices"])
 check("mapeamento: todo modelo da tabela do seletor e do config.toml do repo tem id nas duas fontes",
       all(set(S.source_ids(m)) == {S.MODELS_DEV, S.OPENROUTER} for m in sel | cfg_models))
-check("seletor: a tabela do repo dá os 6 ids Claude/Codex esperados",
+check("seletor: a tabela do repo dá os ids Claude/Codex esperados",
       sel == {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "gpt-6-luna"})
 check("seletor: arquivo ausente = conjunto vazio com o motivo", P.select_models(f"{tmp}/nao-existe.toml") == (set(), "FileNotFoundError"))
 
