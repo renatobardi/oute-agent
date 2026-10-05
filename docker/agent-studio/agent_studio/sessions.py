@@ -37,7 +37,9 @@ def _filter_cols(state=False):
     return cols
 
 
+# `f_round` (#601): só as sessões de uma rodada, o destino do link da rodada sem etapa em `/rodadas`
 TABLE = Table([Col("start", "time", lambda x: x["start_ns"]), Col("session", "text", lambda x: x["id"]), *_filter_cols(state=True),
+               Col("round", "text", lambda x: x["swarm_round"], lambda x: [x["swarm_round"]], "f_round"),
                Col("duration", "num", lambda x: x["duration_ns"]), *usage_cols(lambda x: x["usage"])], default=("start", "desc"))
 LOOSE = Table([Col("start", "time", lambda x: x["start_ns"]), Col("session", "text", lambda x: x["id"]), *_filter_cols(),
                Col("duration", "num", lambda x: x["duration_ns"]), *usage_cols(lambda x: x["usage"])], default=("start", "desc"),
