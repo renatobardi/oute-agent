@@ -411,7 +411,7 @@ a.nota { text-decoration: underline; text-underline-offset: 3px; }
 .uso-svg .grade.tracejada { stroke-dasharray: 4 3; }
 .uso-svg .alvo { fill: transparent; }
 .uso-svg .coluna:hover .alvo { fill: var(--muted); }
-/* custo: real cheio, estimado tracejado; tokens: entrada cheio, saída tracejado, cache pontilhado (distinguíveis sem cor) */
+/* Distinção sem cor: custo real cheio e estimado tracejado; tokens com entrada cheia, saída tracejada e cache pontilhado. */
 .uso-svg .real, .amostra .t-ent { fill: var(--primary); }
 .uso-svg .t-ent { fill: var(--primary); }
 .uso-svg .estimado { fill: color-mix(in oklab, var(--primary) 30%, var(--card)); stroke: var(--primary); stroke-width: 1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }

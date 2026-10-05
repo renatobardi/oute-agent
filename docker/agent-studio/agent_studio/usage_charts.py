@@ -20,10 +20,16 @@ def _tick(i, n):
     return i % max(1, math.ceil(n / 8)) == 0 if n > 10 else True
 
 
-def days(series):
-    """Série do `usage.usage` (dia × host × agente × modelo) -> um item por dia, do primeiro ao último dia com chamada
-    (dia sem chamada entra zerado, para o gráfico mostrar o buraco). Cada item: custo real e estimado, tokens (com o cache
-    junto: `cache` = leitura + escrita), `real_frac`/`est_frac` pelo maior dia de custo e `*_frac` de tokens pelo maior dia."""
+def _cost_of(a):
+    return (a["real_usd"] or 0) + (a["estimated_usd"] or 0)
+
+
+def _tok_of(a):
+    return sum(a["tokens"].values())
+
+
+def _by_day(series):
+    """Série (dia × host × agente × modelo) -> acumulador por dia."""
     acc = {}
     for r in series:
         a = acc.setdefault(r["day"], _zero())
@@ -32,33 +38,44 @@ def days(series):
         _add_usd(a, "estimated_usd", r["cost"]["estimated_usd"])
         for t in TOKENS:
             a["tokens"][t] += r["tokens"][t]
+    return acc
+
+
+def _day_keys(acc):
+    """Todos os dias do primeiro ao último com chamada (o dia sem chamada entra, para o gráfico mostrar o buraco)."""
+    first, last = (dt.date.fromisoformat(k) for k in (min(acc), max(acc)))
+    return [(first + dt.timedelta(days=i)).isoformat() for i in range((last - first).days + 1)]
+
+
+def _frac(v, top):
+    return v / top if top else 0
+
+
+def _point(k, i, n, a, max_cost, max_tok):
+    t = a["tokens"]
+    cache = t["cache_read"] + t["cache_creation"]
+    label = f"{k[8:10]}/{k[5:7]}"
+    return {
+        "key": k, "label": label, "tick": label if _tick(i, n) else "", "x": (i + 0.5) / n, "calls": a["calls"],
+        "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"],
+        "real_frac": _frac(a["real_usd"] or 0, max_cost), "est_frac": _frac(a["estimated_usd"] or 0, max_cost),
+        "input": t["input"], "output": t["output"], "cache": cache,
+        "cache_read": t["cache_read"], "cache_creation": t["cache_creation"], "tokens": _tok_of(a),
+        "in_frac": _frac(t["input"], max_tok), "out_frac": _frac(t["output"], max_tok), "cache_frac": _frac(cache, max_tok),
+    }
+
+
+def days(series):
+    """Série do `usage.usage` -> um item por dia, do primeiro ao último dia com chamada. Cada item: custo real e estimado,
+    tokens (`cache` = leitura + escrita), `real_frac`/`est_frac` pelo maior dia de custo e as frações de tokens pelo maior dia."""
+    acc = _by_day(series)
     if not acc:
         return {"points": [], "max_cost": 0, "mid_cost": 0, "max_tokens": 0, "mid_tokens": 0}
-    first, last = (dt.date.fromisoformat(k) for k in (min(acc), max(acc)))
-    keys = [(first + dt.timedelta(days=i)).isoformat() for i in range((last - first).days + 1)]
-    n = len(keys)
-    cost_of = lambda a: (a["real_usd"] or 0) + (a["estimated_usd"] or 0)
-    tok_of = lambda a: sum(a["tokens"][t] for t in ("input", "output")) + a["tokens"]["cache_read"] + a["tokens"]["cache_creation"]
-    max_cost = max(cost_of(acc.get(k) or _zero()) for k in keys)
-    max_tok = max(tok_of(acc.get(k) or _zero()) for k in keys)
-    points = []
-    for i, k in enumerate(keys):
-        a = acc.get(k) or _zero()
-        t = a["tokens"]
-        cache = t["cache_read"] + t["cache_creation"]
-        points.append({
-            "key": k, "label": f"{k[8:10]}/{k[5:7]}", "tick": f"{k[8:10]}/{k[5:7]}" if _tick(i, n) else "",
-            "x": (i + 0.5) / n, "calls": a["calls"],
-            "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"],
-            "real_frac": (a["real_usd"] or 0) / max_cost if max_cost else 0,
-            "est_frac": (a["estimated_usd"] or 0) / max_cost if max_cost else 0,
-            "input": t["input"], "output": t["output"], "cache": cache,
-            "cache_read": t["cache_read"], "cache_creation": t["cache_creation"],
-            "tokens": tok_of(a),
-            "in_frac": t["input"] / max_tok if max_tok else 0,
-            "out_frac": t["output"] / max_tok if max_tok else 0,
-            "cache_frac": cache / max_tok if max_tok else 0,
-        })
+    keys = _day_keys(acc)
+    rows = [acc.get(k) or _zero() for k in keys]
+    max_cost = max(_cost_of(a) for a in rows)
+    max_tok = max(_tok_of(a) for a in rows)
+    points = [_point(k, i, len(keys), a, max_cost, max_tok) for i, (k, a) in enumerate(zip(keys, rows))]
     return {"points": points, "max_cost": max_cost, "mid_cost": max_cost / 2, "max_tokens": max_tok, "mid_tokens": max_tok // 2}
 
 
