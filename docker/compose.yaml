@@ -170,7 +170,7 @@ services:
       # fila em disco do collector (#161): a imagem roda como 10001:10001
       - oute-otel-queue:/v/otel-queue
       # RocksDB do SurrealDB (#187, só no oute-server; nos outros hosts o volume fica vazio): a imagem roda como nonroot
-      - oute-surrealdb:/v/surrealdb
+      - ${OUTE_SURREALDB_DIR:-oute-surrealdb}:/v/surrealdb
 
   agent-studio:
     # ADR-08 (#185): recebe OTLP/HTTP JSON do collector de cada host e grava no DuckDB (dedupe; 2xx só depois do
@@ -222,7 +222,10 @@ services:
     mem_limit: ${OUTE_AGENT_STUDIO_MEM:-6g}
     volumes:
       # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
-      - oute-agent-studio:/data/agent-studio
+      # o DuckDB guarda tudo, sem retenção (#570): no oute-server fica numa pasta do disco de dados
+      # (OUTE_AGENT_STUDIO_DIR no .env; o `oute up` confere que ela existe e é do usuário do container). Sem a variável,
+      # volume docker
+      - ${OUTE_AGENT_STUDIO_DIR:-oute-agent-studio}:/data/agent-studio
       # pasta, não arquivo: o `git pull` troca o arquivo e o `oute down/up` pega o novo, sem release
       - ./config/agent-studio:/etc/oute/agent-studio:ro
       # tabela do seletor (ADR-02), só leitura: os modelos que a conferência de preços (#339) sempre confere
@@ -257,7 +260,8 @@ services:
     mem_limit: ${OUTE_SURREALDB_MEM:-2g}
     # sem porta publicada: só o agent-studio, pela rede studio
     volumes:
-      - oute-surrealdb:/data/surrealdb
+      # mesma regra do DuckDB (#570): OUTE_SURREALDB_DIR no .env = pasta do disco de dados; sem ela, volume docker
+      - ${OUTE_SURREALDB_DIR:-oute-surrealdb}:/data/surrealdb
     healthcheck:
       test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://127.0.0.1:8000"]
       interval: 10s
