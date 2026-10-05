@@ -93,6 +93,84 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 - **Aprovar… / Recusar…** no tray **abrem o Terminal** no `oute approve <id>` daquele pedido (local no Mac, ou `ssh oute-server` para pedido do servidor); o Bardi lê o script e confirma como hoje. O `oute approve` já grava `.out`, `approve.log` e emite `oute.canal.decided`. **O ADR-01 não muda.** Motivo: os agentes rodam em yolo no mesmo servidor e na mesma rede docker do agent-studio; uma API que fizesse o host executar um pedido deixaria um agente aprovar o próprio pedido e virar root no host.
 - Nenhuma outra ação no v1. Ação nova entra depois, no mesmo padrão: abrir o Terminal no comando que já existe.
 
+#### Adendo proposto: ack de alerta e de decisão pendente (#537)
+
+**Cabe ao Bardi escolher onde guardar o ack e quando ele deixa de valer. O gate de `arch` está aberto.**
+Este adendo é uma **proposta**, não uma decisão aceita nem uma autorização para implementar.
+Só o Bardi faz o merge deste PR; ele não entra na autorização permanente de merge.
+Fonte do gate: [encaminhamento da #537](https://github.com/renatobardi/oute-agent/issues/537#issuecomment-5992710394).
+
+**Base existente.** A #510 já trouxe a credencial de marcação e o `POST /rodada/acao` ([PR #576](https://github.com/renatobardi/oute-agent/pull/576)).
+O adendo “Exceção ao §10: escrita vinda da tela”, abaixo, continua sendo a exceção aceita.
+As marcas de ação ficam em `action_marks`, no DuckDB, com estado derivado no SurrealDB e perda aceita fora do bucket.
+Fontes: [marcas atuais](https://github.com/renatobardi/oute-agent/blob/a2776266ec09646ffcbf13eb0462c099ecf66031/docker/agent-studio/agent_studio/marks.py#L1) e aquele adendo.
+Os alertas continuam calculados por consulta; a seção “Alertas do pipeline: `GET /v1/alerts`” define esse contrato sem estado.
+
+**Alcance proposto — recomendação do autor.** Ack significa “visto”: retira o item da faixa da tela enquanto a marca valer.
+A marca vale entre aparelhos do Bardi. O item continua consultável, identificado como visto, com a hora e a validade da marca.
+Ack não resolve alerta, não responde pergunta, não fecha gate e não altera pedido do canal.
+O `GET /v1/alerts`, o tray e os eventos de pergunta e resposta mantêm seus contratos.
+A regra de recolher faixas por idade (#524) continua separada da validade do ack.
+
+**Rota e credencial propostas — recomendação do autor.** Acrescentar `POST /ack`, exclusivo para reconhecimento, usando a credencial de marcação existente.
+Sem essa credencial configurada, a rota não existe. Leitura ou ingestão nunca autorizam ack; nenhuma credencial nova chega ao `agent`.
+O servidor confere cookie de marcação, `Origin` e CSRF, como na #510; aceita somente referência a um item vigente.
+Ele calcula a identidade, a versão e a validade; o navegador não escolhe quem marcou nem o prazo.
+O ack não faz o host rodar nada e não escreve em `action_marks`.
+Hoje o cookie de marcação tem `Path=/rodada` ([auth.py](https://github.com/renatobardi/oute-agent/blob/a2776266ec09646ffcbf13eb0462c099ecf66031/docker/agent-studio/agent_studio/auth.py#L29)).
+Esta proposta amplia o caminho para `/`, permitindo o formulário nas faixas de todas as telas e o envio a `/ack`.
+Preserva `HttpOnly`, `Secure` e `SameSite=Strict`; cada rota de escrita continua conferindo a permissão no servidor.
+Na implementação, a troca deve remover o cookie antigo para evitar dois cookies com o mesmo nome.
+
+**Onde o estado mora — alternativas propostas:**
+
+1. **DuckDB como fonte, SurrealDB como estado derivado — recomendação do autor.** Criar `ack_marks`, só de acréscimo, separada de `action_marks`.
+   Cada linha guarda o alvo, sua versão, a hora UTC do servidor, `by = human` e a validade escolhida.
+   Só a rota autenticada escreve marcas; ingestão e replay de telemetria nunca fabricam ack.
+   O SurrealDB guarda a visão derivada; `rebuild-state` a remonta das marcas sem renovar sua validade.
+   Motivo: segue a separação usada pela #510 e compartilha o reconhecimento entre aparelhos.
+   Propõe-se também a perda aceita da #510: as marcas não vão ao bucket.
+   Com perda do DuckDB, o histórico de ack se perde; itens ainda ativos voltam sem reconhecimento.
+   Essa perda depende de aceite próprio do Bardi para a #537; o aceite da #510 não a autoriza automaticamente.
+2. **Guardar também no bucket um registro autenticado do ack.** Permite recuperar marcas após perda do DuckDB.
+   Exige um caminho de recuperação que confira a autenticidade; um log comum não pode se tornar prova de reconhecimento humano.
+   Motivo para considerar: preservar o histórico. Motivo para não recomendar agora: acrescenta esse contrato de recuperação à #537.
+3. **Guardar só no navegador ou só no SurrealDB.** O primeiro simplifica a escrita, mas não compartilha a marca entre aparelhos.
+   O segundo evita uma tabela, mas perde a fonte para remontagem prevista no §3.
+   Motivo para não recomendar: ambos enfraquecem a recuperação ou a consistência da marca.
+
+**Quando o ack expira — alternativas propostas:**
+
+1. **Até a condição mudar, sem prazo.** Reconhece a mesma ocorrência enquanto ela permanecer ativa.
+   Uma ocorrência nova exige outro ack; uma condição persistente pode ficar reconhecida por tempo indefinido.
+   Motivo para considerar: evita pedir reconhecimento repetido do mesmo fato. Custo: exige identificar ocorrências com estabilidade.
+2. **Por prazo, limitado à ocorrência reconhecida — recomendação do autor.** Proposta inicial: **24 horas**, contadas no servidor desde o ack.
+   O prazo é uma escolha do autor, sem medição de uso; cabe ao Bardi aceitá-lo ou escolher outro.
+   O ack termina no prazo ou antes, se a ocorrência acabar ou mudar. Uma nova ocorrência nunca herda a marca anterior.
+   Motivo: limita o tempo em que uma condição persistente fica fora da faixa. Custo: pede novo reconhecimento se ela continuar.
+   Recarregar a tela, repetir o mesmo envio ou remontar o estado não renova o prazo. Renovar exige novo ato explícito do Bardi.
+
+**Identidade e mudança de condição — parte da proposta nas duas opções.** Um alerta é identificado pelo tipo, origem e dimensões da regra.
+Exporter, agente e janela de cota, modelo ou rodada distinguem alvos quando a regra os usa.
+Oscilação do valor dentro da mesma condição e aumento da idade não criam ocorrência nova.
+Recuperação seguida de nova falha, mudança da regra ou agravamento que mude a condição exigem novo reconhecimento.
+O `since` isolado não identifica uma ocorrência: ele é limitado por `lookback_hours` no contrato atual dos alertas.
+A `spec` deve definir a versão por tipo a partir dos fatos; sem comprovar continuidade, a tela não aplica o ack antigo.
+Para decisão pendente, o alvo inclui origem, rodada e a identidade do evento `oute.swarm.round.asked`.
+Nova pergunta exige novo ack, mesmo com texto igual; resposta ou fechamento encerra a validade da marca da pergunta anterior.
+O ack nunca emite `oute.swarm.round.answered` ([decisions.py](https://github.com/renatobardi/oute-agent/blob/a2776266ec09646ffcbf13eb0462c099ecf66031/docker/agent-studio/agent_studio/decisions.py#L1)).
+
+**Falhas e recuperação propostas — recomendação do autor.** Sucesso só depois de persistir a marca; falha de gravação permite retentativa sem renovar o mesmo ack.
+Formulário antigo não reconhece uma ocorrência nova. Falha ao ler as marcas mantém os itens visíveis, com aviso de indisponibilidade.
+Expirar invalida o efeito da marca, sem apagar seu histórico. Se o item continuar ativo, ele volta à apresentação definida pela #524.
+Recuperar o banco não torna válido um ack vencido nem transfere a marca para outra ocorrência.
+Esses comportamentos ainda não têm implementação nem prova nesta entrega de `arch`.
+
+**Escolha pendente do Bardi.** Aprovar ou alterar a rota e seu alcance, escolher a persistência e aceitar ou recusar a perda das marcas.
+Escolher também entre condição sem prazo e prazo por ocorrência; na segunda opção, fixar a duração.
+A recomendação do autor combina a primeira opção de persistência com a segunda opção de validade, em 24 horas.
+A #537 permanece aberta: depois do gate, a `spec` define os critérios de implementação e teste, conforme a própria issue.
+
 ### 11. Regra de ferramenta nova (substitui a do ADR-04)
 **Nenhuma ferramenta entra no stack se não mandar consumo ao bucket + agent-studio**, pelo collector, com a origem (`host.name` + `oute.instance`) e `oute.agent` (ADR-04). O Langfuse foi desligado em 2026-10-03 (#160, item 9).
 
