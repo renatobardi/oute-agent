@@ -196,26 +196,27 @@ class Store:
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)
 
-    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
+    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
         """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila. `repo`
-        (#528) só a tela `/uso` passa; o `GET /v1/usage` não tem o parâmetro."""
+        (#528) e `effective` (#531, custo efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
         with self.lock:
-            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz, repo)
+            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz, repo, effective)
 
     def repos(self, from_ns, to_ns):
         """Os repositórios com fato na janela (#528), para o filtro das telas."""
         with self.lock:
             return repo_mod.options(self.con, from_ns, to_ns)
 
-    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None):
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
-        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528) e o modelo (#532) fazem parte da chave."""
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532) e o custo efetivo (#531) fazem parte da chave."""
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute
-        key = ("live", to_ns - from_ns, tzk, repo, model) if live else (from_ns // minute, to_ns // minute, tzk, repo, model)
+        key = (("live", to_ns - from_ns, tzk, repo, model, effective) if live
+               else (from_ns // minute, to_ns // minute, tzk, repo, model, effective))
         with self._dash_lock:
             hit = self._dash_cache.get(key)
             if hit and time.monotonic() - hit[0] < DASH_TTL_S:
@@ -223,18 +224,18 @@ class Store:
             if hit and live:
                 if not self._dash_refreshing.get(key):
                     self._dash_refreshing[key] = True
-                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model), daemon=True).start()
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model, effective), daemon=True).start()
                 return hit[1]
-        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model)
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model, effective)
 
-    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None):
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None, effective=False):
         with self._dash_lock:
             try:
                 cur = self.con.cursor()
                 timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
                 timer.start()
                 try:
-                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model)
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model, effective)
                     snap["tools"] = tools_mod.top(cur, from_ns, to_ns, repo)  # gráfico das ferramentas (#535)
                 finally:
                     timer.cancel()
@@ -260,9 +261,9 @@ class Store:
             return decisions_mod.pending(self.con, at_ns, cfg)
 
     # leituras da tela (#206), sob a mesma trava
-    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None):
+    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False):
         with self.lock:
-            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo)
+            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo, effective=effective)
 
     def tools(self, from_ns, to_ns, tz=tz_mod.UTC, repo=None, host=None, agent=None):
         """Tela Ferramentas (#535), sob a mesma trava."""
@@ -273,9 +274,9 @@ class Store:
         with self.lock:
             return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent)
 
-    def conversation(self, session_id, prices, errors_only=False):
+    def conversation(self, session_id, prices, errors_only=False, effective=False):
         with self.lock:
-            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only)
+            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only, effective=effective)
 
     def conversation_logs(self, session_id, offset, errors_only=False):
         with self.lock:
@@ -286,13 +287,13 @@ class Store:
             return conv_mod.span(self.con, trace_id, span_id)
 
     # leituras da tela de sessões (#207), sob a mesma trava
-    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None):
+    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False):
         with self.lock:
-            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo)
+            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo, effective=effective)
 
-    def session(self, task_id, prices):
+    def session(self, task_id, prices, effective=False):
         with self.lock:
-            return sess_mod.detail(self.con, task_id, prices)
+            return sess_mod.detail(self.con, task_id, prices, effective=effective)
 
     # leitura da página do pedido (#208), sob a mesma trava
     def proposal(self, proposal_id):

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "ferramentas" %}
 {% set crumbs = [("Análise", none), ("Ferramentas", none)] %}
-{% from "_macros.html" import filter, badge %}
+{% from "_macros.html" import filter, badge with context %}
 {# Ferramentas (#535): usos, erros e p95 por ferramenta, por repositório e no tempo. Só leitura; a regra do uso está no ADR-08.
    Gráfico em SVG gerado aqui (sem JS, sem estilo na tag): a escala vem do viewBox e a dica de cada ponto, do <title>. #}
 {% block title %}Ferramentas · Agent Studio{% endblock %}
@@ -9,7 +9,7 @@
 {% set W = 600 %}{% set H = 180 %}
 <div class="pagina">
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Ferramentas</h1>{{ filter("/ferramentas", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
+  <div class="titulo-linha"><h1>Ferramentas</h1>{{ filter("/ferramentas", windows, hours, range, hosts, host, agents, agent, repos, repo, custo_ctl=false) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · cada uso conta uma vez (o span <code>claude_code.tool</code>) · só o Claude Code manda span de ferramenta com nome; o Codex não</p>
 </div>
 

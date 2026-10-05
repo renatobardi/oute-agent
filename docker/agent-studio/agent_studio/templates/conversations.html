@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "conversas" %}
 {% set crumbs = [("Telemetria", none), ("Conversas", none)] %}
-{% from "_macros.html" import cost, filter, badge, conv_name %}
+{% from "_macros.html" import cost, filter, badge, conv_name, aviso_custo with context %}
 {% block title %}Conversas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
@@ -9,13 +9,14 @@
   <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > conversations|length %} · Mostrando as {{ conversations|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
+{{ aviso_custo() }}
 {% if conversations %}
 <div class="cartao rolagem">
 <table class="conversas empilha">
   <thead><tr>
     <th>Início ({{ tzl() }})</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
     <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
-    <th class="n">Custo</th><th class="n">Erros</th>
+    <th class="n">Custo ({{ custo_nome() }})</th><th class="n">Erros</th>
   </tr></thead>
   <tbody>
   {% for c in conversations %}
@@ -29,13 +30,13 @@
     <td class="hora sec">{{ c.start_ns|ts }}</td>
     <td class="sec">{{ c.host or "—" }}</td>
     <td class="sec">{{ c.agent or "—" }}</td>
-    <td class="prim">{{ conv_name(c.id, "/conversa?id=" ~ (c.id|urlencode)) }}
+    <td class="prim">{{ conv_name(c.id, com_custo("/conversa?id=" ~ (c.id|urlencode))) }}
       <span class="so-celular-linha">{{ c.start_ns|ts }} · {{ c.host or "—" }} · {{ c.agent or "—" }} · {{ u.calls|num }} chamadas · {{ c.duration_ns|dur }}</span></td>
     <td class="n sec">{{ c.duration_ns|dur }}</td>
     <td class="n sec">{{ u.calls|num }}</td>
     <td class="n sec">{{ u.tokens.input|num }} / {{ u.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ u.tokens.cache_read|num }} / {{ u.tokens.cache_creation|num }}</span></td>
     <td class="n custo">{{ cost(u.cost) }}</td>
-    <td class="n">{% if u.errors.total %}<a class="erros-link" href="/conversa?id={{ c.id|urlencode }}&amp;erros=1" title="só os erros desta conversa">{{ badge(u.errors.total|num, "destrutivo") }}</a>{% else %}{{ u.errors.total|num }}{% endif %}</td>
+    <td class="n">{% if u.errors.total %}<a class="erros-link" href="{{ com_custo("/conversa?id=" ~ (c.id|urlencode) ~ "&erros=1") }}" title="só os erros desta conversa">{{ badge(u.errors.total|num, "destrutivo") }}</a>{% else %}{{ u.errors.total|num }}{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

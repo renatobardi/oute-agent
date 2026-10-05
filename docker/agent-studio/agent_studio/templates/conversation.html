@@ -3,7 +3,7 @@
 {% set detail = true %}
 {% set back = "/conversas" %}
 {% set crumbs = [("Conversas", "/conversas"), (id|nome, none)] %}
-{% from "_macros.html" import cost, log_table, badge, tile, icon, span_icon, conv_name %}
+{% from "_macros.html" import cost, log_table, badge, tile, icon, span_icon, conv_name, aviso_custo with context %}
 {% set c = conversation %}
 {% set u = c.usage %}
 {% block title %}{{ id|nome }} · Agent Studio{% endblock %}
@@ -12,11 +12,12 @@
 <div class="pagina-topo">
   <div class="titulo-linha">
     <h1>Conversa {{ conv_name(id) }}</h1>
-    <a class="botao" href="/conversas">{{ icon("arrow-left", 14) }}Conversas</a>
+    <a class="botao" href="{{ com_custo("/conversas") }}">{{ icon("arrow-left", 14) }}Conversas</a>
   </div>
   {% if errors_only %}<p class="nota" data-filtro-erros>Só os erros: spans com status de erro e logs ERROR ou acima.
-    <a href="/conversa?id={{ id|urlencode }}">Ver a conversa inteira</a></p>{% endif %}
+    <a href="{{ com_custo("/conversa?id=" ~ (id|urlencode)) }}">Ver a conversa inteira</a></p>{% endif %}
 </div>
+{{ aviso_custo() }}
 <div class="tiles">
   {% call tile("Chamadas ao modelo", "activity") %}{{ u.calls|num }}{% endcall %}
   {% call tile("Tokens ent / saí", "arrow-left-right") %}{{ u.tokens.input|num }} / {{ u.tokens.output|num }}{% endcall %}
@@ -54,9 +55,10 @@
       {% if s.is_call %}
       <td class="n sec">{{ s.input_tokens|num }} / {{ s.output_tokens|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ s.cache_read_tokens|num }} / {{ s.cache_creation_tokens|num }}</span></td>
       <td class="n custo">
-        {% if s.cost_kind == "real" %}<span class="real" title="custo real, informado pela fonte">{{ s.cost|usd }}</span>
+        {% if s.cost_kind == "real" %}<span class="real" title="informado pela fonte (preço de lista, não gasto)">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
-        {% else %}<span class="semp" title="sem custo real e sem preço na tabela">sem preço</span>{% endif %}
+        {% elif s.cost_kind == "effective" %}<span class="real" title="custo efetivo: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
+        {% else %}<span class="semp" title="sem custo informado pela fonte e sem preço na tabela">sem preço</span>{% endif %}
       </td>
       {% else %}
       <td class="n sec">—</td><td class="n sec">—</td>
@@ -80,7 +82,7 @@
         data-unpriced-calls="{{ u.cost.unpriced_calls }}">
       <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
       <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>
-      {% if c.task_id %}<dt>Sessão</dt><dd><a href="/sessao?id={{ c.task_id|urlencode }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
+      {% if c.task_id %}<dt>Sessão</dt><dd><a href="{{ com_custo("/sessao?id=" ~ (c.task_id|urlencode)) }}">{{ c.task_id }}</a>{% if c.swarm_round %} · rodada {{ c.swarm_round }}{% endif %}</dd>{% endif %}
       <dt>Início ({{ tzl() }})</dt><dd>{{ c.start_ns|ts }}</dd>
       <dt>Duração</dt><dd>{{ c.duration_ns|dur }}</dd>
       <dt>Chamadas ao modelo</dt><dd>{{ u.calls|num }}</dd>

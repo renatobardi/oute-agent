@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "sessoes" %}
 {% set crumbs = [("Telemetria", none), ("Sessões", none)] %}
-{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning %}
+{% from "_macros.html" import filter, session_table, session_row, conversation_row, state_warning, aviso_custo with context %}
 {% block title %}Sessões · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
@@ -9,6 +9,7 @@
   <div class="titulo-linha"><h1>Sessões</h1>{{ filter("/sessoes", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > sessions|length %} · Mostrando as {{ sessions|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
+{{ aviso_custo() }}
 {{ state_warning(state_read) }}
 {% if sessions %}
 {% call session_table() %}
@@ -16,7 +17,7 @@
   <tbody>
   {{ session_row(s) }}
   {% if s.hidden %}
-  <tr class="mais"><td colspan="10"><a href="/sessao?id={{ s.id|urlencode }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
+  <tr class="mais"><td colspan="10"><a href="{{ com_custo("/sessao?id=" ~ (s.id|urlencode)) }}">mais {{ s.hidden|num }} conversas antes destas</a></td></tr>
   {% endif %}
   {% for c in s.conversations %}{{ conversation_row(c) }}{% endfor %}
   </tbody>

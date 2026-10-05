@@ -126,9 +126,29 @@ def _env(zone=tz_mod.UTC):
     env.filters.update(ts=_ts_in(zone), dur=_dur, ms=_ms, when=_when_in(zone), num=_num, usd=_usd, usdm=_usdm, ago=_ago, usd2=_usd2, pct=_pct_in, compact=_compact, calls=_calls,
                        alert_title=alert_text.title, nome=names_mod.friendly, price_alert=lambda a: str(a.get("type", "")).startswith("price_"), alert_value=alert_text.text, proposal_path=prop_mod.page_path)
     env.tests["safe_cmd_id"] = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v) is not None  # id que cabe num comando sem aspas
+    env.globals["custo"] = "lista"  # o padrão de quem renderiza sem a escolha (#531); `page()` põe a da URL
+    env.globals["com_custo"], env.globals["custo_nome"] = _com_custo, _custo_nome
     env.globals["repo_none"] = repo_mod.NONE  # o valor de "sem repositório" no filtro (#528)
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
+
+
+def cost_mode(q):
+    """`custo=efetivo` na URL = custo efetivo (#531: assinatura conta 0); qualquer outro valor ou ausente = custo de lista."""
+    return "efetivo" if q.get("custo") == "efetivo" else "lista"
+
+
+@jinja2.pass_context
+def _com_custo(ctx, url):
+    """Link para outra tela levando a escolha do custo (#531): `custo=efetivo` só quando é o efetivo (o padrão é a lista)."""
+    if ctx.get("custo") != "efetivo" or "custo=" in url:
+        return url
+    return url + ("&" if "?" in url else "?") + "custo=efetivo"
+
+
+@jinja2.pass_context
+def _custo_nome(ctx):
+    return ctx.get("custo") or "lista"
 
 
 def local_input(ns, zone):
@@ -215,6 +235,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
     def page(request, name, status=200, headers=None, **ctx):
         # os alertas só existem em página de quem passou pelo `gate` (o login não os mostra)
+        ctx.setdefault("custo", cost_mode(request.query_params))  # #531: os links e rótulos do casco leem daqui
         shown = hasattr(request.state, "alerts")
         # o casco (barra lateral e cabeçalho, #467) só aparece para quem entrou; o login e o erro de quem não entrou saem sem ele
         now = time.time()
@@ -288,8 +309,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         model = q.get("model", "")
+        custo = cost_mode(q)
         snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz,
-                                  repo_mod.parse(repo), model or None)
+                                  repo_mod.parse(repo), model or None, custo == "efetivo")
         if failed:
             return failed
         now = time.time_ns()
@@ -307,8 +329,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs = f"hours={quote(per['hours'], safe='')}"
         if repo:  # o repositório vai nos links para as outras telas (#528)
             qs += f"&repo={quote(repo, safe='')}"
+        if custo == "efetivo":  # #531
+            qs += "&custo=efetivo"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
-                    gates=len(ages), window_qs=qs, repo=repo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
+                    gates=len(ages), window_qs=qs, repo=repo, custo=custo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
     # ------------------------------------------------ ferramentas (#535): só leitura
     def tools_qs(q, from_ns, to_ns, host, agent, repo):
@@ -322,6 +346,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         for key, value in (("host", host), ("agent", agent), ("repo", repo)):
             if value:
                 qs += f"&{key}={quote(value, safe='')}"
+        if cost_mode(q) == "efetivo":  # #531: a escolha do custo atravessa a tela
+            qs += "&custo=efetivo"
         return qs
 
     @app.get("/ferramentas")
@@ -403,7 +429,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "lista de conversas", store.conversations, from_ns, to_ns, config.prices,
-                                  host, agent, repo_mod.parse(repo))
+                                  host, agent, repo_mod.parse(repo), cost_mode(q) == "efetivo")
         if failed:
             return failed
         return page(request, "conversations.html", **data, from_ns=from_ns, to_ns=to_ns, host=host, agent=agent, repo=repo,
@@ -417,7 +443,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if not session_id:
             return error(request, 400, "Falta o id da conversa.")
         errors_only = request.query_params.get("erros") == "1"
-        data, failed = await read(request, "conversa", store.conversation, session_id, config.prices, errors_only)
+        data, failed = await read(request, "conversa", store.conversation, session_id, config.prices, errors_only,
+                                  cost_mode(request.query_params) == "efetivo")
         if failed:
             return failed
         if data is None:
@@ -484,7 +511,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "lista de sessões", store.sessions, from_ns, to_ns, config.prices,
-                                  host, agent, repo_mod.parse(repo))
+                                  host, agent, repo_mod.parse(repo), cost_mode(q) == "efetivo")
         if failed:
             return failed
         state = await with_state(data["sessions"])
@@ -498,7 +525,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         task_id = request.query_params.get("id", "")
         if not task_id:
             return error(request, 400, "Falta o id da sessão.")
-        data, failed = await read(request, "sessão", store.session, task_id, config.prices)
+        data, failed = await read(request, "sessão", store.session, task_id, config.prices,
+                                  cost_mode(request.query_params) == "efetivo")
         if failed:
             return failed
         # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
@@ -519,7 +547,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as e:
             return error(request, 400, str(e))
         repo = q.get("repo", "")
-        data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo))
+        data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo),
+                                  cost_mode(q) == "efetivo")
         if failed:
             return failed
         repos, failed = await read(request, "repositórios do uso", store.repos, from_ns, to_ns)
