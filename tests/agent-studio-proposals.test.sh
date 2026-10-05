@@ -109,7 +109,7 @@ check "lista: pedido sem o proposed aparece pelo id"   jqe --arg p4 "$P4" '.[2] 
 check "lista: link da página do pedido (URL estável por id)" grep -qF "<a href=\"/pedido?id=$P1\">" "$TMP/list.html"
 check "lista: id escapado na página e codificado no link" bash -c '! grep -q "<b>5</b>" "$1" && ! grep -q "<b>nginx</b>" "$1" && grep -qF "href=\"/pedido?id=p%20%3Cb%3E5%3C/b%3E%26x%3D%C3%A9\"" "$1"' _ "$TMP/list.html"
 # tabelas com ordem, filtro por coluna e página (#529): os pendentes (sufixo _p) e os decididos (_d) são duas tabelas, cada uma com os seus parâmetros
-ids_of() { data | jq -c --arg st "$1" '[.[] | select(.pedido and .state == $st) | .pedido]'; }
+ids_of() { local st="$1"; data | jq -c --arg st "$st" '[.[] | select(.pedido and .state == $st) | .pedido]'; return $?; }
 check "decididos: a ordem inicial é a da hora da decisão, do mais novo (a de sempre)" test "$(page /pedidos | ids_of decidido)" = "$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
 check "decididos: ordenar por rc inverte nos dois sentidos (sem rc no fim)" test "$(page '/pedidos?ord_d=rc&dir_d=desc' | ids_of decidido)$(page '/pedidos?ord_d=rc&dir_d=asc' | ids_of decidido)" = "$(jq -cn --arg a "$P2" --arg b "$P4" --arg c "$P3" '[$a, $b, $c]')$(jq -cn --arg a "$P4" --arg b "$P2" --arg c "$P3" '[$a, $b, $c]')"
 check "decididos: filtro por decisão deixa só a escolhida, com o rodapé 'N a M de total'" bash -c 'h="$(curl -s "${@:2}" "$1/pedidos?f_decision_d=recusado")"; grep -q "1 a 1 de 1 (filtrado, 3 no total)" <<<"$h" && [ "$(grep -c "data-decision=\"recusado\"" <<<"$h")" = 1 ] && ! grep -q "data-decision=\"executado\"" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"

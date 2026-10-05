@@ -71,25 +71,34 @@ def check_params(q, tables):
     return None
 
 
-def parse(table, q):
-    """Lê da URL (`q` = os parâmetros da consulta) o pedido para `table`. Valor fora da lista fixa = `ValueError`."""
+def _digits(value, low, high):
+    """`value` é um inteiro só de dígitos ASCII entre `low` e `high`? (`isdigit` aceita `²`, que o `int` recusa)"""
+    return value.isascii() and value.isdigit() and low <= int(value) <= high
+
+
+def _check(table, q):
+    """Valida o que a URL pediu para `table`; fora da lista fixa = `ValueError`."""
     order, direction = q.get(table.name("ord")), q.get(table.name("dir"))
     if order is not None and order not in table.cols:
         raise ValueError("coluna de ordem fora da lista")
     if direction is not None and direction not in DIRECTIONS:
         raise ValueError("direção de ordem inválida (asc ou desc)")
-    size = q.get(table.name("tam"))
-    if size is not None and (not (size.isascii() and size.isdigit()) or int(size) not in SIZES):
+    size, page = q.get(table.name("tam")), q.get(table.name("pag"))
+    if size is not None and not (_digits(size, 0, 10**9) and int(size) in SIZES):
         raise ValueError("tamanho de página inválido (20, 50 ou 100)")
-    page = q.get(table.name("pag"))
-    if page is not None and (not (page.isascii() and page.isdigit()) or not 1 <= int(page) <= 10**9):
+    if page is not None and not _digits(page, 1, 10**9):
         raise ValueError("página inválida")
+
+
+def parse(table, q):
+    """Lê da URL (`q` = os parâmetros da consulta) o pedido para `table`. Valor fora da lista fixa = `ValueError`."""
+    _check(table, q)
     default_order, default_dir = table.default
-    order = order or default_order
-    direction = direction or (default_dir if order == default_order else NATURAL[table.cols[order].kind])
-    filters = {c.key: q.get(p, "") for p, c in table.filters().items()}
+    order = q.get(table.name("ord")) or default_order
+    direction = q.get(table.name("dir")) or (default_dir if order == default_order else NATURAL[table.cols[order].kind])
     explicit = {b: q.get(table.name(b)) for b in ("ord", "dir", "pag", "tam") if q.get(table.name(b)) is not None}
-    return State(order, direction, int(page) if page else 1, int(size) if size else DEFAULT_SIZE,
+    filters = {c.key: q.get(p, "") for p, c in table.filters().items()}
+    return State(order, direction, int(explicit.get("pag", 1)), int(explicit.get("tam", DEFAULT_SIZE)),
                  {k: v for k, v in filters.items() if v}, explicit)
 
 
@@ -117,8 +126,7 @@ class View:
         """O link com a mudança pedida. Ordem, filtro e tamanho novos voltam à primeira página; `page` só muda a página."""
         t, s = self.table, self.state
         pairs = list(self._pairs)
-        new = {"ord": s.explicit.get("ord"), "dir": s.explicit.get("dir"), "pag": s.explicit.get("pag"),
-               "tam": s.explicit.get("tam")}
+        new = {b: s.explicit.get(b) for b in ("ord", "dir", "pag", "tam")}
         flt = dict(s.filters)
         if order is not None:
             new["ord"], new["dir"], new["pag"] = order, direction, None

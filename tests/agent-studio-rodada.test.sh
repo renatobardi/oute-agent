@@ -109,7 +109,7 @@ check "lista: a R5 tem cinco etapas e o veredito da última (#508)" jqe --arg r 
 check "lista: link da página da rodada"                grep -qF "<a href=\"/rodada?id=$R1\">$R1</a>" "$TMP/list.html"
 check "lista: veredito em Badge (aprovado, reprovado)"  bash -c 'grep -q "badge secundario\"><svg[^>]*><use href=\"/static/lucide.svg#check\"/></svg>aprovado</span>" "$1" && grep -q "badge destrutivo\"><svg[^>]*><use href=\"/static/lucide.svg#triangle-alert\"/></svg>reprovado</span>" "$1"' _ "$TMP/list.html"
 # tabela com ordem, filtro por coluna e página (#529)
-rounds_of() { data | jq -c '[.[] | select(has("rodada")) | .rodada]'; }
+rounds_of() { data | jq -c '[.[] | select(has("rodada")) | .rodada]'; return $?; }
 check "lista: o rodapé conta as rodadas ('1 a 5 de 5') e o tamanho 20 é o padrão" bash -c 'grep -q "data-faixa>1 a 5 de 5<" "$1" && grep -q "aria-current=\"true\">20</a>" "$1"' _ "$TMP/list.html"
 check "lista: ordenar pela rodada de A a Z e invertido" test "$(page '/rodadas?ord=rodada&dir=asc' | rounds_of)$(page '/rodadas?ord=rodada&dir=desc' | rounds_of)" = "$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$a, $b, $c, $d, $e]')$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$e, $d, $c, $b, $a]')"
 check "lista: ordenar pelo número de etapas começa pela rodada com mais etapas (a R5, cinco)" test "$(page '/rodadas?ord=steps&dir=desc' | rounds_of | jq -r '.[0]')" = "$R5"

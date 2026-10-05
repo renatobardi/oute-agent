@@ -155,7 +155,7 @@ check "lista: as 4 sessões da janela, da mais recente para a mais antiga (pelo 
 check "lista: hora do fato (sessão de janeiro fora)"   jqe 'all(.sessao | test("antiga") | not)' <<<"$L"
 check "lista: menu com conversas e sessões"            bash -c 'grep -qE "<a class=\"nav-item\" href=\"/conversas\"[^>]*>.*<span>Conversas</span></a>" "$1" && grep -qE "<a class=\"nav-item\" href=\"/sessoes\"[^>]*>.*<span>Sessões</span></a>" "$1"' _ "$TMP/list.html"
 # tabela com ordem e filtro por coluna (#529): o estado vem do SurrealDB e filtra pelo cabeçalho da coluna Sessão / conversa
-sess_of() { curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$1" | data | jq -c '[.[] | select(.sessao) | .sessao]'; }
+sess_of() { local qs="$1"; curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$qs" | data | jq -c '[.[] | select(.sessao) | .sessao]'; return $?; }
 check "lista: filtro por estado (aberta) deixa só as abertas, na ordem de sempre" test "$(sess_of f_state=aberta)" = "$(jq -cn --arg a "$S4" --arg b "$S1" '[$a, $b]')"
 check "lista: filtro por estado (removida)" test "$(sess_of f_state=removida)" = "$(jq -cn --arg a "$S2" '[$a]')"
 check "lista: o cabeçalho oferece os estados que as sessões têm" bash -c 'sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">aberta</a>" && sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">removida</a>"' _ "$TMP/list.html"

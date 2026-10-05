@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "pedidos" %}
 {% set crumbs = [("Governança", none), ("Pedidos", none)] %}
-{% from "_macros.html" import badge, icon, copy_button, th, rodape, sem_linhas %}
+{% from "_macros.html" import badge, icon, copy_button, ta, tb, rodape, sem_linhas %}
 {% block head %}<script src="/static/copiar.js" defer></script>{% endblock %}
 {% block title %}Pedidos · Agent Studio{% endblock %}
 {% macro proposal_data(p) %}data-pedido="{{ p.id }}" data-state="{{ p.state or '' }}" data-as="{{ p.as or '' }}" data-agent="{{ p.agent or '' }}" data-host="{{ p.host or '' }}" data-decision="{{ p.decision or '' }}" data-rc="{{ '' if p.rc is none else p.rc }}"{% endmacro %}
@@ -17,7 +17,7 @@
 {% if tp.rows %}
 <div class="cartao rolagem">
 <table class="pedidos empilha" data-tabela>
-  <thead><tr>{{ th(tp, "idade", "Idade", "n") }}{{ th(tp, "pedido", "Pedido") }}{{ th(tp, "as", "Roda como") }}{{ th(tp, "agent", "Agente") }}{{ th(tp, "host", "Host") }}{{ th(tp, "proposto", "Proposto em (" ~ tzl() ~ ")") }}<th>Comando</th></tr></thead>
+  <thead><tr><th{{ ta(tp, "idade", "n") }}>{{ tb(tp, "idade", "Idade") }}</th><th{{ ta(tp, "pedido") }}>{{ tb(tp, "pedido", "Pedido") }}</th><th{{ ta(tp, "as") }}>{{ tb(tp, "as", "Roda como") }}</th><th{{ ta(tp, "agent") }}>{{ tb(tp, "agent", "Agente") }}</th><th{{ ta(tp, "host") }}>{{ tb(tp, "host", "Host") }}</th><th{{ ta(tp, "proposto") }}>{{ tb(tp, "proposto", "Proposto em (" ~ tzl() ~ ")") }}</th><th>Comando</th></tr></thead>
   <tbody>
   {% for p in tp.rows %}
   <tr {{ proposal_data(p) }}>
@@ -44,8 +44,8 @@
 {% if td.rows %}
 <div class="cartao rolagem">
 <table class="pedidos empilha" data-tabela>
-  <thead><tr>{{ th(td, "pedido", "Pedido") }}{{ th(td, "as", "Roda como") }}{{ th(td, "agent", "Agente") }}{{ th(td, "host", "Host") }}{{ th(td, "decision", "Decisão") }}
-    {{ th(td, "rc", "rc", "n", "código de saída do script no host") }}{{ th(td, "duration", "Duração", "n") }}{{ th(td, "approver", "Aprovador") }}{{ th(td, "decidido", "Decidido em (" ~ tzl() ~ ")") }}</tr></thead>
+  <thead><tr><th{{ ta(td, "pedido") }}>{{ tb(td, "pedido", "Pedido") }}</th><th{{ ta(td, "as") }}>{{ tb(td, "as", "Roda como") }}</th><th{{ ta(td, "agent") }}>{{ tb(td, "agent", "Agente") }}</th><th{{ ta(td, "host") }}>{{ tb(td, "host", "Host") }}</th><th{{ ta(td, "decision") }}>{{ tb(td, "decision", "Decisão") }}</th>
+    <th{{ ta(td, "rc", "n", "código de saída do script no host") }}>{{ tb(td, "rc", "rc") }}</th><th{{ ta(td, "duration", "n") }}>{{ tb(td, "duration", "Duração") }}</th><th{{ ta(td, "approver") }}>{{ tb(td, "approver", "Aprovador") }}</th><th{{ ta(td, "decidido") }}>{{ tb(td, "decidido", "Decidido em (" ~ tzl() ~ ")") }}</th></tr></thead>
   <tbody>
   {% for p in td.rows %}
   <tr {{ proposal_data(p) }}>
