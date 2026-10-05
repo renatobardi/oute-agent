@@ -17,6 +17,8 @@ public enum MenuSymbol: CaseIterable {
     case pendingProposal
     case decisions
     case pendingDecision
+    case steps
+    case step
     case cost
     case errors
     case alerts
@@ -35,6 +37,8 @@ public enum MenuSymbol: CaseIterable {
         case .proposals: return "tray"
         case .pendingProposal, .pendingDecision: return "hand.raised"
         case .decisions: return "questionmark.bubble"
+        case .steps: return "list.bullet.rectangle"
+        case .step: return "doc.richtext"
         case .cost: return "dollarsign.circle"
         case .viewScript: return "doc.text"
         case .approve: return "checkmark"

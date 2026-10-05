@@ -14,7 +14,7 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - `GET /v1/rodada?id=`: só leitura, credencial de leitura; as etapas publicadas da rodada (#507); sem id = 400, rodada desconhecida =
   404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
-  `proposals.available` = `false` (o resto do menu segue).
+  `proposals.available` = `false` e `steps.available` = `false` (o resto do menu segue); o bloco `steps` (#508) lê o SurrealDB à parte.
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
   (#206); a ingestão, só o `Bearer`.
 """
@@ -230,6 +230,19 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             detail.exception("tray: pedidos pendentes falhou")
             return None
 
+    def _tray_steps(at_ns):
+        """Etapas das rodadas abertas (#508); `None` sem SurrealDB ou se a leitura falha (a causa só no stderr): o bloco sai
+        com `available: false` e os pedidos seguem."""
+        if surreal is None:
+            return None
+        try:
+            return etapas_mod.tray_steps(surreal, at_ns)
+        except Exception as e:  # noqa: BLE001
+            tel.warn("tray-steps-failed", "tray: etapas das rodadas (SurrealDB) falhou, respondi sem elas: %s",
+                     type(e).__name__, level=logging.ERROR)
+            detail.exception("tray: etapas das rodadas falhou")
+            return None
+
     @app.get("/v1/tray")
     async def v1_tray(request: Request):
         """Tudo o que o menu do tray mostra, numa chamada (ADR-08 §10, contrato na seção #205)."""
@@ -243,14 +256,14 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         at_ns = time.time_ns()
         try:
             # os dois bancos ao mesmo tempo: o SurrealDB lento não soma ao tempo do DuckDB
-            snap, pending = await asyncio.gather(
+            snap, pending, steps = await asyncio.gather(
                 run_in_threadpool(store.tray, at_ns, config.prices, config.alerts, zone),
-                run_in_threadpool(_tray_pending, at_ns))
+                run_in_threadpool(_tray_pending, at_ns), run_in_threadpool(_tray_steps, at_ns))
         except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
             tel.warn("tray-failed", "consulta do tray falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta do tray falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
-        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone))
+        return JSONResponse(tray_mod.response(at_ns, snap, pending, config.errors, zone, steps))
 
     # ------------------------------------------------ a rodada em JSON (#507)
     @app.get("/v1/rodada")

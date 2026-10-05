@@ -17,6 +17,7 @@ final class TrayModel: ObservableObject {
     private let session: URLSession
     private let notifications = Notifications()
     private var seen = SeenProposals()
+    private var seenSteps = SeenSteps()
     private var timer: Timer?
 
     init() {
@@ -63,6 +64,9 @@ final class TrayModel: ObservableObject {
         for proposal in seen.newProposals(in: snapshot) {
             notifications.post(id: proposal.id, title: "Pedido novo no canal de aprovação", body: MenuText.proposal(proposal))
         }
+        for step in seenSteps.newSteps(in: snapshot) {
+            notifications.post(id: step.id, title: "Etapa nova na página da rodada", body: MenuText.step(step), kind: "etapa")
+        }
     }
 
     // MARK: - o que o menu abre (o tray não decide nada)
@@ -73,6 +77,14 @@ final class TrayModel: ObservableObject {
 
     func approveCommand(_ proposal: TraySnapshot.Proposal) -> String? {
         ApproveCommand.command(for: proposal, hosts: hosts)
+    }
+
+    func stepURL(_ step: TraySnapshot.Step) -> URL? {
+        config?.pageURL(path: step.url)
+    }
+
+    func openStep(_ step: TraySnapshot.Step) {
+        if let url = stepURL(step) { NSWorkspace.shared.open(url) }
     }
 
     func openScript(_ proposal: TraySnapshot.Proposal) {
