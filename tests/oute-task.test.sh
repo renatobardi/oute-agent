@@ -475,12 +475,12 @@ t 41-spec
 check "fase spec, sem agente posicional: Opus"         [ "$(args claude)" == "--model claude-opus-5-5" ]
 check "fase spec: origem label (o padrão claude não é escolha)" sel_ev spec label claude claude-opus-5-5 ""
 t 44-ops claude
-check "fase ops: Haiku"                                [ "$(args claude)" == "--model claude-haiku-4-5-20251001" ]
+check "fase ops: Sonnet"                                [ "$(args claude)" == "--model claude-sonnet-5-5" ]
 
 # 10b. exceção por label
 t 42-licao claude "lição"
-check "kaizen: Haiku, mesmo com aidlc:spec"            [ "$(args claude)" == "--model claude-haiku-4-5-20251001 lição" ]
-check "kaizen: evento com a fase da issue e origem label" sel_ev spec label claude claude-haiku-4-5-20251001 ""
+check "kaizen: Sonnet, mesmo com aidlc:spec"            [ "$(args claude)" == "--model claude-sonnet-5-5 lição" ]
+check "kaizen: evento com a fase da issue e origem label" sel_ev spec label claude claude-sonnet-5-5 ""
 
 # 10c. sem label e gh fora do ar: Sonnet, com aviso, e a sessão abre
 FAKE_RC=6 t 43-semlabel claude "p"
@@ -631,9 +631,9 @@ check "jev: só o prompt vai à TypeSafe"                jqe '.body.state == "de
 check "jev: a chave não chega aos argumentos do agente nem ao evento" bash -c '! grep -qF "$1" "$2" && ! grep -qF "$1" <<<"$3"' _ "$TS_KEY" "$FAKE/claude.args" "$(last)"
 ts_set ok ops 0.75
 t 43-jev claude "veja por que o custo subiu ontem"
-check "jev: issue sem label de fase abre no Haiku"     [ "$(args claude)" == "--model claude-haiku-4-5-20251001 veja por que o custo subiu ontem" ]
+check "jev: issue sem label de fase abre no Sonnet"     [ "$(args claude)" == "--model claude-sonnet-5-5 veja por que o custo subiu ontem" ]
 check "jev: confiança no evento da issue sem label"    bash -c '[ "$1" == 0.75 ]' _ "$(cf)"
-check "jev: atributos da escolha (issue sem label)"    sel_ev ops jev claude claude-haiku-4-5-20251001 ""
+check "jev: atributos da escolha (issue sem label)"    sel_ev ops jev claude claude-sonnet-5-5 ""
 ts_set ok arch 0.4
 t avulsa-baixa claude "faça alguma coisa aí"
 check "jev com confiança baixa: Sonnet"                [ "$(args claude)" == "--model claude-sonnet-5-5 faça alguma coisa aí" ]

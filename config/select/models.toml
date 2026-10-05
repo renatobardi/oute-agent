@@ -28,7 +28,7 @@ effort = "high"
 
 [[line]]
 phases = ["ops", "ctx", "learn"]
-claude = "claude-haiku-4-5-20251001"
+claude = "claude-sonnet-5-5"
 codex = "gpt-6-luna"
 effort = "medium"
 
@@ -43,13 +43,13 @@ effort = "high"
 [[exception]]
 label = "kaizen"
 unless_phases = ["build", "qa", "design", "plan", "ship", "iter"]
-claude = "claude-haiku-4-5-20251001"
+claude = "claude-sonnet-5-5"
 codex = "gpt-6-luna"
 effort = "medium"
 
 [[exception]]
 label = "docs"
-claude = "claude-haiku-4-5-20251001"
+claude = "claude-sonnet-5-5"
 codex = "gpt-6-luna"
 effort = "medium"
 
