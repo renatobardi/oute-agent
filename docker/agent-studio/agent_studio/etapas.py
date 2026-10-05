@@ -325,12 +325,16 @@ def parse(text):
     return p.finish()
 
 
+def _near(steps, j):
+    """A etapa `j` como destino de link (âncora e título fixo), ou `None` fora da lista."""
+    return {"anchor": steps[j]["anchor"], "title": steps[j]["title"]} if 0 <= j < len(steps) else None
+
+
 def navigate(steps):
     """Põe em cada etapa (já em ordem de rodada) a posição (`pos` de `total`) e a anterior e a seguinte (`prev`, `next`:
     `{"anchor", "title"}` ou `None` nas pontas). Só âncoras e títulos fixos por tipo: nada vem do texto."""
     for i, s in enumerate(steps):
-        near = lambda j: {"anchor": steps[j]["anchor"], "title": steps[j]["title"]} if 0 <= j < len(steps) else None  # noqa: E731
-        s["pos"], s["total"], s["prev"], s["next"] = i + 1, len(steps), near(i - 1), near(i + 1)
+        s["pos"], s["total"], s["prev"], s["next"] = i + 1, len(steps), _near(steps, i - 1), _near(steps, i + 1)
     return steps
 
 
