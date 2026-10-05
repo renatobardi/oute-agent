@@ -182,7 +182,7 @@ def event_statements(row):
         if name == "oute.swarm.round.opened":
             return upsert("rodada", rnd, {**origin, "repo": a("oute.swarm.repo"), "max": a("oute.swarm.max"),
                                           "label": a("oute.swarm.label"), "agent": row.get("oute_agent"),
-                                          "opened_event": ev},
+                                          "name": a("oute.swarm.round.name"), "opened_event": ev},
                           times={"opened_at": t}, initial="aberta")
         if name == "oute.swarm.round.closed":
             return upsert("rodada", rnd, {**origin, "state": "fechada", "closed_event": ev}, times={"closed_at": t})

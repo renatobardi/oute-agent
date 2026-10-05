@@ -78,6 +78,8 @@ public struct TraySnapshot: Decodable, Equatable {
     /// Rodada do swarm parada esperando uma resposta do Bardi (#386).
     public struct Decision: Decodable, Equatable {
         public let round: String?
+        /// Nome amigável da rodada (#605); ausente em rodada antiga e em agent-studio anterior à #605.
+        public let name: String?
         public let host: String?
         public let question: String?
         public let ageSeconds: Int?
@@ -92,6 +94,8 @@ public struct TraySnapshot: Decodable, Equatable {
     /// vem do agent-studio; o texto da etapa nunca vem aqui, só o caminho da página.
     public struct Step: Decodable, Equatable {
         public let round: String
+        /// Nome amigável da rodada (#605); ausente em rodada antiga e em agent-studio anterior à #605.
+        public let name: String?
         /// `triagem`, `merge`, `kaizen` ou `fechamento`.
         public let kind: String
         /// Número do PR, só na etapa `merge`.

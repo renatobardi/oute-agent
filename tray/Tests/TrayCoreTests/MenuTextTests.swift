@@ -38,18 +38,27 @@ final class MenuTextTests: XCTestCase {
 
     func testDecisaoPendente() throws {
         XCTAssertEqual(MenuText.decision(try XCTUnwrap(try leitura().decisions?.pending.first)),
-                       "swarm-1003-1211 · 1. aprovar a triagem  2. cortar a #387 · há 10 min")
+                       "Brave_Otter (swarm-1003-1211) · 1. aprovar a triagem  2. cortar a #387 · há 10 min")
     }
 
     func testEtapaAprovadaDizTituloRodadaEIdadeSemVeredito() throws {
         let etapas = try XCTUnwrap(try leitura().steps)
-        XCTAssertEqual(MenuText.step(etapas.rows[0]), "Fechamento da rodada · swarm-1003-1211 · há 2 min")
+        XCTAssertEqual(MenuText.step(etapas.rows[0]), "Fechamento da rodada · Brave_Otter (swarm-1003-1211) · há 2 min")
     }
 
     func testEtapaSemRevisorEReprovadaDizemOVeredito() throws {
         let etapas = try XCTUnwrap(try leitura().steps)
-        XCTAssertEqual(MenuText.step(etapas.rows[1]), "Pedido de merge #12 · swarm-1003-1211 · sem revisor · há 5 min")
-        XCTAssertEqual(MenuText.step(etapas.rows[2]), "Triagem · swarm-1003-1211 · reprovada pelo revisor · há 40 min")
+        XCTAssertEqual(MenuText.step(etapas.rows[1]), "Pedido de merge #12 · Brave_Otter (swarm-1003-1211) · sem revisor · há 5 min")
+        XCTAssertEqual(MenuText.step(etapas.rows[2]), "Triagem · Brave_Otter (swarm-1003-1211) · reprovada pelo revisor · há 40 min")
+    }
+
+    func testEtapaDeRodadaAntigaSemNomeMostraSoOId() throws {
+        let json = #"{"round":"swarm-1003-1211","kind":"triagem","key":null,"rev":1,"review":"aprovado","title":"Triagem","age_seconds":60}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let etapa = try decoder.decode(TraySnapshot.Step.self, from: Data(json.utf8))
+        XCTAssertNil(etapa.name)
+        XCTAssertEqual(MenuText.step(etapa), "Triagem · swarm-1003-1211 · há 1 min")
     }
 
     func testEtapasDizemQuantasHaOuQueEstaIndisponivel() throws {

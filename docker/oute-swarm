@@ -29,7 +29,14 @@
 #              [--deliver]                          --deliver: em vez de depender do harness, digita os eventos (agrupados, numa
 #                                                   mensagem) no campo do dispatcher parado; nunca com ele ocupado nem sem achar
 #                                                   o campo; o resto fica na fila (watch.queue) e tudo vai ao log
-#   oute-swarm list                                 abas abertas por este dispatcher + worktrees de tarefa
+#   oute-swarm list                                 rodadas (nome e id) com as abas abertas + worktrees de tarefa
+#   oute-swarm busy [--repo <repo>]                 (usado pelo dispatcher, #605) issues com sessão aberta em OUTRA rodada do
+#                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
+#
+# Rodada (#605): id técnico único (`swarm-<MMDD>-<HHMM>`, com sufixo curto se a pasta já existe: reserva por mkdir sem -p) e
+# nome amigável `Adjetivo_Substantivo` (docker/agent-studio/agent_studio/names.py), sorteado na abertura entre os que nenhuma
+# rodada aberta usa e gravado em `name=` do meta. O id segue sendo a chave em tudo; rodada antiga, sem nome, só tem o id.
+# spawn recusa (código 4) issue que já tem sessão aberta em outra rodada.
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
@@ -71,7 +78,7 @@ coord_round() {
   b="$(git -C "$PWD" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   top="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
   [[ "$b" =~ ^sessao/(swarm-[A-Za-z0-9-]+)$ ]] && cands+=("${BASH_REMATCH[1]}")
-  [[ "${top##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4})$ ]] && cands+=("${BASH_REMATCH[1]}")
+  [[ "${top##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4}(-[0-9a-f]{3})?)$ ]] && cands+=("${BASH_REMATCH[1]}")
   for c in ${cands[@]+"${cands[@]}"}; do
     if [[ -f "$STATE_ROOT/$c/meta" ]]; then printf '%s' "$c"; return 0; fi
   done
@@ -105,9 +112,119 @@ resolve_repo() {
   main_root "$r" || die "$r não é um repositório git"
 }
 
+NAMES_PY="${OUTE_NAMES_PY:-/opt/agent-studio/app/agent_studio/names.py}"   # as listas do nome da rodada (#605), as mesmas do agent-studio
+NAME_RE='^[A-Z][a-z]+_[A-Z][a-z]+$'
+
+# acrescenta uma linha `chave=valor` ao meta da rodada, fechando antes a última linha se ela veio sem o \n
+meta_add() {
+  local dir="${1%/}" line="$2"
+  [[ -z "$(tail -c1 "$dir/meta" 2>/dev/null)" ]] || echo >> "$dir/meta"
+  printf '%s\n' "$line" >> "$dir/meta"
+  return 0
+}
+
+# valor de uma chave do meta da rodada (vazio se não há)
+meta_get() {
+  local dir="${1%/}" key="$2"
+  sed -n "s/^$key=//p" "$dir/meta" 2>/dev/null | head -1
+  return 0
+}
+
+# rodada aberta (#605): tem meta e ainda não tem a marca `fechada`; as pastas `ciclo-*` e o `avulso` não têm meta
+round_open() {
+  local dir="${1%/}"
+  [[ -f "$dir/meta" && ! -f "$dir/fechada" ]]
+  return $?
+}
+
+# "Nome (id)" da rodada, ou só o id (rodada antiga, sem nome no meta)
+round_label() {
+  local dir="${1%/}" nm
+  nm="$(meta_get "$dir" name)"
+  if [[ "$nm" =~ $NAME_RE ]]; then printf '%s (%s)' "$nm" "$(basename "$dir")"; else basename "$dir"; fi
+  return 0
+}
+
+# reserva o id técnico da rodada (#605): `mkdir` sem -p é atômico, então duas aberturas no mesmo minuto nunca ficam com a
+# mesma pasta; se `swarm-<MMDD>-<HHMM>` já existe, tenta de novo com um sufixo curto (3 hex). Imprime o id; exit 1 sem vaga
+reserve_round_id() {
+  local base id i
+  base="swarm-$(date +%m%d-%H%M)"; id="$base"
+  mkdir -p "$STATE_ROOT"
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if mkdir "$STATE_ROOT/$id" 2>/dev/null; then printf '%s' "$id"; return 0; fi
+    id="$base-$(printf '%03x' $((RANDOM % 4096)))"
+  done
+  return 1
+}
+
+# sorteia o nome amigável da rodada $1 entre os que nenhuma rodada aberta usa e o grava no meta (#605). Sob trava, para duas
+# aberturas juntas não sortearem o mesmo; sem as listas ou sem python3 a rodada abre só com o id (aviso)
+set_round_name() {
+  local id="$1" d nm name taken=()
+  if [[ ! -f "$NAMES_PY" ]] || ! command -v python3 >/dev/null 2>&1; then
+    echo "oute-swarm: aviso: sem $NAMES_PY ou python3; a rodada $id abre só com o id" >&2; return 0
+  fi
+  for d in "$STATE_ROOT"/*/; do
+    round_open "$d" || continue
+    nm="$(meta_get "$d" name)"; [[ -z "$nm" ]] || taken+=("$nm")
+  done
+  name="$(python3 "$NAMES_PY" draw ${taken[@]+"${taken[@]}"} 2>/dev/null)" || name=""
+  if [[ ! "$name" =~ $NAME_RE ]]; then
+    echo "oute-swarm: aviso: não consegui sortear o nome da rodada $id; abre só com o id" >&2; return 0
+  fi
+  meta_add "$STATE_ROOT/$id" "name=$name"
+  return 0
+}
+
+# set_round_name sob flock (a trava fica ao lado da pasta de estado, em ~/.oute/swarm-nome.lock: dentro dela o oute-emit a leria
+# como rodada; sem flock no PATH, sem trava)
+set_round_name_locked() {
+  local id="$1"
+  if command -v flock >/dev/null 2>&1; then
+    ( flock 9; set_round_name "$id" ) 9>"${STATE_ROOT%/*}/swarm-nome.lock"
+  else set_round_name "$id"; fi
+  return $?
+}
+
+# issues com sessão aberta (spawned menos closed; sessão kaizen não conta) em outras rodadas do repo $1, fora a rodada $2:
+# `<n>\t<slug>\t<id da rodada>`, uma por linha. Repo da sessão: o 6º campo do spawned (linha antiga: o da rodada)
+busy_lines() {
+  local repo="$1" skip="$2" d rid rr
+  for d in "$STATE_ROOT"/*/; do
+    d="${d%/}"; rid="$(basename "$d")"
+    [[ -f "$d/spawned" && "$rid" != "$skip" && "$rid" != ciclo-* ]] || continue
+    rr="$(meta_get "$d" repo)"
+    awk -v cf="$d/closed" -v rid="$rid" -v rr="$rr" -v want="$repo" '
+      BEGIN {while ((getline l < cf) > 0) c[l] = 1}
+      $7 != "kaizen" && !($1 in c) && (($6 == "" ? rr : $6) == want) {split($1, p, "-"); print p[1] "\t" $1 "\t" rid}' "$d/spawned"
+  done
+  return 0
+}
+
+# as outras rodadas abertas no repo $1 (fora a $2), uma linha cada: `Nome (id) · space <s> · issues com sessão aberta: #a, #b`
+other_rounds() {
+  local repo="$1" skip="$2" d rid sp iss
+  for d in "$STATE_ROOT"/*/; do
+    d="${d%/}"; rid="$(basename "$d")"
+    [[ "$rid" != "$skip" ]] && round_open "$d" && [[ "$(meta_get "$d" repo)" == "$repo" ]] || continue
+    sp="$(meta_get "$d" space)"
+    iss="$(busy_lines "$repo" "" | awk -F'\t' -v r="$rid" '$3 == r {printf "%s#%s", (n++ ? ", " : ""), $1}')"
+    printf '%s · space %s · issues com sessão aberta: %s\n' "$(round_label "$d")" "${sp:--}" "${iss:-nenhuma}"
+  done
+  return 0
+}
+
+# space do herdr em que a rodada abre (label do workspace atual); vazio fora do herdr ou sem achar
+herdr_space() {
+  [[ -n "${HERDR_WORKSPACE_ID:-}" ]] || return 0
+  herdr workspace get "$HERDR_WORKSPACE_ID" 2>/dev/null | jq -r '.result.workspace.label // empty' 2>/dev/null | head -1 || true
+  return 0
+}
+
 cmd_start() {
   [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex]"
-  local repo max=3 label="" workers="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd
+  local repo max=3 label="" workers="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -129,13 +246,17 @@ cmd_start() {
   fi
   command -v gh >/dev/null || die "gh não encontrado"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
-  id="swarm-$(date +%m%d-%H%M)"
-  mkdir -p "$STATE_ROOT/$id"
+  id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
+  space="$(herdr_space)"
   # agent = o do dispatcher (oute.agent dos eventos da rodada): claude, ou o do --agent quando é codex (#213);
   # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
   # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (só fora do Claude)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=%s\n%s%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" "$dagent" \
     "${workers:+workers=$workers$'\n'}" "$([[ "$dagent" == claude ]] || printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
+  [[ -z "$space" ]] || meta_add "$STATE_ROOT/$id" "space=$space"
+  set_round_name_locked "$id"
+  rname="$(meta_get "$STATE_ROOT/$id" name)"; rlabel="$(round_label "$STATE_ROOT/$id")"
+  others="$(other_rounds "$main" "$id")"
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   if [[ -n "$workers" ]]; then wtext="\`$workers\` (escolhido pelo Bardi na abertura, \`--agent $workers\`)"
   else wtext="seletor (a rodada abriu sem \`--agent\`: \`claude\`, com o modelo da fase de cada issue)"; fi
@@ -145,9 +266,15 @@ cmd_start() {
   prompt="$(sed -e "s|@@$drop@@[^@]*@@/$drop@@||g" -e "s|@@/\?$keep@@||g" -e '/^- $/d' "$LIB/swarm.md" \
             | sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
                 -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
-                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g")"
-  slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
-  echo "dispatcher $id · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
+                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|${rname:+ (nome amigável **$rname**: o id é a chave em tudo, mas para o Bardi escreva sempre os dois, ex.: \`$rname ($id)\`)}|g")"
+  prompt="${prompt//'{{OUTRAS}}'/${others:-nenhuma}}"
+  slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id${rname:+ · $rname} (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
+  echo "dispatcher $rlabel · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
+  if [[ -n "$others" ]]; then
+    echo "outras rodadas abertas no repo $name:" >&2; sed 's/^/  /' <<<"$others" >&2
+  fi
+  # rótulo da aba do dispatcher: nome e id (#605); o herdr é só o rótulo, falha não impede a rodada
+  if [[ -n "${HERDR_TAB_ID:-}" ]]; then herdr tab rename "$HERDR_TAB_ID" "${rname:+$rname · }$id" >/dev/null 2>&1 || true; fi
   if [[ "$dagent" != claude ]]; then
     # aba do watch: fora do agente, entrega os eventos digitando no campo do dispatcher (watch --deliver). Sem a aba o
     # dispatcher ficaria cego: recusa a abertura em vez de abrir sem acompanhamento
@@ -170,7 +297,7 @@ cmd_start() {
 
 cmd_spawn() {
   local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
-  local model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
+  local busy bslug brid model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
@@ -203,6 +330,17 @@ cmd_spawn() {
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
   else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher)"; fi
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
+  # a mesma issue não abre em duas rodadas (#605): sessão aberta em outra rodada do repo recusa, com código 4 e o nome e o id
+  # da outra; sessão fechada não bloqueia. Kaizen é retrospectiva, não trabalho da issue: fica fora
+  if (( ! kaizen )); then
+    busy="$(busy_lines "$main" "$round" | awk -F'\t' -v n="$n" '$1 == n {print; exit}')"
+    if [[ -n "$busy" ]]; then
+      IFS=$'\t' read -r _ bslug brid <<<"$busy"
+      printf 'oute-swarm: #%s já tem sessão aberta na rodada %s: %s (código 4); feche-a lá (OUTE_SWARM_ID=%s oute-swarm close %s) ou escolha outra issue\n' \
+        "$n" "$(round_label "$STATE_ROOT/$brid")" "$bslug" "$brid" "$bslug" >&2
+      exit 4
+    fi
+  fi
   state="$STATE_ROOT/$round"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
   if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
   # o limite conta as abas abertas agora (spawned menos closed); sessão kaizen (7º campo) não conta
@@ -1282,7 +1420,7 @@ cmd_list() {
   local d line
   for d in "$STATE_ROOT"/*/; do
     [[ -f "$d/spawned" ]] || continue
-    echo "== $(basename "$d")"
+    echo "== $(round_label "$d")"
     while IFS= read -r line; do
       [[ -n "$line" ]] || continue
       if is_closed "${d%/}" "${line%% *}"; then echo "  $line (fechada)"; else echo "  $line"; fi
@@ -1291,8 +1429,34 @@ cmd_list() {
   echo "== worktrees"; oute-task list
 }
 
+# issues com sessão aberta em OUTRA rodada do repo (#605): `<n> <nome ou -> <id> <slug>`; a rodada e o repo são os do dispatcher
+# (--repo: outro repo)
+cmd_busy() {
+  local repo="" round main n slug rid opt val
+  while [[ $# -gt 0 ]]; do
+    opt="$1"; val="${2:-}"
+    case "$opt" in
+      --repo) repo="${val:?}"; shift 2 ;;
+      *) die "opção desconhecida: $opt" ;;
+    esac
+  done
+  round="$(round_id || true)"
+  if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
+  else
+    main="${OUTE_SWARM_REPO:-}"
+    [[ -z "$main" && -n "$round" ]] && main="$(meta_get "$STATE_ROOT/$round" repo)"
+    [[ -n "$main" ]] || main="$(main_root "$PWD" || true)"
+  fi
+  [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher ou passe --repo)"
+  while IFS=$'\t' read -r n slug rid; do
+    [[ -n "$n" ]] || continue
+    printf '%s %s %s %s\n' "$n" "$(meta_get "$STATE_ROOT/$rid" name | grep . || echo -)" "$rid" "$slug"
+  done < <(busy_lines "$main" "$round")
+  return 0
+}
+
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;
@@ -1301,5 +1465,6 @@ case "${1:-}" in
   watch) shift; cmd_watch "$@" ;;
   step) shift; cmd_step "$@" ;;
   list) cmd_list ;;
+  busy) shift; cmd_busy "$@" ;;
   *) cmd_start "$@" ;;
 esac
