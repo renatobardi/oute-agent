@@ -863,7 +863,8 @@ echo 'isto não é JSON' > "$HF"
 t clean
 check "ai-memory com lixo: avisa e segue"               bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2"' _ "$RC" "$OUT"
 jq -n --arg a "$SP/proj-err1" '[{id:"h-err",cwd:$a}]' > "$HF"
-t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=6 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes
+# Este caso mede o prazo dos handoffs; a proteção de sessão em uso já foi conferida na seção 12.
+t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=6 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes --force-in-use
 check "ai-memory sem resposta: avisa, segue e remove, dentro do prazo" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && [ ! -e "$3" ] && [ $(( $(date +%s) - $4 )) -le 4 ]' _ "$RC" "$OUT" "$SP/proj-err1" "$t0"
 t abs1 claude
 NOAM="$TMP/bin-noam"; mkdir -p "$NOAM"
