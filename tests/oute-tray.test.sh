@@ -84,7 +84,8 @@ check "install: sem ícone no Dock (LSUIElement)" file_has "$APP/Contents/Info.p
 check "install: o binário grava o ícone do app (#563)" file_has "$F_CALLS" "OuteTray --write-icon $APP/Contents/Resources/AppIcon.icns"
 check "install: o .app tem o ícone" [ -s "$APP/Contents/Resources/AppIcon.icns" ]
 check "install: o Info.plist aponta para o ícone" file_has "$APP/Contents/Info.plist" '<key>CFBundleIconFile</key><string>AppIcon.icns</string>'
-check "install: identificador do pacote" file_has "$APP/Contents/Info.plist" '<key>CFBundleIdentifier</key><string>pro.oute.tray</string>'
+check "install: identificador do pacote (novo na #563; o rótulo do LaunchAgent segue pro.oute.tray)" file_has "$APP/Contents/Info.plist" '<key>CFBundleIdentifier</key><string>pro.oute.outetray</string>'
+check "install: rótulo do LaunchAgent" file_has "$PLIST" '<key>Label</key><string>pro.oute.tray</string>'
 check "install: LaunchAgent aponta para o binário do .app" file_has "$PLIST" "<string>$APP/Contents/MacOS/OuteTray</string>"
 check "install: LaunchAgent abre no login" file_has "$PLIST" '<key>RunAtLoad</key><true/>'
 check "install: LaunchAgent carregado na sessão do usuário" file_has "$F_CALLS" "launchctl bootstrap gui/$(id -u) $PLIST"

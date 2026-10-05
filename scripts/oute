@@ -1035,6 +1035,9 @@ install_link() {
 # compila aqui, monta o .app sem ícone no Dock (LSUIElement) e abre no login por um LaunchAgent. Sem App Store nem
 # assinatura de desenvolvedor (só a ad-hoc, local). O app só lê o agent-studio; aprovar abre o Terminal no `oute approve`.
 TRAY_LABEL="pro.oute.tray"
+# o identificador do app é outro que o rótulo do LaunchAgent (#563): a Central de Notificações do macOS guarda o
+# ícone por identificador, e o `pro.oute.tray` ficou com o ícone genérico de quando o app não tinha ícone
+TRAY_BUNDLE_ID="pro.oute.outetray"
 TRAY_APP="$HOME/Applications/OuteTray.app"
 TRAY_PLIST="$HOME/Library/LaunchAgents/$TRAY_LABEL.plist"
 TRAY_HOSTS="$OUTE_HOME/tray-hosts"
@@ -1084,7 +1087,7 @@ tray_install() {
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>$TRAY_LABEL</string>
+  <key>CFBundleIdentifier</key><string>$TRAY_BUNDLE_ID</string>
   <key>CFBundleName</key><string>OuteTray</string>
   <key>CFBundleExecutable</key><string>OuteTray</string>
   <key>CFBundlePackageType</key><string>APPL</string>
