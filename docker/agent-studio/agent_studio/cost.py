@@ -3,8 +3,9 @@
 Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas (#204), o tray e a tela (#205 a
 #207), que reusam este módulo e o `usage.aggregate`. O SQL sai daqui montado, com os valores sempre em parâmetro.
 
-- **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex) ou
-  `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
+- **Chamada ao modelo** = span `claude_code.llm_request` (Claude Code), `session_task.turn` (Codex),
+  `ai_memory.llm_request` (o oute-llm-proxy, LLM do ai-memory, #459; agente `ai-memory`, custo real no `oute.cost_usd`)
+  ou `jev.decision` (histórico, ver abaixo). Tokens, custo e p95 saem só delas.
 - **Histórico até 2026-09-30 (#218):** o jev-router (LiteLLM + OpenRouter) saiu do stack e ninguém mais emite
   `jev.decision` nem `oute.agent=router`. As regras desses registros ficam só para o que já está gravado, para o
   custo passado não sumir do `/v1/usage`:
@@ -25,7 +26,7 @@ Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas
 from dataclasses import dataclass
 
 # nomes exatos dos spans que representam uma chamada ao modelo
-MODEL_CALL_SPANS = ("claude_code.llm_request", "session_task.turn", "jev.decision")
+MODEL_CALL_SPANS = ("claude_code.llm_request", "session_task.turn", "ai_memory.llm_request", "jev.decision")
 # histórico até 2026-09-30 (#218): só existem em registro já gravado, ninguém mais emite
 ROUTER_AGENT = "router"
 DECISION_SPAN = "jev.decision"
@@ -195,8 +196,9 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     return sql, [CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
 
 
-def window_spans_with_cost(from_ns, to_ns):
-    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga."""
-    return spans_with_cost("time_unix_nano >= ? AND time_unix_nano < ?", [from_ns, to_ns],
+def window_spans_with_cost(from_ns, to_ns, span_extra="", span_extra_params=()):
+    """`spans_with_cost` dos spans que começam em [from_ns, to_ns), com os logs da janela mais a folga. `span_extra` =
+    condição a mais sobre os spans (` AND …`, com os parâmetros em `span_extra_params`): o filtro de repositório, #528."""
+    return spans_with_cost(f"time_unix_nano >= ? AND time_unix_nano < ?{span_extra}", [from_ns, to_ns, *span_extra_params],
                            "time_unix_nano >= ? AND time_unix_nano < ?",
                            [max(from_ns - LOG_COST_MARGIN_NS, 0), to_ns + LOG_COST_MARGIN_NS])

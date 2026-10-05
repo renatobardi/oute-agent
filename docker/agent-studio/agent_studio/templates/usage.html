@@ -29,7 +29,7 @@
 <div class="pagina">
 <div class="pagina-topo">
 <div class="titulo-linha"><h1>Uso por papel e por fase</h1>
-{{ filter("/uso", windows, hours, range) }}</div>
+{{ filter("/uso", windows, hours, range, repos=repos, repo=repo) }}</div>
 <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 <p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">

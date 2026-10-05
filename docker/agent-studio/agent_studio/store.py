@@ -10,7 +10,7 @@ import time
 import duckdb
 
 from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, prices as prices_mod, proposals as prop_mod,
-               sessions as sess_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
+               repo as repo_mod, sessions as sess_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -26,6 +26,7 @@ TABLES = {
         ("session_id", "VARCHAR"),
         ("oute_task_id", "VARCHAR"),
         ("oute_swarm_round", "VARCHAR"),
+        ("oute_repo", "VARCHAR"),
         ("event_name", "VARCHAR"),
         ("oute_event_id", "VARCHAR"),
         ("severity_number", "INTEGER"),
@@ -48,6 +49,7 @@ FIXED_COLS = [
     ("session_id", "VARCHAR"),
     ("oute_task_id", "VARCHAR"),
     ("oute_swarm_round", "VARCHAR"),
+    ("oute_repo", "VARCHAR"),
 ]
 TABLES["spans"] = [
     ("dedupe_key", "VARCHAR PRIMARY KEY"),  # s:<trace_id>:<span_id>
@@ -119,6 +121,26 @@ def _sql(table, cols):
 SQL = {table: _sql(table, cols) for table, cols in TABLES.items()}
 
 
+def migrate(con):
+    """Banco criado antes do #528: põe a coluna `oute_repo` e a preenche do JSON `resource_attributes`, para o histórico
+    aparecer no filtro de repositório como o resto. Numa transação só (ou a coluna e o preenchimento entram, ou nenhum),
+    e só nas tabelas que ainda não têm a coluna: depois disso a subida não varre nada."""
+    have = {t for (t,) in con.execute("SELECT table_name FROM information_schema.columns WHERE column_name = 'oute_repo'").fetchall()}
+    missing = [t for t in TABLES if t not in have]
+    if not missing:
+        return
+    con.execute("BEGIN TRANSACTION")
+    try:
+        for table in missing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN oute_repo VARCHAR")
+            con.execute(f"UPDATE {table} SET oute_repo = NULLIF(json_extract_string(resource_attributes, '{repo_mod.JSON_PATH}'), '') "
+                        f"WHERE json_extract_string(resource_attributes, '{repo_mod.JSON_PATH}') IS NOT NULL")
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
 class Store:
     def __init__(self, path):
         self.path = path
@@ -132,6 +154,7 @@ class Store:
         with self.lock:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
+            migrate(self.con)
             prices_mod.create(self.con)  # histórico de preços (#339)
 
     def close(self):
@@ -173,20 +196,26 @@ class Store:
             self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
         return len(new), len(rows) - len(new)
 
-    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
-        """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila."""
+    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
+        """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila. `repo`
+        (#528) só a tela `/uso` passa; o `GET /v1/usage` não tem o parâmetro."""
         with self.lock:
-            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz)
+            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz, repo)
 
-    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC):
+    def repos(self, from_ns, to_ns):
+        """Os repositórios com fato na janela (#528), para o filtro das telas."""
+        with self.lock:
+            return repo_mod.options(self.con, from_ns, to_ns)
+
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
-        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano."""
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528) faz parte da chave."""
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute
-        key = ("live", to_ns - from_ns, tzk) if live else (from_ns // minute, to_ns // minute, tzk)
+        key = ("live", to_ns - from_ns, tzk, repo) if live else (from_ns // minute, to_ns // minute, tzk, repo)
         with self._dash_lock:
             hit = self._dash_cache.get(key)
             if hit and time.monotonic() - hit[0] < DASH_TTL_S:
@@ -194,18 +223,18 @@ class Store:
             if hit and live:
                 if not self._dash_refreshing.get(key):
                     self._dash_refreshing[key] = True
-                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz), daemon=True).start()
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo), daemon=True).start()
                 return hit[1]
-        return self._dash_refresh(key, from_ns, to_ns, prices, tz)
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo)
 
-    def _dash_refresh(self, key, from_ns, to_ns, prices, tz):
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None):
         with self._dash_lock:
             try:
                 cur = self.con.cursor()
                 timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
                 timer.start()
                 try:
-                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz)
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo)
                 finally:
                     timer.cancel()
                     cur.close()
@@ -230,9 +259,9 @@ class Store:
             return decisions_mod.pending(self.con, at_ns, cfg)
 
     # leituras da tela (#206), sob a mesma trava
-    def conversations(self, from_ns, to_ns, prices, host=None, agent=None):
+    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None):
         with self.lock:
-            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent)
+            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo)
 
     def conversation(self, session_id, prices, errors_only=False):
         with self.lock:
@@ -247,9 +276,9 @@ class Store:
             return conv_mod.span(self.con, trace_id, span_id)
 
     # leituras da tela de sessões (#207), sob a mesma trava
-    def sessions(self, from_ns, to_ns, prices, host=None, agent=None):
+    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None):
         with self.lock:
-            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent)
+            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, repo=repo)
 
     def session(self, task_id, prices):
         with self.lock:

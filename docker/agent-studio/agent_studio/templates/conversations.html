@@ -6,7 +6,7 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent) }}</div>
+  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > conversations|length %} · Mostrando as {{ conversations|length }} mais recentes de {{ total }}{% endif %}</p>
 </div>
 {% if conversations %}
@@ -20,7 +20,7 @@
   <tbody>
   {% for c in conversations %}
   {% set u = c.usage %}
-  <tr data-conversa="{{ c.id }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}" data-start-ns="{{ c.start_ns }}"
+  <tr data-conversa="{{ c.id }}" data-host="{{ c.host or '' }}" data-repo="{{ c.repo or '' }}" data-agent="{{ c.agent or '' }}" data-start-ns="{{ c.start_ns }}"
       data-duration-ns="{{ c.duration_ns }}" data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}"
       data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}"
       data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"

@@ -31,7 +31,8 @@ case "$1" in
              # o que o compose interpolaria (#256): só o que os casos de segredo de serviço conferem
              *" up "*) printf '%s\n' "ingest=${AGENT_STUDIO_INGEST_TOKEN:-}" "read=${AGENT_STUDIO_READ_TOKEN:-}" \
                          "pass=${AGENT_STUDIO_SURREAL_PASS:-}" "antigo=${AGENT_STUDIO_TOKEN:-}" "otel=${OUTE_OTEL_STUDIO:-}" \
-                         "url=${AGENT_STUDIO_URL:-}" "profiles=${COMPOSE_PROFILES:-}" "bw=${BW_SESSION:-}" > "$F_ENV" ;;
+                         "url=${AGENT_STUDIO_URL:-}" "profiles=${COMPOSE_PROFILES:-}" "bw=${BW_SESSION:-}" \
+                         "memkey=${OPENROUTER_MEMORY_API_KEY:-}" > "$F_ENV" ;;
            esac ;;
   image)   exit 0 ;;
   volume)  exit 1 ;;
@@ -91,7 +92,7 @@ gerados() { mkdir -p "$REPO/$OLDDIR"; for f in router.yaml config.yaml candidate
 oute_env() {
   env -u "$OLD_KEY" -u OUTE_AGENT_STUDIO -u AGENT_STUDIO_TOKEN -u COMPOSE_PROFILES \
     -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION \
-    -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
+    -u OPENROUTER_MEMORY_API_KEY -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_URL \
     -u OUTE_AGENT_STUDIO_URL -u OUTE_VAULT_FOLDER -u OUTE_VAULT_SERVICES_FOLDER -u GH_TOKEN -u GHCR_TOKEN \
     -u BW_SESSION -u BW_PASSWORD -u BW_CLIENTID -u BW_CLIENTSECRET -u OUTE_FUSE_PATHS \
     ${F_FUSE:+OUTE_FUSE_PATHS="$F_FUSE"} ${F_OCI:+OCI_S3_ACCESS_KEY="$F_OCI" OCI_S3_SECRET_KEY="$F_OCI" OCI_S3_ENDPOINT="$F_OCI" OCI_S3_REGION="$F_OCI"} \
@@ -523,6 +524,44 @@ check "oficial com FUSE: sem mensagem nova"            bash -c '! grep -qF -e "$
 check "Linux: sem mensagem nova"                       bash -c '! grep -qF -e "$1" -e "$2" <<<"$3"' _ "$HB" "$NF" "$OUT"
 check "Linux: nenhuma chamada ao rclone"               test ! -s "$F_RCLONE_LOG"
 unset F_PATHX
+
+# ================================================================ proxy do LLM do ai-memory (#459)
+# a chave da memória (item openrouter-memoria, pasta oute-services) só chega ao compose, que a interpola só no serviço
+# llm-proxy; o profile liga com ela e desliga sem ela; o agent.env nunca a leva
+T_MEM="$(rnd)"
+rm -f "$REPO/.env" "$AENV" "$SENV"
+printf "export GH_TOKEN='%s'\n" "$T_GH" > "$F_VAULT/oute-agent"
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\n" "$T_ING" > "$F_VAULT/oute-services"
+oute up --refresh-secrets
+check "proxy do LLM, sem a chave: rc 0 e sobe"         [ "$RC" -eq 0 ]
+check "proxy do LLM, sem a chave: profile desligado"   test -z "$(cenv profiles)"
+check "proxy do LLM, sem a chave: nada de chave ao compose" test -z "$(cenv memkey)"
+check "proxy do LLM, sem a chave: a nota diz como ligar" has 'nota: OPENROUTER_MEMORY_API_KEY não está em .*item openrouter-memoria da pasta oute-services'
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\nexport OPENROUTER_MEMORY_API_KEY='%s'\n" "$T_ING" "$T_MEM" > "$F_VAULT/oute-services"
+oute up --refresh-secrets
+check "proxy do LLM, com a chave: rc 0"                [ "$RC" -eq 0 ]
+check "proxy do LLM, com a chave: profile llm-proxy"   test "$(cenv profiles)" = "llm-proxy"
+check "proxy do LLM, com a chave: o compose a recebe"  test "$(cenv memkey)" = "$T_MEM"
+check "proxy do LLM, com a chave: services.env a guarda" grep -qxF "export OPENROUTER_MEMORY_API_KEY=$T_MEM" "$SENV"
+check "proxy do LLM, com a chave: agent.env sem ela"   bash -c '! grep -qF -e OPENROUTER_MEMORY -e "$1" "$0"' "$AENV" "$T_MEM"
+check "proxy do LLM, com a chave: sem a nota"          hasnt 'nota: OPENROUTER_MEMORY_API_KEY'
+check "proxy do LLM, com a chave: saída sem o valor"   hasnt_str "$T_MEM"
+# no oute-server o profile soma ao do agent-studio
+printf 'OUTE_AGENT_STUDIO=1\n' > "$REPO/.env"
+printf "export AGENT_STUDIO_INGEST_TOKEN='%s'\nexport AGENT_STUDIO_SURREAL_PASS='%s'\nexport OPENROUTER_MEMORY_API_KEY='%s'\n" "$T_ING" "$S_NEW" "$T_MEM" > "$F_VAULT/oute-services"
+oute up --refresh-secrets
+check "proxy do LLM no oute-server: os dois profiles"  test "$(cenv profiles)" = "agent-studio,llm-proxy"
+# chave esquecida na pasta oute-agent (nome de serviço): sai do agent.env e o services.env a guarda
+rm -f "$AENV" "$SENV" "$F_VAULT/oute-services"
+printf "export GH_TOKEN='%s'\nexport OPENROUTER_MEMORY_API_KEY='%s'\n" "$T_GH" "$T_MEM" > "$F_VAULT/oute-agent"
+oute up --refresh-secrets
+check "chave na pasta do agent: sai do agent.env"      bash -c '! grep -qF -e OPENROUTER_MEMORY -e "$1" "$0"' "$AENV" "$T_MEM"
+check "chave na pasta do agent: vai ao services.env e ao compose" test "$(grep -cxF "export OPENROUTER_MEMORY_API_KEY=$T_MEM" "$SENV")$(cenv memkey)" = "1$T_MEM"
+check "chave na pasta do agent: avisa o nome, sem o valor" bash -c 'grep -q "segredo de serviço fora do arquivo do agent (#256): OPENROUTER_MEMORY_API_KEY estava" <<<"$0" && ! grep -qF "$1" <<<"$0"' "$OUT" "$T_MEM"
+: > "$F_LOG"
+oute down
+check "down enxerga o profile do llm-proxy"            grep -qF -e '--profile llm-proxy' "$F_LOG"
+rm -f "$REPO/.env"
 
 # ================================================================ rede (#230): derivação e validação
 # Mac com subnet customizada: range derivado, IP fixo validado

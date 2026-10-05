@@ -94,20 +94,30 @@
 {% endmacro %}
 
 {# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
-{# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela e, nas
-   listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam host e agente; o intervalo vai em `de`/`ate`. #}
-{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="") %}
+{# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela, o
+   repositório (`repos` = none: sem ele) e, nas listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam repositório, host e agente; o intervalo vai em `de`/`ate`. #}
+{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="") %}
 <form class="filtro" method="get" action="{{ action }}"{% if hosts is not none %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
       hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true"{% endif %}>
   <nav class="janelas" aria-label="Janela">
     {% for value, label in windows %}
-    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}
+    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}
     <a href="{{ action }}?{{ keep|urlencode }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
   {% if not range.from %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
   <label>De ({{ tzl() }})<input type="datetime-local" name="de" value="{{ range.from }}"></label>
   <label>Até ({{ tzl() }})<input type="datetime-local" name="ate" value="{{ range.to }}"></label>
+  {% if repos is not none %}
+  <label>Repositório
+    <select name="repo">
+      <option value="">Todos</option>
+      {% for r in repos %}<option value="{{ r }}"{% if r == repo %} selected{% endif %}>{{ r }}</option>{% endfor %}
+      <option value="{{ repo_none }}"{% if repo == repo_none %} selected{% endif %}>sem repositório</option>
+      {% if repo and repo != repo_none and repo not in repos %}<option value="{{ repo }}" selected>{{ repo }}</option>{% endif %}
+    </select>
+  </label>
+  {% endif %}
   {% if hosts is not none %}
   <label>Host
     <select name="host">
@@ -160,7 +170,7 @@
 {% endmacro %}
 
 {% macro conversation_row(c) %}
-<tr class="conversa" data-conversa="{{ c.id }}" data-da-sessao="{{ c.session or '' }}" data-host="{{ c.host or '' }}" data-agent="{{ c.agent or '' }}"
+<tr class="conversa" data-conversa="{{ c.id }}" data-da-sessao="{{ c.session or '' }}" data-host="{{ c.host or '' }}" data-repo="{{ c.repo or '' }}" data-agent="{{ c.agent or '' }}"
     data-models="{{ c.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-start-ns="{{ c.start_ns }}"
     data-duration-ns="{{ c.duration_ns }}" {{ usage_data(c.usage) }}>
   <td class="hora sec">{{ c.start_ns|ts }}</td>
@@ -186,7 +196,7 @@
 {% endmacro %}
 
 {% macro session_row(s) %}
-<tr class="sessao" data-sessao="{{ s.id }}" data-host="{{ s.host or '' }}" data-agents="{{ s.agents|join(',') }}"
+<tr class="sessao" data-sessao="{{ s.id }}" data-host="{{ s.host or '' }}" data-repo="{{ s.repo or '' }}" data-agents="{{ s.agents|join(',') }}"
     data-models="{{ s.models|map(attribute='model')|map('default', '', true)|join(',') }}" data-round="{{ s.swarm_round or '' }}"
     data-state="{{ s.state.state or '' if s.state else '' }}" data-conversations="{{ s.conversation_count }}"
     data-start-ns="{{ '' if s.start_ns is none else s.start_ns }}" data-duration-ns="{{ '' if s.duration_ns is none else s.duration_ns }}"
