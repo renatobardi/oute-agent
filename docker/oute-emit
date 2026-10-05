@@ -706,11 +706,14 @@ TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.
              # confiança do Jev (#257): presente quando ele respondeu, com origem jev ou padrao
              "confidence": "oute.task.confidence",
              # motivo da reserva no Codex (ADR-02, #258): só quando a sessão abriu na reserva
-             "reserve": "oute.task.reserve"}
+             "reserve": "oute.task.reserve",
+             # assinatura de onde a sessão saiu para a reserva (#598): o agente do evento é a de destino
+             "reserve_from": "oute.task.reserve_from"}
 TASK_REASONS = ("merged", "empty", "detached")
 TASK_ORIGINS = ("manual", "label", "jev", "padrao")
 TASK_RESERVES = ("indisponivel", "cota")
-SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence", "reserve")
+SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence", "reserve", "reserve_from")
+SUBSCRIPTION_RE = re.compile(r"[a-z][a-z0-9-]{0,31}")
 
 
 def cmd_task(kind, caller, pairs):
@@ -739,6 +742,8 @@ def cmd_task(kind, caller, pairs):
             raise Skip(f"origem da escolha inválida: {f['origin']}")
         if "reserve" in f and f["reserve"] not in TASK_RESERVES:
             raise Skip(f"motivo da reserva inválido: {f['reserve']}")
+        if "reserve_from" in f and ("reserve" not in f or not SUBSCRIPTION_RE.fullmatch(f["reserve_from"])):
+            raise Skip(f"assinatura de origem da reserva inválida: {f['reserve_from']}")
         if "confidence" in f:
             if not re.fullmatch(r"0(\.[0-9]+)?|1(\.0+)?", f["confidence"]):
                 raise Skip(f"confiança inválida: {f['confidence']}")

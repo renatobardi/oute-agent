@@ -359,7 +359,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     def validate_screen(path, q):
         # Mesmas regras das rotas completas, antes de abrir a primeira leitura.
         if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas"):
-            screen_window(q)
+            path_window(path, q)
         tables = {CONVERSAS: (conv_mod.TABLE,), SESSOES: (sess_mod.TABLE, sess_mod.LOOSE),
                   "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE),
                   "/pedidos": (prop_mod.PENDING_TABLE, prop_mod.RECENT_TABLE), "/rodadas": (etapas_mod.TABLE,)}
@@ -383,9 +383,16 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             if not 0 <= offset < 2**31:
                 raise ValueError("Parâmetros inválidos (id e offset).")
 
-    def request_window(request):
+    def path_window(path, q):
+        """A janela da tela `path`. Só `/rodadas` muda a regra (#618): sem período escolhido (`hours` ausente ou vazio, sem
+        from/to e sem de/ate), a janela é `etapas.ALL_TIME`, todas as rodadas. As outras telas seguem com 24 h por padrão."""
+        if path == "/rodadas" and not q.get("hours") and "from" not in q and "to" not in q and not has_range(q):
+            return etapas_mod.ALL_TIME
+        return screen_window(q)
+
+    def request_window(request, path=""):
         view = getattr(request.state, "view", None)
-        return view.window if view is not None and view.window is not None else screen_window(request.query_params)
+        return view.window if view is not None and view.window is not None else path_window(path, request.query_params)
 
     def shell_info(path, request):
         title, nav, detail, blocks = loading_mod.SCREENS[path]
@@ -428,7 +435,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 except ValueError as exc:
                     return error(request, 400, str(exc))
                 request.state.screen_path = path
-                fixed_window = screen_window(request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas") else None
+                fixed_window = path_window(path, request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas") else None
                 request.state.view_id = views.open(path, loading_mod.pairs(request.query_params), fixed_window)
                 return page(request, "loading.html", **shell_info(path, request),
                             full_url=full_url(request), loading_shell=True)
@@ -835,12 +842,13 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
     @screen("/rodadas")
     async def rounds(request: Request):
-        """O histórico das rodadas (#601): toda rodada com evento de abertura na janela, com ou sem etapa publicada."""
+        """O histórico das rodadas (#601): toda rodada com evento de abertura, com ou sem etapa publicada. Sem período
+        escolhido, todas as rodadas (#618); com ele, só as da janela."""
         if (denied := await gate(request)) is not None:
             return denied
         q = request.query_params
         try:
-            from_ns, to_ns = request_window(request)
+            from_ns, to_ns = request_window(request, "/rodadas")
             (st,) = table_states(q, etapas_mod.TABLE)
         except ValueError as e:
             return error(request, 400, str(e))
@@ -853,8 +861,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         for r in etapas_mod.with_state(rows, states):
             r["url"] = round_url(r, now_ns)
         (t,), keep = table_ctx(q, "/rodadas", (etapas_mod.TABLE, st, rows))
-        return page(request, "rodadas.html", t=t, keep=keep, state_read=state_read, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS,
-                    **period(q, from_ns, to_ns, config.tz))
+        todas = (from_ns, to_ns) == etapas_mod.ALL_TIME
+        per = {"hours": "", "range": {"from": "", "to": ""}} if todas else period(q, from_ns, to_ns, config.tz)
+        return page(request, "rodadas.html", t=t, keep=keep, state_read=state_read, from_ns=from_ns, to_ns=to_ns,
+                    windows=(("", "todas as rodadas"), *WINDOWS), todas=todas, **per)
 
     def round_data(rnd):
         data = etapas_mod.load(store, surreal, rnd)

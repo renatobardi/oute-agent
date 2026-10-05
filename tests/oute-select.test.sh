@@ -196,7 +196,7 @@ check "sem tabela: a escolha explícita vale"            is "" manual codex gpt-
 echo 'default = [' > "$TMP/quebrada.toml"
 OUTE_SELECT_TABLE="$TMP/quebrada.toml" sel --issue 10
 check "tabela que não é TOML: abre sem modelo, com aviso" bash -c '[ "$1" -eq 0 ] && jq -e ".model == \"\"" <<<"$2" >/dev/null && grep -qF "tabela de fase ausente ou inválida" <<<"$3"' _ "$RC" "$OUT" "$ERR"
-printf '[default]\nclaude = "a b"\ncodex = "x"\neffort = "high"\n' > "$TMP/invalida.toml"
+printf '[[subscription]]\nname = "claude"\ndefault = true\n[[subscription]]\nname = "codex"\n[default]\nclaude = "a b"\ncodex = "x"\neffort = "high"\n' > "$TMP/invalida.toml"
 OUTE_SELECT_TABLE="$TMP/invalida.toml" sel --issue 10
 check "tabela com id inválido: abre sem modelo, com aviso" bash -c '[ "$1" -eq 0 ] && jq -e ".model == \"\"" <<<"$2" >/dev/null && grep -qF "[default] sem claude, codex ou effort" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 
@@ -567,9 +567,9 @@ OUT="$(PATH="$TMP/semquota" "$SEL" --json --repo "$TMP/repo" --issue 50 2>"$TMP/
 check "sem oute-quota no PATH: Claude, aviso, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null && grep -qF "não li a cota" <<<"$3"' _ "$RC" "$OUT" "$ERR"
 
 # os dois esgotados: aviso claro, Claude
-qj 99 40 9000 ok 98 10; sel --issue 50
+qj 99 40 9000 ok 100 10; sel --issue 50
 check "Claude e Codex >= 98%: Claude, reserve vazio, código 0" bash -c '[ "$1" -eq 0 ] && jq -e ".agent == \"claude\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$RC" "$OUT"
-check "Claude e Codex >= 98%: aviso diz que a do Codex também" bash -c 'grep -qF "esgotada" <<<"$1" && grep -qF "do Codex também" <<<"$1" && grep -qF "5h em 98%" <<<"$1"' _ "$ERR"
+check "Claude e Codex >= 98%: aviso diz que a do Codex também" bash -c 'grep -qF "esgotada" <<<"$1" && grep -qF "do Codex também" <<<"$1" && grep -qF "5h em 100%" <<<"$1"' _ "$ERR"
 qj 10 99 9000 ok 10 99; sel --issue 50
 check "7d do Codex em 99%: também esgotado, Claude"     resv "" claude
 # Codex desconhecido: troca, com aviso

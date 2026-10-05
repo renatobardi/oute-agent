@@ -91,7 +91,11 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Reserva (#258): com o Claude indisponível (`claude auth status` ≠ 0 ou claude ausente), a sessão abre no Codex da
   mesma linha (`codex -m <id> -c model_reasoning_effort=<e>`), e o evento leva oute.task.reserve=indisponivel.
   --agent/--model explícitos e --phase fixa não caem na reserva (só avisam); os dois fora: aviso e abre no Claude.
-  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--model <id>]
+  Reserva por cota e assinaturas (#598): a tabela lista as assinaturas (uma padrão, as outras reservas). Com a padrão
+  indisponível ou com janela >= 98%, a sessão abre na reserva de mais cota livre (`reserve_mode = "mais-livre"`) ou na
+  primeira da ordem da tabela abaixo do teto (`"ordem"`); todas no teto: a de mais cota livre, com aviso. O evento leva
+  oute.task.reserve (cota|indisponivel) e oute.task.reserve_from (a assinatura de onde saiu).
+  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--prefer A] [--model <id>]
               [--text-file <arquivo>|-]
                                     diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
                                     confiança do Jev e reserva (reserve), sem abrir sessão; --text-file: o texto da tarefa para o Jev
@@ -228,7 +232,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   permitem afirmar e quantas separam duas variantes) e `custo por execução` (chamadas, tempo, turnos e custo por modelo).
   --keep <pasta>: guarda transcrições e registros dos dublês (ssh.log, gh.log…) de cada chamada, sem valor de segredo.
   --model: só um modelo. --codex: roda também a tarefa root com `codex exec`. OUTE_REGRESSION_PARALLEL (padrão 8) limita as
-  chamadas ao mesmo tempo. Com `oute-quota` e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), recusa e sai com 3.
+  chamadas ao mesmo tempo. Com `oute-quota` e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT) da assinatura que a execução usa (Claude; com --codex, também o Codex; #598), recusa e sai com 3, dizendo a assinatura e a janela.
   Ao fim emite oute.regression.run (imagem, CLIs, modelos, rodadas, verde/vermelho por tarefa e modelo, chamadas, custo)
   pelo oute-emit, sem texto de prompt nem de resposta. Obrigatória em todo PR que muda agent-notes.md, swarm.md ou
   swarm-worker.md (regra do swarm-worker.md). Nunca em CI. Saída: 0 verde, 1 alguma tarefa vermelha, 2 não rodou, 3 cota.
