@@ -759,7 +759,8 @@ t cota-1 codex
 check "cota: reabrir também faz o snapshot (novos pontos do Claude)" until_n "mp '.name == \"oute.quota.used_pct\"' | grep -c ." $((before / 2 + 1))
 # leitura lenta: a abertura volta antes e com a mesma saída
 echo 6 > "$QB/sleep"
-t0=$(date +%s); FAKE_RC=5 t cota-2 claude "p"; dt=$(( $(date +%s) - t0 ))
+# O prazo abaixo mede o snapshot assíncrono; a leitura do seletor tem teto curto só neste caso.
+t0=$(date +%s); FAKE_RC=5 OUTE_SELECT_QUOTA_TIMEOUT=0.3 t cota-2 claude "p"; dt=$(( $(date +%s) - t0 ))
 check "cota lenta: a abertura não espera a leitura ($dt s)" bash -c '[ "$1" -eq 5 ] && [ "$2" -le 4 ] && [ "$3" = "agente falso claude" ]' _ "$RC" "$dt" "$OUT"
 # oute-quota que falha (rc 2, sem saída): a abertura é a mesma
 rm -f "$QB/sleep"; echo 2 > "$QB/rc"; : > "$QB/json"
@@ -767,7 +768,7 @@ FAKE_RC=5 t cota-3 claude "p"
 check "cota com falha na leitura: abertura igual"      bash -c '[ "$1" -eq 5 ] && [ "$2" = "agente falso claude" ] && [ "$3" = "worktree $4/proj-cota-3 · branch sessao/cota-3 (de origin/main)" ]' _ "$RC" "$OUT" "$ERR" "$SP"
 check "cota com falha na leitura: o oute.task.opened sai" [ "$(task_ev '.attrs["oute.task.slug"] == "cota-3"' | grep -c .)" -eq 1 ]
 export PATH="$OLDPATH"
-rcv_stop
+# O receptor segue ativo até o trap: o prazo dos handoffs não deve incluir retries de um coletor fora do ar.
 
 # ---------------------------------------------------------------- 12. clean: sessão em uso (#374)
 # Duas rodadas no mesmo space: a swarm-0303-1000 fecha e roda o clean; a swarm-0303-1001 segue aberta, com um worker
