@@ -44,6 +44,10 @@ detail_log = logging.getLogger("agent_studio_detail")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOME = "/"
+CONVERSAS = "/conversas"
+SESSOES = "/sessoes"
+FERRAMENTA = "/ferramenta"
+CONVERSA_LOGS = "/conversa/logs"
 MAX_LOGIN_BODY = 4096
 # janelas prontas das quatro telas com período (#527; horas -> rótulo); a URL aceita também from/to, como o /v1/usage, e de/ate no fuso da tela
 WINDOWS = (("24", "24 horas"), ("168", "7 dias"), ("720", "30 dias"), ("8784", "366 dias"))
@@ -353,22 +357,22 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
     def validate_screen(path, q):
         # Mesmas regras das rotas completas, antes de abrir a primeira leitura.
-        if path in ("/", "/conversas", "/sessoes", "/uso", "/ferramentas", "/ferramenta"):
+        if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA):
             screen_window(q)
-        tables = {"/conversas": (conv_mod.TABLE,), "/sessoes": (sess_mod.TABLE, sess_mod.LOOSE),
+        tables = {CONVERSAS: (conv_mod.TABLE,), SESSOES: (sess_mod.TABLE, sess_mod.LOOSE),
                   "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE),
                   "/pedidos": (prop_mod.PENDING_TABLE, prop_mod.RECENT_TABLE), "/rodadas": (etapas_mod.TABLE,)}
         if path in tables:
             table_states(q, *tables[path])
-        if path in ("/conversa", "/sessao", "/pedido", "/rodada", "/ciclo", "/conversa/logs") and not q.get("id"):
+        if path in ("/conversa", "/sessao", "/pedido", "/rodada", "/ciclo", CONVERSA_LOGS) and not q.get("id"):
             raise ValueError("Falta o id.")
         if path == "/ciclo" and not etapas_mod.CYCLE_ID.match(q["id"]):
             raise ValueError("O id do ciclo tem de ser <dono>/<repo>#<número>.")
-        if path == "/ferramenta" and (not q.get("nome") or len(q["nome"]) > 200):
+        if path == FERRAMENTA and (not q.get("nome") or len(q["nome"]) > 200):
             raise ValueError("informe o nome da ferramenta")
         if path == "/conversa/span" and (not q.get("trace") or not q.get("span")):
             raise ValueError("Faltam trace e span.")
-        if path == "/conversa/logs":
+        if path == CONVERSA_LOGS:
             try:
                 offset = int(q.get("offset", "0"))
             except ValueError:
@@ -383,7 +387,12 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     def shell_info(path, request):
         title, nav, detail, blocks = loading_mod.SCREENS[path]
         back = "/" + nav
-        group = "Telemetria" if nav in ("conversas", "sessoes") else "Análise" if nav in ("uso", "ferramentas", "precos") else "Governança"
+        if nav in ("conversas", "sessoes"):
+            group = "Telemetria"
+        elif nav in ("uso", "ferramentas", "precos"):
+            group = "Análise"
+        else:
+            group = "Governança"
         label = "Uso" if nav == "uso" else title
         crumbs = [(group, None), (label, None)] if path != "/" else [(title, None)]
         ident = request.query_params.get("id", "")
@@ -391,11 +400,11 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             parent = {"conversas": "Conversas", "sessoes": "Sessões", "pedidos": "Pedidos", "rodadas": "Rodadas", "ferramentas": "Ferramentas"}[nav]
             label = names_mod.friendly(ident) if path == "/conversa" else ident or title
             crumbs = [(parent, back), (label, None)]
-        if path == "/conversa/logs":
+        if path == CONVERSA_LOGS:
             back = "/conversa?id=" + quote(ident, safe="") + ("&erros=1" if request.query_params.get("erros") == "1" else "")
-            crumbs = [("Conversas", "/conversas"), (names_mod.friendly(ident), back), ("Logs", None)]
-        return dict(titulo=title, nav=nav, detail=detail, blocos=blocks, back=back, crumbs=crumbs,
-                    shell_path=path, id=ident)
+            crumbs = [("Conversas", CONVERSAS), (names_mod.friendly(ident), back), ("Logs", None)]
+        return {"titulo": title, "nav": nav, "detail": detail, "blocos": blocks, "back": back, "crumbs": crumbs,
+                "shell_path": path, "id": ident}
 
     def screen(path):
         def register(fn):
@@ -403,9 +412,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
             @app.get(path)
             async def shell(request: Request):
-                if path in ("/conversa/logs", "/conversa/span") and is_htmx(request):
+                if path in (CONVERSA_LOGS, "/conversa/span") and is_htmx(request):
                     request.state.screen_path = path
-                    request.state.inline_block = "tabela" if path == "/conversa/logs" else "faixa"
+                    request.state.inline_block = "tabela" if path == CONVERSA_LOGS else "faixa"
                     return await fn(request)
                 if request.query_params.get("full") == "1":
                     return await fn(request)
@@ -416,7 +425,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 except ValueError as exc:
                     return error(request, 400, str(exc))
                 request.state.screen_path = path
-                fixed_window = screen_window(request.query_params) if path in ("/", "/conversas", "/sessoes", "/uso", "/ferramentas", "/ferramenta") else None
+                fixed_window = screen_window(request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA) else None
                 request.state.view_id = views.open(path, loading_mod.pairs(request.query_params), fixed_window)
                 return page(request, "loading.html", **shell_info(path, request),
                             full_url=full_url(request), loading_shell=True)
@@ -425,7 +434,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
     @app.get("/bloco/{screen_name:path}/{block}")
     async def block_screen(request: Request, screen_name: str, block: str):
-        # Todo trecho exige login, mesmo quando aberto diretamente por link.
+        # Cada trecho exige login, mesmo quando aberto diretamente por link.
         request.state.block = block
         path = "/" if screen_name == "dashboard" else "/" + screen_name
         request.state.screen_path = path
@@ -436,8 +445,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         names = {n for n, _ in loading_mod.SCREENS[path][3]}
         if not loading_mod.SCREENS[path][2]:
             names.update(("alertas", "decisoes"))
-        price_block = path == "/precos" and re.fullmatch(r"preco-[0-9]{1,4}-(grafico|vigente|historico)", block)
-        step_block = path == "/rodada" and re.fullmatch(r"etapa-[0-9]{1,4}", block)
+        price_block = path == "/precos" and re.fullmatch(r"preco-\d{1,4}-(grafico|vigente|historico)", block, re.ASCII)
+        step_block = path == "/rodada" and re.fullmatch(r"etapa-\d{1,4}", block, re.ASCII)
         if block not in names and not price_block and not step_block:
             return error(request, 404, "Bloco não encontrado.")
         try:
@@ -535,7 +544,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         return page(request, "tools.html", **data, host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
                     windows=WINDOWS, link_qs=tools_qs(q, from_ns, to_ns, host, agent, repo), **period(q, from_ns, to_ns, config.tz))
 
-    @screen("/ferramenta")
+    @screen(FERRAMENTA)
     async def tool_screen(request: Request):
         if (denied := await gate(request)) is not None:
             return denied
@@ -586,7 +595,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         return resp
 
     # ------------------------------------------------ conversas
-    @screen("/conversas")
+    @screen(CONVERSAS)
     async def conversations(request: Request):
         if (denied := await gate(request)) is not None:
             return denied
@@ -604,7 +613,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                                   "", "", repo_mod.parse(repo), cost_mode(q) == "efetivo", None)
         if failed:
             return failed
-        (t,), keep = table_ctx(q, "/conversas", (conv_mod.TABLE, st, data["conversations"]))
+        (t,), keep = table_ctx(q, CONVERSAS, (conv_mod.TABLE, st, data["conversations"]))
         return page(request, "conversations.html", t=t, keep=keep, repos=data["repos"], from_ns=from_ns, to_ns=to_ns, repo=repo,
                     windows=WINDOWS, **period(q, from_ns, to_ns, config.tz))
 
@@ -624,7 +633,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 404, "Conversa não encontrada.")
         return page(request, "conversation.html", **data, id=session_id, span_limit=conv_mod.SPAN_LIMIT, errors_only=errors_only)
 
-    @screen("/conversa/logs")
+    @screen(CONVERSA_LOGS)
     async def conversation_logs(request: Request):
         """Página seguinte dos logs: linhas da tabela para o htmx; sem htmx, uma página inteira só com elas."""
         if (denied := await gate(request)) is not None:
@@ -673,7 +682,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             detail_log.exception("tela: estado das sessões falhou")
             return False
 
-    @screen("/sessoes")
+    @screen(SESSOES)
     async def sessions(request: Request):
         if (denied := await gate(request)) is not None:
             return denied
@@ -692,7 +701,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if failed:
             return failed
         state = await with_state(data["sessions"])   # o estado antes da tabela: ele é uma coluna de filtro
-        (ts, tl), keep = table_ctx(q, "/sessoes", (sess_mod.TABLE, st, data["sessions"]), (sess_mod.LOOSE, st_loose, data["loose"]))
+        (ts, tl), keep = table_ctx(q, SESSOES, (sess_mod.TABLE, st, data["sessions"]), (sess_mod.LOOSE, st_loose, data["loose"]))
         return page(request, "sessions.html", ts=ts, tl=tl, keep=keep, repos=data["repos"], state_read=state, from_ns=from_ns, to_ns=to_ns,
                     repo=repo, windows=WINDOWS, **period(q, from_ns, to_ns, config.tz))
 

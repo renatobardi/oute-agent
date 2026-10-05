@@ -257,7 +257,7 @@ check "conv-b: tela não mostra custo real"             jqe '.text | test("≈ U
 RD="$(row 'conv d/1&x=é')"
 check "conversa que começou antes da janela: números da conversa inteira" jqe ".calls == \"2\" and $(usd '.["real-usd"]') == 750000" <<<"$RD"
 check "lista: link do detalhe com o id codificado"     grep -qF 'href="/conversa?id=conv%20d/1%26x%3D%C3%A9"' "$TMP/list.html"
-ids() { studio_page "${C[@]}" "$STUDIO_URL/conversas?$WIN&$1" | data | jq -c '[.[] | select(.conversa) | .conversa]'; }
+ids() { local query="$1"; studio_page "${C[@]}" "$STUDIO_URL/conversas?$WIN&$query" | data | jq -c '[.[] | select(.conversa) | .conversa]'; return $?; }
 check "filtro por host"                                test "$(ids host=oute-mac)" = '["conv-b","conv d/1&x=é"]'
 check "filtro por agente"                              test "$(ids agent=codex)" = '["conv-b"]'
 check "filtro por host e agente"                       test "$(ids 'host=oute-mac&agent=claude')" = '["conv d/1&x=é"]'

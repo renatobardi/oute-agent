@@ -223,7 +223,7 @@ PY_RC=$?
 check "o Python completou os casos" test "$PY_RC" = 0
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
 if [[ "$PY_RC" != 0 ]]; then cat "$TMP/py.out"; fi
-node "$ROOT/tests/lib/studio_loading_js.cjs" "$ROOT/docker/agent-studio/agent_studio/static/loading.js" > "$TMP/js.out" 2>&1
+node "$ROOT/tests/lib/studio_loading_js.cjs" > "$TMP/js.out" 2>&1
 check "os eventos em JavaScript passam" test "$?" = 0
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/js.out")
 check_end

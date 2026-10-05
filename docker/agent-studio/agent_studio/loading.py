@@ -43,7 +43,11 @@ def pairs(q):
 
 
 def block_url(path, block, query, view=''):
-    prefix = '/rodada/bloco' if path == '/rodada' else '/bloco' + ('/dashboard' if path == '/' else path)
+    if path == '/rodada':
+        prefix = '/rodada/bloco'
+    else:
+        screen_path = '/dashboard' if path == '/' else path
+        prefix = '/bloco' + screen_path
     return prefix + '/' + block + '?' + urlencode([*query, ('view', view)])
 
 

@@ -1,5 +1,5 @@
 <div class="carregamento {{ forma }}" data-bloco="{{ nome }}"{% if anchor %} id="{{ anchor }}"{% endif %} hx-get="{{ url }}" hx-trigger="revealed" hx-request='{"timeout":60000}' hx-swap="outerHTML" aria-busy="true">
-  <span class="so-leitor" role="status">Carregando {{ nome }}…</span>
+  <output class="so-leitor">Carregando {{ nome }}…</output>
   <div class="shimmer" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
   <a class="nota" data-full href="{{ full_url }}">Ver a página inteira</a>
 </div>

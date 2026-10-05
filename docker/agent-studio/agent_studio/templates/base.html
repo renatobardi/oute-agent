@@ -132,7 +132,7 @@
 {% call fragment("decisoes") %}
 {% if loading_shell and not _detail %}{{ loading_slot("decisoes", "faixa") }}{% else %}
 {% if decisions is defined and (decisions or decisions_old) and not _detail %}
-<section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" data-decisoes-antigas="{{ decisions_old|length }}" role="status">
+<section class="decisoes" id="decisoes" data-decisoes="{{ decisions|length }}" data-decisoes-antigas="{{ decisions_old|length }}" aria-live="polite">
   {{ icon("hand") }}
   <div class="faixa-corpo">
     {% if decisions %}

@@ -1,13 +1,11 @@
 /* Exercita eventos reais de loading.js com um DOM mínimo, sem dependências. */
-const fs = require("node:fs");
-const vm = require("node:vm");
 const listeners = new Map();
 const requests = [];
 let titles = [];
 const document = {
   title: "",
   addEventListener: (name, fn) => listeners.set(name, fn),
-  createElement: tag => ({tag, attrs: new Map(), children: [],
+  createElement: tag => ({tag, attrs: new Map(), children: [], dataset: {},
     setAttribute(name, value) { this.attrs.set(name, value); },
     getAttribute(name) { return this.attrs.get(name); },
     append(...children) { this.children.push(...children); },
@@ -17,7 +15,9 @@ const document = {
   }),
   querySelectorAll: () => titles,
 };
-vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), {document, htmx: {ajax: (...a) => requests.push(a)}});
+globalThis.document = document;
+globalThis.htmx = {ajax: (...a) => requests.push(a)};
+require("../../docker/agent-studio/agent_studio/static/loading.js");
 let failed = 0;
 function check(name, passed) {
   process.stdout.write((passed ? "ok   " : "FAIL ") + name + "\n");
@@ -34,6 +34,7 @@ check("JS: erro fora de um bloco preserva o comportamento do htmx", swap(500, fa
 const attrs = new Map([["hx-get", "/bloco/conversas/tabela?hours=168"]]);
 const link = {};
 const block = {
+  dataset: {},
   getAttribute: name => attrs.get(name),
   setAttribute: (name, value) => attrs.set(name, value),
   querySelector: selector => { block.fallbackSelector = selector; return link; },
@@ -58,18 +59,18 @@ check("JS: falha de rede fora de bloco não altera a página", requests.length =
 const cell = document.createElement("td");
 cell.matches = selector => selector === "[data-inline-bloco]";
 cell.closest = () => cell;
-cell.setAttribute("data-inline-bloco", "faixa");
+cell.dataset.inlineBloco = "faixa";
 const anchor = document.createElement("a");
 anchor.setAttribute("hx-get", "/conversa/span?trace=t&span=s");
 listeners.get("htmx:beforeRequest")({detail: {target: cell, elt: anchor}});
 check("JS: clique em span mostra shimmer e estado ocupado", cell.attrs.get("aria-busy") === "true" && cell.children[0].children[0].children.length === 4);
-check("JS: clique preserva endereço e cria link sem JavaScript", cell.attrs.get("data-retry-url") === anchor.getAttribute("hx-get") && cell.children[0].children[1].getAttribute("href").endsWith("&full=1"));
+check("JS: clique preserva endereço e cria link sem JavaScript", cell.dataset.retryUrl === anchor.getAttribute("hx-get") && cell.children[0].children[1].getAttribute("href").endsWith("&full=1"));
 listeners.get("htmx:afterSwap")({detail: {target: cell}});
 check("JS: resposta do span encerra estado ocupado", cell.attrs.get("aria-busy") === "false");
 const row = document.createElement("tr");
 row.matches = selector => selector === "tr" || selector === "[data-inline-bloco]";
 row.closest = () => row;
-row.setAttribute("data-inline-bloco", "tabela");
+row.dataset.inlineBloco = "tabela";
 row.querySelector = selector => selector === "td" ? cell : link;
 listeners.get("htmx:beforeRequest")({detail: {target: row, elt: anchor}});
 check("JS: mais logs coloca shimmer dentro da célula", cell.children.length === 2 && row.children.length === 0);

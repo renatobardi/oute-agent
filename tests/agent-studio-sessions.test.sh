@@ -215,7 +215,7 @@ check "sessões + sem sessão = totais do /v1/usage"     jqe --argjson u "$U" \
    and ($g | map(.input | tonumber) | add) == $u.tokens.input
    and ($g | map(.errors | tonumber) | add) == $u.errors.total' "$TMP/year.json"
 check "janela do ano: a sessão e a conversa de janeiro entram" jqe '([.[] | select(.sessao)] | length) == 5 and any(.[]; .conversa == "solta-jan")' "$TMP/year.json"
-ids() { studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$1" | data | jq -c '[.[] | select(.sessao or (.conversa and .["da-sessao"] == "")) | (.sessao // .conversa)]'; }
+ids() { local query="$1"; studio_page "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$query" | data | jq -c '[.[] | select(.sessao or (.conversa and .["da-sessao"] == "")) | (.sessao // .conversa)]'; return $?; }
 check "filtro por host"                                test "$(ids host=oute-mac)" = "[\"$S2\",\"solta 2/&é\"]"
 check "filtro por agente"                              test "$(ids agent=codex)" = "[\"$S2\",\"solta 2/&é\"]"
 check "filtro por host e agente"                       test "$(ids 'host=oute-server&agent=claude' | jq -c 'map(select(test("<b>") | not))')" = "[\"$S1\",\"solta-1\"]"
