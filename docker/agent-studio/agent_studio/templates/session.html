@@ -3,7 +3,7 @@
 {% set detail = true %}
 {% set back = "/sessoes" %}
 {% set crumbs = [("Sessões", "/sessoes"), (id, none)] %}
-{% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, timeline, state_warning, badge, tile, icon %}
+{% from "_macros.html" import cost, model_list, usage_data, session_table, conversation_row, timeline, state_warning, badge, tile, icon, aviso_custo with context %}
 {% set s = session %}
 {% set st = s.state %}
 {% set u = s.usage %}
@@ -21,10 +21,11 @@
         {% if phase %}{{ badge("aidlc:" ~ phase, "contorno", "tag") }}{% endif %}
       </div>
     </div>
-    <a class="botao" href="/sessoes">{{ icon("arrow-left", 14) }}Sessões</a>
+    <a class="botao" href="{{ com_custo("/sessoes") }}">{{ icon("arrow-left", 14) }}Sessões</a>
   </div>
 </div>
 {{ state_warning(state_read) }}
+{{ aviso_custo() }}
 <div class="tiles">
   {% call tile("Conversas", "message-square") %}{{ s.conversation_count|num }}{% endcall %}
   {% call tile("Chamadas", "activity") %}{{ u.calls|num }}{% endcall %}

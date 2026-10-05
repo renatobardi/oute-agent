@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set nav = "ferramentas" %}
 {% set crumbs = [("Análise", none), ("Ferramentas", "/ferramentas?" ~ link_qs), (tool, none)] %}
-{% from "_macros.html" import conv_name, badge %}
+{% from "_macros.html" import conv_name, badge with context %}
 {# Conversas que usaram a ferramenta na janela (#535), com os erros dela em destaque. Sem a entrada nem a saída: isso fica no detalhe da conversa. #}
 {% block title %}{{ tool }} · Ferramentas · Agent Studio{% endblock %}
 {% block main %}
@@ -24,9 +24,9 @@
     <td class="sec">{{ c.host or "—" }}</td>
     <td class="sec">{{ c.agent or "—" }}</td>
     <td class="sec">{{ c.repo or "—" }}</td>
-    <td class="prim">{% if c.conv %}{{ conv_name(c.conv, "/conversa?id=" ~ (c.conv|urlencode)) }}{% else %}—{% endif %}</td>
+    <td class="prim">{% if c.conv %}{{ conv_name(c.conv, com_custo("/conversa?id=" ~ (c.conv|urlencode))) }}{% else %}—{% endif %}</td>
     <td class="n sec">{{ c.uses|num }}</td>
-    <td class="n">{% if c.errors and c.conv %}<a class="erros-link" href="/conversa?id={{ c.conv|urlencode }}&amp;erros=1" title="só os erros desta conversa">{{ badge(c.errors|num, "destrutivo") }}</a>{% elif c.errors %}{{ badge(c.errors|num, "destrutivo") }}{% else %}0{% endif %}</td>
+    <td class="n">{% if c.errors and c.conv %}<a class="erros-link" href="{{ com_custo("/conversa?id=" ~ (c.conv|urlencode) ~ "&erros=1") }}" title="só os erros desta conversa">{{ badge(c.errors|num, "destrutivo") }}</a>{% elif c.errors %}{{ badge(c.errors|num, "destrutivo") }}{% else %}0{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

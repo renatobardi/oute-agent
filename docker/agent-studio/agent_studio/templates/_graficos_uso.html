@@ -1,16 +1,16 @@
 {# Gráficos da tela Uso (#533): SVG gerado no servidor, sem JS e sem estilo na tag, como os do Dashboard. A escala vem do viewBox e a dica
-   de cada ponto, do <title>. Real (cheio) × estimado (tracejado) se distinguem pelo traço e pelo texto; entrada, saída e cache dos tokens,
+   de cada ponto, do <title>. Informado pela fonte ou efetivo (cheio) × estimado (tracejado) se distinguem pelo traço e pelo texto; entrada, saída e cache dos tokens,
    também (cheio, tracejado, pontilhado). `c` = o resultado de `usage_charts.build`. #}
 {% macro _raw(v) %}{{ '' if v is none else v }}{% endmacro %}
 {% macro _money(real, est) %}{% if real is none and est is none %}—{% else %}{% if est is not none %}≈ {% endif %}{{ ((real or 0) + (est or 0))|usd2 }}{% endif %}{% endmacro %}
 
 {# amostra da legenda de custo #}
 {% macro legenda_custo() %}
-<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>Real (informado pela fonte)</span>
-  <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ (preço de lista)</span></div>
+<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Efetivo (assinatura = 0)" if custo == "efetivo" else "Informado pela fonte" }}</span>
+  <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ (tabela de preços)</span></div>
 {% endmacro %}
 
-{# custo por dia: colunas empilhadas, real embaixo e estimado em cima #}
+{# custo por dia: colunas empilhadas, informado embaixo e estimado em cima #}
 {% macro custo_dia(d, total) %}
 {% set W = 600 %}{% set H = 180 %}{% set n = d.points|length %}
 <section class="cartao bloco grafico" data-grafico="uso-custo-dia" data-days="{{ n }}" data-real-usd="{{ _raw(total.real_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
@@ -18,8 +18,8 @@
   {% if n %}
   <div class="linha-grafico larga">
     <div class="eixo-y"><span>{{ d.max_cost|usd2 }}</span><span>{{ d.mid_cost|usd2 }}</span><span>0</span></div>
-    <svg class="uso-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Custo por dia, real e estimado">
-      <title>Custo por dia, real e estimado</title>
+    <svg class="uso-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Custo por dia, informado pela fonte e estimado">
+      <title>Custo por dia, informado pela fonte e estimado</title>
       <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
       <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
       <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
@@ -43,7 +43,7 @@
 </section>
 {% endmacro %}
 
-{# custo por papel ou por fase: uma barra por linha, real (cheio) e estimado (tracejado) #}
+{# custo por papel ou por fase: uma barra por linha, informado pela fonte (cheio) e estimado (tracejado) #}
 {% macro custo_barras(kind, titulo, rows, total) %}
 <section class="cartao bloco grafico" data-grafico="uso-custo-{{ kind }}" data-rows="{{ rows|length }}" data-real-usd="{{ _raw(total.real_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
   <div class="grafico-topo"><h2>{{ titulo }}</h2><span class="nota">{{ _money(total.real_usd, total.estimated_usd) }} na janela</span></div>

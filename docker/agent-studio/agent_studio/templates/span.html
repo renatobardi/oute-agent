@@ -8,7 +8,7 @@
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo"><div class="titulo-linha"><h1>Span <code>{{ span.name or "(sem nome)" }}</code></h1>
-  {% if span.session_id %}<a class="botao" href="/conversa?id={{ span.session_id|urlencode }}">{{ icon("arrow-left", 14) }}Conversa <code>{{ span.session_id }}</code></a>{% endif %}</div></div>
+  {% if span.session_id %}<a class="botao" href="{{ com_custo("/conversa?id=" ~ (span.session_id|urlencode)) }}">{{ icon("arrow-left", 14) }}Conversa <code>{{ span.session_id }}</code></a>{% endif %}</div></div>
 <div class="cartao bloco">{{ span_detail(span) }}</div>
 </div>
 {% endblock %}

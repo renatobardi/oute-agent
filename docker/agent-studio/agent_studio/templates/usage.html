@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% set nav = "uso" %}
 {% set crumbs = [("Análise", none), ("Uso", none)] %}
-{% from "_macros.html" import cost, filter %}
-{% from "_graficos_uso.html" import custo_dia, custo_barras, tokens_dia %}
+{% from "_macros.html" import cost, filter, aviso_custo with context %}
+{% from "_graficos_uso.html" import custo_dia, custo_barras, tokens_dia with context %}
 {% macro usage_table(kind, label, rows) %}
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}">
   <thead><tr>
     <th{% if kind == "role" %} title="dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora de rodada (e a conversa sem sessão)"{% else %} title="o aidlc:&lt;fase&gt; que o seletor usou; sessão sem fase registrada fica em desconhecida"{% endif %}>{{ label }}</th><th class="n">Chamadas</th>
-    <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th><th class="n">Custo</th>
+    <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th><th class="n">Custo ({{ custo_nome() }})</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}
@@ -33,6 +33,7 @@
 {{ filter("/uso", windows, hours, range, repos=repos, repo=repo) }}</div>
 <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
+{{ aviso_custo() }}
 <p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
   Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span></p>
 <div class="graficos" id="graficos-uso">

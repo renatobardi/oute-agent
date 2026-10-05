@@ -182,7 +182,7 @@ check("2) barras: real e estimado em <rect> de classes diferentes (o estimado é
       sec("custo-modelo").count('class="real"') >= 2 and 'class="estimado"' in sec("custo-modelo")
       and re.search(r"\.estimado[^}]*stroke-dasharray", CSS) is not None)
 check("2) modelo sem preço diz 'sem preço' em vez de zero", "sem preço</span>" in sec("custo-modelo"))
-check("2) composição: real, estimado, % e as chamadas sem preço", "Real US$ 10,00 (62%)" in sec("custo-modelo")
+check("2) composição: informado pela fonte, estimado, % e as chamadas sem preço", "Informado pela fonte US$ 10,00 (62%)" in sec("custo-modelo")
       and "Estimado ≈ US$ 6,00 (38%)" in sec("custo-modelo") and "3 chamadas sem preço, fora da soma" in sec("custo-modelo"))
 lat = {m.group(1): m.group(0) for m in re.finditer(r'<tr data-modelo="([^"]*)" data-calls=.*?</tr>', sec("latencia"), re.S)}
 check("3) latência: um modelo por linha, do p95 mais alto ao mais baixo", list(lat) ==

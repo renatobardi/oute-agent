@@ -179,7 +179,7 @@ check "/uso: tokens: a soma das colunas = a do gráfico" bash -c 'jq -n -e --arg
   [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
   ([\$g[] | select(.bucket and has(\"input\")) | (.input | tonumber) + (.output | tonumber) + (.[\"cache-read\"] | tonumber) + (.[\"cache-creation\"] | tonumber)] | add) ==
   ((\$c.input | tonumber) + (\$c.output | tonumber) + (\$c[\"cache-read\"] | tonumber) + (\$c[\"cache-creation\"] | tonumber))" >/dev/null' _ "$G"
-check "/uso: real × estimado distinguidos por texto e traço"  bash -c 'grep -q "Real (informado pela fonte)" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
+check "/uso: informado pela fonte × estimado distinguidos por texto e traço"  bash -c 'grep -q "Informado pela fonte" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
 check "/uso: entrada, saída e cache distinguidos por texto e traço" bash -c 'for w in "Entrada (" "Saída (" "Cache, leitura" "t-ent" "t-sai" "t-cache"; do grep -q "$w" <<<"$1" || exit 1; done' _ "$UH"
 check "/uso: sem style= nas tags dos gráficos (CSP)"    bash -c '! grep -q "style=" <<<"$1"' _ "$UH"
 check "/uso: as tabelas por papel e por fase seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1' <<<"$G"
