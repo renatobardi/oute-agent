@@ -500,3 +500,9 @@ a.erros-link { text-decoration: none; }
 /* controle de período (#527): janelas prontas + De/Até com dia e hora; quebra em linhas no celular */
 .filtro input[type="datetime-local"] { min-width: 13rem; }
 @media (max-width: 640px) { .filtro { gap: .75rem; } .filtro label, .filtro input[type="datetime-local"] { width: 100%; } }
+
+/* ferramentas (#535) */
+.linha-svg .linha.erros { stroke: var(--destructive); stroke-dasharray: 4 3; }
+.barra-svg .erro { fill: var(--destructive); }
+tr.com-erro > td:first-child { box-shadow: inset 3px 0 0 var(--destructive); }
+.taxa-erro { color: var(--destructive); }

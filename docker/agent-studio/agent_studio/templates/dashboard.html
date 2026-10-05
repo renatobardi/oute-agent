@@ -215,6 +215,21 @@
   {% endfor %}
 </section>
 
+{# 8) ferramentas mais usadas (#535): barra nos usos, o erro dela ao lado; o link leva à tela Ferramentas com a mesma janela e repositório #}
+{% set tl = snap.tools %}
+<section class="cartao bloco grafico" data-grafico="ferramentas" data-ferramentas="{{ tl.rows|length }}" data-total="{{ tl.total }}" data-erros="{{ tl.errors }}">
+  <div class="grafico-topo"><h2>Ferramentas mais usadas</h2><a class="nota" href="/ferramentas?{{ window_qs }}">ver Ferramentas</a></div>
+  {% for t in tl.rows %}
+  <div class="barra-linha" data-ferramenta="{{ t.tool }}" data-usos="{{ t.uses }}" data-erros="{{ t.errors }}" title="{{ t.tool }}: {{ t.uses|num }} usos, {{ t.errors|num }} erros">
+    <span class="rotulo mono"><a href="/ferramenta?nome={{ t.tool|urlencode }}&amp;{{ window_qs }}">{{ t.tool }}</a></span>
+    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.tool }} · {{ t.uses|num }} usos · {{ t.errors|num }} erros</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 1]|max) }}" height="14"/></svg>
+    <span class="valor">{{ t.uses|num }}{% if t.errors %} · {{ t.errors|num }} {{ "erro" if t.errors == 1 else "erros" }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhum uso de ferramenta nesta janela.</p>
+  {% endfor %}
+</section>
+
 </div>
 </div>
 {% endblock %}
