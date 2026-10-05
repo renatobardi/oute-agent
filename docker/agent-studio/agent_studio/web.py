@@ -47,6 +47,7 @@ HOME = "/"
 CONVERSAS = "/conversas"
 SESSOES = "/sessoes"
 FERRAMENTA = "/ferramenta"
+GRUPO_INVALIDO = "grupo inválido: só o Bash tem grupos"
 CONVERSA_LOGS = "/conversa/logs"
 MAX_LOGIN_BODY = 4096
 # janelas prontas das quatro telas com período (#527; horas -> rótulo); a URL aceita também from/to, como o /v1/usage, e de/ate no fuso da tela
@@ -357,7 +358,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
 
     def validate_screen(path, q):
         # Mesmas regras das rotas completas, antes de abrir a primeira leitura.
-        if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA):
+        if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas"):
             screen_window(q)
         tables = {CONVERSAS: (conv_mod.TABLE,), SESSOES: (sess_mod.TABLE, sess_mod.LOOSE),
                   "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE),
@@ -370,6 +371,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             raise ValueError("O id do ciclo tem de ser <dono>/<repo>#<número>.")
         if path == FERRAMENTA and (not q.get("nome") or len(q["nome"]) > 200):
             raise ValueError("informe o nome da ferramenta")
+        if path == FERRAMENTA and tool_group(q) is None:
+            raise ValueError(GRUPO_INVALIDO)
         if path == "/conversa/span" and (not q.get("trace") or not q.get("span")):
             raise ValueError("Faltam trace e span.")
         if path == CONVERSA_LOGS:
@@ -425,7 +428,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 except ValueError as exc:
                     return error(request, 400, str(exc))
                 request.state.screen_path = path
-                fixed_window = screen_window(request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA) else None
+                fixed_window = screen_window(request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas") else None
                 request.state.view_id = views.open(path, loading_mod.pairs(request.query_params), fixed_window)
                 return page(request, "loading.html", **shell_info(path, request),
                             full_url=full_url(request), loading_shell=True)
@@ -527,6 +530,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs += "&custo=efetivo"
         return qs
 
+    def tool_group(q):
+        """O `grupo=` da lista de uma ferramenta (#600): "" sem ele, o id do grupo do Bash, ou `None` se não vale
+        (id que não existe, ou grupo em ferramenta que não é o Bash)."""
+        group = q.get("grupo", "")
+        if group and (group not in tools_mod.GROUPS or q.get("nome") != tools_mod.BASH):
+            return None
+        return group
+
     @screen("/ferramentas")
     async def tools_screen(request: Request):
         if (denied := await gate(request)) is not None:
@@ -556,12 +567,15 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         name = q.get("nome", "")
         if not name or len(name) > 200:
             return error(request, 400, "informe o nome da ferramenta")
+        group = tool_group(q)
+        if group is None:
+            return error(request, 400, GRUPO_INVALIDO)
         host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
         data, failed = await read(request, "conversas da ferramenta", store.tool_conversations, name, from_ns, to_ns,
-                                  repo_mod.parse(repo), host or None, agent or None)
+                                  repo_mod.parse(repo), host or None, agent or None, group or None)
         if failed:
             return failed
-        return page(request, "tool.html", data=data, tool=name, host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
+        return page(request, "tool.html", data=data, tool=name, group=group, group_name=tools_mod.GROUPS.get(group), host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
                     link_qs=tools_qs(q, from_ns, to_ns, host, agent, repo), limit=tools_mod.CONV_LIMIT)
 
     # ------------------------------------------------ login
@@ -810,23 +824,37 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         return page(request, "proposal.html", p=prop_mod.merged(proposal_id, ev, record), state_read=state_read)
 
     # ------------------------------------------------ rodadas (#507): as etapas que o dispatcher publica; só leitura
+    def round_url(r, now_ns):
+        """Aonde a linha da rodada leva (#601): com etapa, à página da rodada; sem etapa, às sessões dela, na janela que vai
+        do primeiro evento ao fechamento (rodada sem fechamento: até agora), limitada ao máximo da tela."""
+        if r["steps"]:
+            return "/rodada?id=" + quote(r["round"], safe="")
+        to_ns = max(r["closed_ns"] or now_ns, r["start_ns"]) + 1_000_000_000
+        from_ns = max(r["start_ns"], to_ns - MAX_HOURS * 3_600_000_000_000)
+        return SESSOES + "?" + urlencode({"from": iso_utc(from_ns), "to": iso_utc(to_ns), "f_round": r["round"]})
+
     @screen("/rodadas")
     async def rounds(request: Request):
+        """O histórico das rodadas (#601): toda rodada com evento de abertura na janela, com ou sem etapa publicada."""
         if (denied := await gate(request)) is not None:
             return denied
+        q = request.query_params
         try:
-            (st,) = table_states(request.query_params, etapas_mod.TABLE)
+            from_ns, to_ns = request_window(request)
+            (st,) = table_states(q, etapas_mod.TABLE)
         except ValueError as e:
             return error(request, 400, str(e))
-        rows, failed = await read(request, "lista de rodadas", store.read, lambda con: etapas_mod.listing(con, tabela_mod.ALL))
+        rows, failed = await read(request, "lista de rodadas", store.read,
+                                  lambda con: etapas_mod.listing(con, from_ns, to_ns, tabela_mod.ALL))
         if failed:
             return failed
         states, state_read = await proposal_state(request, "estado das rodadas", etapas_mod.round_states, [r["round"] for r in rows])
-        for r in rows:
-            r["state"] = (states or {}).get(r["round"])
-            r["cycle_url"] = etapas_mod.cycle_url((r["state"] or {}).get("cycle"))
-        (t,), _ = table_ctx(request.query_params, "/rodadas", (etapas_mod.TABLE, st, rows))
-        return page(request, "rodadas.html", t=t, state_read=state_read)
+        now_ns = time.time_ns()
+        for r in etapas_mod.with_state(rows, states):
+            r["url"] = round_url(r, now_ns)
+        (t,), keep = table_ctx(q, "/rodadas", (etapas_mod.TABLE, st, rows))
+        return page(request, "rodadas.html", t=t, keep=keep, state_read=state_read, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS,
+                    **period(q, from_ns, to_ns, config.tz))
 
     def round_data(rnd):
         data = etapas_mod.load(store, surreal, rnd)
