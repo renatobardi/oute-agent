@@ -186,6 +186,8 @@ case "\$1 \$2" in
     done
     echo "https://github.com/regression/regression/pull/100" ;;
   "pr merge") echo "gh: merge bloqueado pelo oute-regression" >&2; exit 77 ;;
+  "repo view")
+    if [[ "\$all" == *" --json "* ]]; then echo '{"nameWithOwner":"regression/regression"}'; else echo "regression/regression"; fi ;;
   "auth status") exit 0 ;;
   *) echo "gh: bloqueado pelo oute-regression" >&2; exit 1 ;;
 esac
@@ -286,11 +288,11 @@ verdict() { # falhas rodadas
 }
 for k in ${KEYS[@]+"${KEYS[@]}"}; do
   key_parts "$k"; t="$KT"; a="$KA"; al="$KM"
-  nok=0; nfail=0; nerr=0; why=""
+  nok=0; nfail=0; nerr=0; why=""; seen_note=""
   for ((r = 1; r <= ROUNDS; r++)); do
     att="$TMP/$t-$a-$al-r$r"
     case "$(cat "$att/status" 2>/dev/null)" in
-      ok) nok=$((nok + 1)); ran_any=1 ;;
+      ok) nok=$((nok + 1)); ran_any=1; [[ -z "$(head -n1 "$att/reason" 2>/dev/null)" ]] || seen_note="$(head -n1 "$att/reason")" ;;
       fail) nfail=$((nfail + 1)); ran_any=1; why="$(head -n1 "$att/reason")" ;;
       *) nerr=$((nerr + 1)); why="$(head -n1 "$att/reason" 2>/dev/null)" ;;
     esac
@@ -307,6 +309,7 @@ for k in ${KEYS[@]+"${KEYS[@]}"}; do
   done
   VERDICT[$k]="$(verdict $((nfail + nerr)) "$ROUNDS")"
   DETAIL[$k]="$nok/$ROUNDS ok"
+  [[ -z "$seen_note" ]] || DETAIL[$k]+=" (visto: $seen_note)"
   (( nfail + nerr == 0 )) || DETAIL[$k]+=", $nfail reprovada(s), $nerr sem rodar${why:+ (última: $why)}"
 done
 if [[ ${#KEYS[@]} -gt 0 && $ran_any = 0 ]]; then
@@ -314,10 +317,46 @@ if [[ ${#KEYS[@]} -gt 0 && $ran_any = 0 ]]; then
 fi
 
 # --- studio: a conversa de cada chamada do claude aparece no agent-studio com o oute.task.id do teste
-studio_get() { # id → código HTTP em STUDIO_CODE e corpo em $TMP/studio.body; 1 = não deu para perguntar
-  local tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; tok="${tok//\"/\\\"}"
-  STUDIO_CODE="$(curl -sS --max-time 20 -o "$TMP/studio.body" -w '%{http_code}' -K - -G --data-urlencode "id=$1" \
-    "${AGENT_STUDIO_URL%/}/sessao" 2>/dev/null <<<"header = \"Authorization: Bearer $tok\"")" || return 1
+studio_curl() { # url [args do curl…] → código HTTP em STUDIO_CODE e corpo em $TMP/studio.body; 1 = não deu para perguntar
+  local url="$1" tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; shift
+  tok="${tok//\"/\\\"}"
+  STUDIO_CODE="$(curl -sS --max-time 20 -o "$TMP/studio.body" -w '%{http_code}' -K - "$@" "$url" 2>/dev/null \
+    <<<"header = \"Authorization: Bearer $tok\"")" || return 1
+  return 0
+}
+studio_get() { # id → a casca da sessão (GET /sessao?id=)
+  local id="$1"
+  studio_curl "${AGENT_STUDIO_URL%/}/sessao" -G --data-urlencode "id=$id"
+  return $?
+}
+# a conversa de <id> chegou? STUDIO_RES = seen | wait | nores (a casca não traz o resumo, nem o bloco dele, ou o bloco
+# não traz o número de conversas: formato que a suíte não sabe ler) | down:<motivo>. Duas formas, a de antes do
+# carregamento por bloco (#536: `data-resumo-sessao` e `data-agents` na própria página) e a de agora (a casca aponta o
+# bloco /bloco/sessao/resumo, e a conversa chegou quando o tile "Conversas" dele é >= 1)
+BLOCO_RE='^/bloco/sessao/resumo\?[A-Za-z0-9_=&.-]+$'
+studio_probe() {
+  local id="$1" path conv
+  STUDIO_RES=wait
+  studio_get "$id" || { STUDIO_RES="down:agent-studio fora do ar"; return 0; }
+  case "$STUDIO_CODE" in
+    200) ;;
+    404) return 0 ;;
+    *) STUDIO_RES="down:agent-studio respondeu HTTP $STUDIO_CODE"; return 0 ;;
+  esac
+  if grep -q "data-resumo-sessao=\"$id\"" "$TMP/studio.body" && grep -q 'data-agents="[^"]*claude' "$TMP/studio.body"; then
+    STUDIO_RES=seen; return 0
+  fi
+  path="$(grep -o 'hx-get="/bloco/sessao/resumo?[^"]*"' "$TMP/studio.body" | head -n1 | sed 's/^hx-get="//; s/"$//; s/&amp;/\&/g')"
+  [[ "$path" =~ $BLOCO_RE ]] || { STUDIO_RES=nores; return 0; }
+  studio_curl "${AGENT_STUDIO_URL%/}$path" || { STUDIO_RES="down:agent-studio fora do ar"; return 0; }
+  case "$STUDIO_CODE" in
+    200) conv="$(tr -d '\n' < "$TMP/studio.body" | sed -n 's|.*Conversas</span><strong class="tile-valor">\([0-9][0-9]*\)<.*|\1|p')"
+         [[ -n "$conv" ]] || { STUDIO_RES=nores; return 0; }
+         (( conv >= 1 )) && STUDIO_RES=seen ;;
+    404) ;;
+    *) STUDIO_RES="down:agent-studio respondeu HTTP $STUDIO_CODE" ;;
+  esac
+  return 0
 }
 if [[ $RUN_STUDIO = 1 ]]; then
   STUDIO_KEY="$STUDIO_TASK"
@@ -326,28 +365,29 @@ if [[ $RUN_STUDIO = 1 ]]; then
   elif ! command -v curl >/dev/null; then
     VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="sem curl"
   else
-    declare -A SEEN; pending=0; unreachable=""
+    declare -A SEEN; pending=0; unreachable=""; noresumo=0
     for att in "$TMP"/*-claude-*-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error ]] && pending=$((pending + 1)); done
     waited=0
     while :; do
       for att in "$TMP"/*-claude-*-r*; do
         [[ -f "$att/id" && "$(cat "$att/status")" != error ]] || continue
         id="$(cat "$att/id")"; [[ -z "${SEEN[$id]:-}" ]] || continue
-        if ! studio_get "$id"; then unreachable="agent-studio fora do ar"; break; fi
-        case "$STUDIO_CODE" in
-          200) grep -q "data-resumo-sessao=\"$id\"" "$TMP/studio.body" && grep -q 'data-agents="[^"]*claude' "$TMP/studio.body" \
-                 && SEEN[$id]=1 ;;
-          404) ;;
-          *) unreachable="agent-studio respondeu HTTP $STUDIO_CODE"; break ;;
+        studio_probe "$id"
+        case "$STUDIO_RES" in
+          seen) SEEN[$id]=1 ;;
+          nores) noresumo=1; break ;;
+          down:*) unreachable="${STUDIO_RES#down:}"; break ;;
         esac
       done
-      [[ -z "$unreachable" ]] || break
+      [[ -z "$unreachable" && $noresumo = 0 ]] || break
       left=0; for att in "$TMP"/*-claude-*-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error && -z "${SEEN[$(cat "$att/id")]:-}" ]] && left=1; done
       [[ $left = 1 && $waited -lt $STUDIO_WAIT ]] || break
       sleep "$STUDIO_STEP"; waited=$((waited + STUDIO_STEP))
     done
     if [[ -n "$unreachable" ]]; then
       VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="$unreachable"
+    elif [[ $noresumo = 1 ]]; then
+      VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="a casca da sessão no agent-studio vem sem o resumo (formato que a suíte não lê)"
     elif [[ $pending = 0 ]]; then
       VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="nenhuma conversa do claude para procurar"
     else

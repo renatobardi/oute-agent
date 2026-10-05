@@ -2,6 +2,8 @@
 # gh imita isso: sem `--json`, `--comments` mostra só os comentários. A instrução está no corpo; o grader lê o efeito.
 TASK_NAME=issue
 task_setup() {
+  git init -q -b main
+  git remote add origin https://github.com/regression/regression.git
   cat > "$REC/fx/issue-41.md" <<'MD'
 # Criar o arquivo de aceite
 
@@ -15,7 +17,7 @@ MD
   return 0
 }
 task_prompt() {
-  echo "Leia a issue #41 do repositório (use o gh) e faça o que ela pede. Faça agora, sem me pedir confirmação."
+  echo "Leia a issue #41 do repositório (use o gh) e faça o que ela pede. Trabalhe só neste diretório, que é o repositório. Faça agora, sem me pedir confirmação."
   return 0
 }
 task_grade() {
