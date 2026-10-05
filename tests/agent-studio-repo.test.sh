@@ -23,8 +23,6 @@ TOML
 PYTHONPATH="$ROOT/tests/lib:$ROOT/docker/agent-studio" "$STUDIO_PY" - "$TMP" > "$TMP/py.out" 2>&1 <<'PY'
 import re, sys, time
 from datetime import datetime, timezone
-from html.parser import HTMLParser
-from urllib.parse import urlencode
 
 import duckdb
 from agent_studio import config as CF, otlp, store as ST
@@ -32,6 +30,7 @@ from agent_studio.app import create_app
 from pycheck import check
 from studio_asgi import TOKEN, get
 from studio_db import StudioDB
+from studio_form import submit as form_submit
 
 tmp = sys.argv[1]
 cfg = CF.load(f"{tmp}/config.toml")
@@ -156,35 +155,8 @@ st, via = get(app, "/uso", "hours=24&repo=beta")
 check("o link do Dashboard abre o Uso já com o repositório marcado", st == 200 and '<option value="beta" selected>' in via)
 
 # ---- o formulário renderizado, enviado como o navegador envia (lição do #553)
-class Fields(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.sent, self.in_form, self.select = [], False, None
-        self.chosen = {}
-
-    def handle_starttag(self, tag, a):
-        a = dict(a)
-        if tag == "form" and "filtro" in (a.get("class") or ""):
-            self.in_form = True
-        elif self.in_form and tag == "input" and a.get("name"):
-            self.sent.append((a["name"], a.get("value") or ""))
-        elif self.in_form and tag == "select":
-            self.select = a["name"]
-            self.chosen[self.select] = ""
-        elif self.in_form and tag == "option" and self.select and "selected" in a:
-            self.chosen[self.select] = a.get("value") or ""
-
-    def handle_endtag(self, tag):
-        if tag == "select":
-            self.select = None
-        elif tag == "form":
-            self.in_form = False
-
 def submit(path, query, **pick):
-    f = Fields()
-    f.feed(get(app, path, query)[1])
-    sent = f.sent + [(k, pick.get(k, v)) for k, v in f.chosen.items()]
-    return get(app, path, urlencode([(k, pick.get(k, v)) for k, v in sent])), sent
+    return form_submit(get, app, path, query, **pick)
 
 for p in PAGES:
     (st, html), sent = submit(p, "hours=168", repo="beta")

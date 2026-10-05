@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from . import (alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
-               sessions as sess_mod, tz as tz_mod)
+               sessions as sess_mod, tools as tools_mod, tz as tz_mod)
 from . import alerts as alerts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -308,6 +308,57 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs += f"&repo={quote(repo, safe='')}"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
                     gates=len(ages), window_qs=qs, repo=repo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
+
+    # ------------------------------------------------ ferramentas (#535): só leitura
+    def tools_qs(q, from_ns, to_ns, host, agent, repo):
+        """Query string que leva a janela e os filtros da tela das ferramentas para a lista de conversas de uma ferramenta."""
+        if "from" in q:
+            qs = f"from={quote(q['from'], safe='')}&to={quote(q.get('to', ''), safe='')}"
+        elif has_range(q):  # o intervalo digitado no fuso da tela vai adiante em UTC, exato
+            qs = f"from={quote(iso_utc(from_ns), safe='')}&to={quote(iso_utc(to_ns), safe='')}"
+        else:
+            qs = f"hours={quote(period(q, from_ns, to_ns, config.tz)['hours'], safe='')}"
+        for key, value in (("host", host), ("agent", agent), ("repo", repo)):
+            if value:
+                qs += f"&{key}={quote(value, safe='')}"
+        return qs
+
+    @app.get("/ferramentas")
+    async def tools_screen(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        q = request.query_params
+        try:
+            from_ns, to_ns = screen_window(q)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
+        data, failed = await read(request, "ferramentas", store.tools, from_ns, to_ns, config.tz, repo_mod.parse(repo),
+                                  host or None, agent or None)
+        if failed:
+            return failed
+        return page(request, "tools.html", **data, host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
+                    windows=WINDOWS, link_qs=tools_qs(q, from_ns, to_ns, host, agent, repo), **period(q, from_ns, to_ns, config.tz))
+
+    @app.get("/ferramenta")
+    async def tool_screen(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        q = request.query_params
+        try:
+            from_ns, to_ns = screen_window(q)
+        except ValueError as e:
+            return error(request, 400, str(e))
+        name = q.get("nome", "")
+        if not name or len(name) > 200:
+            return error(request, 400, "informe o nome da ferramenta")
+        host, agent, repo = q.get("host", ""), q.get("agent", ""), q.get("repo", "")
+        data, failed = await read(request, "conversas da ferramenta", store.tool_conversations, name, from_ns, to_ns,
+                                  repo_mod.parse(repo), host or None, agent or None)
+        if failed:
+            return failed
+        return page(request, "tool.html", data=data, tool=name, host=host, agent=agent, repo=repo, from_ns=from_ns, to_ns=to_ns,
+                    link_qs=tools_qs(q, from_ns, to_ns, host, agent, repo), limit=tools_mod.CONV_LIMIT)
 
     # ------------------------------------------------ login
     @app.get("/login")
