@@ -28,6 +28,7 @@ from urllib.parse import quote, urlsplit
 
 from .conversations import _dicts
 from .proposals import age_seconds
+from .tabela import Col, Table
 from .state import CYCLE_KIND, STEP_EVENT as EVENT, STEP_KINDS as KINDS, iso, step_valid
 
 TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospectiva (kaizen)",
@@ -38,8 +39,19 @@ ROUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z", re.ASCII)   # o id 
 CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z", re.ASCII)   # `<dono>/<repo>#<n>`
 SECTIONS = ("Decisão", "Ações", "Detalhe")
 TEXT_MAX = 32768   # o mesmo teto do `oute-swarm step publish` e do `oute-emit`
-LIST_LIMIT = 100   # rodadas na lista
+LIST_LIMIT = 100   # rodadas na lista (a tela, que pagina, pede `tabela.ALL`)
 TRAY_LIMIT = 50    # etapas no bloco `steps` do tray (as mais novas); `total` diz quantas há
+
+# a tabela da tela das rodadas (#529): a mais recente primeiro; estado e veredito filtram
+def _st(x, key):
+    return (x.get("state") or {}).get(key) or None
+
+
+TABLE = Table([Col("rodada", "text", lambda x: x["round"]), Col("repo", "text", lambda x: _st(x, "repo")),
+               Col("state", "text", lambda x: _st(x, "state"), lambda x: [_st(x, "state")]), Col("cycle", "text", lambda x: _st(x, "cycle")),
+               Col("steps", "num", lambda x: x["steps"]), Col("kind", "text", lambda x: x["kind"]),
+               Col("review", "text", lambda x: x["review"], lambda x: [x["review"]]), Col("last", "time", lambda x: x["last_ns"])],
+              default=("last", "desc"))
 
 # ---------------------------------------------------------------- leitura
 # antes do primeiro evento a tabela não existe, e ler tabela que não existe é erro no SurrealDB: sem ela, lista vazia

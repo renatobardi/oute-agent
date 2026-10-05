@@ -20,11 +20,40 @@ from urllib.parse import quote
 
 from .conversations import _dicts
 from .state import iso
+from .tabela import Col, Table
 
 PENDING_LIMIT = 200  # pedidos pendentes na lista (os mais recentes)
 RECENT_LIMIT = 50    # pedidos decididos na lista (os últimos, pela hora da decisão)
 
 PROPOSED = "oute.canal.proposed"
+
+
+def _epoch(when):
+    """Datetime do SurrealDB -> segundos desde 1970 (`None` se não é uma hora): o valor de ordem das colunas de hora."""
+    try:
+        return int(datetime.strptime(when[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def _in(key):
+    return lambda p: [p.get(key)]
+
+
+def _cols(*extra):
+    return [Col("pedido", "text", lambda p: p.get("title") or p["id"]),
+            Col("as", "text", lambda p: p.get("as"), _in("as")), Col("agent", "text", lambda p: p.get("agent"), _in("agent")),
+            Col("host", "text", lambda p: p.get("host"), _in("host")), *extra]
+
+
+# as tabelas da tela (#529): pendentes (a mais nova primeiro) e decididos (o último decidido primeiro)
+PENDING_TABLE = Table(_cols(Col("idade", "num", lambda p: None if _epoch(p.get("proposed_at")) is None else -_epoch(p["proposed_at"])),
+                            Col("proposto", "time", lambda p: _epoch(p.get("proposed_at")))),
+                      default=("proposto", "desc"), suffix="_p")
+RECENT_TABLE = Table(_cols(Col("decision", "text", lambda p: p.get("decision"), _in("decision")), Col("rc", "num", lambda p: p.get("rc")),
+                           Col("duration", "num", lambda p: p.get("duration_s")), Col("approver", "text", lambda p: p.get("approver")),
+                           Col("decidido", "time", lambda p: _epoch(p.get("decided_at")))),
+                     default=("decidido", "desc"), suffix="_d", anchor="#decididos")
 # o que a página aceita do registro do SurrealDB (o script, o sha256 dele e as versões são só do evento)
 _RECORD = ("title", "as", "agent", "host", "instance", "size", "state", "proposed_at", "decided_at", "decision", "rc",
            "duration_s", "output_bytes", "approver", "sha256")
@@ -63,7 +92,8 @@ APPROVE_READ = 65536  # o `oute approve` lê no máximo isto do arquivo do pedid
 
 
 def listing(surreal, pending_limit=PENDING_LIMIT, recent_limit=RECENT_LIMIT):
-    """Pedidos pendentes (do mais novo para o mais antigo; `pending_total` diz quantos há) e os últimos decididos.
+    """Pedidos pendentes (do mais novo para o mais antigo; `pending_total` diz quantos há) e os últimos decididos (a
+    tela, que pagina, pede `tabela.ALL` nos dois).
     Erro do SurrealDB levanta (SurrealError): sem o estado não há lista."""
     found = surreal.query(_LIST, {"pending": pending_limit, "recent": recent_limit})
     return {"pending": found[0]["result"] or [], "recent": found[1]["result"] or [],

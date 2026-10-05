@@ -108,6 +108,16 @@ check "lista: etapas, revisões e o veredito da última" jqe --arg r "$R1" '.[] 
 check "lista: a R5 tem cinco etapas e o veredito da última (#508)" jqe --arg r "$R5" '.[] | select(.rodada == $r) | .etapas == "5" and .revisoes == "5" and .review == "aprovado"' <<<"$L"
 check "lista: link da página da rodada"                grep -qF "<a href=\"/rodada?id=$R1\">$R1</a>" "$TMP/list.html"
 check "lista: veredito em Badge (aprovado, reprovado)"  bash -c 'grep -q "badge secundario\"><svg[^>]*><use href=\"/static/lucide.svg#check\"/></svg>aprovado</span>" "$1" && grep -q "badge destrutivo\"><svg[^>]*><use href=\"/static/lucide.svg#triangle-alert\"/></svg>reprovado</span>" "$1"' _ "$TMP/list.html"
+# tabela com ordem, filtro por coluna e página (#529)
+rounds_of() { data | jq -c '[.[] | select(has("rodada")) | .rodada]'; return $?; }
+check "lista: o rodapé conta as rodadas ('1 a 5 de 5') e o tamanho 20 é o padrão" bash -c 'grep -q "data-faixa>1 a 5 de 5<" "$1" && grep -q "aria-current=\"true\">20</a>" "$1"' _ "$TMP/list.html"
+check "lista: ordenar pela rodada de A a Z e invertido" test "$(page '/rodadas?ord=rodada&dir=asc' | rounds_of)$(page '/rodadas?ord=rodada&dir=desc' | rounds_of)" = "$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$a, $b, $c, $d, $e]')$(jq -cn --arg a "$R1" --arg b "$R2" --arg c "$R3" --arg d "$R4" --arg e "$R5" '[$e, $d, $c, $b, $a]')"
+check "lista: ordenar pelo número de etapas começa pela rodada com mais etapas (a R5, cinco)" test "$(page '/rodadas?ord=steps&dir=desc' | rounds_of | jq -r '.[0]')" = "$R5"
+check "lista: o cabeçalho da coluna ordenada propõe a direção oposta no segundo clique" bash -c 'tr "\n" " " <<<"$1" | grep -q "data-col=\"steps\">[[:space:]]*<a class=\"ordem\" href=\"/rodadas?ord=steps&amp;dir=asc\""' _ "$(page '/rodadas?ord=steps&dir=desc')"
+check "lista: filtro por veredito deixa só as reprovadas (a R2) e o rodapé conta o filtrado" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=reprovado")"; grep -q "data-faixa>1 a 1 de 1 (filtrado, 5 no total)<" <<<"$h" && [ "$(grep -c "data-rodada=\"$2\"" <<<"$h")" = 1 ] && [ "$(grep -c "<tr data-rodada=" <<<"$h")" = 1 ]' _ "$STUDIO_URL" "$R2" "${C[@]}"
+check "lista: o filtro do cabeçalho de veredito oferece os valores da lista inteira" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=reprovado")"; sed -n "/data-filtro=\"review\"/,/<\/details>/p" <<<"$h" | grep -q ">aprovado</a>"' _ "$STUDIO_URL" "${C[@]}"
+check "lista: filtro sem rodada mostra o aviso com o link para limpar, não a mensagem de 'nenhuma rodada ainda'" bash -c 'h="$(curl -s "${@:2}" "$1/rodadas?f_review=sem-revisor-nenhum")"; grep -q "Limpar o filtro" <<<"$h" && ! grep -q "data-sem-rodadas" <<<"$h"' _ "$STUDIO_URL" "${C[@]}"
+check "lista: ordem, direção, tamanho, página ou filtro fora da lista fixa = 400" bash -c 'for q in ord=nope dir=up tam=7 tam=abc pag=0 pag=x f_nada=1 f_review_d=x ord_p=state; do [ "$(curl -s -o /dev/null -w "%{http_code}" "${@:2}" "$1/rodadas?$q")" = 400 ] || { echo "$q" >&2; exit 1; }; done' _ "$STUDIO_URL" "${C[@]}"
 
 # ---------------------------------------------------------------- 4. /rodada: a R1
 page "/rodada?id=$R1" > "$TMP/r1.html"

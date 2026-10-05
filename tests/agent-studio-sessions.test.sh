@@ -154,6 +154,13 @@ check "lista: as 4 sessões da janela, da mais recente para a mais antiga (pelo 
   jqe --arg s1 "$S1" --arg s2 "$S2" --arg s3 "$S3" --arg s4 "$S4" 'map(.sessao) == [$s2, $s4, $s3, $s1]' <<<"$L"
 check "lista: hora do fato (sessão de janeiro fora)"   jqe 'all(.sessao | test("antiga") | not)' <<<"$L"
 check "lista: menu com conversas e sessões"            bash -c 'grep -qE "<a class=\"nav-item\" href=\"/conversas\"[^>]*>.*<span>Conversas</span></a>" "$1" && grep -qE "<a class=\"nav-item\" href=\"/sessoes\"[^>]*>.*<span>Sessões</span></a>" "$1"' _ "$TMP/list.html"
+# tabela com ordem e filtro por coluna (#529): o estado vem do SurrealDB e filtra pelo cabeçalho da coluna Sessão / conversa
+sess_of() { local qs="$1"; curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&$qs" | data | jq -c '[.[] | select(.sessao) | .sessao]'; return $?; }
+check "lista: filtro por estado (aberta) deixa só as abertas, na ordem de sempre" test "$(sess_of f_state=aberta)" = "$(jq -cn --arg a "$S4" --arg b "$S1" '[$a, $b]')"
+check "lista: filtro por estado (removida)" test "$(sess_of f_state=removida)" = "$(jq -cn --arg a "$S2" '[$a]')"
+check "lista: o cabeçalho oferece os estados que as sessões têm" bash -c 'sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">aberta</a>" && sed -n "/data-filtro=\"state\"/,/<\/details>/p" "$1" | grep -q ">removida</a>"' _ "$TMP/list.html"
+check "lista: ordenar pelo id da sessão de A a Z e invertido" test "$(sess_of 'ord=session&dir=asc')$(sess_of 'ord=session&dir=desc')" = "$(jq -cn '[$ARGS.positional | sort[]]' --args "$S1" "$S2" "$S3" "$S4")$(jq -cn '[$ARGS.positional | sort | reverse[]]' --args "$S1" "$S2" "$S3" "$S4")"
+check "lista: o filtro por estado só existe na tabela das sessões (nas conversas sem sessão é 400)" test "$(code "${C[@]}" "$STUDIO_URL/sessoes?$WIN&f_state_c=aberta")" = 400
 R1="$(srow "$S1")"
 check "S1: host e agente"                              jqe '.host == "oute-server" and .agents == "claude"' <<<"$R1"
 check "S1: modelos das chamadas, do mais chamado para o menos" jqe '.models == "claude-sonnet-5,claude-opus-5" and (.text | test("claude-sonnet-5 ×3 claude-opus-5 ×1"))' <<<"$R1"
@@ -213,7 +220,7 @@ check "filtro por host"                                test "$(ids host=oute-mac
 check "filtro por agente"                              test "$(ids agent=codex)" = "[\"$S2\",\"solta 2/&é\"]"
 check "filtro por host e agente"                       test "$(ids 'host=oute-server&agent=claude' | jq -c 'map(select(test("<b>") | not))')" = "[\"$S1\",\"solta-1\"]"
 check "filtro sem resultado: avisos, sem erro"         bash -c 'grep -q "Nenhuma sessão nessa janela" <<<"$1" && grep -q "Nenhuma conversa sem sessão" <<<"$1"' _ "$(curl -s "${C[@]}" "$STUDIO_URL/sessoes?$WIN&host=oute-mac&agent=claude")"
-check "filtros oferecem os hosts e agentes da janela"  bash -c 'grep -q "<option value=\"oute-mac\"" "$1" && grep -q "<option value=\"oute-server\"" "$1" && grep -q "<option value=\"codex\"" "$1" && ! grep -q "<option value=\"human\"" "$1"' _ "$TMP/list.html"
+check "filtros do cabeçalho oferecem os hosts e agentes da janela (#529)"  bash -c 'grep -q "<a href=\"[^\"]*host=oute-mac[^\"]*\">oute-mac</a>" "$1" && grep -q "<a href=\"[^\"]*host=oute-server[^\"]*\">oute-server</a>" "$1" && grep -q "<a href=\"[^\"]*agent=codex[^\"]*\">codex</a>" "$1" && ! grep -q ">human</a>" "$1"' _ "$TMP/list.html"
 check "janela padrão (24 h): nada (hora do fato, não a de chegada)" grep -q 'Nenhuma sessão nessa janela' <(curl -s "${C[@]}" "$STUDIO_URL/sessoes")
 check "janela só com o começo da sessão longa"         test "$(curl -s "${C[@]}" "$STUDIO_URL/sessoes?from=2025-09-25&to=2025-09-26" | data | jq -c '[.[] | select(.sessao) | .calls]')" = '["4"]'
 check "janela inválida: 400"                           test "$(code "${C[@]}" "$STUDIO_URL/sessoes?from=ontem&to=2025-09-29")" = 400
@@ -291,7 +298,7 @@ studio_stop
 PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" "$STUDIO_PY" - "$TMP/s/db.duckdb" > "$TMP/py.out" 2>&1 <<'PY'
 import sys
 import duckdb
-from agent_studio import cost, sessions, usage, web
+from agent_studio import cost, sessions, tabela, usage, web
 from agent_studio.app import create_app
 from pycheck import check
 from studio_asgi import TOKEN, Broken, Odd, get
@@ -313,9 +320,10 @@ s1 = next(s for s in r["sessions"] if s["id"] == S1)
 check("lista: conversas por sessão cortadas nas mais recentes, com as que faltam contadas",
       [c["id"] for c in s1["conversations"]] == ["s1-a", "s1-b"] and s1["hidden"] == 1 and s1["conversation_count"] == 3)
 check("lista: o corte das conversas não muda as somas da sessão", s1["usage"]["calls"] == 4)
+views = [tabela.apply(t, tabela.parse(t, {}), rows, [], "/sessoes") for t, rows in ((sessions.TABLE, r["sessions"]), (sessions.LOOSE, r["loose"]))]
 html = web._env().get_template("sessions.html").render(
-    **r, state_read=None, from_ns=D1 - DAY, to_ns=D1 + DAY, host="", agent="", repo="", windows=web.WINDOWS, hours="24",
-    range={"from": "", "to": ""}, limit=200)
+    ts=views[0], tl=views[1], keep=[], repos=r["repos"], state_read=None, from_ns=D1 - DAY, to_ns=D1 + DAY, repo="", windows=web.WINDOWS, hours="24",
+    range={"from": "", "to": ""})
 check("lista: sessão cortada leva o link para as conversas que faltam",
       f'<a href="/sessao?id={S1}">mais 1 conversas antes destas</a>' in html and 'data-conversa="s1-0"' not in html)
 check("lista: sem SurrealDB lido, sessão sem estado e sem rodada resolvida",

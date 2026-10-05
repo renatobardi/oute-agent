@@ -180,7 +180,7 @@ for p in PAGES:
           and body(html) == body(get(app, p, "hours=168")[1]))
 (st, html), sent = submit("/uso", q("beta"), repo="")
 check("trocar para Todos num formulário que tinha o repositório: volta ao total", st == 200 and uso(html) == 6)
-(st, html), sent = submit("/sessoes", Q, repo=NONE, host="oute-server")
+(st, html), sent = submit("/sessoes", Q + "&host=oute-server", repo=NONE)   # o host vem do filtro do cabeçalho (#529) e o formulário o leva escondido
 check("formulário de Sessões com 'sem repositório' e host: 200, repo e host no envio e só a conversa solta",
       st == 200 and ("repo", NONE) in sent and ("host", "oute-server") in sent and ids(html) == ["c-solta"])
 

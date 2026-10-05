@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 {% set nav = "conversas" %}
 {% set crumbs = [("Telemetria", none), ("Conversas", none)] %}
-{% from "_macros.html" import cost, filter, badge, conv_name, aviso_custo with context %}
+{% from "_macros.html" import cost, filter, badge, conv_name, aviso_custo, ta, tb, rodape, sem_linhas with context %}
 {% block title %}Conversas · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 <div class="pagina-topo">
-  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, hosts, host, agents, agent, repos, repo) }}</div>
-  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}{% if total > conversations|length %} · Mostrando as {{ conversations|length }} mais recentes de {{ total }}{% endif %}</p>
+  <div class="titulo-linha"><h1>Conversas</h1>{{ filter("/conversas", windows, hours, range, repos=repos, repo=repo, hidden=keep, live=true) }}</div>
+  <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 {{ aviso_custo() }}
-{% if conversations %}
+{% if t.rows %}
 <div class="cartao rolagem">
-<table class="conversas empilha">
+<table class="conversas empilha" data-tabela>
   <thead><tr>
-    <th>Início ({{ tzl() }})</th><th>Host</th><th>Agente</th><th>Conversa</th><th class="n">Duração</th><th class="n">Chamadas</th>
-    <th class="n" title="tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo">Tokens ent / saí</th>
-    <th class="n">Custo ({{ custo_nome() }})</th><th class="n">Erros</th>
+    <th{{ ta(t, "start") }}>{{ tb(t, "start", "Início (" ~ tzl() ~ ")") }}</th><th{{ ta(t, "host") }}>{{ tb(t, "host", "Host") }}</th><th{{ ta(t, "agent") }}>{{ tb(t, "agent", "Agente") }}</th><th{{ ta(t, "conv") }}>{{ tb(t, "conv", "Conversa") }}</th><th{{ ta(t, "duration", "n") }}>{{ tb(t, "duration", "Duração") }}</th><th{{ ta(t, "calls", "n") }}>{{ tb(t, "calls", "Chamadas") }}</th>
+    <th{{ ta(t, "tokens", "n", "tokens de entrada / saída; o cache (leitura / escrita) na linha de baixo") }}>{{ tb(t, "tokens", "Tokens ent / saí") }}</th>
+    <th{{ ta(t, "cost", "n") }}>{{ tb(t, "cost", "Custo (" ~ custo_nome() ~ ")") }}</th><th{{ ta(t, "errors", "n") }}>{{ tb(t, "errors", "Erros") }}</th>
   </tr></thead>
   <tbody>
-  {% for c in conversations %}
+  {% for c in t.rows %}
   {% set u = c.usage %}
   <tr data-conversa="{{ c.id }}" data-host="{{ c.host or '' }}" data-repo="{{ c.repo or '' }}" data-agent="{{ c.agent or '' }}" data-start-ns="{{ c.start_ns }}"
       data-duration-ns="{{ c.duration_ns }}" data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}"
@@ -42,8 +42,9 @@
   </tbody>
 </table>
 </div>
+{{ rodape(t) }}
 {% else %}
-<p class="aviso" id="vazio">Nenhuma conversa nessa janela.</p>
+{{ sem_linhas(t, "Nenhuma conversa nessa janela.") }}
 {% endif %}
 </div>
 {% endblock %}

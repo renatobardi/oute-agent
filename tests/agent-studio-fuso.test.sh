@@ -75,7 +75,7 @@ check "tray: asked_at da decisão segue em ISO com Z, na hora exata da pergunta"
 
 # ---------------------------------------------------------------- 3. telas: hora convertida e rótulo do fuso
 P="$(get "$CONV")"
-check "conversas: cabeçalho Início (GMT-3), nunca (UTC)" bash -c 'grep -q "<th>Início (GMT-3)</th>" <<<"$1" && ! grep -q "(UTC)" <<<"$1"' _ "$P"
+check "conversas: cabeçalho Início (GMT-3), nunca (UTC)" bash -c 'grep -q ">Início (GMT-3)<" <<<"$1" && ! grep -q "(UTC)" <<<"$1"' _ "$P"
 check "conversas: conv-1 às 23:30 do dia 26 (e não 02:30 do 27)" bash -c 'grep -q "2025-09-26 23:30:00" <<<"$1" && ! grep -q "2025-09-27 02:30:00" <<<"$1"' _ "$P"
 check "conversas: conv-2 às 00:30 do dia 27 (e não 03:30)" bash -c 'grep -q "2025-09-27 00:30:00" <<<"$1" && ! grep -q "2025-09-27 03:30:00" <<<"$1"' _ "$P"
 check "conversas: a nota diz a hora do fato em GMT-3, e a janela também é convertida" bash -c 'grep -q " · GMT-3" <<<"$1" && grep -q "2025-09-25 21:00:00" <<<"$1"' _ "$P"
@@ -101,7 +101,7 @@ check "fuso inválido: o motivo vai em prices.errors"     jqe '.prices.errors | 
 check "fuso inválido: o motivo vai ao stderr"            grep -q "timezone inválido" "$TMP/ruim/stderr"
 check "fuso inválido: o tray também diz UTC"             jqe '.timezone == "UTC"' <<<"$(get /v1/tray)"
 P="$(get "$CONV")"
-check "fuso inválido: telas em UTC, com (UTC) no cabeçalho e a hora do fato" bash -c 'grep -q "<th>Início (UTC)</th>" <<<"$1" && grep -q "2025-09-27 02:30:00" <<<"$1"' _ "$P"
+check "fuso inválido: telas em UTC, com (UTC) no cabeçalho e a hora do fato" bash -c 'grep -q ">Início (UTC)<" <<<"$1" && grep -q "2025-09-27 02:30:00" <<<"$1"' _ "$P"
 studio_stop
 studio_start "$TMP/sem" AGENT_STUDIO_CONFIG="$TMP/prices.toml" || { cat "$TMP/sem/stderr"; die "agent-studio não subiu"; }
 check "fuso ausente: timezone UTC"                       jqe '.timezone == "UTC"' <<<"$(get "/v1/usage?$WIN")"
