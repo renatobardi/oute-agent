@@ -1,0 +1,20 @@
+{# Linha do tempo em SVG do Dashboard (#469) e da tela Ferramentas (#535): o <title> geral e o `<g class="ponto">` de cada ponto vêm do bloco da
+   chamada (`caller()` recebe `p`); `extra` = traço a mais (erros). `s` = a série, `n` = nº de pontos, `W` e `H` = a caixa do viewBox. #}
+{% macro linha(s, n, W, H, rotulo, erros=false) %}
+    <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="{{ rotulo }} por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
+      <title>{{ rotulo }} por {{ "hora" if s.unit == "hour" else "dia" }}</title>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
+      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
+      <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
+      <path class="area" d="M{{ '%.1f'|format(s.points[0].x * W) }} {{ H }}{% for p in s.points %} L{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %} L{{ '%.1f'|format(s.points[-1].x * W) }} {{ H }} Z"/>
+      <path class="linha" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %}"/>
+      {% if erros %}<path class="linha erros" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.err_frac * H) }}{% endfor %}"/>
+      {% endif %}{% for p in s.points %}
+      <g class="ponto" {{ caller(p, false) }}>
+        <rect class="alvo" x="{{ '%.1f'|format((p.x - 0.5 / n) * W) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
+        <line class="guia" x1="{{ '%.1f'|format(p.x * W) }}" x2="{{ '%.1f'|format(p.x * W) }}" y1="0" y2="{{ H }}"/>
+        <title>{{ caller(p, true) }}</title>
+      </g>
+      {% endfor %}
+    </svg>
+{% endmacro %}

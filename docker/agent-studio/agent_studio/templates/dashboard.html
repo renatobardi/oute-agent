@@ -2,6 +2,9 @@
 {% set nav = "dashboard" %}
 {% set crumbs = [("Dashboard", none)] %}
 {% from "_macros.html" import icon, badge, filter, aviso_custo with context %}
+{% from "_graficos_barras.html" import barra, mini, amostra %}
+{% from "_graficos_linha.html" import linha %}
+{% from "_graficos_painel.html" import barra_modelo, composicao %}
 {# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem estilo na tag: a escala vem
    do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
    distingue o informado pela fonte (ou efetivo) do estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
@@ -90,21 +93,7 @@
   </form>
   <div class="linha-grafico">
     <div class="eixo-y"><span>{{ s.max|num }}</span><span>{{ s.mid|num }}</span><span>0</span></div>
-    <svg class="linha-svg" viewBox="0 0 {{ W }} {{ H }}" preserveAspectRatio="none" role="img" aria-label="Chamadas ao modelo por {{ 'hora' if s.unit == 'hour' else 'dia' }}">
-      <title>Chamadas ao modelo por {{ "hora" if s.unit == "hour" else "dia" }}</title>
-      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="0" y2="0"/>
-      <line class="grade tracejada" x1="0" x2="{{ W }}" y1="{{ H // 2 }}" y2="{{ H // 2 }}"/>
-      <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
-      <path class="area" d="M{{ '%.1f'|format(s.points[0].x * W) }} {{ H }}{% for p in s.points %} L{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %} L{{ '%.1f'|format(s.points[-1].x * W) }} {{ H }} Z"/>
-      <path class="linha" d="{% for p in s.points %}{{ 'M' if loop.first else ' L' }}{{ '%.1f'|format(p.x * W) }} {{ '%.1f'|format(H - p.frac * H) }}{% endfor %}"/>
-      {% for p in s.points %}
-      <g class="ponto" data-bucket="{{ p.key }}" data-calls="{{ p.calls }}">
-        <rect class="alvo" x="{{ '%.1f'|format((p.x - 0.5 / n) * W) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
-        <line class="guia" x1="{{ '%.1f'|format(p.x * W) }}" x2="{{ '%.1f'|format(p.x * W) }}" y1="0" y2="{{ H }}"/>
-        <title>{{ p.label }} · {{ p.calls|calls }} · p95 {{ p.p95|ms }}</title>
-      </g>
-      {% endfor %}
-    </svg>
+    {% call(p, titulo) linha(s, n, W, H, "Chamadas ao modelo") %}{% if titulo %}{{ p.label }} · {{ p.calls|calls }} · p95 {{ p.p95|ms }}{% else %}data-bucket="{{ p.key }}" data-calls="{{ p.calls }}"{% endif %}{% endcall %}
     <span></span>
     <div class="eixo-x">{% for p in s.points %}<span>{{ p.tick }}</span>{% endfor %}</div>
   </div>
@@ -120,11 +109,7 @@
   <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
        title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'informado pela fonte' }}">
     <span class="rotulo mono">{{ m.model }}</span>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
-      <title>{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}</title>
-      {% if m.real_frac %}<rect class="real" x="0" y="0" width="{{ '%.2f'|format([m.real_frac * 100, 1]|max) }}" height="14"/>{% endif %}
-      {% if m.est_frac %}<rect class="estimado" x="{{ '%.2f'|format([m.real_frac * 100, 0]|max) }}" y="0" width="{{ '%.2f'|format([m.est_frac * 100, 1]|max) }}" height="14"/>{% endif %}
-    </svg>
+    {% call barra_modelo(m) %}{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}{% endcall %}
     <span class="valor{% if m.estimated_usd is not none %} est{% endif %}">{% if m.cost is none %}sem preço{% else %}{{ money(m) }}{% endif %}</span>
   </div>
   {% else %}
@@ -134,13 +119,10 @@
     <span class="nota">Composição do custo</span>
     {% set real_f = (comp.real_usd or 0) / comp.total if comp.total else 0 %}
     {% set est_f = (comp.estimated_usd or 0) / comp.total if comp.total else 0 %}
-    <svg class="composicao-svg" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true">
-      <rect class="real" x="0" y="0" width="{{ '%.2f'|format(real_f * 100) }}" height="10"/>
-      <rect class="estimado" x="{{ '%.2f'|format(real_f * 100) }}" y="0" width="{{ '%.2f'|format(est_f * 100) }}" height="10"/>
-    </svg>
+    {{ composicao(real_f, est_f) }}
     <div class="legenda">
-      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ 'Efetivo' if custo == 'efetivo' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
-      <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
+      <span>{{ amostra("real") }}{{ 'Efetivo' if custo == 'efetivo' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
+      <span>{{ amostra("estimado") }}Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
       {% if comp.unpriced_calls %}<span class="nota">{{ comp.unpriced_calls|num }} {{ "chamada sem preço" if comp.unpriced_calls == 1 else "chamadas sem preço" }}, fora da soma</span>{% endif %}
     </div>
   </div>
@@ -158,7 +140,7 @@
     {% for l in snap.latency %}
     <tr data-modelo="{{ l.model }}" data-calls="{{ l.n }}" data-p50-ms="{{ l.p50 }}" data-p90-ms="{{ l.p90 }}" data-p95-ms="{{ l.p95 }}" data-p99-ms="{{ l.p99 }}">
       <td class="mono">{{ l.model }}</td><td class="n">{{ l.n|num }}</td><td class="n sec">{{ l.p50|ms }}</td><td class="n sec">{{ l.p90|ms }}</td>
-      <td class="n p95"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>p95 {{ l.p95|ms }}</title><rect x="0" y="0" width="{{ '%.2f'|format([l.frac * 100, 2]|max) }}" height="6"/></svg>{{ l.p95|ms }}</td>
+      <td class="n p95">{% call mini(l.frac) %}p95 {{ l.p95|ms }}{% endcall %}{{ l.p95|ms }}</td>
       <td class="n sec">{{ l.p99|ms }}</td>
     </tr>
     {% else %}
@@ -177,7 +159,7 @@
   {% for f in snap.phases %}
   <div class="barra-linha fase" data-fase="{{ f.phase }}" data-tokens="{{ f.tokens }}" title="{{ f.phase }}: {{ f.tokens|num }} tokens em {{ f.calls|calls }}">
     <code>{{ f.phase }}</code>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ f.phase }} · {{ f.tokens|num }} tokens</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([f.frac * 100, 1]|max) }}" height="14"/></svg>
+    {% call barra(f.frac) %}{{ f.phase }} · {{ f.tokens|num }} tokens{% endcall %}
     <span class="valor">{{ f.tokens|compact }}</span>
   </div>
   {% else %}
@@ -211,7 +193,7 @@
   {% for t in snap.top_sessions %}
   <a class="top-sessao" href="{{ com_custo("/sessao?id=" ~ (t.id|urlencode)) }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
     <span class="top-linha"><span class="mono">{{ t.id }}</span><span class="valor{% if t.estimated %} est{% endif %}">{{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</span></span>
-    <span class="top-linha"><svg class="mini" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</title><rect x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 2]|max) }}" height="6"/></svg>
+    <span class="top-linha">{% call mini(t.frac) %}{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}{% endcall %}
       <span class="nota">{{ t.agents|join(", ") or "—" }} · {{ t.model or "—" }} · {{ t.calls|calls }}</span></span>
   </a>
   {% else %}
@@ -228,7 +210,7 @@
   <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
        title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
     <span class="rotulo mono">{{ r.repo }}</span>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([r.frac * 100, 1]|max) }}" height="14"/></svg>
+    {% call barra(r.frac) %}{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}
     <span class="valor">{{ r.calls|num }} · {% if r.cost is none %}sem preço{% else %}{{ money(r) }}{% endif %}</span>
   </div>
   {% else %}
@@ -245,7 +227,7 @@
   {% for t in tl.rows %}
   <div class="barra-linha" data-ferramenta="{{ t.tool }}" data-usos="{{ t.uses }}" data-erros="{{ t.errors }}" title="{{ t.tool }}: {{ t.uses|num }} usos, {{ t.errors|num }} erros">
     <span class="rotulo mono"><a href="/ferramenta?nome={{ t.tool|urlencode }}&amp;{{ window_qs }}">{{ t.tool }}</a></span>
-    <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><title>{{ t.tool }} · {{ t.uses|num }} usos · {{ t.errors|num }} erros</title><rect class="real" x="0" y="0" width="{{ '%.2f'|format([t.frac * 100, 1]|max) }}" height="14"/></svg>
+    {% call barra(t.frac) %}{{ t.tool }} · {{ t.uses|num }} usos · {{ t.errors|num }} erros{% endcall %}
     <span class="valor">{{ t.uses|num }}{% if t.errors %} · {{ t.errors|num }} {{ "erro" if t.errors == 1 else "erros" }}{% endif %}</span>
   </div>
   {% else %}
