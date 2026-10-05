@@ -16,16 +16,17 @@ PKG="$ROOT/docker/agent-studio/agent_studio"
 
 svg_templates_valid() {
   local templates="$1" template content svg_ok
-  [ -d "$templates" ] || return 0
+  [[ -d "$templates" ]] || return 0
   for template in "$templates"/*.html; do
-    [ -f "$template" ] || continue
+    [[ -f "$template" ]] || continue
     case "${template##*/}" in
       _macros.html|_graficos*.html) continue ;;
+      *) : ;;
     esac
     if grep -q '<svg' "$template"; then
       content="$(cat "$template")"
       svg_ok="$(printf '%s' "$content" | grep -A 100 '<svg' | grep -E '({{|{%)' | head -1)"
-      if [ -z "$svg_ok" ]; then
+      if [[ -z "$svg_ok" ]]; then
         return 1
       fi
     fi
