@@ -60,7 +60,7 @@ CASE=539-rmvariavel; round "$CASE"
 sw spawn 539-rmvariavel "$WORKER_INSTR"
 P="$STATE/539-rmvariavel.prompt"
 check "worker 539: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
-check "worker 539: regra do rm antes de rodar comando (#539)" grep -qF 'Antes de rodar um comando que use `rm` com variável, confira a regra da linha 14' "$P"
+check "worker 539: regra do rm antes de rodar comando (#539)" grep -qF 'Antes de rodar um comando que use `rm` com variável, confira a regra do `rm` com variável, acima' "$P"
 check "worker 539: regra vale também na aba (#539)" grep -qF 'A regra vale também para comando que você roda na aba, não só para o que vai no arquivo de teste.' "$P"
 check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
@@ -71,8 +71,8 @@ P="$STATE/373-semacao.prompt"
 check "worker sem ação manual: código 0, com o prompt"   bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker sem ação manual: proíbe o diálogo de pergunta (#373)" grep -qF 'Não use o diálogo interativo de pergunta do harness' "$P"
 check "worker sem ação manual: dúvida em texto BLOQUEADO (#373)" grep -qF 'termina o turno com texto: `BLOQUEADO #373: <pergunta>`, as opções numeradas (1, 2, …) e a sua recomendação' "$P"
-check "worker sem ação manual: regra se prompt aparecer mesmo assim (#373)" grep -qF 'Se um prompt de permissão aparecer mesmo assim, a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
-check "worker sem ação manual: rm com variável é caso mais comum (#373)" grep -qF 'a regra da linha 14 sobre `rm` com variável é o caso mais comum' "$P"
+check "worker sem ação manual: regra se prompt aparecer mesmo assim (#373)" grep -qF 'Se um prompt de permissão aparecer mesmo assim, a regra do `rm` com variável, acima, é o caso mais comum' "$P"
+check "worker sem ação manual: rm com variável é caso mais comum (#373)" grep -qF 'a regra do `rm` com variável, acima, é o caso mais comum' "$P"
 check "worker spike: escopo de teste em serviço compartilhado (#378)" grep -qF 'use um escopo de teste fixo, com `workspace` e `project` próprios e `oute.task.slug` identificável' "$P"
 check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 opn --max 2
@@ -101,7 +101,6 @@ check "worker check-lib: sem placeholder no prompt"       [ -z "$(grep -o "$NO_P
 
 # 11j1. regra de parallel-lib quando altera testes (#450): rodar parallel-lib e dizer no corpo do PR
 CASE=parallel-lib; round "$CASE"
-INSTR_450="$WORKER_INSTR"
 sw spawn 450-parallellib "$WORKER_INSTR"
 P="$STATE/450-parallellib.prompt"
 check "worker parallel-lib: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
@@ -114,7 +113,6 @@ check "worker parallel-lib: sem placeholder no prompt"     [ -z "$(grep -o "$NO_
 
 # 11k. conferência do diff contra SonarCloud antes de abrir PR (#540): evita gates reprovados
 CASE=sonar; round "$CASE"
-INSTR="$WORKER_INSTR"
 SCHEME="http"
 sw spawn 540-sonar "$WORKER_INSTR"
 P="$STATE/540-sonar.prompt"
@@ -151,7 +149,7 @@ check "worker: Refs se algum critério de build, qa ou design faltar (#501)" gre
 check "worker: ship no Falta com marca (ship) (#501)"        grep -qF 'vai no `## Falta` com a marca `(ship)`, e o PR usa `Closes`' "$W"
 check "worker: critério de ship é depois de entrar ou deploy ou release (#501)" grep -qF 'Critério de `ship` (com "depois de entrar", "depois do deploy" ou "medida após a release")' "$W"
 # 585. conferir funções de shell novas com grep antes do PR e declarar o resultado (#585)
-check "worker: lista funções novas do diff com grep antes do PR (#585)" grep -qF 'git diff --unified=0 origin/main...HEAD -- tests/*.test.sh scripts/ docker/ | grep -E' "$W"
+check "worker: lista funções novas do diff com grep antes do PR (#585)" grep -qF 'git diff --unified=0 origin/main...HEAD -- tests/*.test.sh tests/lib/ scripts/ docker/ | grep -E' "$W"
 check "worker: grep identifica definições de função no diff (#585)" grep -qF 'function[[:space:]]+[[:alnum:]_]+|[[:alnum:]_]+[[:space:]]*[(][)][[:space:]]*[{]' "$W"
 check "worker: confere local em cada função nova (#585)" grep -qF 'todo parâmetro posicional deve ser atribuído a uma variável `local`' "$W"
 check "worker: confere return explícito em cada função nova (#585)" grep -qF 'deve haver um `return` explícito no fim' "$W"
