@@ -14,7 +14,7 @@ Rotas: `POST /api/v1/chat/completions`, `GET /api/v1/models` e `GET /healthz`; o
 Um heartbeat (métrica `oute.llm_proxy.up`, uma por minuto) deixa o agent-studio alertar quando o proxy cai.
 
 Ambiente: LLM_PROXY_API_KEY, LLM_PROXY_UPSTREAM (padrão a API do OpenRouter; só `https`), LLM_PROXY_BIND/PORT
-(0.0.0.0:8440; o compose não publica porta e só põe o proxy na rede `llm`), OTEL_EXPORTER_OTLP_ENDPOINT (sem ele, não
+(0.0.0.0:8440; o compose não publica porta e põe o proxy nas redes `llm` e `saida`), LLM_PROXY_UPSTREAM_TIMEOUT (segundos, padrão 300; o teste baixa), OTEL_EXPORTER_OTLP_ENDPOINT (sem ele, não
 emite), OUTE_HOST, OUTE_INSTANCE, LLM_PROXY_AGENT (padrão ai-memory), LLM_PROXY_HEARTBEAT_SECONDS (60), LLM_PROXY_RETRY_SECONDS (5; nova tentativa
 da emissão ao collector).
 Só stdlib. Teste: tests/oute-llm-proxy.test.sh.
@@ -42,7 +42,7 @@ MAX_PARSE = 16 * 2**20        # resposta lida inteira para achar o `usage`; acim
 MAX_ERROR_BODY = 64 * 2**10   # corpo de erro do upstream, lido inteiro para tirar a chave
 MAX_SSE_LINE = 2**20
 MODEL_RE = re.compile(r"^[A-Za-z0-9._:/@+-]{1,128}$")
-UPSTREAM_TIMEOUT = 300
+UPSTREAM_TIMEOUT = float(os.environ.get("LLM_PROXY_UPSTREAM_TIMEOUT", "300"))  # o teste baixa; em produção fica 300 s
 ROUTES = {("POST", "/api/v1/chat/completions"): "/chat/completions", ("GET", "/api/v1/models"): "/models"}
 QUEUE_MAX = 1000
 RETRY_SECONDS = float(os.environ.get("LLM_PROXY_RETRY_SECONDS", "5"))

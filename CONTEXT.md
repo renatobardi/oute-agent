@@ -6,11 +6,11 @@ Resumo para agentes. **O canônico são os ADRs em `docs/adr/`**, mantidos pelo 
 | serviço | papel |
 |---|---|
 | `agent` | Ubuntu 24.04 com herdr, sshd (`127.0.0.1:2222`), Claude Code (principal), Codex (reserva), CLIs (gh, oci, gcloud, aws, rclone, ai-memory). IP fixo `172.19.0.5`, uid/gid 10001 |
-| `ai-memory` | memória compartilhada entre agentes (hooks + MCP), dados no volume `oute-memory` |
+| `ai-memory` | memória compartilhada entre agentes (hooks + MCP), dados no volume `oute-memory`. Sem saída à internet, por construção: só redes `internal` (`memoria`, com o `agent`; `llm`, com o `llm-proxy` e o collector; ADR-08, adendo #564) |
 | `otel-collector` | telemetria → bucket OCI (tudo) + agent-studio (tudo; ADR-08), com fila em disco por destino |
 | `agent-studio` | só no oute-server (profile do compose): recebe OTLP/HTTP JSON do collector de cada host (credencial de ingestão), grava tudo no DuckDB e o estado no SurrealDB; API só leitura para tray, tela e `ops-observe` (credencial de leitura; única exceção: `POST /rodada/acao`, com a credencial de marcação, #489; ADR-08 §6); única chamada à internet: a conferência diária dos preços em models.dev e OpenRouter (#339) |
 | `surrealdb` | só no oute-server: estado derivado (rodadas, sessões, pedidos, aprovações), sem porta publicada, na rede `studio` só com o `agent-studio` (o `agent` não alcança; ADR-08) |
-| `llm-proxy` | só com a chave da memória no `services.env` (profile `llm-proxy`, nos dois hosts): proxy do LLM do `ai-memory` ao OpenRouter; lê o `usage` de cada resposta e manda o consumo ao collector (agente `ai-memory`, span `ai_memory.llm_request`). Sem porta publicada, na rede `llm` só com o `ai-memory` e o collector (o `agent` não alcança); a chave da memória é só dele (ADR-08, adendo #459) |
+| `llm-proxy` | só com a chave da memória no `services.env` (profile `llm-proxy`, nos dois hosts): proxy do LLM do `ai-memory` ao OpenRouter; lê o `usage` de cada resposta e manda o consumo ao collector (agente `ai-memory`, span `ai_memory.llm_request`). Sem porta publicada, na rede `llm` (interna) com o `ai-memory` e o collector, e na rede `saida`, a única com rota ao OpenRouter (o `agent` não alcança); a chave da memória é só dele (ADR-08, adendo #459) |
 | `volume-init` | one-shot: dono 10001 nos volumes |
 
 Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o container recebe os valores da pasta `oute-agent` em `/run/secrets/agent_env`. Segredo de serviço fica na pasta `oute-services` (→ `~/.oute/services.env`) e vai só aos serviços, nunca ao `agent` (ADR-01, adendo #256).

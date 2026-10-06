@@ -102,7 +102,7 @@ check "compose: só o agent monta o agent_env"           test "$(nocomment < "$C
 check "compose: services.env não é montado em nenhum serviço" bash -c '! grep -q "services.env" <(grep -v "^ *#" "$0")' "$COMPOSE"
 check "compose: collector com a credencial de ingestão" grep -q 'AGENT_STUDIO_INGEST_TOKEN: \${AGENT_STUDIO_INGEST_TOKEN:-}' <<<"$COL"
 check "compose: collector sem a de leitura e sem a senha" bash -c '! grep -qE "READ_TOKEN|SURREAL" <<<"$0"' "$COL"
-check "compose: agent só na rede oute"                  bash -c 'grep -q "^      oute:$" <<<"$0" && ! grep -q "studio" <<<"$(sed -n "/^    networks:/,/^    [a-z]/p" <<<"$0")"' "$AGENT"
+check "compose: agent fora da rede studio"                  bash -c 'grep -q "^      oute:$" <<<"$0" && ! grep -q "studio" <<<"$(sed -n "/^    networks:/,/^    [a-z]/p" <<<"$0")"' "$AGENT"
 check "compose: surrealdb só na rede studio"            grep -qx '    networks: \[studio\]' <<<"$SURREAL"
 check "compose: agent-studio nas redes oute e studio"   grep -qx '    networks: \[oute, studio\]' <<<"$STUDIO"
 check "compose: collector fora da rede studio (oute e llm, #459)" grep -qx '    networks: \[oute, llm\]' <<<"$COL"
@@ -113,7 +113,7 @@ if docker compose version >/dev/null 2>&1; then
   CFG="$(compose_config agent-studio 2>"$TMP/cfg.err")" || CFG=""
   check "compose config: resolve"                       test -n "$CFG"
   check "compose config: surrealdb só na rede studio"   jqe '.services.surrealdb.networks | keys == ["studio"]' <<<"$CFG"
-  check "compose config: agent só na rede oute"         jqe '.services.agent.networks | keys == ["oute"]' <<<"$CFG"
+  check "compose config: agent nas redes oute e memoria, nunca na studio" jqe '.services.agent.networks | keys == ["memoria", "oute"]' <<<"$CFG"
   check "compose config: rede studio interna"           jqe '.networks.studio.internal == true' <<<"$CFG"
   check "compose config: agent sem credencial de serviço no environment" jqe '.services.agent.environment | keys | map(select(test("AGENT_STUDIO_[A-Z_]*(TOKEN|PASS)|SURREAL"))) == []' <<<"$CFG"
   # o endereço não é credencial: o agent lê o agent-studio por ele, com a de leitura do agent_env (#259)
