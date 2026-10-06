@@ -1,2 +1,0 @@
-### Changed
-- **Tray do Mac com a sakura do Kubo** (#563). A barra de menu mostra a sakura no lugar da bandeja, sem cor (pintada pelo sistema). O app ganha ícone: a sakura com a pétala rosa do agent-studio. O macOS mostra esse ícone na notificação. Para isso o identificador do app mudou para `pro.oute.outetray`: o macOS pede de novo a permissão de notificação, uma vez. O `oute tray install` grava o ícone no `.app`. Entra no Mac com `git pull` + `oute tray install`, sem release (o tray é do host, não da imagem).
