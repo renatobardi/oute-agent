@@ -134,8 +134,29 @@ s, h = get(empty, "/precos")
 check("sem nenhum preço: aviso no lugar, página 200", s == 200 and 'id="sem-precos"' in h)
 s, h = get(create_app(Broken(), TOKEN), "/precos")
 check("leitura que falha: 500, sem a causa na página", s == 500 and "segredo-da-falha" not in h and "A consulta falhou" in h)
+
+# fuso do processo (#592): a data ISO do `view` é UTC, e o fuso local (com ou sem horário de verão) não a desloca.
+# O fuso vai como regra POSIX, para não depender do tzdata da máquina; o valor esperado sai do `datetime`, em UTC.
+import os
+from datetime import datetime, timezone
+utc_s = lambda *a: int(datetime(*a, tzinfo=timezone.utc).timestamp())
+tz_before = os.environ.get("TZ")
+got = {}
+for zone in ("EST5EDT,M3.2.0,M11.1.0", "<-03>3", "UTC0"):
+    os.environ["TZ"] = zone
+    time.tzset()
+    got[zone] = (P._parse_iso("2026-07-01T12:00:00Z"), P._parse_iso("2026-01-15T12:00:00Z"))
+if tz_before is None:
+    del os.environ["TZ"]
+else:
+    os.environ["TZ"] = tz_before
+time.tzset()
+want = (utc_s(2026, 7, 1, 12), utc_s(2026, 1, 15, 12))
+check("_parse_iso em fuso com horário de verão: a data de julho e a de janeiro saem em UTC, sem 1 h de desvio",
+      got["EST5EDT,M3.2.0,M11.1.0"] == want)
+check("_parse_iso em fuso sem horário de verão e em UTC: o mesmo valor", got["<-03>3"] == want and got["UTC0"] == want)
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 35
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 37
 check_end

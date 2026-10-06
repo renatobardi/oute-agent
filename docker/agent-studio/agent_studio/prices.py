@@ -18,6 +18,7 @@ deixa de valer (o histórico manda).
 com chamada nos últimos 30 dias. Só troca o preço quando **as duas fontes concordam** (`agree`); fonte fora do ar,
 divergência ou modelo que uma das fontes não tem deixam o preço como está.
 """
+import calendar
 import json
 import logging
 import os
@@ -344,7 +345,8 @@ CHART_W, CHART_H = 300, 80
 
 
 def _parse_iso(s):
-    return int(time.mktime(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))) - time.timezone
+    """Segundos UTC de uma data ISO em UTC (a do `view`). Não passa pela hora local: o fuso do processo não muda o valor."""
+    return calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
 
 
 def _trend(history):
