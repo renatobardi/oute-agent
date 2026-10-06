@@ -161,4 +161,20 @@ check "484: worker: saída 3 = trava de cota; não sobe o limite e declara no ##
 check "484: worker: o merge sem a regressão fica para o Bardi (decisão do Bardi)" grep -qF 'o merge fica para o Bardi decidir (a auditoria recomenda `decisão do Bardi`)' "$W"
 check "484: skill de auditoria: confere a saída da regressão e recomenda decisão do Bardi sem ela" bash -c 'grep -qF "**Regressão dos agentes (#484).**" "$1" && grep -qF "a ação recomendada é \`decisão do Bardi\`" "$1" && grep -qF -- "- \`decisão do Bardi\`: PR de prompt" "$1"' _ "$A"
 check "484: skill de auditoria: a ação decisão do Bardi está no modelo do relatório" grep -qF 'perguntar ao autor | decisão do Bardi | não fazer merge' "$A"
+
+# 11z. bloco "Antes de abrir o PR" no topo das regras e a regra do rm no texto que o spawn acrescenta (#578)
+CASE=antes-pr; round "$CASE"
+sw spawn 578-antespr "$WORKER_INSTR"
+P="$STATE/578-antespr.prompt"
+check "worker antes do PR: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
+check "worker antes do PR: o bloco é a primeira regra da lista (#578)" bash -c 'grep -m1 -- "^- " "$1" | grep -qF -- "- **Antes de abrir o PR (#578):**"' _ "$P"
+check "worker antes do PR: rm com variável, só \${VAR:?}, literal ou mktemp (#578)" grep -qF 'só `"${VAR:?}"/…`, caminho literal ou `mktemp -d` novo; nunca `rm -rf $VAR/*`.' "$P"
+check "worker antes do PR: custo do prompt de permissão (#578)" grep -qF 'o prompt nega sozinho em cerca de 1 min 35 s.' "$P"
+check "worker antes do PR: arquivo novo vazio e símbolo sem definição (#578)" grep -qF 'Nenhum arquivo novo está vazio (`git diff --stat`, 0 linhas num arquivo novo).' "$P"
+check "worker antes do PR: definição no diff, por git grep (#578)" grep -qF 'tem definição no diff (`git grep` do nome).' "$P"
+check "worker antes do PR: suíte inteira quando muda compose, esquema ou apoio de teste (#578)" grep -qF 'roda a suíte inteira (`tests/*.test.sh`, `xargs -P` até o `nproc`' "$P"
+check "worker antes do PR: testes que citam o termo alterado (#578)" grep -qF '`git grep -l <termo> tests/`' "$P"
+check "worker antes do PR: só arquivos da issue (#578)" grep -qF '`git diff --name-only origin/main...HEAD` só lista arquivos da própria issue; arquivo de runtime ou binário sai do PR.' "$P"
+check "worker antes do PR: arquivo apagado ou revertido (#578)" grep -qF '`git diff origin/main --stat` não mostra arquivo apagado ou revertido que a issue não pediu.' "$P"
+check "worker antes do PR: sem placeholder no prompt"      [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 check_end
