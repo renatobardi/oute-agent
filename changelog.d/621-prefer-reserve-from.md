@@ -1,5 +1,0 @@
-### Added
-- **`--prefer` ganha chamador e o studio mostra a reserva** (#621, #598). `oute-task --prefer <assinatura>`, `oute-swarm spawn --prefer <assinatura>` e `oute-swarm <repo> --prefer <assinatura>` (o meta da rodada guarda `prefer=`) pedem uma reserva sem ser escolha explícita: com ela no teto de cota, a sessão volta para a padrão (`--agent`, `--model` e `--phase` continuam vencendo). A página da sessão do agent-studio mostra, no resumo e num badge, de qual assinatura para qual ela abriu e por quê (`oute.task.reserve_from`, `oute.task.agent`, `oute.task.reserve`). **Precisa de release** (`oute-task` e `oute-swarm` vão na imagem, e o agent-studio também).
-
-### Fixed
-- **Folga nos dois casos de tempo do `tests/oute-task.test.sh`** (#621). "coletor fora do ar: rápido" e "ai-memory sem resposta" mediam 6 s e 4 s e falharam com o host a load 13; os limites sobem para 20 s e 25 s, o segundo ainda abaixo dos 40 s que o ai-memory falso dorme (o prazo do caso é o `OUTE_HANDOFFS_TIMEOUT` de 1 s).
