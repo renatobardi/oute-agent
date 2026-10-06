@@ -1298,6 +1298,7 @@ update_check_branch() {
     die "o checkout $dir está com HEAD solto (sem branch); a branch padrão é $def. Para voltar: git -C $dir checkout $def"
   fi
   die "o checkout $dir está na branch $cur; a branch padrão é $def. Para voltar: git -C $dir checkout $def"
+  return 0
 }
 # sufixo da mensagem de falha do git pull: a pergunta só quando o git status mostra mudança local
 update_pull_hint() {
