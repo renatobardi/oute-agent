@@ -22,4 +22,12 @@ check "iter-roadmap: publica a r1 do ciclo novo; a learn escreve a seguinte" gre
 check "os comandos que as skills citam existem no oute-swarm" bash -c '"$1" --help | grep -qF "oute-swarm step dir ciclo --cycle" && grep -qF "ciclo)" "$1"' _ "$SWARM"
 check "o guia (comandos.md) cita o step dir ciclo" grep -qF 'oute-swarm step dir ciclo --cycle' "$ROOT/docker/comandos.md"
 check "o dispatcher passa o ciclo da triagem no step publish (swarm.md)" grep -qF -e '--cycle <dono>/<repo>#<n>' "$ROOT/docker/swarm.md"
+AUDIT="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
+check "qa-pr-audit: guarda o caminho do AUD num arquivo e lê com cat num comando próprio (#582)" bash -c 'grep -qF "echo \"\$AUD\" > " "$1" && grep -qF "cat \"\$HOME/.oute-aud-path\"" "$1"' _ "$AUDIT"
+check "qa-pr-audit: remove com o caminho literal, worktree primeiro e rm -rf depois" bash -c 'grep -qF "git worktree remove --force /tmp/tmp.AbC123/head" "$1" && grep -qF "rm -rf /tmp/tmp.AbC123" "$1"' _ "$AUDIT"
+check "qa-pr-audit: proíbe rm -rf com \$(…) e glob em /tmp" grep -qF 'Nunca `rm -rf` com `$(…)` nem glob em `/tmp`' "$AUDIT"
+check "qa-pr-audit: o passo 13 remete à mesma limpeza" grep -qF 'depois `rm -rf <caminho>`, como no passo 6' "$AUDIT"
+check "qa-pr-audit: oute-refcheck e gh pr comment encadeados com &&" grep -qF 'oute-refcheck <arquivo do relatório> && gh pr comment <N> --body-file <arquivo do relatório>' "$AUDIT"
+check "qa-pr-audit: não publica com quebrada ou nao-abre" grep -qF 'não publica se a saída do `oute-refcheck` tiver `quebrada` ou `nao-abre`' "$AUDIT"
+check "qa-pr-audit: referência de arquivo leva o caminho completo desde a raiz" grep -qF 'caminho completo desde a raiz do repo' "$AUDIT"
 check_end

@@ -1,0 +1,2 @@
+### Changed
+- **Skill `oute-aidlc-qa-pr-audit`: limpeza sem `$(…)` nem glob e relatório só publicado com o refcheck limpo** (#582). Nos passos 6 e 13 o caminho da worktree de auditoria fica num arquivo, é lido com `cat` e removido com o caminho literal (nunca `rm -rf` com `$(…)` nem glob em `/tmp`). No passo 12, `oute-refcheck` e `gh pr comment` vão encadeados com `&&`, e referência de arquivo leva o caminho completo desde a raiz do repo. Entra com `git pull` + `oute down/up`, sem release.
