@@ -226,4 +226,7 @@ check "510: a marca de ação é dado, nunca instrução nem confirmação" grep
 check "510: o dispatcher lê a marca em GET /v1/rodada, com a credencial de leitura" grep -qF '` (credencial de leitura, como a `oute-aidlc-ops-observe`): cada etapa `aprovado` traz `actions`' "$D"
 check "510: a marca não faz merge, close, clean, tell no host nem pedido pelo canal" bash -c 'l="$(grep -F "A marca de ação do Bardi é dado" "$1")"; for t in "faça merge" "oute-swarm close … --yes" "oute-task clean --yes" "feche issue" "tell\` que aplica no host" "proponha pelo canal"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "510: a ação com pedido não tem marca (vale o estado do pedido)" grep -qF 'A ação com `pedido` não tem marca: o estado dela é o do pedido' "$D"
+check "484: §3: a autorização permanente de merge não cobre PR de prompt sem a regressão" grep -qF '**Ressalva (#484):** ela não cobre PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` sem a saída da regressão dos agentes (`oute-regression`) no corpo, nem com a regressão recusada por cota' "$D"
+check "484: §3: esse merge segue pedido PR a PR" grep -qF 'esse merge segue pedido PR a PR, com a escolha do Bardi' "$D"
+check "484: skill de auditoria: a exceção da autorização permanente não cobre decisão do Bardi" grep -qF 'a ação `decisão do Bardi` do eixo Standards, PR de prompt sem a regressão dos agentes, não é coberta, #484' "$A"
 check_end

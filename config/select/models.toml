@@ -3,9 +3,29 @@
 # em /opt/oute/select. Mudança entra com `git pull` + `oute down/up`, sem release.
 #
 # Ids exatos, sem alias (`opus`, `sonnet`): trocar de versão é uma mudança visível aqui. Todo id precisa existir no
-# CLI instalado (#220). A coluna do Codex abre com `--agent codex` e na reserva (#258): sem `--agent`/`--model`/`--phase`, com o Claude indisponível (`claude auth status` ≠ 0), a sessão abre no Codex da mesma linha.
+# CLI instalado (#220). A coluna de cada assinatura abre com `--agent <nome>` e na reserva (#258, #598): sem `--agent`/`--model`/`--phase`, com a padrão indisponível ou no teto de cota, a sessão abre na reserva, na mesma linha.
 #
 # Precedência: --agent/--model > exceção por label > label aidlc:<fase> > [default].
+
+# Assinaturas (#598, ADR-02): uma é a padrão (`default = true`, só uma); as outras são reservas. Toda linha de fase abaixo
+# tem uma coluna por assinatura (`name`), conferida pelo `scripts/models-check`. `status` é o comando que sai 0 quando o
+# agente está logado; `effort = true` = a assinatura usa o esforço da linha (hoje só o Codex); `prefixes` = começos de id de
+# modelo que identificam a assinatura num `--model` fora da tabela. A cota de cada uma vem do `oute-quota --json`.
+[[subscription]]
+name = "claude"
+default = true
+status = ["claude", "auth", "status"]
+
+[[subscription]]
+name = "codex"
+status = ["codex", "login", "status"]
+effort = true
+prefixes = ["gpt-", "codex"]
+
+# Como escolher a reserva quando a padrão está indisponível ou no teto de cota (98%, #558): `mais-livre` = a reserva com mais
+# cota livre (100 − a janela mais cheia dela); `ordem` = a primeira reserva abaixo do teto, na ordem das [[subscription]].
+[select]
+reserve_mode = "mais-livre"
 
 # Nada decidiu (sem issue, issue sem label de fase, `gh` fora do ar): Sonnet, com aviso.
 [default]

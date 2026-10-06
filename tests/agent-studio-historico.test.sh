@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Testes do histórico de rodadas do agent-studio (#601, ADR-08 "Página da rodada e do ciclo"): `GET /rodadas` lista toda
 # rodada com `oute.swarm.round.opened`, pela ingestão de verdade (POST /v1/logs e /v1/traces): rodada com etapa, sem etapa
-# publicada, sem evento de fechamento, antiga (fora da janela padrão), só com etapa (sem o evento de abertura) e a que não
-# entra (só `session.spawned`). Mais o filtro de período (enviado como o navegador envia, tests/lib/studio_form.py), a
+# publicada, sem evento de fechamento, antiga (fora das 24 h), só com etapa (sem o evento de abertura) e a que não
+# entra (só `session.spawned`). Sem parâmetro, a lista traz todas as rodadas (#618). Mais o filtro de período (enviado como o navegador envia, tests/lib/studio_form.py), a
 # paginação, o link para as sessões da rodada sem etapa e a lógica do `etapas.with_state` direto em Python. Sem Docker e sem
 # SurrealDB: a lista sai dos eventos do DuckDB (o SurrealDB fora, com o aviso, está em tests/agent-studio-rodada.test.sh).
 # Uso: tests/agent-studio-historico.test.sh   (sai != 0 se algum caso falhar)
@@ -26,10 +26,11 @@ studio_init
 # F (não entra): só um `session.spawned`, há 3 h.
 # G (em andamento na janela): abertura há 60 h, fechamento há 10 h, nenhum evento entre as 50 h e as 40 h.
 # H (abertura além do máximo da tela): abertura há 400 dias, uma sessão há 12 h, sem fechamento.
+# I (além do máximo do filtro): abertura há 500 dias, fechamento 1 h depois: fora de 366 dias; só aparece em "todas" (#618).
 # P01 a P21: só a abertura, há 20 dias e mais 1 a 21 horas (para a segunda página).
 NOW="$(date +%s)"
 A=swarm-0101-0001; B=swarm-0101-0002; C_=swarm-0101-0003; D=swarm-0901-0004; E=swarm-0101-0005; F=swarm-0101-0006
-G=swarm-0101-0007; H=swarm-0801-0008
+G=swarm-0101-0007; H=swarm-0801-0008; I=swarm-0501-0009
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" <<'PY'
 import hashlib, json, sys
 from otlp_json import event, rl, rs, span
@@ -68,6 +69,7 @@ logs = [opened(NOW - 5 * HOUR, A, "ready"), spawned(NOW - 5 * HOUR + 60, A, "31-
         spawned(NOW - 3 * HOUR, F, "71-f"),
         opened(NOW - 60 * HOUR, G), closed(NOW - 10 * HOUR, G),
         opened(NOW - 400 * DAY, H), spawned(NOW - 12 * HOUR, H, "81-h"),
+        opened(NOW - 500 * DAY, "swarm-0501-0009"), closed(NOW - 500 * DAY + HOUR, "swarm-0501-0009"),
         *[opened(NOW - 20 * DAY - i * HOUR, f"swarm-0911-p{i:02d}") for i in range(1, 22)]]
 json.dump({"resourceLogs": [rl(res, logs)]}, open(f"{tmp}/logs.json", "w"))
 # conversas: a sessão `tb` é da rodada B, a `ta` da rodada A e a `solta` não tem rodada
@@ -89,12 +91,13 @@ iso() { local secs="$1"; date -u -d "@$secs" +%Y-%m-%dT%H:%M:%SZ; return $?; }
 
 # ---------------------------------------------------------------- 1. antes de qualquer evento
 EMPTY="$(page /rodadas)"
-check "sem evento: /rodadas 200 com a mensagem da janela" bash -c 'grep -q "data-sem-rodadas" <<<"$1" && grep -q "Nenhuma rodada nessa janela" <<<"$1"' _ "$EMPTY"
+check "sem evento: /rodadas 200 com a mensagem de lista vazia (sem janela: o padrão é todas)" bash -c 'grep -q "data-sem-rodadas>Nenhuma rodada.<" <<<"$1" && grep -q "data-todas" <<<"$1"' _ "$EMPTY"
+check "sem evento, com janela: a mensagem fala da janela" bash -c 'grep -q "data-sem-rodadas>Nenhuma rodada nessa janela.<" <<<"$1"' _ "$(page '/rodadas?hours=24')"
 check "ingestão: logs = 200"                            test "$(post logs "$TMP/logs.json")" = 200
 check "ingestão: traces = 200"                          test "$(post traces "$TMP/traces.json")" = 200
 
-# ---------------------------------------------------------------- 2. a lista na janela padrão (24 h)
-page /rodadas > "$TMP/list.html"
+# ---------------------------------------------------------------- 2. a lista na janela de 24 h
+page '/rodadas?hours=24' > "$TMP/list.html"
 check "lista: toda rodada com evento de abertura na janela, da aberta mais recente para a mais antiga (a E, só com etapa, pela hora do primeiro evento)" \
   jqe --arg a "$A" --arg b "$B" --arg c "$C_" --arg e "$E" --arg g "$G" --arg h "$H" '. == [$c, $a, $e, $b, $g, $h]' <<<"$(rounds_of < "$TMP/list.html")"
 check "lista: a rodada só com session.spawned (F) não entra" bash -c '! grep -qF "data-rodada=\"$2\"" "$1"' _ "$TMP/list.html" "$F"
@@ -157,23 +160,43 @@ check "os links do rodapé e do cabeçalho levam a janela" bash -c 'grep -q "hre
 # há 10 h; a H abriu há 400 dias e teve sessão há 12 h)
 W="from=$(enc "$(iso $((NOW - 50 * 3600)))")&to=$(enc "$(iso $((NOW - 40 * 3600)))")"
 check "intervalo sem evento da rodada, com ela em andamento: a G e a H, e mais nenhuma" jqe --arg g "$G" --arg h "$H" '. == [$g, $h]' <<<"$(page "/rodadas?$W" | rounds_of)"
-W2="from=$(enc "$(iso $((NOW - 500 * 86400)))")&to=$(enc "$(iso $((NOW - 450 * 86400)))")"
+W2="from=$(enc "$(iso $((NOW - 700 * 86400)))")&to=$(enc "$(iso $((NOW - 650 * 86400)))")"
 check "intervalo antes da primeira abertura: a mensagem, sem tabela" bash -c 'grep -q "data-sem-rodadas" <<<"$1" && ! grep -q "<tr data-rodada=" <<<"$1"' _ "$(page "/rodadas?$W2")"
 check "filtro por estado: só as abertas (C e H) e o rodapé conta o filtrado" \
-  bash -c 'h="$(studio_page "${@:4}" "$1/rodadas?f_state=aberta")"; grep -q "data-faixa>1 a 2 de 2 (filtrado, 6 no total)<" <<<"$h" && [ "$(grep -c "<tr data-rodada=" <<<"$h")" = 2 ] && grep -qF "data-rodada=\"$2\"" <<<"$h" && grep -qF "data-rodada=\"$3\"" <<<"$h"' _ "$STUDIO_URL" "$C_" "$H" "${AUTH[@]}"
-check "ordenar por sessões começa pela rodada com mais sessões (B, três)" test "$(page '/rodadas?ord=sessions&dir=desc' | rounds_of | jq -r '.[0]')" = "$B"
-check "ordenar por PRs: a rodada com etapa (A) primeiro; as sem número ficam no fim" test "$(page '/rodadas?ord=prs&dir=desc' | rounds_of | jq -r '.[0]')" = "$A"
+  bash -c 'h="$(studio_page "${@:4}" "$1/rodadas?hours=24&f_state=aberta")"; grep -q "data-faixa>1 a 2 de 2 (filtrado, 6 no total)<" <<<"$h" && [ "$(grep -c "<tr data-rodada=" <<<"$h")" = 2 ] && grep -qF "data-rodada=\"$2\"" <<<"$h" && grep -qF "data-rodada=\"$3\"" <<<"$h"' _ "$STUDIO_URL" "$C_" "$H" "${AUTH[@]}"
+check "ordenar por sessões começa pela rodada com mais sessões (B, três)" test "$(page '/rodadas?hours=24&ord=sessions&dir=desc' | rounds_of | jq -r '.[0]')" = "$B"
+check "ordenar por PRs: a rodada com etapa (A) primeiro; as sem número ficam no fim" test "$(page '/rodadas?hours=24&ord=prs&dir=desc' | rounds_of | jq -r '.[0]')" = "$A"
 check "período inválido, ordem ou filtro fora da lista fixa = 400" \
   bash -c 'for q in hours=abc hours=99999 "de=2026-01-01T00:00" "from=2026-01-02&to=2026-01-01" ord=last ord=nope f_nada=1; do [ "$(curl -s -o /dev/null -w "%{http_code}" "${@:2}" "$1/rodadas?$q")" = 400 ] || { echo "$q" >&2; exit 1; }; done' _ "$STUDIO_URL" "${AUTH[@]}"
 check "período inválido: 400 também no bloco da tabela"  test "$(code "${AUTH[@]}" "$STUDIO_URL/bloco/rodadas/tabela?hours=abc")" = 400
 check "sem login: /rodadas com janela = 303"            test "$(code "$STUDIO_URL/rodadas?hours=168")" = 303
 
+# ---------------------------------------------------------------- 3b. sem parâmetro: todas as rodadas (#618)
+ALL_EXP="$(jq -cn --arg a "$A" --arg b "$B" --arg c "$C_" --arg d "$D" --arg e "$E" --arg g "$G" --arg h "$H" --arg i "$I" \
+  '[$c, $a, $e, $b, $g] + [range(1; 22) | "swarm-0911-p" + (if . < 10 then "0" else "" end) + tostring] + [$d, $h, $i]')"
+page /rodadas > "$TMP/todas.html"
+check "todas: /rodadas sem parâmetro traz as 29 rodadas, 20 na primeira página" bash -c 'grep -q "data-faixa>1 a 20 de 29<" "$1" && [ "$(grep -c "<tr data-rodada=" "$1")" = 20 ]' _ "$TMP/todas.html"
+check "todas: da aberta mais recente para a mais antiga, com a de 40 dias (D) e a de 500 dias (I), que nenhuma janela pronta alcança" \
+  test "$(page '/rodadas?tam=100' | rounds_of)" = "$ALL_EXP"
+check "todas: a rodada só com session.spawned (F) continua fora" bash -c '! grep -qF "data-rodada=\"$2\"" <<<"$1"' _ "$(page '/rodadas?tam=100')" "$F"
+check "todas: o texto da tela diz que o padrão é todas as rodadas" bash -c 'grep -q "data-janela data-todas>Todas as rodadas (o padrão desta tela)" "$1"' _ "$TMP/todas.html"
+check "todas: 'todas as rodadas' é a janela ativa, e 24 horas não" \
+  bash -c 'grep -q "<a href=\"/rodadas?hours=\" aria-current=\"true\">todas as rodadas</a>" "$1" && grep -q "<a href=\"/rodadas?hours=24\">24 horas</a>" "$1"' _ "$TMP/todas.html"
+check "todas: o link 'todas as rodadas' (hours vazio) dá a mesma lista" test "$(page '/rodadas?hours=&tam=100' | rounds_of)" = "$ALL_EXP"
+check "todas: a rota completa (full=1) e o bloco da tabela dão as 29" \
+  bash -c '[ "$(curl -s "${@:2}" "$1/rodadas?full=1&tam=100" | grep -c "<tr data-rodada=")" = 29 ] && [ "$(curl -s "${@:2}" "$1/bloco/rodadas/tabela?tam=100" | grep -c "<tr data-rodada=")" = 29 ]' _ "$STUDIO_URL" "${AUTH[@]}"
+check "todas: os links do rodapé e do cabeçalho seguem sem janela" bash -c 'grep -q "href=\"/rodadas?pag=2\"" "$1" && grep -q "href=\"/rodadas?ord=steps&amp;dir=desc\"" "$1"' _ "$TMP/todas.html"
+check "hours=24: só as seis recentes, sem a D, as P e a I" jqe --arg a "$A" --arg b "$B" --arg c "$C_" --arg e "$E" --arg g "$G" --arg h "$H" '. == [$c, $a, $e, $b, $g, $h]' <<<"$(page '/rodadas?hours=24&tam=100' | rounds_of)"
+check "hours=24: a tela mostra a janela e diz qual é o padrão" bash -c '! grep -q "data-todas" "$1" && grep -q "Sem período escolhido, o padrão é todas as rodadas" "$1" && grep -q "<a href=\"/rodadas?hours=\">todas as rodadas</a>" "$1"' _ "$TMP/list.html"
+check "366 dias: a I (500 dias) fica fora da maior janela pronta" bash -c '! grep -qF "data-rodada=\"$2\"" <<<"$1"' _ "$(page '/rodadas?hours=8784&tam=100')" "$I"
+check "as outras telas seguem com 24 horas por padrão" bash -c 'for p in /sessoes /conversas; do studio_page "${@:2}" "$1$p" | grep -q "<a href=\"$p?hours=24\" aria-current=\"true\">24 horas</a>" || { echo "$p" >&2; exit 1; }; done' _ "$STUDIO_URL" "${AUTH[@]}"
+
 # o formulário do período, enviado como o navegador envia (#586): os campos escondidos levam a ordem, o tamanho e o filtro
-PYTHONPATH="$ROOT/tests/lib" "$STUDIO_PY" - "$STUDIO_URL" "$STUDIO_TOKEN" "$STUDIO_LIB" "$C_" "$H" > "$TMP/form.out" 2>&1 <<'PY'
+PYTHONPATH="$ROOT/tests/lib" "$STUDIO_PY" - "$STUDIO_URL" "$STUDIO_TOKEN" "$STUDIO_LIB" "$C_" "$H" "$D" "$(date -d "@$((NOW - 45 * 86400))" +%Y-%m-%dT%H:%M)" "$(date -d "@$((NOW - 35 * 86400))" +%Y-%m-%dT%H:%M)" > "$TMP/form.out" 2>&1 <<'PY'
 import re, subprocess, sys
 from pycheck import check
 from studio_form import submit
-url, token, lib, C, H = sys.argv[1:6]
+url, token, lib, C, H, D, DE, ATE = sys.argv[1:9]
 
 
 def get(_app, path, query=""):
@@ -192,6 +215,13 @@ check("formulário: o envio leva a janela, a ordem, a direção, o tamanho e o f
       dict(sent) == {"hours": "168", "ord": "rodada", "dir": "asc", "tam": "50", "f_state": "aberta", "de": "", "ate": ""})
 check("formulário: o envio dá a mesma lista (as abertas, de A a Z)", rounds(after) == rounds(before) == [C, H])
 check("formulário: a tela das rodadas não tem o controle de custo", "custo" not in dict(sent))
+# #618: a tela sem janela envia `hours` vazio, e a lista continua com todas; com de/ate preenchidos, o período restringe
+(_, todas) = get(None, "/rodadas", "tam=100")
+(_, again), sent_all = submit(get, None, "/rodadas", "tam=100")
+check("formulário (todas): o envio leva hours vazio e o tamanho", dict(sent_all) == {"hours": "", "tam": "100", "de": "", "ate": ""})
+check("formulário (todas): o envio dá a mesma lista, as 29", rounds(again) == rounds(todas) and len(rounds(todas)) == 29)
+(_, cut), sent_cut = submit(get, None, "/rodadas", "tam=100", de=DE, ate=ATE)
+check("formulário (todas): com de/ate preenchidos, só as rodadas do período (a D, de 40 dias, e a H, em andamento nele)", rounds(cut) == [D, H])
 PY
 check_py "$TMP/form.out"
 

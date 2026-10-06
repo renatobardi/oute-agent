@@ -4,13 +4,21 @@ Tabelas nativas num arquivo `.duckdb`. Colunas fixas + JSON; `time` é a hora do
 chegada (`received_at` fica à parte). A chave de dedupe é a PRIMARY KEY: reenvio do mesmo registro não vira linha
 nova.
 """
+import ctypes
+import importlib.util
+import sys
 import threading
 import time
 
 import duckdb
 
+# O DuckDB procura o `pandas` no disco a cada execute; sem ele instalado (o studio não o usa), isso era ~17% do tempo com
+# o GIL no flamegraph (#570). O sentinela faz a busca falhar na hora; instalado de verdade, nada muda.
+if importlib.util.find_spec("pandas") is None:
+    sys.modules["pandas"] = None
+
 from . import (alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
-               repo as repo_mod, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
+               repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -102,18 +110,40 @@ TABLES["metrics"] = [
 DERIVED = {"time": "time_unix_nano", "received_at": "received_unix_nano"}
 DASH_DEADLINE_S = 50   # prazo da consulta do Dashboard (abaixo do corte de 60 s do nginx)
 DASH_TTL_S = 60        # quanto o resultado da janela vale
+READ_DEADLINE_S = 50   # prazo de cada leitura fora da trava (#570), abaixo do corte de 60 s do nginx
+READ_SLOTS = 2         # leituras ao mesmo tempo (memória do DuckDB); a terceira espera a vez, sem prender a ingestão
 TS_UTC = "(make_timestamp_ns(?::BIGINT) AT TIME ZONE 'UTC')"
+
+
+def name_thread(label):
+    """Nome da thread no Python (`py-spy dump`) e no kernel (`top -H`, 15 caracteres): todas eram `python` (#570)."""
+    threading.current_thread().name = label
+    if sys.platform.startswith("linux"):
+        try:
+            ctypes.CDLL(None).prctl(15, label.encode()[:15], 0, 0, 0)  # PR_SET_NAME
+        except (OSError, AttributeError):
+            pass  # só o nome no Python
+
+
+def _base(typ):
+    return typ.split()[0]  # "VARCHAR PRIMARY KEY" -> "VARCHAR"
 
 
 def _sql(table, cols):
     names = [c for c, _ in cols]
+    plain = [(c, _base(t)) for c, t in cols if c not in DERIVED]
+    # uma instrução por lote, as colunas em listas (`unnest`): o `executemany` fazia uma execução por linha (~1,3 ms)
+    # e segurava a trava do escritor (#570). Os JSON entram como texto e voltam a JSON na seleção; a hora vem do ns.
+    unnest = ", ".join(f"unnest(?::{t if t != 'JSON' else 'VARCHAR'}[]) AS {c}" for c, t in plain)
+    select = ", ".join(f"(make_timestamp_ns({DERIVED[c]}::BIGINT) AT TIME ZONE 'UTC')" if c in DERIVED
+                       else f"{c}::JSON" if t == "JSON" else c for c, t in [(c, _base(t)) for c, t in cols])
     return {
         "create": f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(f'{c} {t}' for c, t in cols)})",
         # chaves que já existem, com a lista inteira num parâmetro só
         "existing": f"SELECT dedupe_key FROM {table} WHERE list_contains(?::VARCHAR[], dedupe_key)",
-        "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) "
-                  f"VALUES ({', '.join(TS_UTC if c in DERIVED else '?' for c in names)})",
+        "insert": f"INSERT OR IGNORE INTO {table} ({', '.join(names)}) SELECT {select} FROM (SELECT {unnest})",
         "columns": names,
+        "plain": [c for c, _ in plain],  # as do `insert`, na ordem das listas: as derivadas saem do ns na seleção
     }
 
 
@@ -149,12 +179,20 @@ class Store:
         self.con.execute("SET TimeZone = 'UTC'")
         self.lock = threading.Lock()
         self._dash_lock = threading.Lock()
+        self._read_slots = threading.BoundedSemaphore(READ_SLOTS)
+        # quanto vale o resultado do tray e dos alertas (#570): 0 = sempre refaz; o app liga com AGENT_STUDIO_READ_TTL_S
+        self.read_ttl = 0.0
+        self._cache, self._cache_lock = {}, threading.Lock()
+        # tempo por fase (#570): `obs(fase, segundos, rótulo=None)`; o app liga na telemetria, sem ela não faz nada
+        self.obs = lambda phase, seconds, label=None: None
         self._dash_cache = {}
         self._dash_refreshing = {}
         with self.lock:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
             migrate(self.con)
+            repo_infer.apply(self.con)   # histórico da conversa aberta direto numa pasta (#599)
+            repo_mod.apply_legacy(self.con)  # acerto único: o que sobrou sem repositório antes do corte (#617)
             prices_mod.create(self.con)  # histórico de preços (#339)
             marks_mod.create(self.con)   # marcas das ações do Bardi (#510): só de acréscimo, escrita só pela rota
 
@@ -168,14 +206,20 @@ class Store:
         before_commit: chamado depois dos INSERTs e antes do COMMIT (o SurrealDB, #187); se levantar, rollback.
         Devolve {tabela: (gravadas, repetidas)}."""
         result = {}
+        t = time.monotonic()
         with self.lock:
+            t = self._lap("lock_wait", t)
+            name_thread("studio-write")
             self.con.execute("BEGIN TRANSACTION")
             try:
                 for table, rows in batch.items():
                     result[table] = self._insert(table, rows)
+                t = time.monotonic()
                 if before_commit:
                     before_commit()
+                    t = self._lap("surreal", t)
                 self.con.execute("COMMIT")
+                self._lap("commit", t)
             except BaseException:
                 self.con.execute("ROLLBACK")
                 raise
@@ -190,23 +234,61 @@ class Store:
             return 0, len(rows)
         sql = SQL[table]
         keys = list(uniq)
+        t = time.monotonic()
         seen = {k for (k,) in self.con.execute(sql["existing"], [keys]).fetchall()}
+        t = self._lap("existing", t, table)
         new = [uniq[k] for k in keys if k not in seen]
         if new:
-            cols = sql["columns"]
-            self.con.executemany(sql["insert"], [[r[DERIVED[c]] if c in DERIVED else r.get(c) for c in cols] for r in new])
+            self.con.execute(sql["insert"], [[r.get(c) for r in new] for c in sql["plain"]])
+            self._lap("insert", t, table)
         return len(new), len(rows) - len(new)
 
+    def _cached(self, key, fn):
+        """Resultado de `fn()` por `read_ttl` s. Uma chamada só o refaz: as outras esperam e recebem o mesmo (o tray, a
+        barra de alertas de cada tela e o `/v1/alerts` pediam a mesma conta ao mesmo tempo)."""
+        if self.read_ttl <= 0:
+            return fn()
+        with self._cache_lock:
+            hit = self._cache.get(key)
+            if hit and time.monotonic() - hit[0] < self.read_ttl:
+                return hit[1]
+            value = fn()
+            self._cache[key] = (time.monotonic(), value)
+            return value
+
+    def _lap(self, phase, since, label=None):
+        """Reporta o tempo desde `since` e devolve o instante de agora, para a fase seguinte."""
+        now = time.monotonic()
+        self.obs(phase, now - since, label)
+        return now
+
+    def read_free(self, fn, label="read"):
+        """`fn(cursor)` num cursor próprio, **fora da trava do escritor** (#570): a leitura lenta não segura a ingestão
+        (o collector desistia em 30 s e reenviava o lote) e a ingestão não segura a leitura. O DuckDB lê o estado
+        confirmado enquanto outra conexão grava. No máximo `READ_SLOTS` por vez; passado `READ_DEADLINE_S`, a consulta
+        é interrompida e a chamada levanta. `label` nomeia a thread (`studio-<label>`) e a fase reportada."""
+        t = time.monotonic()
+        with self._read_slots:
+            t = self._lap("read_wait", t, label)
+            name_thread(f"studio-{label}")
+            cur = self.con.cursor()
+            timer = threading.Timer(READ_DEADLINE_S, cur.interrupt)
+            timer.start()
+            try:
+                return fn(cur)
+            finally:
+                timer.cancel()
+                cur.close()
+                self._lap("read", t, label)
+
     def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
-        """Leitura do `/v1/usage` (#203), sob a trava do escritor: uma conexão só, leitura e escrita em fila. `repo`
-        (#528) e `effective` (#531, custo efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
-        with self.lock:
-            return usage_mod.usage(self.con, from_ns, to_ns, prices, tz, repo, effective)
+        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528) e `effective` (#531, custo
+        efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
+        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective), "usage")
 
     def repos(self, from_ns, to_ns):
-        """Os repositórios com fato na janela (#528), para o filtro das telas."""
-        with self.lock:
-            return repo_mod.options(self.con, from_ns, to_ns)
+        """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns), "repos")
 
     def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
@@ -247,19 +329,17 @@ class Store:
                 self._dash_refreshing.pop(key, None)
 
     def alerts(self, at_ns, cfg):
-        """Leitura do `/v1/alerts` (#204), sob a mesma trava."""
-        with self.lock:
-            return alerts_mod.evaluate(self.con, at_ns, cfg)
+        """Leitura do `/v1/alerts` (#204), fora da trava do escritor (#570)."""
+        return self._cached(("alerts",), lambda: self.read_free(lambda con: alerts_mod.evaluate(con, at_ns, cfg), "alerts"))
 
     def tray(self, at_ns, prices, cfg, tz=tz_mod.UTC):
-        """Leitura do `/v1/tray` (#205), sob a mesma trava: os blocos do DuckDB numa passada só."""
-        with self.lock:
-            return tray_mod.snapshot(self.con, at_ns, prices, cfg, tz)
+        """Leitura do `/v1/tray` (#205): os blocos do DuckDB numa passada só, fora da trava do escritor (#570)."""
+        return self._cached(("tray", getattr(tz, "key", str(tz))),
+                            lambda: self.read_free(lambda con: tray_mod.snapshot(con, at_ns, prices, cfg, tz), "tray"))
 
     def decisions(self, at_ns, cfg):
-        """Decisões pendentes do Bardi (#386), sob a mesma trava: o bloco do tray e o topo das telas."""
-        with self.lock:
-            return decisions_mod.pending(self.con, at_ns, cfg)
+        """Decisões pendentes do Bardi (#386): o bloco do tray e o topo das telas, fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg), "decisions")
 
     # leituras da tela (#206), sob a mesma trava
     def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):

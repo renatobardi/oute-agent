@@ -5,7 +5,8 @@
 # (credencial de ingestão, porta), contra o agent-studio e o SurrealDB de verdade (venv e binário fixados, sem Docker).
 # Casos: DuckDB vazio = N linhas; segunda vez = 0 novas (idempotente); SurrealDB esvaziado com o DuckDB intacto =
 # pedidos, rodadas e sessões voltam; lote > 64 MB partido por resource; faixa pela partição com 1 h de folga, --host,
-# --signal, --legacy; objeto ilegível (Archive) pulado com rc ≠ 0; 400 e 503 no replay; a credencial nunca em argv.
+# --signal, --legacy; objeto ilegível (Archive) pulado com rc ≠ 0; 400 e 503 no replay; a credencial nunca em argv;
+# o acerto do histórico sem repositório (#617) pelo replay.
 # Uso: tests/agent-studio-replay.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -376,5 +377,65 @@ H1="$(curl -s -D - -o /dev/null -X POST -H "Authorization: Bearer $STUDIO_TOKEN"
 H2="$(curl -s -D - -o /dev/null -X POST -H "Authorization: Bearer $STUDIO_TOKEN" -H 'Content-Type: application/json' --data-binary "@$TMP/one.json" "$STUDIO_URL/v1/logs" | tr -d '\r')"
 check "ingestão: a primeira vez devolve gravados=1, repetidos=0" bash -c 'grep -qi "^x-agent-studio-written: 1" <<<"$1" && grep -qi "^x-agent-studio-duplicate: 0" <<<"$1"' _ "$H1"
 check "ingestão: a segunda devolve gravados=0, repetidos=1" bash -c 'grep -qi "^x-agent-studio-written: 0" <<<"$1" && grep -qi "^x-agent-studio-duplicate: 1" <<<"$1"' _ "$H2"
+
+# ---------------------------------------------------------------- 11. o acerto do histórico sem repositório vale no replay (#617)
+# A mesma entrada do tests/agent-studio-repo-corte.test.sh, agora pelo `agent_studio.replay` real contra a ingestão: fato sem
+# repositório antes de 2026-10-06T00:00:00Z entra com `oute-agent`; depois do corte segue NULL; repositório próprio fica.
+studio_stop; studio_start "$TMP/s4" "${SENV[@]}" AGENT_STUDIO_SURREAL_URL= || die "agent-studio (4) não subiu"
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
+import gzip, json, sys
+from otlp_json import event, kv, rl, rs, span
+tmp = sys.argv[1]
+OLD, NEW = 1791201600, 1791374400   # 2026-10-05T12:00:00Z (antes do corte) e 2026-10-07T12:00:00Z (depois)
+res = {"host.name": "h-corte", "service.name": "oute"}   # sem oute.task.repo
+own = {**res, "oute.task.repo": "alfa"}
+
+
+def put(name, obj):
+    open(f"{tmp}/corte-{name}.json.gz", "wb").write(gzip.compress(json.dumps(obj).encode()))
+
+
+def call(t, conv):
+    return span("claude_code.llm_request", t, 2, {"model": "claude-sonnet-5", "session.id": conv})
+
+
+def point(t, name):
+    return {"name": name, "gauge": {"dataPoints": [{"timeUnixNano": str(t * 10**9), "asInt": "1", "attributes": []}]}}
+
+
+put("traces", {"resourceSpans": [rs(res, [call(OLD, "velha"), call(NEW, "nova")]), rs(own, [call(OLD, "propria")])]})
+put("logs", {"resourceLogs": [rl(res, [event(OLD, "oute.exemplo", "ev-velha", {}), event(NEW, "oute.exemplo", "ev-nova", {})]),
+                              rl(own, [event(OLD, "oute.exemplo", "ev-propria", {})])]})
+put("metrics", {"resourceMetrics": [{"resource": {"attributes": kv(res)}, "scopeMetrics": [{"metrics": [point(OLD, "m.velha"), point(NEW, "m.nova")]}]},
+                                    {"resource": {"attributes": kv(own)}, "scopeMetrics": [{"metrics": [point(OLD, "m.propria")]}]}]})
+PY
+CORTE_OUT=""
+for sig in traces logs metrics; do
+  CORTE_OUT+="$sig: $(env AGENT_STUDIO_INGEST_TOKEN="$STUDIO_TOKEN" AGENT_STUDIO_PORT="${STUDIO_URL##*:}" PYTHONPATH="$PKG" "$STUDIO_PY" -m agent_studio.replay "$sig" < "$TMP/corte-$sig.json.gz" 2>>"$TMP/corte.err")"$'\n'
+done
+check "replay do corte: os três sinais entram (3 gravados cada)" test "$CORTE_OUT" = $'traces: written=3 duplicate=0 failed=0\nlogs: written=3 duplicate=0 failed=0\nmetrics: written=3 duplicate=0 failed=0\n'
+# as três tabelas numa leitura só: <tabela> <chave do exemplo> <oute_repo ou NULL> <o JSON do resource tem oute.task.repo?>
+CORTE_JSON="json_extract_string(resource_attributes, '\$.\"oute.task.repo\"') IS NOT NULL"
+CORTE_SQL="SELECT 'spans' AS tab, session_id AS k, coalesce(oute_repo, 'NULL') AS r, $CORTE_JSON AS j FROM spans
+  UNION ALL SELECT 'logs', oute_event_id, coalesce(oute_repo, 'NULL'), $CORTE_JSON FROM logs
+  UNION ALL SELECT 'metrics', metric_name, coalesce(oute_repo, 'NULL'), $CORTE_JSON FROM metrics"
+studio_stop; CORTE="$(studio_sql "$TMP/s4/db.duckdb" "$CORTE_SQL" | jq -r '[.tab, .k, .r, (.j | tostring)] | join(" ")' | sort)"
+CORTE_WANT="logs ev-nova NULL false
+logs ev-propria alfa true
+logs ev-velha oute-agent false
+metrics m.nova NULL false
+metrics m.propria alfa true
+metrics m.velha oute-agent false
+spans nova NULL false
+spans propria alfa true
+spans velha oute-agent false"
+check "replay: antes do corte sem repositório = oute-agent; depois = NULL; repositório próprio fica; o JSON do resource não muda" test "$CORTE" = "$CORTE_WANT"
+# a subida em cima do que o replay gravou, e o replay de novo: nada muda
+studio_start "$TMP/s4" "${SENV[@]}" AGENT_STUDIO_SURREAL_URL= || die "agent-studio (4) não voltou"
+CORTE_OUT="$(env AGENT_STUDIO_INGEST_TOKEN="$STUDIO_TOKEN" AGENT_STUDIO_PORT="${STUDIO_URL##*:}" PYTHONPATH="$PKG" "$STUDIO_PY" -m agent_studio.replay traces < "$TMP/corte-traces.json.gz" 2>>"$TMP/corte.err")"
+check "replay do corte de novo: tudo repetido" test "$CORTE_OUT" = "written=0 duplicate=3 failed=0"
+studio_stop
+check "depois da subida e do replay repetido: as mesmas linhas, com o mesmo repositório" \
+  test "$(studio_sql "$TMP/s4/db.duckdb" "$CORTE_SQL" | jq -r '[.tab, .k, .r, (.j | tostring)] | join(" ")' | sort)" = "$CORTE_WANT"
 
 check_end

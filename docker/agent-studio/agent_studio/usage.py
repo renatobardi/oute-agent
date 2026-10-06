@@ -2,10 +2,11 @@
 agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
-Papel e fase da sessão (#433): `role` = dispatcher, worker ou avulsa; `phase` = o `aidlc:<fase>` que o seletor usou ou
-`desconhecida`. Nada vem de atributo novo: saem dos eventos `oute.task.opened`/`reopened` da própria sessão (`oute.task.phase`
-e `oute.swarm.round`/`oute.swarm.session`), também no histórico, e a chamada de sessão sem esses eventos cai no que o resource
-dela diz (papel) ou em `desconhecida`/`avulsa`: nunca some do total.
+Papel e fase da sessão (#433): `role` = dispatcher, worker ou avulsa; `phase` = o `aidlc:<fase>` que o seletor usou,
+`desconhecida` (sessão com `oute.task.id` e sem fase registrada) ou `interativa` (conversa sem `oute.task.id`, #599). Nada vem
+de atributo novo: saem dos eventos `oute.task.opened`/`reopened` da própria sessão (`oute.task.phase` e
+`oute.swarm.round`/`oute.swarm.session`), também no histórico, e a chamada de sessão sem esses eventos cai no que o resource
+dela diz (papel) ou em `desconhecida`/`interativa`/`avulsa`: nunca some do total.
 
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
@@ -27,6 +28,9 @@ ROLE_TABLE, PHASE_TABLE = _table("role"), _table("phase")
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo")
 ROLES = ("dispatcher", "worker", "avulsa")
 UNKNOWN_PHASE = "desconhecida"
+# conversa sem `oute.task.id` (aberta direto numa pasta, fora do `oute-task`, #599): categoria de exibição, não é fase do
+# AI-DLC (ADR-07). `desconhecida` fica só para a sessão com id e sem fase registrada
+INTERACTIVE_PHASE = "interativa"
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
@@ -61,7 +65,8 @@ _SESSION_INFO = (
 # sem evento da sessão: o papel sai do resource da própria chamada
 _SCOPE = (f"(SELECT t.*, COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
           "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
-          f"ELSE 'avulsa' END) AS role, COALESCE(i.phase, '{UNKNOWN_PHASE}') AS phase "
+          f"ELSE 'avulsa' END) AS role, COALESCE(i.phase, CASE WHEN t.oute_task_id IS NULL THEN '{INTERACTIVE_PHASE}' "
+          f"ELSE '{UNKNOWN_PHASE}' END) AS phase "
           f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id)")
 
 
@@ -269,7 +274,7 @@ def _sorted(groups):
 def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
     """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
     o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
-    `by_phase` (fase do seletor ou `desconhecida`): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
+    `by_phase` (fase do seletor, `desconhecida` ou `interativa`): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""
     fine_keys = ("day", "host", "agent", "model", "role", "phase")
     fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, effective=effective)  # a junção com os logs de custo roda uma vez só (#504)
