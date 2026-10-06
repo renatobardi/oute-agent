@@ -1,6 +1,6 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: Sonnet nas fases `ops`, `ctx`, `learn` e nas exceções `kaizen`, `docs` (decisão do Bardi, #615) · adendo 2026-10-05: assinatura padrão e reservas, dois modos de escolher a reserva (#598, gate de `spec` do Bardi) · adendo 2026-10-05: assinatura `zai` (GLM) e padrão por grupo de fase (gate de `arch` do Bardi, #629)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: Sonnet nas fases `ops`, `ctx`, `learn` e nas exceções `kaizen`, `docs` (decisão do Bardi, #615) · adendo 2026-10-05: assinatura padrão e reservas, dois modos de escolher a reserva (#598, gate de `spec` do Bardi) · adendo 2026-10-05: assinatura `zai` (GLM) e padrão por grupo de fase (gate de `arch` do Bardi, #629) · adendo 2026-10-06: a `zai` vira a padrão da execução numa entrega só, sem fatias, e a sessão `zai` não lê imagem (decisão do Bardi depois do spike, #629)
 
 ## Decisão
 O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
@@ -17,6 +17,7 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
 
 ### Tabela fase → modelo
 > Adendo 2026-10-05 (#629): a assinatura `zai` (GLM) e o padrão por grupo de fase (raciocínio × execução) mudam esta tabela na fatia (c). Até lá, ela vale para quem não pede `zai`.
+> Adendo 2026-10-06 (#629): não há mais fatias; a tabela muda na entrega da `zai`.
 
 | fase | Claude | reserva (Codex) |
 |---|---|---|
@@ -168,6 +169,28 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 - **A lição do Pi** (Histórico: modelo servido chamando ferramenta inexistente ou recusando o schema) vale aqui. A fatia (a) só fecha com o `oute-regression` passando na `zai` e o handoff da ai-memory provado entre sessões `zai` e `claude`.
 - **Revisão cruzada de PR** continua fora ("Fora", acima). Com o `build` na `zai` e o `qa` na `claude`, a auditoria passa a ser feita por outro fornecedor como efeito da tabela, sem regra nova.
 - **Saída de dados:** código e prompt de qualquer repo podem ir à Z.ai. O registro e as regras estão no ADR-01 (adendo #629).
+
+### Adendo 2026-10-06 — a `zai` vira a padrão da execução numa entrega só; sessão `zai` não lê imagem (decisão do Bardi, #629)
+**Contexto:** o spike da #629 rodou os itens 1 a 5 no container do Mac, no plano Lite ([resultado](https://github.com/renatobardi/oute-agent/issues/629#issuecomment-6015525631)). Ferramentas, MCP e handoff do ai-memory, telemetria e o endpoint de cota passaram. A visão falhou.
+
+**Decisão** (troca os itens 5 e 7 do adendo de 2026-10-05; os itens 1 a 4 e 6 seguem valendo):
+1. **Sem fatias.** As cadeias do item 3 viram o padrão da tabela na mesma entrega que traz a assinatura `zai`: execução `zai` → `claude` → `codex`, raciocínio `claude` → `zai` → `codex`. O `--subscription zai` e o `--prefer zai` entram juntos, com as regras do #598.
+2. **A medição de qualidade deixa de ser condição de entrada.** O item 6 do spike (uma issue real de `build` em GLM × a mesma em Sonnet) não rodou. A qualidade se mede em uso, pelos ajustes até a auditoria passar (a medida da #409) e pelo agent-studio.
+3. **A regressão de agentes continua condição:** a entrega só fecha com o `oute-regression` passando na `zai` (requisito 6 do #598 e a ressalva da lição do Pi).
+4. **Sessão `zai` não lê imagem.** No spike, o `Read` de um PNG não chegou ao modelo: a Z.ai subiu o arquivo para um CDN de terceiro e devolveu só o link (ADR-01, adendo de 2026-10-06). A sessão `zai` abre sem a leitura de imagem; o mecanismo fica para a `spec`.
+5. **Plano:** a entrega entra no **Lite**, o plano assinado. O Pro deixa de ser critério de `ship`: subir de plano é decisão do Bardi, com o dado do `oute-quota`.
+
+**O que o spike mediu e a `spec` usa:**
+- O Claude Code preenche `cost_usd` para o `glm-5.3` com um valor que não é real (`costBasis: unknown`). Confirma o custo **estimado** do adendo de 2026-10-05.
+- O Claude Code assume contexto de 200k para o `glm-5.3` e compacta nesse limite. O 1M não foi medido.
+- Os conectores do claude.ai não carregam na sessão `zai`; o MCP local do ai-memory carrega.
+- A busca web da sessão `zai` é da Z.ai.
+- A cota do Lite é de 2.000 créditos na janela de 5h e 10.000 na de 7 dias. O spike inteiro gastou 51.
+
+**Ressalvas registradas:**
+- **A janela do Lite pode não cobrir uma rodada.** Com a `zai` no teto, a sessão anda a cadeia e abre no `claude`, com o `reserve_from` dizendo `zai`. O efeito é o de hoje, não uma recusa.
+- **O limite de sessões simultâneas do Lite é incerto.** A página de rate limits da Z.ai vale só para a API com saldo. A primeira rodada com vários workers mede.
+- **Tarefa que precisa de imagem** (screenshot do `oute-shot`, por exemplo) numa fase de execução abre na `zai` sem ver a imagem. Proposta para a `spec`, não decidida: abrir essas tarefas com `--subscription claude`.
 
 ## Histórico
 
