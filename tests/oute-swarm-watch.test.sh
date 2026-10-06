@@ -323,4 +323,22 @@ echo : > "$FAKE/on-sleep-2"
 watch
 check "falha: uma linha para o check que falhou"         [ "$(ci_events)" == "[ci] PR #12 · lint: fail" ]
 
+# 455. [canal]: o `# sessao:` do cabeçalho do pedido marca (da rodada) ou (alheio); sem o campo, sem marca
+CASE=canal; round "$CASE"
+cat > "$FAKE/on-sleep-1" <<'SH'
+ped() {
+  local id="$1" titulo="$2" extra="$3"
+  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: claude\n# criado: 2026-06-01T00:00:00Z\n%s\necho x\n' "$titulo" "$extra" > "$OUTE_OUTBOX/$id.sh"
+  return 0
+}
+ped a-rodada  "ajuste do deploy"        "# sessao: 7-foo"
+ped b-alheio  "ajuste do deploy"        "# sessao: 99-outra-rodada"
+ped c-antigo  "ajuste #7 sem o campo"   ""
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "canal: sessão da rodada leva (da rodada)"          logged "[canal] pedido pendente a-rodada: ajuste do deploy (agente claude, user) (da rodada) — aprovação no host: oute watch"
+check "canal: sessão de fora leva (alheio)"               logged "[canal] pedido pendente b-alheio: ajuste do deploy (agente claude, user) (alheio) — aprovação no host: oute watch"
+check "canal: pedido antigo sem o campo fica como era"    logged "[canal] pedido pendente c-antigo: ajuste #7 sem o campo (agente claude, user) — aprovação no host: oute watch"
+
 check_end
