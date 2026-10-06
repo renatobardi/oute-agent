@@ -299,4 +299,6 @@ if [[ "$PY_RC" != 0 ]]; then cat "$TMP/py.out"; fi
 node "$ROOT/tests/lib/studio_loading_js.cjs" > "$TMP/js.out" 2>&1
 check "os eventos em JavaScript passam" test "$?" = 0
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/js.out")
+# #591: o ADR-08 não descreve mais a abertura vencida como motivo para reabrir a tela
+check "ADR-08: nenhuma frase manda reabrir a tela" bash -c 'cd "$1" && ! git grep -q -i -e "reabrir a tela" -e "reabra a tela" -- docs/adr/0008-agent-studio.md' _ "$ROOT"
 check_end
