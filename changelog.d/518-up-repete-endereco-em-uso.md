@@ -1,0 +1,2 @@
+### Fixed
+- **`oute up` repete a subida quando o compose falha com `Address already in use`** (#518). Ao recriar a rede `oute-agent_oute` logo depois do `down`, o docker às vezes ainda segurava a sub-rede e o `oute update` terminava com rc 1. Agora só esse erro repete o `compose up`, com espera de 5 s e até 3 tentativas (`OUTE_UP_RETRIES`, `OUTE_UP_RETRY_WAIT`); outro erro, ou o fim das tentativas, falha como antes. Não precisa de release (só `scripts/oute`).

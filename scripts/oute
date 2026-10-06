@@ -818,6 +818,24 @@ validate_agent_ip_not_in_range() {
   return 0
 }
 
+# compose_up_retry: #518. O `compose up` pode falhar ao recriar a rede com "failed to allocate gateway: Address already in use"
+# (a ponte antiga ainda ocupa a sub-rede logo depois do down). Só esse erro repete, com espera curta
+# (OUTE_UP_RETRIES tentativas no total, padrão 3; OUTE_UP_RETRY_WAIT segundos, padrão 5); outro erro, ou o fim das tentativas, falha como antes.
+compose_up_retry() {
+  local tries="${OUTE_UP_RETRIES:-3}" wait_s="${OUTE_UP_RETRY_WAIT:-5}" n=1 log rc
+  log="$(mktemp "${TMPDIR:-/tmp}/oute-up.XXXXXX")" || die "não criei o arquivo temporário"
+  while :; do
+    rc=0
+    "${COMPOSE[@]}" up -d --no-build "$@" > "$log" 2>&1 || rc=$?
+    cat "$log"
+    if [[ "$rc" -eq 0 ]]; then rm -f "$log"; return 0; fi
+    if [[ "$n" -ge "$tries" ]] || ! grep -qi 'address already in use' "$log"; then rm -f "$log"; return "$rc"; fi
+    echo "oute: o compose up falhou com 'Address already in use' (tentativa $n de $tries); repito em ${wait_s}s" >&2
+    sleep "$wait_s"
+    n=$((n + 1))
+  done
+}
+
 # ensure_net_ip_range: valida e deriva OUTE_NET_IP_RANGE antes do compose up
 ensure_net_ip_range() {
   local subnet range agent_ip
@@ -1349,7 +1367,7 @@ case "${1:-}" in
     ensure_image
     queue_reserve_check
     ensure_net_ip_range
-    "${COMPOSE[@]}" up -d --no-build ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
+    compose_up_retry ${up_args[@]+"${up_args[@]}"}; "$0" status; wait_sshd
     # imagem antiga só fica "solta" depois que o container é recriado -> limpa aqui (retenção, #12)
     docker image prune -f >/dev/null 2>&1 || true
     ;;
