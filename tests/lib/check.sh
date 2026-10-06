@@ -8,6 +8,9 @@
 # check_py <arquivo>: soma os casos que um trecho em Python imprimiu (`ok   …`/`FAIL …`, como o pycheck.py),
 # sem repetir as linhas; define n_ok e n_fail. check_py_lines <arquivo>: repete cada caso, e linha que não é caso
 # (um traceback) conta como falha. check_end: resumo e código de saída; é a última linha do teste.
+# Ao ser carregado, pega uma vaga de teste do container (tests/lib/slot.sh, #623); sem vaga no prazo, o teste roda assim mesmo.
+. "$(dirname "${BASH_SOURCE[0]}")/slot.sh"
+slot_take || true
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
 bad() {

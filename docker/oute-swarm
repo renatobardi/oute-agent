@@ -306,6 +306,19 @@ cmd_start() {
     exec oute-task --phase plan -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
 }
 
+# carga do container (#623): avisa em stderr, sem bloquear, quando a média de 1 min do /proc/loadavg passa de 2 × nproc.
+# Sem o arquivo (o Mac), sem `nproc` ou com valor que não é número, não diz nada
+load_warn() {
+  local slug="$1" file="${OUTE_SWARM_LOADAVG:-/proc/loadavg}" n load
+  n="$(nproc 2>/dev/null || true)"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || return 0
+  load="$(cut -d' ' -f1 "$file" 2>/dev/null || true)"
+  [[ "$load" =~ ^[0-9]+[.]?[0-9]*$ ]] || return 0
+  awk -v l="$load" -v n="$n" 'BEGIN { exit !(l > 2 * n) }' || return 0
+  echo "oute-swarm: aviso: carga do container em $load, acima de $((2 * n)) (2 × $n núcleos); $slug abre mesmo assim" >&2
+  return 0
+}
+
 cmd_spawn() {
   local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
   local busy bslug brid model="" prefer="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
@@ -389,6 +402,7 @@ cmd_spawn() {
     printf '%s\n\n' "$instr"
     sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
   } > "$pfile"
+  load_warn "$slug"
   label="#$n ${slug#*-}"
   # abas que já têm esse label (issue reaberta, rodada antiga com aba aberta): o spawn não fecha nenhuma delas (#289)
   old_ok=1; old="$(tabs_by_label "$label")" || old_ok=0
