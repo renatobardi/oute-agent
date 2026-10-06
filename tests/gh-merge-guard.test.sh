@@ -32,22 +32,28 @@ FAKEGH
 chmod 755 "$REAL/gh"
 
 pr() {   # pr <sel> <número> <branch> [comentários-json]
-  jq -n --argjson n "$2" --arg b "$3" --argjson c "${4:-[]}" \
-    '{number: $n, headRefName: $b, url: "https://github.com/dono/oute-agent/pull/\($n)", comments: $c}' > "$FAKE/pr-$1.json"
+  local sel="$1" num="$2" branch="$3" comments="${4:-[]}"
+  jq -n --argjson n "$num" --arg b "$branch" --argjson c "$comments" \
+    '{number: $n, headRefName: $b, url: "https://github.com/dono/oute-agent/pull/\($n)", comments: $c}' > "$FAKE/pr-$sel.json"
+  return $?
 }
 round() {   # round <id> <repo> <slug…> ; marcadores à parte
   local id="$1" repo="$2"; shift 2; mkdir -p "$H/.oute/swarm/$id"
   printf 'repo=%s\nmax=3\n' "$repo" > "$H/.oute/swarm/$id/meta"
   : > "$H/.oute/swarm/$id/spawned"
   for s in "$@"; do printf '%s %%1 claude 2026-10-04T10:00:00Z t1 %s -\n' "$s" "$repo" >> "$H/.oute/swarm/$id/spawned"; done
+  return 0
 }
 # run <env…> -- <gh args…>: o shim, num cwd fora de worktree de rodada; stdout+stderr em $OUT, código em $RC
 run() {
-  local envs=(); while [[ "$1" != -- ]]; do envs+=("$1"); shift; done; shift
+  local envs=() all=("$@") a
+  for a in "${all[@]}"; do shift; [[ "$a" != -- ]] || break; envs+=("$a"); done
   OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID HOME="$H" FAKE="$FAKE" PATH="$SHIMS:$REAL:$PATH" ${envs[@]+"${envs[@]}"} "$SHIMS/gh" "$@" 2>&1 </dev/null)"; RC=$?
+  return 0
 }
-merged() { grep -q '^pr merge' "$FAKE/gh.log" 2>/dev/null; }
-reset() { : > "$FAKE/gh.log"; }
+merged() { grep -q '^pr merge' "$FAKE/gh.log" 2>/dev/null; return $?; }
+reset() { : > "$FAKE/gh.log"; return 0; }
+OK517='test "$1" -eq 0 && grep -q "^pr merge 517" "$2"'   # passa e chega ao gh real
 
 round swarm-1004-1306 /workspace/oute-agent 507-pagina-rodada 540-outra
 pr 517 517 feat/507-pagina-rodada '[{"url":"https://github.com/dono/oute-agent/pull/517#issuecomment-1","body":"x\n<!-- oute-aidlc-qa-pr-audit -->\najustar"}]'
@@ -82,7 +88,7 @@ check "dispatcher, por URL: passa"                       bash -c 'test "$1" -eq 
 # dispatcher reiniciado sem a variável: a worktree sessao/<rodada>
 WT="$TMP/wt"; git init -q -b sessao/swarm-1004-1306 "$WT"; git -C "$WT" -c user.email=a@b -c user.name=t commit -q --allow-empty -m i
 reset; OUT="$(cd "$WT" && env -u OUTE_SWARM_ID HOME="$H" FAKE="$FAKE" PATH="$SHIMS:$REAL:$PATH" "$SHIMS/gh" pr merge 517 --squash 2>&1 </dev/null)"; RC=$?
-check "dispatcher sem a variável, na worktree sessao/<rodada>: passa" bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
+check "dispatcher sem a variável, na worktree sessao/<rodada>: passa" bash -c "$OK517" _ "$RC" "$FAKE/gh.log"
 reset; run -- pr merge 600
 check "PR fora de rodada (issue sem sessão): passa"      bash -c 'test "$1" -eq 0 && grep -q "^pr merge 600" "$2"' _ "$RC" "$FAKE/gh.log"
 pr 602 602 feat/rascunho-sem-numero; reset; run -- pr merge 602
@@ -93,17 +99,17 @@ check "PR de issue da rodada, mas de outro repo: passa"  test "$RC" -eq 0
 # aba da sessão em closed (rodada sem `fechada`): o PR deixa de ser da rodada
 printf '507-pagina-rodada\n' > "$H/.oute/swarm/swarm-1004-1306/closed"
 reset; run -- pr merge 517 --squash
-check "rodada sem fechada, mas com a aba da sessão em closed: passa" bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
+check "rodada sem fechada, mas com a aba da sessão em closed: passa" bash -c "$OK517" _ "$RC" "$FAKE/gh.log"
 : > "$H/.oute/swarm/swarm-1004-1306/closed"
 reset; run -- pr merge 517 --squash
 check "closed vazio: volta a recusar"                    test "$RC" -eq 77
 touch "$H/.oute/swarm/swarm-1004-1306/fechada"
 reset; run -- pr merge 517 --squash
-check "rodada fechada (fechada): passa"                  bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
+check "rodada fechada (fechada): passa"                  bash -c "$OK517" _ "$RC" "$FAKE/gh.log"
 rm -f "$H/.oute/swarm/swarm-1004-1306/fechada"
 rm -rf "${H:?}/.oute/swarm"
 reset; run -- pr merge 517 --squash
-check "sem estado de rodada: passa"                      bash -c 'test "$1" -eq 0 && grep -q "^pr merge 517" "$2"' _ "$RC" "$FAKE/gh.log"
+check "sem estado de rodada: passa"                      bash -c "$OK517" _ "$RC" "$FAKE/gh.log"
 
 # ---------------------------------------------------------------- 3. o resto do gh não muda
 round swarm-1004-1306 /workspace/oute-agent 507-pagina-rodada
