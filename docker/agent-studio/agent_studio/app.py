@@ -27,6 +27,7 @@ import contextlib
 import gzip
 import json
 import logging
+import os
 import time
 import zlib
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from . import store as store_mod
 from . import (acoes as acoes_mod, auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
                tz as tz_mod, web)
 
@@ -154,6 +156,27 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     @app.post("/v1/metrics")
     async def v1_metrics(request: Request):
         return await ingest("metrics", request)
+
+    @app.post("/v1/backup")
+    async def v1_backup(request: Request):
+        """Cópia de segurança do DuckDB em `<pasta do banco>/backup/` (#570). Só a credencial de ingestão (a do serviço):
+        quem lê não copia o banco. O `oute studio backup` chama pelo `python -m agent_studio.backup`, no container."""
+        if not auth.ingest(request):
+            if auth.split and auth.bearer(request):
+                tel.warn("forbidden", "recusado: credencial de leitura na cópia de segurança")
+                return JSONResponse({"message": "forbidden"}, status_code=403)
+            tel.warn("unauthorized", "recusado: token ausente ou errado (backup)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        try:
+            result = await run_in_threadpool(store.backup_dir, os.path.join(os.path.dirname(store.path), "backup"))
+        except store_mod.BackupBusy:
+            return JSONResponse({"message": "cópia em andamento"}, status_code=409)
+        except Exception as e:  # noqa: BLE001 — a causa fica no stderr; a resposta diz só que falhou
+            tel.warn("backup-failed", "cópia de segurança falhou (%s)", type(e).__name__, level=logging.ERROR)
+            detail.exception("cópia de segurança falhou")
+            return JSONResponse({"message": "cópia de segurança falhou"}, status_code=503)
+        log.info("backup: %s, %d bytes em %.1f s", result["file"], result["bytes"], result["seconds"])
+        return JSONResponse(result)
 
     @app.get("/healthz")
     async def healthz():
