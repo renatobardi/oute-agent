@@ -190,8 +190,10 @@ COPY docker/shims/oute-agent-shim /usr/local/lib/oute/shims/oute-agent-shim
 # trava do `gh pr merge` de PR de rodada aberta (#538) e a do pkill/killall (hook do Claude + regras do Codex)
 COPY docker/shims/gh /usr/local/lib/oute/shims/gh
 COPY docker/oute-guard-kill docker/codex-kill.rules /usr/local/lib/oute/
+# trava do `git` no checkout principal de /workspace/<repo>: checkout, switch, commit, merge e rebase recusados (#651)
+COPY docker/shims/git /usr/local/lib/oute/shims/git
 # `pi` continua como shim só para responder que o Pi saiu do stack (#217), mesmo com o binário antigo em ~/.local/bin
-RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh && chmod 755 /usr/local/lib/oute/oute-guard-kill \
+RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh git && chmod 755 /usr/local/lib/oute/oute-guard-kill \
     && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
