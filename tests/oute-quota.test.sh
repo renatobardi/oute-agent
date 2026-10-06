@@ -23,6 +23,7 @@ python3 "$ROOT/tests/lib/fake-quota.py" "$SD" & SRV_PID=$!
 for _ in $(seq 1 50); do [[ -s "$SD/port" ]] && break; sleep 0.1; done
 [[ -s "$SD/port" ]] || die "o servidor falso não subiu"
 BASE="https://127.0.0.1:$(cat "$SD/port")"
+DEAD="https://127.0.0.1:1/x"   # porta sem ninguém: conexão recusada
 
 # --- ambiente do comando (isolado do real)
 H="$TMP/home"; CL="$H/.claude"; CX="$H/.codex"; mkdir -p "$CL" "$CX" "$TMP/bin"
@@ -92,7 +93,7 @@ oj() { jq -e "$1" <<<"$OUT" >/dev/null 2>&1; }
 rc_and_oj() { [[ "$RC" -eq "$1" ]] && oj "$2"; }
 cred_state() { stat -c '%y' "$CL/.credentials.json" "$CX/auth.json" 2>/dev/null; sha256sum "$CL/.credentials.json" "$CX/auth.json" 2>/dev/null; }
 tree_hash() { (cd "$H" && find . -type f -not -path './.cache/*' | sort | xargs sha256sum 2>/dev/null); }
-no_secret() { ! grep -qF -e "$CTOK" -e "$XJWT" -e "$XTOK_RAW" -e "$ACCT" -e "$ZKEY" "$@"; }
+no_secret() { ! grep -qF -e "$CTOK" -e "$XJWT" -e "$XTOK_RAW" -e "$ACCT" -e "$ZKEY" "$@"; return $?; }
 zreqs() { reqs_of zai; return $?; }
 
 # ============ 200 nos dois ============
@@ -228,9 +229,9 @@ check "janela com tipo errado: unknown formato" oj '.agents.claude.reason == "fo
 reset_world; mode claude 5xx
 run --json
 check "HTTP 503 no claude: unknown http-503, codex ok, saída 0" rc_and_oj 0 '.agents.claude.reason == "http-503" and .agents.codex.status == "ok"'
-reset_world; OUTE_QUOTA_CLAUDE_URL="https://127.0.0.1:1/x" run --json --agent claude
+reset_world; OUTE_QUOTA_CLAUDE_URL="$DEAD" run --json --agent claude
 check "rede fora (conexão recusada): unknown rede" oj '.agents.claude.reason == "rede"'
-reset_world; OUTE_QUOTA_CLAUDE_URL="https://127.0.0.1:1/x" run --json
+reset_world; OUTE_QUOTA_CLAUDE_URL="$DEAD" run --json
 check "rede fora só num agente: o outro continua ok, saída 0" rc_and_oj 0 '.agents.codex.status == "ok" and .agents.claude.reason == "rede"'
 reset_world; mode claude hang; mode codex hang; printf 4 > "$SD/hang"
 T0=$SECONDS; OUTE_QUOTA_TIMEOUT=1 run --json; T1=$((SECONDS - T0))
@@ -241,7 +242,7 @@ reset_world; write_cache claude 600 $R5C; mode claude hang; printf 4 > "$SD/hang
 OUTE_QUOTA_TIMEOUT=1 run --json --agent claude
 check "timeout com cache de 10 min: cache stale" oj '.agents.claude.status == "ok" and .agents.claude.stale == true'
 reset_world; write_cache claude 600 $R5C
-OUTE_QUOTA_CLAUDE_URL="https://127.0.0.1:1/x" run --json --agent claude
+OUTE_QUOTA_CLAUDE_URL="$DEAD" run --json --agent claude
 check "rede fora com cache de 10 min: cache stale" oj '.agents.claude.status == "ok" and .agents.claude.stale == true'
 
 # ============ zai (#676) ============
@@ -333,7 +334,7 @@ check "--available zai sem a chave: saída ≠ 0, sem rede e sem texto" bash -c 
 reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai hang; printf 8 > "$SD/hang"
 T0=$SECONDS; run --available zai; T1=$((SECONDS - T0))
 check "--available zai sem resposta em 5 s (o teto padrão): saída ≠ 0 em ≤ 7 s" bash -c '[ "$1" != 0 ] && [ "$2" -le 7 ] && [ -z "$3$4" ]' _ "$RC" "$T1" "$OUT" "$ERR"
-reset_world; OUTE_ZAI_API_KEY="$ZKEY" OUTE_QUOTA_ZAI_URL="https://127.0.0.1:1/x" run --available zai
+reset_world; OUTE_ZAI_API_KEY="$ZKEY" OUTE_QUOTA_ZAI_URL="$DEAD" run --available zai
 check "--available zai com a rede fora: saída ≠ 0" test "$RC" -ne 0
 run --available;        check "--available sem valor: saída 2" test "$RC" -eq 2
 run --available outro;  check "--available de agente desconhecido: saída 2" test "$RC" -eq 2
