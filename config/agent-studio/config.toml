@@ -165,3 +165,16 @@ quota_reset_grace_minutes = 20
 # vira "rodada antiga sem fechamento" por mais lookback_hours, e depois some. Pergunta pendente ao Bardi (#386,
 # oute.swarm.round.asked) conta como evento da rodada: só vira "parada" depois deste mesmo limite.
 round_stalled_minutes = 30
+
+# `zai` (GLM Coding Plan, ADR-02 adendo #629; #679). O Claude Code serve o `glm-5.3` e calcula o `cost_usd` pela própria
+# tabela, que não conhece `glm-*` (`costBasis: unknown`): o agent-studio descarta esse valor nas chamadas com
+# `oute.subscription=zai` e as estima por este preço (`cost.spans_with_cost`), nunca como custo real. Fonte: models.dev,
+# provedor `zai` (https://models.dev/api.json), lida em 2026-10-06; a escrita em cache é de graça lá (`cache_write` 0),
+# então `cache_creation = 0`. O OpenRouter (`z-ai/glm-5.3`) trazia outros valores nessa data, então as duas fontes
+# divergem e a conferência (#339) não troca este preço sozinha. Plano de assinatura: o valor é de lista da API, para
+# comparar com os outros modelos, não o que a assinatura cobra.
+[prices."glm-5.3"]
+input = 1.4
+output = 4.4
+cache_read = 0.26
+cache_creation = 0.0

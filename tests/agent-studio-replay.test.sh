@@ -66,7 +66,7 @@ put("logs", "oute-server", (1, 8), "logs_f", {"resourceLogs": [rl(server, [event
 put("logs", "oute-mac", (1, 12), "logs_g", {"resourceLogs": [rl(mac, [event(T + 90, "oute.exemplo", "ev-mac", {})])]})
 put("logs", None, (1, 12), "logs_h", {"resourceLogs": [rl({"service.name": "oute"}, [event(T + 95, "oute.exemplo", "ev-legado", {})])]}, legacy=True)
 put("metrics", "oute-server", (1, 12), "metrics_a", queue_metrics("oute-server", T + 100, 40))
-put("traces", "oute-server", (1, 12), "traces_a", {"resourceSpans": [rs(server, [span("claude_code.llm_request", T + 5, 2, {"model": "claude-sonnet-5"})])]})
+put("traces", "oute-server", (1, 12), "traces_a", {"resourceSpans": [rs({**server, "oute.subscription": "zai"}, [span("claude_code.llm_request", T + 5, 2, {"model": "claude-sonnet-5"})])]})
 # um .gz sem partição de hora no caminho (não dá para saber se está na faixa: ignorado, com aviso)
 open(f"{b}/logs/host=oute-server/instance=oute-agent/solto.json.gz", "w").write("x")
 # um objeto que não é gzip, uma pasta de outro tipo de arquivo (ignorada) e o da Archive (listado, mas ilegível)
@@ -161,6 +161,9 @@ check "fora da faixa e da folga: a das 8h, a de dois dias depois, oute-mac e o l
   bash -c '! grep -qxE "ev-longe|ev-fora|ev-mac|ev-legado" <<<"$1"' _ "$EV"
 count_now; N="$NOW_COUNTS"
 check "DuckDB: 8 logs, 1 span e 2 métricas" test "$N" = "logs=8 spans=1 metrics=2"
+studio_stop; SUBS="$(studio_sql "$TMP/s/db.duckdb" "SELECT oute_subscription AS s FROM spans" | jq -r .s)"
+studio_start "$TMP/s" "${SENV[@]}" || die "agent-studio não voltou"
+check "o replay remontou a assinatura do span (#679)" test "$SUBS" = zai
 check "pedidos, rodada e sessão no SurrealDB" bash -c '[ "$1" = 2 ] && [ "$2" = 1 ] && [ "$3" = 1 ]' _ "$(sstate pedido)" "$(sstate rodada)" "$(sstate sessao)"
 check "o pedido decidido vem decidido" test "$(surreal_q 'SELECT state FROM pedido:`20261001-120000-reiniciar-nginx`' | jq -r '.[0].state')" = decidido
 

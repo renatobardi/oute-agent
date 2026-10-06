@@ -126,7 +126,7 @@ def sync(store, config, now_ns=None):
 # ---------------------------------------------------------------- o que conferir
 def select_models(path):
     """Ids de modelo da tabela do seletor (`config/select/models.toml`, ADR-02): `[default]`, `[[line]]` e
-    `[[exception]]`, colunas `claude` e `codex`. Arquivo ausente ou inválido = conjunto vazio (e o motivo)."""
+    `[[exception]]`, colunas `claude`, `zai` (#679, ainda sem coluna na tabela) e `codex`. Arquivo ausente ou inválido = conjunto vazio (e o motivo)."""
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
@@ -136,7 +136,7 @@ def select_models(path):
     found = set()
     for entry in entries:
         if isinstance(entry, dict):
-            for col in ("claude", "codex"):
+            for col in ("claude", "zai", "codex"):
                 v = entry.get(col)
                 if isinstance(v, str) and _MODEL_NAME.match(v):
                     found.add(v.lower())

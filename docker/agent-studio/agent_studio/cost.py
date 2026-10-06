@@ -19,7 +19,10 @@ Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas
   `request_id`). Tudo na consulta (`spans_with_cost`), sem mudar schema nem ingestão: vale para o que já está
   gravado.
 - **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real (Codex; Claude sem log
-  `api_request`). Modelo sem preço = **sem estimativa** (`None`), nunca zero.
+  `api_request`; a `zai`, #679). Modelo sem preço = **sem estimativa** (`None`), nunca zero.
+- **Custo da `zai` (#679):** o Claude Code calcula o custo pela própria tabela, que não conhece `glm-*` (`costBasis:
+  unknown`), então o `cost_usd` da chamada com `oute.subscription=zai` não é real: `spans_with_cost` o descarta (o do
+  span e o do log), e a chamada entra como estimada pelo preço do `config.toml`, nunca somada ao custo real.
 - **Erros** = spans com status de erro (qualquer span, inclusive os do LiteLLM: o `jev.decision` só nasce de
   chamada que deu certo, então não há duplicata) e logs de severidade ERROR ou acima.
 """
@@ -36,17 +39,37 @@ MODEL_CALL_SQL = (f"name IN ({', '.join('?' * len(MODEL_CALL_SPANS))}) "
                   "AND (name = ? OR oute_agent IS DISTINCT FROM ?)")
 MODEL_CALL_PARAMS = (*MODEL_CALL_SPANS, DECISION_SPAN, ROUTER_AGENT)
 
-# Assinatura (#531): a telemetria não marca o tipo de conta. Chamada com `oute.agent` = claude ou codex é de assinatura
-# (CONTEXT.md, ADR-02); o resto é pago por uso. É a única definição: o `usage.aggregate` (modo efetivo) e o detalhe da
-# conversa a usam. Limite conhecido: erra se um dia o Claude ou o Codex rodar com chave de API.
-SUBSCRIPTION_AGENTS = ("claude", "codex")
-# SQL sem parâmetro: os nomes são constantes deste módulo, nunca entrada
-SUBSCRIPTION_SQL = f"COALESCE(oute_agent IN ({', '.join(repr(a) for a in SUBSCRIPTION_AGENTS)}), false)"
+# Assinatura (#531, #679): a conversa traz `oute.subscription` (`claude`, `zai` ou `codex`) no resource. Histórico sem o
+# atributo: `claude` ou `codex` pelo `oute.agent` (CONTEXT.md, ADR-02). Chamada de qualquer assinatura é de assinatura
+# (conta 0 no custo efetivo); o resto é pago por uso. É a única definição: o `usage.aggregate` (modo efetivo), o filtro
+# e a quebra por assinatura e o detalhe da conversa a usam. Limite conhecido: erra se um dia o Claude ou o Codex rodar
+# com chave de API.
+SUBSCRIPTIONS = ("claude", "zai", "codex")
+ZAI = "zai"
+SUBSCRIPTION_COL = "oute_subscription"
 
 
-def is_subscription(agent):
-    """`oute.agent` da chamada -> `True` se a chamada é de assinatura (conta 0 no custo efetivo)."""
-    return agent in SUBSCRIPTION_AGENTS
+def subscription_sql(prefix=""):
+    """SQL (sem parâmetro: só constantes deste módulo) da assinatura de uma linha: a coluna `oute_subscription` ou, sem
+    ela, o `oute.agent` quando é claude ou codex. `prefix` = alias da tabela, com o ponto (`t.`)."""
+    agent = f"{prefix}oute_agent"
+    return (f"COALESCE({prefix}{SUBSCRIPTION_COL}, CASE WHEN {agent} IN ('claude', 'codex') THEN {agent} END)")
+
+
+SUBSCRIPTION_EXPR = subscription_sql()
+SUBSCRIPTION_SQL = f"COALESCE({SUBSCRIPTION_EXPR} IN ({', '.join(repr(a) for a in SUBSCRIPTIONS)}), false)"
+
+
+def subscription_of(agent, subscription):
+    """Assinatura da conversa em Python, pela mesma regra do `subscription_sql`; `None` = pago por uso ou desconhecida."""
+    if subscription:
+        return subscription
+    return agent if agent in ("claude", "codex") else None
+
+
+def is_subscription(subscription):
+    """Assinatura da chamada (`subscription_of`) -> `True` se a chamada é de assinatura (conta 0 no custo efetivo)."""
+    return subscription in SUBSCRIPTIONS
 
 
 # custo do Claude no log (#157): o span da chamada e o log `api_request` levam o mesmo `request_id`
@@ -199,14 +222,16 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     # junção só por igualdade (hash join): a condição `s.name = ?` dentro do ON, ou a chave como expressão sobre o
     # span, fazia o DuckDB comparar cada span com cada log (quadrático, ~30 s em /uso de 7 d, #504). A chave
     # `_rid` é calculada antes e é nula fora do span da chamada do Claude (nulo não junta).
-    sql = ("(SELECT t.* EXCLUDE (_rid) REPLACE (COALESCE(t.cost_usd, l.cost_usd) AS cost_usd) FROM ("
+    # a `zai` (#679): o custo que o Claude Code calcula para o `glm-*` não é real; vira NULL e a chamada é estimada
+    sql = ("(SELECT t.* EXCLUDE (_rid) REPLACE (CASE WHEN COALESCE(t.oute_subscription, '') = ? THEN NULL "
+           "ELSE COALESCE(t.cost_usd, l.cost_usd) END AS cost_usd) FROM ("
            "SELECT s.*, CASE WHEN s.name = ? THEN json_extract_string(s.attributes, '$.request_id') END AS _rid "
            f"FROM spans s WHERE {span_where}) t LEFT JOIN ("
            "SELECT json_extract_string(attributes, '$.request_id') AS request_id, "
            "max(TRY_CAST(json_extract_string(attributes, '$.cost_usd') AS DOUBLE)) AS cost_usd FROM logs "
            f"WHERE event_name IN ({', '.join('?' * len(API_REQUEST_EVENTS))}) AND {log_where} GROUP BY ALL) l "
            "ON l.request_id = t._rid)")
-    return sql, [CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
+    return sql, [ZAI, CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]
 
 
 def window_spans_with_cost(from_ns, to_ns, span_extra="", span_extra_params=()):

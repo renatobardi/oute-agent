@@ -10,22 +10,26 @@ dela diz (papel) ou em `desconhecida`/`interativa`/`avulsa`: nunca some do total
 
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
-from . import repo as repo_mod, tz as tz_mod
+from . import repo as repo_mod, subscription as sub_mod, tz as tz_mod
 from .tabela import Col, Table, usage_cols
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
-                   SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
+                   SUBSCRIPTION_EXPR, SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
 
 
+_TABLE_SUFFIX = {"role": "_papel", "phase": "_fase", "subscription": "_assinatura"}
+
+
 def _table(kind):
-    # as tabelas por papel e por fase da tela (#529): só a ordem (sem filtro nem página); a de sempre é a do que mais custou
+    # as tabelas por papel, por fase e por assinatura (#679) da tela (#529): só a ordem (sem filtro nem página); a de sempre é a do que mais custou
     return Table([Col("name", "text", lambda r: r[kind]), *usage_cols(lambda r: r, detail=False)], default=("cost", "desc"),
-                 suffix="_papel" if kind == "role" else "_fase", paginate=False)
+                 suffix=_TABLE_SUFFIX[kind], paginate=False)
 
 
-ROLE_TABLE, PHASE_TABLE = _table("role"), _table("phase")
-KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo")
+ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE = _table("role"), _table("phase"), _table("subscription")
+NO_SUBSCRIPTION = "sem assinatura"  # a chamada que não é de assinatura nenhuma (ex.: o LLM do ai-memory), só na exibição
+KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo", "subscription")
 ROLES = ("dispatcher", "worker", "avulsa")
 UNKNOWN_PHASE = "desconhecida"
 # conversa sem `oute.task.id` (aberta direto numa pasta, fora do `oute-task`, #599): categoria de exibição, não é fase do
@@ -35,7 +39,7 @@ INTERACTIVE_PHASE = "interativa"
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
          "model": "model", "conversation": "session_id", "session": "oute_task_id", "role": "role", "phase": "phase",
-         "repo": repo_mod.COL}
+         "repo": repo_mod.COL, "subscription": SUBSCRIPTION_EXPR}
 _PER_SESSION = {"role", "phase"}
 # logs não têm modelo: agrupados por modelo, caem no modelo nulo
 _LOG_MODEL = {"model": "CAST(NULL AS VARCHAR)"}
@@ -94,13 +98,13 @@ def _epoch_col(prices):
     return f"len(list_filter([{', '.join(str(int(b)) for b in bounds)}]::UBIGINT[], x -> x <= time_unix_nano))"
 
 
-def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, effective=False):
+def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, effective=False, sub=None):
     aggs = ["count(*) AS calls", "count(cost_usd) AS calls_real", "sum(cost_usd) AS cost_real"]
     for t in ("input", "output", "cache_read", "cache_creation"):
         aggs.append(f"COALESCE(sum({t}_tokens), 0) AS {t}")
         aggs.append(f"COALESCE(sum({t}_tokens) FILTER (WHERE cost_usd IS NULL), 0) AS est_{t}")
     # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
-    rsql, rparams = repo_mod.clause(repo)
+    rsql, rparams = sub_mod.scope(repo, sub)
     table, params = window_spans_with_cost(from_ns, to_ns, rsql, rparams)
     extra = {"epoch": _epoch_col(prices)}
     if effective:  # #531: a chamada de assinatura vira um grupo à parte, para o custo dela contar 0
@@ -109,21 +113,21 @@ def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, effective=False):
                   [*params, *MODEL_CALL_PARAMS])
 
 
-def _p95(con, keys, from_ns, to_ns, tz, repo=None):
-    rsql, rparams = repo_mod.clause(repo)
+def _p95(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
+    rsql, rparams = sub_mod.scope(repo, sub)
     return _query(con, keys, _cols(tz), ["quantile_cont(CAST(duration_ns AS DOUBLE), 0.95) / 1e6 AS p95"], _scope("spans", keys),
                   f"{_WINDOW} AND duration_ns IS NOT NULL AND {MODEL_CALL_SQL}{rsql}", [from_ns, to_ns, *MODEL_CALL_PARAMS, *rparams])
 
 
-def _spans(con, keys, from_ns, to_ns, tz, repo=None):
+def _spans(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
     """Todos os spans (o denominador da taxa de erro) e os com status de erro."""
-    rsql, rparams = repo_mod.clause(repo)
+    rsql, rparams = sub_mod.scope(repo, sub)
     return _query(con, keys, _cols(tz), ["count(*) AS spans", "count(*) FILTER (WHERE status_code = ?) AS n"], _scope("spans", keys),
                   f"{_WINDOW}{rsql}", [SPAN_STATUS_ERROR, from_ns, to_ns, *rparams])
 
 
-def _log_errors(con, keys, from_ns, to_ns, tz, repo=None):
-    rsql, rparams = repo_mod.clause(repo)
+def _log_errors(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
+    rsql, rparams = sub_mod.scope(repo, sub)
     return _query(con, keys, _cols(tz, _LOG_MODEL), ["count(*) AS n"], _scope("logs", keys), f"{_WINDOW} AND severity_number >= ?{rsql}",
                   [from_ns, to_ns, LOG_SEVERITY_ERROR, *rparams])
 
@@ -165,12 +169,12 @@ def _add_call(a, rec, prices, at_ns, effective):
         a["estimated_usd"] = _add(a["estimated_usd"], est)
 
 
-def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, effective=False):
+def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, effective=False, sub=None):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
     depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
     na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas.
     `p95=False` pula o p95 (ele não soma entre grupos: quem reagrupa o lê à parte, com `fill_p95`). `repo` (#528) =
-    só os fatos desse repositório (`repo.NONE` = os sem repositório); `None` = todos.
+    só os fatos desse repositório (`repo.NONE` = os sem repositório); `None` = todos. `sub` (#679) = só as chamadas dessa assinatura (`subscription.py`); `None` = todas.
     `effective=True` (#531, custo efetivo): a chamada de assinatura (`cost.SUBSCRIPTION_SQL`, a regra de `cost.is_subscription`) conta US$ 0 (entra no `real_*`, sem estimativa);
     chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
     keys = tuple(keys)
@@ -188,23 +192,23 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
     fine = keys if "model" in keys else keys + ("model",)
-    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, effective):
+    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, effective, sub):
         _add_call(acc(rec), rec, prices, at_ns, effective)
     if p95:
-        fill_p95(con, groups, keys, from_ns, to_ns, tz, repo)
-    for rec in _spans(con, keys, from_ns, to_ns, tz, repo):
+        fill_p95(con, groups, keys, from_ns, to_ns, tz, repo, sub)
+    for rec in _spans(con, keys, from_ns, to_ns, tz, repo, sub):
         a = acc(rec)
         a["spans"] += rec["spans"]
         a["span_errors"] += rec["n"]
-    for rec in _log_errors(con, keys, from_ns, to_ns, tz, repo):
+    for rec in _log_errors(con, keys, from_ns, to_ns, tz, repo, sub):
         if rec["n"]:
             acc(rec)["log_errors"] += rec["n"]
     return groups
 
 
-def fill_p95(con, groups, keys, from_ns, to_ns, tz=tz_mod.UTC, repo=None):
+def fill_p95(con, groups, keys, from_ns, to_ns, tz=tz_mod.UTC, repo=None, sub=None):
     """Põe em cada grupo de `groups` (as chaves `keys`) o p95 das chamadas dele; consulta sem a junção com os logs de custo."""
-    for rec in _p95(con, keys, from_ns, to_ns, tz, repo):
+    for rec in _p95(con, keys, from_ns, to_ns, tz, repo, sub):
         if rec["p95"] is not None:
             groups.setdefault(tuple(rec[k] for k in keys), _empty())["p95"] = rec["p95"]
     return groups
@@ -233,9 +237,9 @@ def regroup(fine, fine_keys, keys):
     return out
 
 
-def aggregate_p95(con, from_ns, to_ns, tz=tz_mod.UTC, repo=None):
+def aggregate_p95(con, from_ns, to_ns, tz=tz_mod.UTC, repo=None, sub=None):
     """O p95 (ms) de todas as chamadas da janela, sem a junção com os logs de custo; `None` sem chamada com duração."""
-    for rec in _p95(con, (), from_ns, to_ns, tz, repo):
+    for rec in _p95(con, (), from_ns, to_ns, tz, repo, sub):
         return rec["p95"]
     return None
 
@@ -271,22 +275,24 @@ def _sorted(groups):
     return sorted(groups.items(), key=lambda kv: tuple((v is not None, v if v is not None else "") for v in kv[0]))
 
 
-def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
+def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False, sub=None):
     """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
     o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
-    `by_phase` (fase do seletor, `desconhecida` ou `interativa`): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
+    `by_phase` (fase do seletor, `desconhecida` ou `interativa`) e, por assinatura (#679), `by_subscription` (`claude`, `zai`,
+    `codex`; `null` = chamada sem assinatura, como a do ai-memory): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""
-    fine_keys = ("day", "host", "agent", "model", "role", "phase")
-    fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, effective=effective)  # a junção com os logs de custo roda uma vez só (#504)
+    fine_keys = ("day", "host", "agent", "model", "role", "phase", "subscription")
+    fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, effective=effective, sub=sub)  # a junção com os logs de custo roda uma vez só (#504)
 
     def cut(keys):
-        return fill_p95(con, regroup(fine, fine_keys, keys), keys, from_ns, to_ns, tz, repo)
+        return fill_p95(con, regroup(fine, fine_keys, keys), keys, from_ns, to_ns, tz, repo, sub)
 
     total = cut(())[()]
     rows = cut(("host", "agent", "model"))
     series = cut(("day", "host", "agent", "model"))
     by_role = cut(("role",))
     by_phase = cut(("phase",))
+    by_subscription = cut(("subscription",))
     return {
         "timezone": tz.key,
         "totals": render((), total, ()),
@@ -296,4 +302,5 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False
         "series": [render(k, a, ("day", "host", "agent", "model")) for k, a in _sorted(series)],
         "by_role": [render(k, a, ("role",)) for k, a in _sorted(by_role)],
         "by_phase": [render(k, a, ("phase",)) for k, a in _sorted(by_phase)],
+        "by_subscription": [render(k, a, ("subscription",)) for k, a in _sorted(by_subscription)],
     }

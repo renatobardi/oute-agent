@@ -16,11 +16,11 @@ from markupsafe import Markup
 # caminho, título, menu, detalhe, blocos (nome, forma). Nomes só deste catálogo.
 SCREENS = {
     '/': ('Dashboard', 'dashboard', False, [('filtros', 'faixa'), ('kpis', 'indicadores'), ('insights', 'faixa'),
-         *[(n, 'grafico') for n in ('chamadas', 'custo-modelo', 'latencia', 'fases', 'atividade', 'sessoes', 'repos', 'ferramentas')]]),
+         *[(n, 'grafico') for n in ('chamadas', 'custo-modelo', 'latencia', 'fases', 'atividade', 'sessoes', 'repos', 'assinaturas', 'ferramentas')]]),
     '/conversas': ('Conversas', 'conversas', False, [('filtros', 'faixa'), ('tabela', 'tabela')]),
     '/sessoes': ('Sessões', 'sessoes', False, [('filtros', 'faixa'), ('sessoes', 'tabela'), ('conversas', 'tabela')]),
     '/uso': ('Uso por papel e por fase', 'uso', False, [('filtros', 'faixa'), ('total', 'indicadores'),
-             *[(n, 'grafico') for n in ('custo-dia', 'tokens-dia', 'custo-papel', 'custo-fase')], ('papel', 'tabela'), ('fase', 'tabela')]),
+             *[(n, 'grafico') for n in ('custo-dia', 'tokens-dia', 'custo-papel', 'custo-fase', 'custo-assinatura')], ('papel', 'tabela'), ('fase', 'tabela'), ('assinatura', 'tabela')]),
     '/ferramentas': ('Ferramentas', 'ferramentas', False, [('filtros', 'faixa'), ('total', 'indicadores'), ('usos', 'grafico'), ('ferramentas', 'tabela'), ('repos', 'grafico')]),
     '/ferramenta': ('Ferramenta', 'ferramentas', True, [('filtros', 'faixa'), ('total', 'indicadores'), ('conversas', 'tabela')]),
     '/precos': ('Preços', 'precos', False, [('fontes', 'faixa'), ('resumo', 'indicadores'), ('modelos', 'faixa')]),

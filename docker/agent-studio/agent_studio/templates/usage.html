@@ -31,7 +31,7 @@
 {% call fragment("filtros") %}
 <div class="pagina-topo">
 <div class="titulo-linha">{% if loading_target is none %}<h1>Uso por papel e por fase</h1>{% endif %}
-{{ filter("/uso", windows, hours, range, repos=repos, repo=repo, hidden=keep) }}</div>
+{{ filter("/uso", windows, hours, range, repos=repos, repo=repo, hidden=keep, subs=true, sub=sub) }}</div>
 <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }}</p>
 </div>
 {{ aviso_custo() }}
@@ -53,6 +53,9 @@
 {% call fragment("custo-fase") %}
 {{ custo_barras("phase", "Custo por fase", charts.phases, totals.cost) }}
 {% endcall %}
+{% call fragment("custo-assinatura") %}
+{{ custo_barras("subscription", "Custo por assinatura", charts.subscriptions, totals.cost) }}
+{% endcall %}
 </div>
 {% call fragment("papel") %}
 <h2>Por papel</h2>
@@ -61,6 +64,10 @@
 {% call fragment("fase") %}
 <h2>Por fase</h2>
 {{ usage_table("phase", "Fase", t_phase, "o aidlc:<fase> que o seletor usou; sessão sem fase registrada fica em desconhecida, e conversa aberta fora do oute-task, em interativa") }}
+{% endcall %}
+{% call fragment("assinatura") %}
+<h2>Por assinatura</h2>
+{{ usage_table("subscription", "Assinatura", t_sub, "claude, zai e codex: a assinatura da conversa (oute.subscription; no histórico, o agente); a zai tem só custo estimado, pelo preço do config.toml") }}
 {% endcall %}
 </div>
 {% endblock %}

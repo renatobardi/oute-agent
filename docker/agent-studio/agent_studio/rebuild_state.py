@@ -30,9 +30,9 @@ TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa", "acao")
 COUNT_NAMES = {"rodada": "rodadas", "worker": "workers", "sessao": "sessoes", "pedido": "pedidos",
                "conversa": "conversas", "etapa": "etapas", "acao": "acoes"}
 ORDER = "ORDER BY received_unix_nano, time_unix_nano, dedupe_key"
-LOGS = ("SELECT time_unix_nano, host_name, oute_instance, oute_agent, service_name, session_id, oute_task_id, "
+LOGS = ("SELECT time_unix_nano, host_name, oute_instance, oute_agent, oute_subscription, service_name, session_id, oute_task_id, "
         f"event_name, oute_event_id, trace_id, attributes, resource_attributes FROM logs {ORDER}")
-SPANS = f"SELECT host_name, oute_instance, oute_agent, service_name, session_id, oute_task_id FROM spans {ORDER}"
+SPANS = f"SELECT host_name, oute_instance, oute_agent, oute_subscription, service_name, session_id, oute_task_id FROM spans {ORDER}"
 
 
 def _json(v):

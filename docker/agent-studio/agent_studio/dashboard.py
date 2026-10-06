@@ -15,7 +15,7 @@ import math
 from datetime import timedelta
 from urllib.parse import quote
 
-from . import alert_text, repo as repo_mod, tz as tz_mod, usage as usage_mod
+from . import alert_text, repo as repo_mod, subscription as sub_mod, tz as tz_mod, usage as usage_mod
 from .cost import MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR
 
 HOUR_NS = 3_600_000_000_000
@@ -224,8 +224,8 @@ def _model_clause(model):
     return " AND model = ?", [model]
 
 
-def _series(con, from_ns, to_ns, tz, repo=None, model=None):
-    rsql, rparams = repo_mod.clause(repo)
+def _series(con, from_ns, to_ns, tz, repo=None, model=None, sub=None):
+    rsql, rparams = sub_mod.scope(repo, sub)
     msql, mparams = _model_clause(model)
     hourly = to_ns - from_ns <= HOURLY_MAX_NS
     fmt, keys = _bucket_keys(from_ns, to_ns, tz, hourly)
@@ -246,6 +246,22 @@ def _series(con, from_ns, to_ns, tz, repo=None, model=None):
             "total": sum(p["calls"] for p in points)}
 
 
+def _subscriptions(by_sub, total_calls):
+    """Chamadas e custo por assinatura (#679), do maior para o menor número de chamadas; a chamada sem assinatura (ex.: o
+    LLM do ai-memory) é a linha `NO_SUBSCRIPTION`. Mesma população do indicador da janela."""
+    rows = []
+    for (name,), a in by_sub.items():
+        if not a["calls"]:
+            continue
+        rows.append({"subscription": name or usage_mod.NO_SUBSCRIPTION, "none": name is None, "calls": a["calls"],
+                     "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"], "cost": _cost(a),
+                     "unpriced_calls": a["unpriced_calls"], "calls_share": _div(a["calls"], total_calls)})
+    rows.sort(key=lambda r: (-r["calls"], -(r["cost"] or 0), r["subscription"]))
+    for r in rows:
+        r["frac"] = _div(r["calls"], rows[0]["calls"])
+    return rows
+
+
 def _repos(by_repo, total_calls):
     """Chamadas e custo por repositório (#532), do maior para o menor número de chamadas; a conversa sem repositório é a
     linha `NO_REPO`. A soma das chamadas é a do indicador da janela (mesma população do `usage.aggregate`)."""
@@ -262,8 +278,8 @@ def _repos(by_repo, total_calls):
     return rows
 
 
-def _model_latency(con, from_ns, to_ns, repo=None):
-    rsql, rparams = repo_mod.clause(repo)
+def _model_latency(con, from_ns, to_ns, repo=None, sub=None):
+    rsql, rparams = sub_mod.scope(repo, sub)
     return {r["model"]: r for r in _rows(
         con, f"SELECT model, count(*) AS n, quantile_cont({_DUR}, 0.5) AS p50, quantile_cont({_DUR}, 0.9) AS p90, "
              f"quantile_cont({_DUR}, 0.95) AS p95, quantile_cont({_DUR}, 0.99) AS p99 FROM spans "
@@ -275,8 +291,8 @@ def _level(v, peak):
     return math.ceil(_div(v, peak) * 4) if v else 0
 
 
-def _heat(con, to_ns, tz, repo=None):
-    rsql, rparams = repo_mod.clause(repo)
+def _heat(con, to_ns, tz, repo=None, sub=None):
+    rsql, rparams = sub_mod.scope(repo, sub)
     grid = [[0] * 24 for _ in DAYS]
     local = usage_mod.local_expr(tz)
     for r in _rows(con, f"SELECT isodow({local}) AS d, hour({local}) AS h, count(*) AS n FROM spans WHERE {_CALL}{rsql} GROUP BY ALL",
@@ -288,9 +304,9 @@ def _heat(con, to_ns, tz, repo=None):
         for i, row in enumerate(grid)]}
 
 
-def _worst_session(con, model, from_ns, to_ns, repo=None):
+def _worst_session(con, model, from_ns, to_ns, repo=None, sub=None):
     """A sessão (ou, sem ela, a conversa) com o p95 mais alto do modelo na janela: a "responsável" do insight."""
-    rsql, rparams = repo_mod.clause(repo)
+    rsql, rparams = sub_mod.scope(repo, sub)
     rows = _rows(con, f"SELECT oute_task_id AS task, session_id AS conversation, quantile_cont({_DUR}, 0.95) AS p95, count(*) AS n "
                       f"FROM spans WHERE {_CALL} AND duration_ns IS NOT NULL AND model IS NOT DISTINCT FROM ?{rsql} "
                       "GROUP BY ALL ORDER BY p95 DESC, n DESC, task NULLS LAST, conversation NULLS LAST LIMIT 1",
@@ -298,9 +314,9 @@ def _worst_session(con, model, from_ns, to_ns, repo=None):
     return rows[0] if rows else None
 
 
-def _tool_errors(con, from_ns, to_ns, repo=None):
+def _tool_errors(con, from_ns, to_ns, repo=None, sub=None):
     """Erros de span por (host, ferramenta) e conversa; a ferramenta é o `tool_name` do span ou, sem ele, o nome do span."""
-    rsql, rparams = repo_mod.clause(repo)
+    rsql, rparams = sub_mod.scope(repo, sub)
     return _rows(con, f"SELECT host_name AS host, COALESCE(json_extract_string(attributes, '$.tool_name'), name) AS tool, "
                       f"session_id AS conversation, count(*) AS n FROM spans WHERE {_WINDOW} AND status_code = ?{rsql} GROUP BY ALL",
                  [from_ns, to_ns, SPAN_STATUS_ERROR, *rparams])
@@ -386,7 +402,7 @@ def _latency_rows(latency):
     return rows
 
 
-def _p95_regression(con, latency, prev_latency, from_ns, to_ns, repo=None):
+def _p95_regression(con, latency, prev_latency, from_ns, to_ns, repo=None, sub=None):
     """O modelo cujo p95 mais subiu sobre a janela anterior (> P95_WORSE, com amostra mínima nas duas) e a sessão responsável."""
     found = []
     for m, r in latency.items():
@@ -399,10 +415,10 @@ def _p95_regression(con, latency, prev_latency, from_ns, to_ns, repo=None):
     if not found:
         return None
     worst = min(found, key=lambda r: (-r["rel"], r["model"] or ""))
-    worst["session"] = _worst_session(con, worst["model"], from_ns, to_ns, repo)
+    worst["session"] = _worst_session(con, worst["model"], from_ns, to_ns, repo, sub)
     return worst
 
-FINE = ("session", "agent", "model", "phase", "repo")
+FINE = ("session", "agent", "model", "phase", "repo", "subscription")
 
 
 def _regroup(fine, keys):
@@ -411,39 +427,40 @@ def _regroup(fine, keys):
     return usage_mod.regroup(fine, FINE, keys)
 
 
-def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
+def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False, sub=None):
     """Tudo o que a tela mostra, do DuckDB, na janela [from_ns, to_ns) e na anterior de mesmo tamanho. `repo` (#528) =
     só os fatos desse repositório (`repo.NONE` = sem repositório) em todos os blocos, nas duas janelas; `repos` = as
     opções do filtro (da janela, sem filtrar). `model` (#532) = só o gráfico de chamadas por hora ou dia, uma série só
-    (`None` = Todos); `model_options` = os modelos com chamada na janela (no filtro de repositório, sem o de modelo).
+    (`None` = Todos); `sub` (#679) = só as chamadas dessa assinatura, em todos os blocos e nas duas janelas (`None` = Todas); `model_options` = os modelos com chamada na janela (no filtro de repositório, sem o de modelo).
     `effective` (#531) = custo efetivo: a chamada de assinatura conta 0 em todo número de custo; o "sem cache" do insight
     de cache é preço de lista e some nesse modo."""
     span = to_ns - from_ns
     prev_from = from_ns - span
-    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False, repo=repo, effective=effective)
+    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False, repo=repo, effective=effective, sub=sub)
     cur = _regroup(fine, ())[()]
-    cur["p95"] = usage_mod.aggregate_p95(con, from_ns, to_ns, tz, repo)
-    prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz, repo=repo, effective=effective)[()]
+    cur["p95"] = usage_mod.aggregate_p95(con, from_ns, to_ns, tz, repo, sub)
+    prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz, repo=repo, effective=effective, sub=sub)[()]
     by_model = _regroup(fine, ("model",))
     total_cost = _cost(cur) or 0.0
     models = _models(by_model, total_cost, cur["calls"])
-    latency = _model_latency(con, from_ns, to_ns, repo)
+    latency = _model_latency(con, from_ns, to_ns, repo, sub)
     by_session = _regroup(fine, ("session", "agent", "model"))
     return {
         "from_ns": from_ns, "to_ns": to_ns, "span_ns": span, "prev_from_ns": prev_from,
         "totals": usage_mod.render((), cur, ()), "prev_totals": usage_mod.render((), prev, ()),
-        "repos": repo_mod.options(con, from_ns, to_ns), "effective": effective, "kpis": _kpis(cur, prev, span, effective), "series": _series(con, from_ns, to_ns, tz, repo, model),
+        "repos": repo_mod.options(con, from_ns, to_ns), "effective": effective, "kpis": _kpis(cur, prev, span, effective), "series": _series(con, from_ns, to_ns, tz, repo, model, sub),
         "model": model, "model_options": sorted({m["model"] for m in models}),
         "by_repo": _repos(_regroup(fine, ("repo",)), cur["calls"]),
+        "by_subscription": _subscriptions(_regroup(fine, ("subscription",)), cur["calls"]),
         "models": models[:MODELS_SHOWN], "models_total": len(models),
         "composition": {"real_usd": cur["real_usd"], "estimated_usd": cur["estimated_usd"], "total": total_cost,
                         "unpriced_calls": cur["unpriced_calls"]},
         "latency": _latency_rows(latency)[:MODELS_SHOWN],
         "phases": _phases(_regroup(fine, ("phase",))),
-        "heat": _heat(con, to_ns, tz, repo),
+        "heat": _heat(con, to_ns, tz, repo, sub),
         "top_sessions": _top_sessions(by_session),
-        "rules": {"p95": _p95_regression(con, latency, _model_latency(con, prev_from, from_ns, repo), from_ns, to_ns, repo),
-                  "tool_errors": _tool_errors(con, from_ns, to_ns, repo),
+        "rules": {"p95": _p95_regression(con, latency, _model_latency(con, prev_from, from_ns, repo, sub), from_ns, to_ns, repo, sub),
+                  "tool_errors": _tool_errors(con, from_ns, to_ns, repo, sub),
                   "span_errors": cur["span_errors"], "cache_share": _cache_share(cur),
                   "cache_saving": None if effective else _cache_saving(by_model, prices.snapshot()), "effective": effective,
                   "unpriced_models": sorted(m or NO_MODEL for m in cur["unpriced_models"]),
