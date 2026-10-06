@@ -865,6 +865,22 @@ kill "$agpid" 2>/dev/null; wait "$agpid" 2>/dev/null
 t clean --force-in-use --bogus
 check "opção desconhecida: código diferente de 0"           [ "$RC" -ne 0 ]
 check "opção desconhecida: o uso cita --force-in-use"       grep -qF -- '[--force-in-use]' <<<"$ERR"
+# processo que morre no meio da varredura do /proc (#672): o /proc/<pid> fica sem `comm`. A proc_comm do oute-task é
+# extraída por sed (como a setup_agents em entrypoint-config.test.sh) e roda com um /proc de mentira.
+PCF="$TMP/proc-comm.sh"; sed -n '/^proc_comm() {/,/^}/p' "$TASK" > "$PCF"
+check "comm: proc_comm extraída do oute-task"               grep -q '^proc_comm() {' "$PCF"
+check "comm: a varredura do /proc lê pela proc_comm"        grep -qF 'comm="$(proc_comm "$c")"' "$TASK"
+mkdir -p "$TMP/proc/morto" "$TMP/proc/vivo"; printf 'claude\n' > "$TMP/proc/vivo/comm"
+pcomm() {   # <dir>: roda a proc_comm; saída em OUT, stderr em ERR, código em RC
+  local d="$1"
+  OUT="$(bash -c '. "$1" 2>/dev/null; proc_comm "$2"' _ "$PCF" "$d" 2>"$TMP/err")"; RC=$?; ERR="$(cat "$TMP/err")"
+  return 0
+}
+pcomm "$TMP/proc/morto"
+check "comm: processo que morreu não escreve em stderr"     [ -z "$ERR" ]
+check "comm: processo que morreu dá nome vazio e código 0"  [ -z "$OUT" -a "$RC" -eq 0 ]
+pcomm "$TMP/proc/vivo"
+check "comm: processo vivo dá o nome, sem stderr"           [ "$OUT" = claude -a -z "$ERR" -a "$RC" -eq 0 ]
 
 # ---------------------------------------------------------------- 12b. clean: handoffs abertos das worktrees removidas (#435)
 # O clean só LISTA (uma linha por handoff, formato estável); cancelar é do agente (memory_handoff_cancel). Nunca --expire-all.

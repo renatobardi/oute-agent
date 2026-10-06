@@ -270,6 +270,13 @@ cmd_list() {
 # (round + session) que está no `spawned` e fora do `closed`, com a aba viva no herdr (herdr fora do ar: vale o
 # spawned); (3) agente (claude/codex) rodando com o cwd nela, via /proc. Saída: o motivo em IN_USE; 0 = em uso.
 SWARM_STATE="$HOME/.oute/swarm"
+# O nome (comm) do processo de /proc/<pid>; vazio se ele morreu no meio da varredura. O grupo descarta também o erro
+# do bash ao abrir o arquivo: o `2>/dev/null` depois do `tr` só valeria para o `tr` (#672).
+proc_comm() {   # <dir do /proc/<pid>>
+  local d="$1"
+  { tr -d '\0' < "$d/comm"; } 2>/dev/null || true
+  return 0
+}
 in_use() {   # <worktree>
   local wt="$1" top c f r s b line tab cwd pid comm tabs
   IN_USE=""
@@ -297,7 +304,7 @@ in_use() {   # <worktree>
   for c in /proc/[0-9]*; do
     pid="${c#/proc/}"; cwd="$(readlink "$c/cwd" 2>/dev/null || true)"
     [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* || "$cwd" == "$top" || "$cwd" == "$top"/* ]] || continue
-    comm="$(tr -d '\0' < "$c/comm" 2>/dev/null || true)"
+    comm="$(proc_comm "$c")"
     case "$comm" in claude|codex|node) IN_USE="agente rodando (pid $pid)"; return 0 ;; esac
   done
   return 1
