@@ -81,6 +81,14 @@ services:
       # #564: rede interna só com o ai-memory (hook, MCP e backup falam com ele por aqui)
       memoria:
     init: true
+    # teto de memória, CPU, /dev/shm e processos (#570): o oute-agent era o único serviço sem limite e roda as sessões
+    # e os testes dos agentes; um vazamento numa sessão comia os 4 cores e a RAM do host (sem swap) e derrubava os
+    # vizinhos. Pico visto: 4,7 GiB e 280% de CPU. 3 cpus deixam 1 core para o resto; o shm de 64 MiB do Docker é
+    # pouco para browser e teste pesado; 4096 processos barram uma fork bomb sem atrapalhar a pytest em paralelo
+    mem_limit: ${OUTE_AGENT_MEM:-10g}
+    cpus: ${OUTE_AGENT_CPUS:-3}
+    shm_size: ${OUTE_AGENT_SHM:-2g}
+    pids_limit: ${OUTE_AGENT_PIDS:-4096}
     tty: true
     stdin_open: true
 
@@ -90,6 +98,9 @@ services:
     container_name: oute-ai-memory
     logging: *logging
     restart: unless-stopped
+    # uso de 120 a 260 MiB (#570)
+    mem_limit: ${OUTE_AI_MEMORY_MEM:-512m}
+    cpus: ${OUTE_AI_MEMORY_CPUS:-1}
     # mesmo uid do agent (10001, fixo na imagem): o volume oute-memory é compartilhado (/data aqui, /data/ai-memory lá)
     user: "10001:10001"
     command: ["serve", "--transport", "http", "--bind", "0.0.0.0:49374", "--enable-web"]
@@ -125,6 +136,9 @@ services:
     container_name: oute-llm-proxy
     logging: *logging
     restart: unless-stopped
+    # python3 stdlib, uso de ~12 MiB (#570)
+    mem_limit: ${OUTE_LLM_PROXY_MEM:-128m}
+    cpus: ${OUTE_LLM_PROXY_CPUS:-0.5}
     user: "10001:10001"
     entrypoint: ["/usr/bin/python3", "/usr/local/bin/oute-llm-proxy"]
     read_only: true
@@ -226,6 +240,8 @@ services:
       # só loopback, nunca 0.0.0.0: o Mac chega pelo vhost agent-studio.oute.pro na tailnet (nginx, repo lab)
       - "127.0.0.1:${OUTE_AGENT_STUDIO_PORT:-8430}:8430"
     mem_limit: ${OUTE_AGENT_STUDIO_MEM:-6g}
+    # 2 cores: se a gravação travar de novo, ele não ocupa os 4 (usou 230% de CPU em 2026-10-05; #570)
+    cpus: ${OUTE_AGENT_STUDIO_CPUS:-2}
     volumes:
       # DuckDB (o volume nasce com o dono 10001 da pasta na imagem)
       # o DuckDB guarda tudo, sem retenção (#570): no oute-server fica numa pasta do disco de dados
@@ -264,6 +280,7 @@ services:
       SURREAL_PASS: ${AGENT_STUDIO_SURREAL_PASS:-}
     # obrigatório: sem limite, o cache do RocksDB mede pela RAM do host (~metade dela, #139)
     mem_limit: ${OUTE_SURREALDB_MEM:-2g}
+    cpus: ${OUTE_SURREALDB_CPUS:-1}
     # sem porta publicada: só o agent-studio, pela rede studio
     volumes:
       # mesma regra do DuckDB (#570): OUTE_SURREALDB_DIR no .env = pasta do disco de dados; sem ela, volume docker
@@ -288,6 +305,7 @@ services:
     stop_grace_period: 30s
     # teto acima do memory_limiter (512 MiB, config/otel/collector.yaml): ele recusa dado antes de o kernel matar (#570)
     mem_limit: ${OUTE_OTELCOL_MEM:-768m}
+    cpus: ${OUTE_OTELCOL_CPUS:-1}
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:
       - --config=/etc/otelcol/collector.yaml
