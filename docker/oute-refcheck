@@ -8,7 +8,9 @@ Referências conferidas:
   SHA (7 a 40 hex)         commit que existe (git cat-file)
   arquivo:linha[-linha]    o arquivo e a linha existem em algum dos refs (padrão: HEAD e origin/main)
   arquivo:linha@sha        o arquivo e a linha existem nesse commit
+                           sem pasta (`rotas.py:66`): procurado também entre os arquivos do diff dos PRs citados no texto (#661)
   link de comentário       https://github.com/<dono>/<repo>/(issues|pull)/N#issuecomment-ID responde 200
+  hash precedido de `sha256`  é hash de arquivo, não commit: não é conferido (#661)
   /tmp/… e …/scratchpad/…  caminho que o Bardi não abre: sempre `nao-abre`
 Saída: uma linha por referência distinta: `<resultado>\t<tipo>\t<referência>[\t<motivo>]`, e por último o resumo
 (`# <n> referências: …`). Resultado: `ok`, `quebrada`, `nao-abre` ou `nao-conferido` (gh fora do ar ou sem resposta).
@@ -40,9 +42,9 @@ def repo_slug():
     return m.group(1) if m else "renatobardi/oute-agent"
 
 
-def gh_get(path, jq, timeout):
+def gh_get(path, jq, timeout, paginate=False):
     """GET na API. Devolve ('ok', saída), ('nao-existe', '') para 404/410 ou ('nao-conferido', motivo)."""
-    rc, out, err = sh(["gh", "api", path, "-q", jq], timeout)
+    rc, out, err = sh(["gh", "api", path] + (["--paginate"] if paginate else []) + ["-q", jq], timeout)
     if rc == 0:
         return "ok", out.strip()
     if re.search(r"HTTP (404|410)|Not Found", err):
@@ -86,8 +88,35 @@ def check_file_line(path, first, last, sha, refs, timeout):
     return "quebrada", reason
 
 
+def cited_prs(txt, repo):
+    """PRs citados no texto (links de comentário de PR primeiro, depois #N), sem repetir: [(dono/repo, n)]."""
+    found = [(m.group(1), m.group(2)) for m in re.finditer(
+        r"https://github\.com/((?![.]{1,2}/)[\w.-]+/(?![.]{1,2}/)[\w.-]+)/pull/(\d+)", txt)]
+    found += [(repo, m.group(1)) for m in re.finditer(r"(?<![\w/&#.-])#(\d{1,5})\b", txt)]
+    return list(dict.fromkeys(found))
+
+
+def check_short_path(path, first, last, prs, cache, refs, timeout):
+    """Caminho sem pasta que não existe nos refs: procura entre os arquivos do diff dos PRs citados."""
+    for owner_repo, n in prs:
+        if (owner_repo, n) not in cache:
+            st, out = gh_get(f"repos/{owner_repo}/pulls/{n}/files", ".[].filename", timeout, True)
+            cache[(owner_repo, n)] = out.splitlines() if st == "ok" else []
+        for name in cache[(owner_repo, n)]:
+            if name != path and not name.endswith("/" + path):
+                continue
+            st, why = check_file_line(name, first, last, None, refs, timeout)
+            if st == "ok":
+                return "ok", f"{name} em {why}"
+            if why.startswith("arquivo tem"):
+                return "quebrada", f"{name}: {why}"
+            return "ok", f"{name} no diff do PR {owner_repo}#{n} (linha não conferida)"
+    return None
+
+
 def scan(txt, repo, refs, timeout):
     out, seen = [], set()
+    prs, pr_cache = cited_prs(txt, repo), {}
 
     def add(kind, ref, res):
         if (kind, ref) not in seen:
@@ -102,6 +131,8 @@ def scan(txt, repo, refs, timeout):
         add("#N", "#" + m.group(1), check_issue(repo, m.group(1), timeout))
     for m in re.finditer(r"(?<![\w/#.-])([0-9a-f]{7,40})\b", txt):
         s = m.group(1)
+        if re.search(r"sha-?256[\s:=`'\"(]*$", txt[max(0, m.start() - 20):m.start()], re.I):
+            continue                                      # hash de arquivo, não commit (#661)
         if re.search(r"[a-f]", s) and re.search(r"\d", s):   # evita número puro e palavra
             add("sha", s, check_sha(s, timeout))
     pat = r"`?((?:(?:docker|scripts|addons|tests|config|docs|tray|changelog\.d|\.github)/[\w./-]*[\w-]|(?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]+)):(\d+)(?:-(\d+))?`?(?:@([0-9a-f]{7,40}))?"
@@ -110,6 +141,11 @@ def scan(txt, repo, refs, timeout):
         if path.startswith("/tmp/") or "/scratchpad/" in path:
             continue
         st, why = check_file_line(path, a, b, sha, refs, timeout)
+        if st != "ok" and "/" not in path and not sha:
+            alt = check_short_path(path, a, b, prs, pr_cache, refs, timeout)
+            if alt:
+                add("arquivo:linha", m.group(0).strip("`"), alt)
+                continue
         add("arquivo:linha", m.group(0).strip("`"), (st, f"em {why}" if st == "ok" else why))
     return out
 
