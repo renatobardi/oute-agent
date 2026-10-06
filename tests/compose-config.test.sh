@@ -49,6 +49,11 @@ check "dados: OUTE_AGENT_STUDIO_DIR monta a pasta do host no DuckDB"         vol
 check "dados: OUTE_SURREALDB_DIR monta a pasta do host no SurrealDB"         vol surrealdb /data/surrealdb bind /srv/oute/surrealdb <<<"$OUT"
 check "dados: o volume-init acerta o dono da mesma pasta do SurrealDB"       vol volume-init /v/surrealdb bind /srv/oute/surrealdb <<<"$OUT"
 
+# ---- 2c. collector com teto de memória (#570): acima do memory_limiter (512 MiB), para ele recusar dado antes do OOM
+check "collector: mem_limit de 768 MiB por padrão"       jqe '.services."otel-collector".mem_limit == "805306368"' <<<"$OUT"
+OUT="$(compose_config "" OUTE_OTELCOL_MEM=1g 2>"$TMP/cfg.err")" || OUT=""
+check "collector: OUTE_OTELCOL_MEM troca o teto"         jqe '.services."otel-collector".mem_limit == "1073741824"' <<<"$OUT"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"

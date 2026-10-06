@@ -35,6 +35,10 @@ for x in traces:314572800 metrics:104857600 logs:629145600; do
      and (.headers | map(select(.name == "Authorization")) | .[0].value) == $t'
   check "$e: fila em disco de $((q / 1048576)) MB, sem bloquear" jqp --arg e "$e" --argjson q "$q" \
     '.exporters[$e].sending_queue | .storage == "file_storage/queue" and .queue_size == $q and .block_on_overflow == false'
+  # #570: o agent-studio tem um escritor só. 10 consumidores por fila (o padrão) x 3 sinais x cada host só esperavam na
+  # trava, estouravam o prazo e reenviavam; 2 por fila bastam. E o prazo de 60 s fica acima da espera por vaga (20 s)
+  check "$e: 2 consumidores na fila (um escritor só do outro lado)" jqp --arg e "$e" '.exporters[$e].sending_queue.num_consumers == 2'
+  check "$e: prazo de 60 s por envio"                     jqp --arg e "$e" '.exporters[$e].timeout == 60000000000'
   check "$e: retry sem prazo"                            jqp --arg e "$e" '.exporters[$e].retry_on_failure | .enabled and .max_elapsed_time == 0'
   check "$e: lote na fila com flush_timeout entre 5 e 30 s" jqp --arg e "$e" \
     '.exporters[$e].sending_queue.batch.flush_timeout | . >= 5000000000 and . <= 30000000000'
@@ -42,6 +46,8 @@ for x in traces:314572800 metrics:104857600 logs:629145600; do
     '.service.pipelines[$p].receivers == ["otlp"] and .service.pipelines[$p].exporters == [$e]
      and .service.pipelines[$p].processors == .service.pipelines[$a].processors'
 done
+# #570: com 256 MiB o collector do oute-server batia no limite e recusava dado a cada poucos minutos
+check "memory_limiter: 512 MiB, com 128 de folga para pico" jqp '.processors.memory_limiter | .limit_mib == 512 and .spike_limit_mib == 128'
 check "sem filtro nem batch em memória no agent-studio" jqp \
   '[.service.pipelines | to_entries[] | select(.key | endswith("/studio")) | .value.processors[]]
    | all(.[]; (startswith("filter") or startswith("batch")) | not)'

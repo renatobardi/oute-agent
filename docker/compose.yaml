@@ -285,6 +285,8 @@ services:
     restart: unless-stopped
     # parada limpa com o OCI lento (PUT de até 30 s, #137 C4); se estourar, o SIGKILL não perde nada (fila em disco)
     stop_grace_period: 30s
+    # teto acima do memory_limiter (512 MiB, config/otel/collector.yaml): ele recusa dado antes de o kernel matar (#570)
+    mem_limit: ${OUTE_OTELCOL_MEM:-768m}
     # sem porta publicada: só a rede "oute" enxerga (4317 gRPC, 4318 HTTP). Broadcast externo = fase 2, via vhost nginx.
     command:
       - --config=/etc/otelcol/collector.yaml

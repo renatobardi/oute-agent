@@ -70,7 +70,13 @@ def _decompress(body, encoding):
     return out
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None):
+INGEST_SLOTS = 4        # ingestões ao mesmo tempo (o DuckDB tem um escritor só; as demais esperam a vaga)
+INGEST_WAIT_S = 20.0    # espera pela vaga antes do 503: abaixo do prazo do collector (60 s), que retenta da fila em disco
+INGEST_RETRY_AFTER = "5"
+
+
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None,
+               ingest_slots=INGEST_SLOTS, ingest_wait=INGEST_WAIT_S):
     """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256);
     `mark_token` = a de marcação (#510; sem ela, `POST /rodada/acao` não existe)."""
     auth = auth_mod.Auth(token, read_token, mark_token)
@@ -92,11 +98,24 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             on_shutdown()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    # vagas de ingestão (#570): só o laço de eventos mexe na contagem, então não precisa de trava nem de semáforo
+    app.state.ingest_slots = ingest_slots
+    app.state.ingest_free = ingest_slots
 
     async def ingest(signal, request):
         resp = await _ingest(signal, request)
         tel.request(signal, resp.status_code)
         return resp
+
+    async def _slot():
+        """Espera uma vaga de ingestão por até `ingest_wait` s. -> True se pegou (quem chama devolve)."""
+        deadline = time.monotonic() + ingest_wait
+        while app.state.ingest_free <= 0:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.02)
+        app.state.ingest_free -= 1
+        return True
 
     async def _ingest(signal, request):
         if not auth.ingest(request):
@@ -111,6 +130,18 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             # nada do que o cliente mandou vai ao log (injeção em log): só o sinal, que é nosso
             tel.warn("content-type", "recusado: %s com Content-Type que não é application/json", signal)
             return JSONResponse({"message": "só OTLP/HTTP JSON (application/json)"}, status_code=415)
+        # vaga antes de ler o corpo (#570): sem limite, cada POST do collector esperava na trava do escritor com o lote na
+        # memória e respondia depois de o cliente desistir (o lote entrava e era reenviado mesmo assim)
+        if not await _slot():
+            tel.warn("ingest-busy", "ingestão cheia, respondi 503 (%s): %d vagas ocupadas por mais de %.0f s", signal,
+                     ingest_slots, ingest_wait)
+            return JSONResponse({"message": "ingestão cheia; reenvie"}, status_code=503, headers={"Retry-After": INGEST_RETRY_AFTER})
+        try:
+            return await _write(signal, request)
+        finally:
+            app.state.ingest_free += 1
+
+    async def _write(signal, request):
         received_ns = time.time_ns()
         body = await request.body()
         encoding = request.headers.get("content-encoding")
