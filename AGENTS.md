@@ -118,7 +118,9 @@ Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aid
   - download sem checksum;
   - dependência sem versão travada;
   - `npm install` sem `--ignore-scripts`;
-  - `http://` literal em arquivo novo, inclusive em teste, mesmo para nome de serviço interno do compose (o teste compara com a linha do `docker/compose.yaml` ou monta o endereço de partes: esquema, serviço e porta).
+  - `http://` literal em arquivo novo, inclusive em teste, mesmo para nome de serviço interno do compose (o teste compara com a linha do `docker/compose.yaml` ou monta o endereço de partes: esquema, serviço e porta).;
+  - condicional aninhada (`if` dentro de `if`, ou ternário dentro de ternário), regra S3358: separar em variável intermediária ou em `if`/`elif`.
+- **Arquivo de teste de shell que o PR altera** (`tests/*.test.sh`, `tests/lib/`): o SonarCloud analisa o arquivo inteiro como código novo, então uma issue em função antiga dele pode reprovar o gate. Depois do push, o worker roda `oute-sonar pr <n>` e corrige o que aparecer **no arquivo que ele tocou**. Arquivo que o PR não tocou não se reescreve, e o gate não se muda.
 - **Função de shell nova** (em `docker/`, `scripts/` e `tests/`): parâmetro posicional vai para uma variável `local` (`local x="$1"`) e a função termina com `return` explícito (`return 0`, ou `return $?` quando devolve o status do último comando). Regras SonarCloud: S7679 ("Assign this positional parameter to a local variable") e S7682 ("Add an explicit return statement at the end of the function"). Só vale para função nova; não reescrever as existentes. Exemplo mínimo:
   ```bash
   foo_new() {
