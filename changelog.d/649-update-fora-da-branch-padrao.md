@@ -1,0 +1,2 @@
+### Fixed
+- **`oute update` diz quando o checkout está fora da branch padrão** (#649). Antes do `git pull`, o comando lê a branch atual e a padrão do remoto; fora dela (ou com `HEAD` solto) para sem alterar nada e mostra as duas branches e o `git -C <pasta> checkout <padrão>`. Quando o `git pull` falha na branch padrão, a pergunta "mudanças locais?" só aparece se o `git status --short` mostra mudança. Não precisa de release (`scripts/oute` entra com `git pull`).
