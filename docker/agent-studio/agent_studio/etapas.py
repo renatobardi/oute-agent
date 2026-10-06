@@ -40,6 +40,7 @@ TITLES = {"triagem": "Triagem", "merge": "Pedido de merge", "kaizen": "Retrospec
           "fechamento": "Fechamento da rodada", "ciclo": "Resumo do ciclo"}
 BAR_LABELS = {"triagem": "Triagem", "merge": "Pedidos de merge", "kaizen": "Kaizen", "fechamento": "Fechamento"}
 ROUND_KINDS = tuple(k for k in KINDS if k != CYCLE_KIND)   # as posições da barra: o resumo do ciclo não é etapa de rodada
+NAME_RE = re.compile(r"^[A-Z][a-z]+_[A-Z][a-z]+\Z", re.ASCII)   # o nome amigável da rodada (#605), `Brave_Otter`
 ROUND_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z", re.ASCII)   # o id de uma rodada (`swarm-1004-1944`), como a pasta dela
 CYCLE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}#\d{1,9}\Z", re.ASCII)   # `<dono>/<repo>#<n>`
 SECTIONS = ("Decisão", "Ações", "Detalhe")
@@ -65,19 +66,19 @@ TABLE = Table([Col("rodada", "text", lambda x: x["round"]), Col("repo", "text", 
 _IF_TABLE = "IF (INFO FOR DB).tables.etapa THEN ({}) ELSE [] END;"
 _FIELDS = "kind, key, rev, sha256, review, writer, reviewer, refcheck, cycle, event, host, instance, published_at"
 _STEPS = _IF_TABLE.format(f'SELECT {_FIELDS} FROM etapa WHERE rodada = type::record("rodada", $id)')
-_ROUND = 'SELECT repo, label, state, cycle, agent, host, instance, opened_at, closed_at FROM [type::record("rodada", $id)];'
-_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, cycle, opened_at FROM rodada "
+_ROUND = 'SELECT repo, label, name, state, cycle, agent, host, instance, opened_at, closed_at FROM [type::record("rodada", $id)];'
+_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, name, state, cycle, opened_at FROM rodada "
            "WHERE record::id(id) IN $ids) ELSE [] END;")
 
 # etapas das rodadas que ainda não fecharam (rodada sem registro de estado conta como aberta: o Bardi ainda não leu a etapa)
 _OPEN = '(rodada.state ?? "aberta") != "fechada"'
-_TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, kind, key, rev, review, cycle, published_at FROM etapa WHERE {_OPEN} '
+_TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, rodada.name AS name, kind, key, rev, review, cycle, published_at FROM etapa WHERE {_OPEN} '
                               "ORDER BY published_at DESC, id LIMIT $limit")
 # o resumo do ciclo (`ciclo`) fica fora do total: a pasta do ciclo não tem registro `rodada`, então ele contaria como aberto para sempre (#575)
 _TRAY_TOTAL = _IF_TABLE.format(f'SELECT count() AS n FROM etapa WHERE {_OPEN} AND kind != "{CYCLE_KIND}" GROUP ALL')
 
 # o ciclo (#509): as rodadas com `rodada.cycle` e o resumo (a etapa `ciclo`) do ciclo; sem a tabela, listas vazias
-_CYCLE_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, opened_at, closed_at FROM rodada "
+_CYCLE_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, name, state, opened_at, closed_at FROM rodada "
                  "WHERE cycle = $c ORDER BY opened_at, id) ELSE [] END;")
 _CYCLE_SUMMARY = _IF_TABLE.format(f'SELECT {_FIELDS} FROM etapa WHERE kind = "ciclo" AND cycle = $c ORDER BY rev DESC LIMIT 1')
 
@@ -88,6 +89,8 @@ _STEP_COLS = (f"oute_event_id AS event, time_unix_nano, host_name AS host, oute_
               f"{_ATTR % 'oute.swarm.step.review'} AS review, {_ATTR % 'oute.swarm.step.writer'} AS writer, "
               f"{_ATTR % 'oute.swarm.step.reviewer'} AS reviewer, {_ATTR % 'oute.swarm.step.refcheck'} AS refcheck, "
               f"{_ATTR % 'oute.swarm.cycle'} AS cycle")
+# o nome amigável da rodada (#605), do evento de abertura (rodada antiga não tem: `None`)
+_NAME = f"SELECT arg_min({_ATTR % 'oute.swarm.round.name'}, time_unix_nano) FROM logs WHERE event_name = ? AND oute_swarm_round = ?"
 _EVENTS = f"SELECT {_STEP_COLS} FROM logs WHERE event_name = ? AND oute_swarm_round = ? ORDER BY time_unix_nano, dedupe_key"
 _KIND = _ATTR % 'oute.swarm.step.kind'
 _NOT_CYCLE = f"coalesce({_KIND}, '') <> 'ciclo'"   # a pasta do resumo do ciclo (#509) não é rodada
@@ -107,6 +110,7 @@ _HISTORY = f"""
            max(time_unix_nano) FILTER (WHERE event_name = '{CLOSED}') AS closed_ns,
            arg_min({_ATTR % 'oute.swarm.repo'}, time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS repo,
            arg_min({_ATTR % 'oute.swarm.label'}, time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS label,
+           arg_min({_ATTR % 'oute.swarm.round.name'}, time_unix_nano) FILTER (WHERE event_name = '{OPENED}') AS name,
            count(DISTINCT {_ATTR % 'oute.swarm.session'}) FILTER (WHERE event_name = '{SPAWNED}') AS sessions,
            count(*) FILTER (WHERE {_STEP}) AS revisions,
            count(DISTINCT {_KIND} || ':' || coalesce({_ATTR % 'oute.swarm.step.key'}, '')) FILTER (WHERE {_STEP}) AS steps,
@@ -130,6 +134,22 @@ _CYCLE_EVENTS = (f"SELECT {_STEP_COLS} FROM logs WHERE event_name = ? AND {_KIND
 def events(con, rnd):
     """Os eventos de etapa da rodada no DuckDB (todas as revisões), sem o texto, pela hora do fato."""
     return _dicts(con.execute(_EVENTS, [EVENT, rnd]))
+
+
+def round_name(con, rnd):
+    """O nome amigável da rodada (#605) no evento de abertura do DuckDB; `None` se a rodada é antiga ou não tem o evento."""
+    row = con.execute(_NAME, [OPENED, rnd]).fetchone()
+    return valid_name(row[0] if row else None)
+
+
+def valid_name(name):
+    """`name` se tem o formato `Adjetivo_Substantivo` (a tela nunca mostra outro texto), senão `None`."""
+    return name if isinstance(name, str) and NAME_RE.match(name) else None
+
+
+def label(name, rnd):
+    """`Nome (id)` (#605): o nome amigável junto do id técnico; sem nome (rodada antiga), só o id."""
+    return f"{name} ({rnd})" if name else rnd
 
 
 def texts(con, event_ids):
@@ -159,6 +179,7 @@ def with_state(rows, states):
     for r in rows:
         rec = (states or {}).get(r["round"]) or {}
         r["repo"], r["label"] = r["repo"] or rec.get("repo"), r["label"] or rec.get("label")
+        r["name"] = valid_name(r.get("name") or rec.get("name"))
         r["status"] = rec.get("state")
         if r["opened_ns"]:
             r["status"] = "aberta"
@@ -250,7 +271,8 @@ def load(store, surreal, rnd):
     for s in steps:
         text = body.get(s["event"])
         s["text"] = text if isinstance(text, str) and len(text.encode()) <= TEXT_MAX else None
-    return {"id": rnd, "record": record, "steps": sorted(steps, key=sort_key), "state_read": state_read,
+    name = valid_name((record or {}).get("name")) or store.read(lambda con: round_name(con, rnd))
+    return {"id": rnd, "name": name, "record": record, "steps": sorted(steps, key=sort_key), "state_read": state_read,
             "state_error": error, "cycle_url": cycle_url((record or {}).get("cycle"))}
 
 
@@ -281,7 +303,7 @@ def _cycle_round_rows(store, recs):
     rounds = []
     for r in recs:
         st = stats.get(r["id"], {})
-        rounds.append({"round": r["id"], "repo": r.get("repo"), "label": r.get("label"), "state": r.get("state"),
+        rounds.append({"round": r["id"], "name": valid_name(r.get("name")), "repo": r.get("repo"), "label": r.get("label"), "state": r.get("state"),
                        "steps": st.get("steps", 0), "revisions": st.get("revisions", 0), "kind": st.get("kind"),
                        "review": st.get("review"), "first_ns": st.get("first_ns"), "last_ns": st.get("last_ns")})
     return sorted(rounds, key=lambda r: (r["first_ns"] is None, r["first_ns"] or 0, r["round"]))
@@ -514,7 +536,7 @@ def api(data):
               "actions": actions_api(s)}
              for s in data["steps"]]
     rec = data["record"] or {}
-    return {"round": data["id"], "state": rec.get("state"), "repo": rec.get("repo"), "label": rec.get("label"),
+    return {"round": data["id"], "name": data.get("name"), "state": rec.get("state"), "repo": rec.get("repo"), "label": rec.get("label"),
             "cycle": rec.get("cycle") if cycle_url(rec.get("cycle")) else None, "state_read": data["state_read"],
             "actions_read": data.get("acoes_read"), "steps": steps}
 
@@ -534,7 +556,7 @@ def tray_steps(surreal, at_ns, limit=TRAY_LIMIT):
         if url is None:
             continue
         age = age_seconds(r.get("published_at"), at_ns)
-        rows.append({"round": r["round"], "kind": step["kind"], "key": step["key"] or None, "rev": r["rev"],
+        rows.append({"round": r["round"], "name": valid_name(r.get("name")), "kind": step["kind"], "key": step["key"] or None, "rev": r["rev"],
                      "review": r["review"], "title": title(step), "published_at": (r.get("published_at") or "")[:19] + "Z",
                      "age_seconds": age, "url": url})
     total = (found[1]["result"] or [{}])[0].get("n", 0)

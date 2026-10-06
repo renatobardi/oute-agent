@@ -29,15 +29,15 @@ import json, sys
 from otlp_json import kv, rl
 tmp, NOW = sys.argv[1], int(sys.argv[2])
 n = 0
-def sw(host, mins, name, rnd, body=None):
+def sw(host, mins, name, rnd, body=None, **extra):
     global n; n += 1
     r = {"timeUnixNano": str((NOW - mins * 60) * 10**9), "severityNumber": 9, "eventName": name,
-         "attributes": kv({"oute.event.id": f"d-{n}", "event.name": name, "oute.swarm.round": rnd})}
+         "attributes": kv({"oute.event.id": f"d-{n}", "event.name": name, "oute.swarm.round": rnd, **extra})}
     if body is not None: r["body"] = {"stringValue": body}
     return host, r
 O, A, W, C = ("oute.swarm.round.opened", "oute.swarm.round.asked", "oute.swarm.round.answered", "oute.swarm.round.closed")
 evs = [
-    sw("oute-server", 100, O, "r-pend"), sw("oute-server", 10, A, "r-pend", "1. aprovar a triagem  2. cortar a #387"),
+    sw("oute-server", 100, O, "r-pend", **{"oute.swarm.round.name": "Brave_Otter"}), sw("oute-server", 10, A, "r-pend", "1. aprovar a triagem  2. cortar a #387"),
     sw("oute-server", 100, O, "r-resp"), sw("oute-server", 20, A, "r-resp", "pergunta velha"), sw("oute-server", 15, W, "r-resp"),
     sw("oute-server", 100, O, "r-nova"), sw("oute-server", 50, A, "r-nova", "primeira"), sw("oute-server", 45, W, "r-nova"),
     sw("oute-server", 5, A, "r-nova", "segunda"),
@@ -67,7 +67,8 @@ R="$(tray)"
 # ---------------------------------------------------------------- 1. /v1/tray
 check "tray: decisions com total e pending"            jqe '.decisions | keys == ["pending", "total"] and .total == (.pending | length)' <<<"$R"
 check "tray: pendentes = r-mesmo, r-nova, r-outro, r-pend e r-velha, nada mais" jqe '[.decisions.pending[].round] | sort == ["r-mesmo", "r-nova", "r-outro", "r-pend", "r-velha"]' <<<"$R"
-check "tray: campos de cada decisão"                   jqe '.decisions.pending | all(keys == ["age_seconds", "asked_at", "host", "instance", "question", "round"])' <<<"$R"
+check "tray: nome amigável da rodada na decisão (#605); a rodada sem nome tem null" jqe '(.decisions.pending[] | select(.round == "r-pend") | .name) == "Brave_Otter" and (.decisions.pending[] | select(.round == "r-nova") | .name) == null' <<<"$R"
+check "tray: campos de cada decisão"                   jqe '.decisions.pending | all(keys == ["age_seconds", "asked_at", "host", "instance", "name", "question", "round"])' <<<"$R"
 check "tray: pergunta pendente com o texto e a idade (~10 min)" jqe "$(dec r-pend)"' | length == 1 and (.[0] | .question == "1. aprovar a triagem  2. cortar a #387" and .host == "oute-server" and .instance == "oute-agent" and .age_seconds >= 600 and .age_seconds < 720)' <<<"$R"
 check "tray: asked_at é a hora do fato (UTC)"          jqe --argjson now "$NOW" "$(dec r-pend)"' | .[0].asked_at | fromdate | (. - $now) as $d | $d <= -590 and $d > -720' <<<"$R"
 check "tray: respondida não aparece"                   jqe "$(dec r-resp) | length == 0" <<<"$R"

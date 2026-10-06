@@ -93,7 +93,7 @@ logs = {"resourceLogs": [
   rl(codex, [{"timeUnixNano": str((NOW - 15) * 10**9), "severityNumber": 17, "body": {"stringValue": "erro"}},
              {"timeUnixNano": str((NOW - 16) * 10**9), "severityNumber": 9, "body": {"stringValue": "info"}}]),
   rl(oute("oute-server", "claude"), [
-    event(NOW - 3000, "oute.swarm.round.opened", "ev-ta-open", {"oute.swarm.round": "swarm-1004-1000", "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3}),
+    event(NOW - 3000, "oute.swarm.round.opened", "ev-ta-open", {"oute.swarm.round": "swarm-1004-1000", "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3, "oute.swarm.round.name": "Brave_Otter"}),
     step(NOW - 2900, "swarm-1004-1000", "ev-ta-t", "triagem", 1, "aprovado"),
     step(NOW - 120, "swarm-1004-1000", "ev-ta-m12", "merge", 1, "aprovado", key="12"),
     step(NOW - 90, "swarm-1004-1000", "ev-ta-m13", "merge", 1, "sem-revisor", key="13"),
@@ -174,8 +174,9 @@ check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep 
 
 # etapas das rodadas abertas (#508)
 check "etapas: disponível, total e lista"              jqe '.steps | keys == ["available", "rows", "total"] and .available == true and .total == 4 and (.rows | length == 4)' <<<"$R"
-check "etapas: campos de cada uma, nenhum é o texto"   jqe '.steps.rows | all(keys == ["age_seconds", "key", "kind", "published_at", "rev", "review", "round", "title", "url"])' <<<"$R"
+check "etapas: campos de cada uma, nenhum é o texto"   jqe '.steps.rows | all(keys == ["age_seconds", "key", "kind", "name", "published_at", "rev", "review", "round", "title", "url"])' <<<"$R"
 check "etapas: da mais nova para a mais antiga; a rodada fechada (TB) fica fora; a sem estado (TC) conta" jqe '[.steps.rows[] | .round + ":" + .kind + ":" + (.key // "")] == ["swarm-1004-1100:fechamento:", "swarm-1004-1000:merge:13", "swarm-1004-1000:merge:12", "swarm-1004-1000:triagem:"]' <<<"$R"
+check "etapas: nome amigável da rodada (#605): o da rodada com nome, nulo na antiga" jqe '[.steps.rows[] | .round + "=" + (.name // "-")] | sort == ["swarm-1004-1000=Brave_Otter", "swarm-1004-1000=Brave_Otter", "swarm-1004-1000=Brave_Otter", "swarm-1004-1100=-"]' <<<"$R"
 check "etapas: título fixo por tipo, com o PR no merge" jqe '[.steps.rows[].title] == ["Fechamento da rodada", "Pedido de merge #13", "Pedido de merge #12", "Triagem"]' <<<"$R"
 check "etapas: veredito do revisor e revisão"          jqe '[.steps.rows[] | [.review, .rev]] == [["aprovado", 1], ["sem-revisor", 1], ["aprovado", 1], ["aprovado", 1]]' <<<"$R"
 check "etapas: chave só no merge, nula nas outras"     jqe '[.steps.rows[].key] == [null, "13", "12", null]' <<<"$R"

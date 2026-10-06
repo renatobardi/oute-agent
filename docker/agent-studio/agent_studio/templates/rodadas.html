@@ -21,7 +21,7 @@
   <tbody>
   {% for x in t.rows %}
   <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-revisoes="{{ x.revisions }}" data-review="{{ x.review or '' }}" data-state="{{ x.status or '' }}" data-sessoes="{{ x.sessions }}" data-prs="{{ '' if x.prs is none else x.prs }}" data-aberta-ns="{{ '' if x.opened_ns is none else x.opened_ns }}" data-fechada-ns="{{ '' if x.closed_ns is none else x.closed_ns }}">
-    <td class="prim"><a href="{{ x.url }}"{% if not x.steps %} title="Sessões da rodada"{% endif %}>{{ x.round }}</a></td>
+    <td class="prim"><a href="{{ x.url }}"{% if not x.steps %} title="Sessões da rodada"{% endif %}>{% if x.name %}<span data-nome-rodada>{{ x.name }}</span> (<code>{{ x.round }}</code>){% else %}{{ x.round }}{% endif %}</a></td>
     <td class="sec">{{ x.repo or "—" }}{% if x.label %} · {{ x.label }}{% endif %}</td>
     <td class="hora sec">{{ x.opened_ns|ts if x.opened_ns else "—" }}</td>
     <td class="sec">{% if x.status == "fechada" and x.closed_ns %}fechada em {{ x.closed_ns|ts }}{% else %}{{ x.status or "—" }}{% endif %}</td>

@@ -8,7 +8,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'ts_stop; kill "${CLARO_PID:-}" 2>/dev/null; rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'ts_stop; kill "${CLARO_PID:-}" 2>/dev/null; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/typesafe.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null && command -v openssl >/dev/null || die "precisa de jq, python3 e openssl"
@@ -55,12 +55,12 @@ check "label: o gh roda no repo dado, uma vez"          [ "$(cat "$FAKE/gh-issue
 labels 11 aidlc:spec; sel --issue 11
 check "label: aidlc:spec abre no Opus"                  is spec label claude "$OPUS" ""
 labels 12 aidlc:ops; sel --issue 12
-check "label: aidlc:ops abre no Haiku"                  is ops label claude "$HAIKU" ""
+check "label: aidlc:ops abre no Sonnet"                  is ops label claude "$SONNET" ""
 sel --task 10-seletor-modelo
 check "--task: o número da issue sai do slug"           is build label claude "$SONNET" ""
 # toda fase do ADR-07 (e a faixa ctx) tem linha na tabela do repo, com o modelo do ADR-02
 for p in strat:$OPUS intent:$OPUS arch:$OPUS spec:$OPUS build:$SONNET qa:$SONNET design:$SONNET plan:$SONNET \
-         ship:$SONNET iter:$SONNET ops:$HAIKU ctx:$HAIKU learn:$HAIKU; do
+         ship:$SONNET iter:$SONNET ops:$SONNET ctx:$SONNET learn:$SONNET; do
   labels 13 "aidlc:${p%%:*}"; sel --issue 13
   check "tabela: ${p%%:*} → ${p#*:}"                    is "${p%%:*}" label claude "${p#*:}" ""
 done
@@ -68,11 +68,11 @@ done
 # ---------------------------------------------------------------- 2. exceção por label (antes da fase)
 labels 20 aidlc:spec kaizen
 sel --issue 20
-check "kaizen: Haiku, mesmo com aidlc:spec"             is spec label claude "$HAIKU" ""
+check "kaizen: Sonnet, mesmo com aidlc:spec"             is spec label claude "$SONNET" ""
 check "kaizen: motivo diz a exceção"                    jqe '.reason == "label kaizen da issue #20"' <<<"$OUT"
 labels 21 docs aidlc:build
 sel --issue 21
-check "docs: Haiku, mesmo com aidlc:build"              is build label claude "$HAIKU" ""
+check "docs: Sonnet, mesmo com aidlc:build"              is build label claude "$SONNET" ""
 labels 26 kaizen aidlc:build
 sel --issue 26
 check "kaizen + aidlc:build: Sonnet, vale a fase"        is build label claude "$SONNET" ""
@@ -83,20 +83,20 @@ for p in qa design plan ship iter; do
 done
 labels 28 kaizen aidlc:spec
 sel --issue 28
-check "kaizen + aidlc:spec: Haiku, vale a exceção"       is spec label claude "$HAIKU" ""
+check "kaizen + aidlc:spec: Sonnet, vale a exceção"       is spec label claude "$SONNET" ""
 labels 29 kaizen aidlc:build aidlc:spec
 sel --issue 29
 check "kaizen + build e spec: a fase de código vale"     bash -c 'jq -e ".phase == \"build\" and .model == \"$1\"" <<<"$2" >/dev/null' _ "$SONNET" "$OUT"
 labels 22 kaizen
 sel --issue 22
-check "kaizen sem fase: Haiku, fase vazia, sem aviso"   bash -c '[ -z "$1" ] && jq -e ".phase == \"\" and .origin == \"label\" and .model == \"$2\"" <<<"$3" >/dev/null' _ "$ERR" "$HAIKU" "$OUT"
+check "kaizen sem fase: Sonnet, fase vazia, sem aviso"   bash -c '[ -z "$1" ] && jq -e ".phase == \"\" and .origin == \"label\" and .model == \"$2\"" <<<"$3" >/dev/null' _ "$ERR" "$SONNET" "$OUT"
 labels 23 aidlc:learn spike
 sel --issue 23
 check "spike: Sonnet, mesmo com aidlc:learn"           is learn label claude "$SONNET" ""
 check "spike: motivo diz a exceção"                    jqe '.reason == "label spike da issue #23"' <<<"$OUT"
 labels 24 spike kaizen
 sel --issue 24
-check "spike + kaizen: Sonnet vence Haiku"             is "" label claude "$SONNET" ""
+check "spike + kaizen: spike vence kaizen"             is "" label claude "$SONNET" ""
 check "spike + kaizen: motivo diz o spike"             jqe '.reason == "label spike da issue #24"' <<<"$OUT"
 labels 25 aidlc:build spike
 sel --issue 25
@@ -130,7 +130,7 @@ touch "$FAKE/gh.down"
 sel --issue 10
 check "gh fora: Sonnet, origem padrao, código 0"        is "" padrao claude "$SONNET" ""
 check "gh fora: aviso em stderr"                        [ "$ERR" == "oute-select: aviso: o gh não respondeu para a issue #10; abrindo no padrão ($SONNET)" ]
-rm "$FAKE/gh.down"
+rm "${FAKE:?}/gh.down"
 sel --issue 99
 check "issue que não existe: Sonnet, com aviso"         bash -c '[ -n "$1" ]' _ "$ERR"
 check "issue que não existe: origem padrao"             is "" padrao claude "$SONNET" ""
@@ -138,7 +138,7 @@ touch "$FAKE/gh.hang"; t0=$(date +%s)
 OUTE_SELECT_GH_TIMEOUT=1 sel --issue 10
 check "gh que não responde: Sonnet depois do tempo limite" is "" padrao claude "$SONNET" ""
 check "gh que não responde: não espera o gh"            [ $(( $(date +%s) - t0 )) -le 4 ]
-rm "$FAKE/gh.hang"
+rm "${FAKE:?}/gh.hang"
 OUT="$(PATH="$NOGH" "$SEL" --json --repo "$TMP/repo" --issue 10 2>"$TMP/err")"; RC=$?; ERR="$(cat "$TMP/err")"
 check "sem gh no PATH: Sonnet, origem padrao, código 0" is "" padrao claude "$SONNET" ""
 check "sem gh no PATH: aviso"                           grep -qF 'o gh não respondeu' <<<"$ERR"
@@ -148,6 +148,8 @@ check "gh com resposta que não é JSON: Sonnet"          is "" padrao claude "$
 mv "$BIN/gh.bak" "$BIN/gh"
 
 # ---------------------------------------------------------------- 5. escolha explícita (manual) vence o label
+sel --issue 20 --model "$HAIKU"
+check "--model Haiku explícito: vence kaizen e spec (#481)" is spec manual claude "$HAIKU" ""
 sel --issue 20 --model claude-fable-5-1
 check "--model: vence a exceção e a fase"               is spec manual claude claude-fable-5-1 ""
 check "--model: motivo com o que a issue daria"         jqe '.reason == "--model claude-fable-5-1 (label kaizen da issue #20)"' <<<"$OUT"
@@ -156,7 +158,7 @@ check "--agent codex: modelo e esforço do Codex da fase" is build manual codex 
 sel --issue 11 --agent codex
 check "--agent codex em spec: linha do Opus"            is spec manual codex gpt-6-astra high
 sel --issue 20 --agent codex
-check "--agent codex em kaizen: linha do Haiku"         is spec manual codex gpt-6-luna medium
+check "--agent codex em kaizen: reserva preservada (gpt-6-luna)"         is spec manual codex gpt-6-luna medium
 sel --issue 11 --agent claude
 check "--agent claude: manual, com o modelo da fase"    is spec manual claude "$OPUS" ""
 sel --issue 10 --model gpt-6-astra
@@ -174,7 +176,7 @@ check "--agent codex em issue sem label: padrão do Codex" is "" manual codex gp
 check "--agent codex em issue sem label: aviso"         grep -qF 'abrindo no padrão (gpt-6.1-sol)' <<<"$ERR"
 
 # ---------------------------------------------------------------- 6. fase fixa (dispatcher): não lê a issue
-rm -f "$FAKE/gh-issue.log"
+rm -f "${FAKE:?}/gh-issue.log"
 sel --phase plan
 check "--phase plan: Sonnet, origem padrao"             is plan padrao claude "$SONNET" ""
 check "--phase plan: sem aviso e sem chamar o gh"       [ -z "$ERR" -a "$(calls)" -eq 0 ]
@@ -245,10 +247,10 @@ check "jev: as opções são as fases da tabela"           jqe '.body.questions.
 check "jev: nada do repo nem da issue no pedido"        bash -c '! grep -qF "$1" <<<"$2" && ! grep -qF "#30" <<<"$2"' _ "$TMP/repo" "$(ts_last)"
 ts_set ok ops 0.8
 jsel "veja por que o custo subiu ontem" --issue 30
-check "jev: issue sem label de fase abre no Haiku da fase ops" is ops jev claude "$HAIKU" ""
+check "jev: issue sem label de fase abre no Sonnet da fase ops" is ops jev claude "$SONNET" ""
 check "jev: motivo diz a issue"                         jqe '.reason == "Jev: fase ops, confiança 0,80 (issue #30 sem label aidlc:<fase>)"' <<<"$OUT"
 jsel "veja por que o custo subiu ontem" --issue 32
-check "jev: fase fora da tabela no label também vai ao Jev" is ops jev claude "$HAIKU" ""
+check "jev: fase fora da tabela no label também vai ao Jev" is ops jev claude "$SONNET" ""
 ts_set ok spec 0.6
 jsel "$TXT"
 check "jev: confiança 0,6 já vale"                      is spec jev claude "$OPUS" ""
@@ -370,12 +372,12 @@ check "sem texto: nenhuma chamada à TypeSafe"           [ "$(ts_calls)" -eq 0 ]
 jsel "$TXT" --issue 10
 check "label de fase: vale o label"                     is build label claude "$SONNET" ""
 jsel "$TXT" --issue 22
-check "exceção por label sem fase: vale a exceção"      is "" label claude "$HAIKU" ""
+check "exceção por label sem fase: vale a exceção"      is "" label claude "$SONNET" ""
 jsel "$TXT" --phase plan
 check "fase fixa (dispatcher): sem Jev"                 is plan padrao claude "$SONNET" ""
 jsel "$TXT" --model "$OPUS"
 check "--model: escolha explícita, sem Jev"             is "" manual claude "$OPUS" ""
-touch "$FAKE/gh.down"; jsel "$TXT" --issue 10; rm "$FAKE/gh.down"
+touch "$FAKE/gh.down"; jsel "$TXT" --issue 10; rm "${FAKE:?}/gh.down"
 check "gh fora do ar: padrão, sem Jev"                  is "" padrao claude "$SONNET" ""
 OUTE_SELECT_TABLE="$TMP/nao-existe.toml" jsel "$TXT"
 check "sem tabela: abre sem modelo, sem Jev"            is "" padrao claude "" ""
@@ -411,6 +413,14 @@ sel --issue 41
 check "indisponível: spec abre no gpt-6-astra"          is spec label codex "$ASTRA" high
 sel --issue 42
 check "indisponível: ops abre no gpt-6-luna (medium)"   is ops label codex "$LUNA" medium
+for p in ctx learn; do
+  labels 43 "aidlc:$p"; sel --issue 43
+  check "indisponível: $p mantém gpt-6-luna (medium)" is "$p" label codex "$LUNA" medium
+done
+for p in kaizen docs; do
+  labels 43 "$p"; sel --issue 43
+  check "indisponível: $p mantém gpt-6-luna (medium)" is "" label codex "$LUNA" medium
+done
 sel --task sem-issue
 check "indisponível: sessão sem issue, padrão no Codex" is "" padrao codex "$GPT" high
 check "indisponível: sem issue, reserve também"         rs indisponivel

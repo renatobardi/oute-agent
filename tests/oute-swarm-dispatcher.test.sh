@@ -219,6 +219,7 @@ CASE=ab-claude-bytes; round "$CASE"
 opn --max 2
 nr="$(nova)"
 expected="$(sed -e '/^- @@CX@@/d' -e 's/@@CX@@[^@]*@@\/CX@@//g' -e 's/@@\/\?CL@@//g' "$ROOT/docker/swarm.md" | sed -e "s|{{REPO}}|repo|g" -e "s|{{REPO_PATH}}|$REPO|g" -e "s|{{MAX}}|2|g" -e "s|{{LABEL}}|(nenhum)|g" -e "s|{{ID}}|$nr|g" \
+  -e 's|{{NOME_TEXTO}}||g' -e "s|{{OUTRAS}}|swarm-test · space - · issues com sessão aberta: #7|g" \
   -e 's|{{WORKERS}}|seletor (a rodada abriu sem `--agent`: `claude`, com o modelo da fase de cada issue)|g' -e 's|{{SELECT_AGENT}}||g')"
 check "claude: o prompt = swarm.md sem os trechos do Codex" [ "$(cat "$FAKE/oute-task.last")" == "$expected" ]
 
