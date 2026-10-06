@@ -120,6 +120,25 @@ for nome in petalPath stamenPath; do
   check "sakura: $nome do tray existe no sprite do agent-studio" bash -c '[ -n "$1" ] && grep -qF -- "d=\"$1\"" "$2"' _ "$caminho" "$SPRITE"
 done
 
+# versão e commit no app (#516), e o `oute tray sync`
+COMMIT="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
+check "install: o Info.plist leva o commit do repo" file_has "$APP/Contents/Info.plist" "<key>OuteTrayCommit</key><string>$COMMIT</string>"
+: > "$F_CALLS"; run_tray sync
+check "sync com o app em dia: rc 0 e diz que está em dia" bash -c '[ "$1" -eq 0 ] && grep -q "^tray em dia (.*, $3)" <<<"$2"' _ "$RC" "$OUT" "$COMMIT"
+check "sync com o app em dia: não compila nem recarrega" bash -c '! grep -q "^swift\|^launchctl" "$1"' _ "$F_CALLS"
+sed -i.bak "s|<key>OuteTrayCommit</key><string>[^<]*</string>|<key>OuteTrayCommit</key><string>0000000</string>|" "$APP/Contents/Info.plist"
+: > "$F_CALLS"; run_tray sync
+check "sync com o app atrás: rc 0 e diz os dois commits" bash -c '[ "$1" -eq 0 ] && grep -q "^tray atrás do repo (instalado: 0000000; repo: $3)" <<<"$2"' _ "$RC" "$OUT" "$COMMIT"
+check "sync com o app atrás: reinstala" bash -c 'grep -q "^swift build" "$1" && grep -q "^launchctl bootstrap " "$1"' _ "$F_CALLS"
+check "sync com o app atrás: o app volta ao commit do repo" file_has "$APP/Contents/Info.plist" "<key>OuteTrayCommit</key><string>$COMMIT</string>"
+sed -i.bak "/OuteTrayCommit/d" "$APP/Contents/Info.plist"
+: > "$F_CALLS"; run_tray sync
+check "sync com app de antes da #516 (sem commit): reinstala" bash -c 'grep -q "instalado: sem commit" <<<"$2" && grep -q "^swift build" "$1"' _ "$F_CALLS" "$OUT"
+sed -i.bak "s|<key>OuteTrayCommit</key><string>[^<]*</string>|<key>OuteTrayCommit</key><string>0000000</string>|" "$APP/Contents/Info.plist"
+FAKE_SWIFT_RC=1 run_tray sync
+check "sync com compilação que falha: rc != 0 (o update trata como aviso)" [ "$RC" -ne 0 ]
+run_tray install
+
 # compilação que falha: nada é trocado nem carregado
 : > "$F_CALLS"; cp "$PLIST" "$TMP/plist.antes"
 FAKE_SWIFT_RC=1 run_tray install
@@ -138,10 +157,15 @@ check "uninstall de novo (nada instalado): rc 0" [ "$RC" -eq 0 ]
 
 rm -f "$HOSTS"; run_tray install; run_tray uninstall
 check "uninstall: tray-hosts que ninguém editou sai junto" [ ! -e "$HOSTS" ]
+: > "$F_CALLS"; run_tray sync
+check "sync sem o tray instalado: rc 0, avisa e não instala" bash -c '[ "$1" -eq 0 ] && grep -q "^tray não instalado; nada a fazer" <<<"$2" && ! grep -q "^swift" "$3"' _ "$RC" "$OUT" "$F_CALLS"
 unset FAKE_UNAME
 
+FAKE_UNAME=Linux run_tray sync
+check "sync fora do macOS: diz que é só no macOS" bash -c '[ "$1" -ne 0 ] && grep -q "oute: o tray é só no macOS" <<<"$2"' _ "$RC" "$OUT"
+check "o update chama o sync do tray no fim" file_has "$OUTE" '&& "$0" version && tray_after_update ;;'
 OUT="$("$OUTE" --help 2>&1)"
-check "o oute --help lista o tray" has '^  tray install|uninstall '
+check "o oute --help lista o tray" has '^  tray install|uninstall|sync '
 
 OUT="$(bash -n "$OUTE" 2>&1)"; RC=$?
 check "bash -n scripts/oute" [ "$RC" -eq 0 ]
