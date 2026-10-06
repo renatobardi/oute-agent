@@ -96,7 +96,7 @@ def scan(txt, repo, refs, timeout):
 
     for m in re.finditer(r"(?<![\w/.-])(/tmp/[^\s`'\")\]>]+|[^\s`'\"(\[<]*/scratchpad/[^\s`'\")\]>]*)", txt):
         add("caminho", m.group(1).rstrip(".,;:"), ("nao-abre", "caminho de scratchpad ou /tmp: o Bardi não abre"))
-    for m in re.finditer(r"https://github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)", txt):
+    for m in re.finditer(r"https://github\.com/((?![.]{1,2}/)[\w.-]+/(?![.]{1,2}/)[\w.-]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)", txt):
         add("comentario", m.group(0), check_comment(repo, m.group(1), m.group(2), m.group(3), timeout))
     for m in re.finditer(r"(?<![\w/&#.-])#(\d{1,5})\b", txt):
         add("#N", "#" + m.group(1), check_issue(repo, m.group(1), timeout))
