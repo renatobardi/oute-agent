@@ -1,10 +1,12 @@
 """Carregamento por bloco (#536): catálogo fixo, espaços e leituras de uma abertura.
 
 Guarda query e resultados, sem receber cookie ou cabeçalho de autenticação.
-Uma abertura vale 120 s, com no máximo 32 aberturas.
+Uma abertura vale 120 s sem pedido, com no máximo 32 aberturas: cada bloco servido renova o prazo (#591).
+Bloco pedido depois do prazo abre a abertura de novo, com o mesmo id; a tela não precisa ser reaberta.
 Os resultados de leituras simultâneas são compartilhados; falha não fica no cache.
 """
 import copy
+import re
 import secrets
 import threading
 import time
@@ -36,10 +38,11 @@ SCREENS = {
 }
 TTL = 120
 MAX_VIEWS = 32
+KEY = re.compile(r'[A-Za-z0-9_-]{24}', re.ASCII)  # o `secrets.token_urlsafe(18)` do `Views.open`
 
 
 def pairs(q):
-    return [(k, v) for k, v in q.items() if v and k not in ('full', 'view') and not (k == 'custo' and v != 'efetivo')]
+    return [(k, v) for k, v in q.items() if v and k not in ('full', 'view') and not (k == 'custo' and v != 'pago')]
 
 
 def block_url(path, block, query, view=''):
@@ -54,7 +57,7 @@ def block_url(path, block, query, view=''):
 class View:
     def __init__(self, path, query, window=None):
         self.path, self.query, self.window = path, query, window
-        self.created = time.monotonic()
+        self.used = time.monotonic()  # último pedido: é dele que o prazo conta (#591)
         self.lock = threading.Lock()
         self.results = {}
 
@@ -79,19 +82,34 @@ class Views:
     def __init__(self):
         self.entries = {}
 
-    def open(self, path, query, window=None):
-        self.entries = {k: v for k, v in self.entries.items() if time.monotonic() - v.created < TTL}
+    def _live(self, v):
+        return time.monotonic() - v.used < TTL
+
+    def open(self, path, query, window=None, key=None):
+        self.entries = {k: v for k, v in self.entries.items() if self._live(v) and k != key}
         while len(self.entries) >= MAX_VIEWS:
             self.entries.pop(next(iter(self.entries)))
-        key = secrets.token_urlsafe(18)
+        key = key or secrets.token_urlsafe(18)
         self.entries[key] = View(path, query, window)
         return key
 
     def find(self, key, path, query):
+        """A abertura `key` desta tela e query, dentro do prazo; achada, o prazo recomeça (#591)."""
         v = self.entries.get(key)
-        if v and v.path == path and v.query == query and time.monotonic() - v.created < TTL:
+        if v and v.path == path and v.query == query and self._live(v):
+            v.used = time.monotonic()
             return v
         return None
+
+    def reopen(self, key, path, query, window):
+        """Bloco pedido com a abertura `key` vencida ou descartada (#591): abre de novo com o mesmo id, para os outros
+        blocos atrasados da tela compartilharem as leituras. `window()` = a janela de agora. `None` = sem abertura (o
+        bloco lê sozinho): id fora do formato, ou id que está em uso por outra tela ou query."""
+        v = self.entries.get(key)
+        if not KEY.fullmatch(key) or (v and self._live(v)):
+            return None
+        self.open(path, query, window(), key)
+        return self.entries[key]
 
 
 def render_fragment(target, found):

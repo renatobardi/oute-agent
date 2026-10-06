@@ -50,18 +50,18 @@ def _dicts(cur):
     return [dict(zip(names, r)) for r in cur.fetchall()]
 
 
-def _with_usage(con, convs, prices, effective=False):
+def _with_usage(con, convs, prices, paid=False):
     """Põe em cada conversa as somas do #203 (a conversa inteira, não só o trecho da janela)."""
     if not convs:
         return
     lo, hi = min(c["start_ns"] for c in convs), max(c["end_ns"] for c in convs) + 1
-    groups = usage_mod.aggregate(con, lo, hi, prices, ("conversation",), effective=effective)
+    groups = usage_mod.aggregate(con, lo, hi, prices, ("conversation",), paid=paid)
     for c in convs:
         c["duration_ns"] = c["end_ns"] - c["start_ns"]
         c["usage"] = usage_mod.rendered(groups, (c["id"],))
 
 
-def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, repo=None, effective=False):
+def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, repo=None, paid=False):
     """Conversas com algum fato na janela [from_ns, to_ns), da mais recente para a mais antiga (pelo início).
 
     `host`/`agent`/`repo` filtram; `hosts`/`agents`/`repos` são as opções do filtro (da janela inteira); o repositório
@@ -84,7 +84,7 @@ def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT
         convs = [c for c in convs if c["agent"] == agent]
     total = len(convs)
     convs = convs[:limit] if limit else convs   # `limit=None`: todas (a tela pagina, #529)
-    _with_usage(con, convs, prices, effective)
+    _with_usage(con, convs, prices, paid)
     return {"conversations": convs, "total": total, "hosts": hosts, "agents": agents, "repos": repos}
 
 
@@ -127,11 +127,11 @@ def tree(spans):
     return out
 
 
-def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False, effective=False):
+def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False, paid=False):
     """Cabeçalho, somas, árvore de spans e a primeira página de logs de uma conversa; `None` se ela não existe.
 
     `errors_only` (#530): só spans com status de erro e logs ERROR ou acima (o que o contador de erros soma); o
-    cabeçalho e as somas seguem sendo os da conversa inteira. `effective` (#531): a chamada de assinatura custa 0, na
+    cabeçalho e as somas seguem sendo os da conversa inteira. `paid` (#531): a chamada de assinatura custa 0, na
     soma e na linha de cada span."""
     head = _dicts(con.execute(
         f"WITH facts AS ({_FACTS.format(where=' AND session_id = ?', repo=repo_mod.COL)}) {_HEAD} FROM facts GROUP BY session_id",
@@ -139,7 +139,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
     if not head:
         return None
     conv = head[0]
-    _with_usage(con, [conv], prices, effective)
+    _with_usage(con, [conv], prices, paid)
     # custo efetivo de cada span (o do span ou o do log `api_request` da conversa, #157), pela regra do `cost.py`
     table, params = spans_with_cost("session_id = ?", [session_id], "session_id = ?", [session_id])
     spans = _dicts(con.execute(
@@ -155,8 +155,8 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
                 s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]))
-            if effective and is_subscription(s["subscription"]):
-                s["cost_kind"], s["cost"] = "effective", 0.0
+            if paid and is_subscription(s["subscription"]):
+                s["cost_kind"], s["cost"] = "paid", 0.0
     if errors_only:
         # sem os pais a árvore não vale: uma lista plana, pela hora do fato
         for s in spans:

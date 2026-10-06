@@ -1,12 +1,12 @@
 {# Gráficos da tela Uso (#533): SVG gerado no servidor, sem JS e sem estilo na tag, como os do Dashboard. A escala vem do viewBox e a dica
-   de cada ponto, do <title>. Informado pela fonte ou efetivo (cheio) × estimado (tracejado) se distinguem pelo traço e pelo texto; entrada, saída e cache dos tokens,
+   de cada ponto, do <title>. Informado pela fonte ou pago (cheio) × estimado (tracejado) se distinguem pelo traço e pelo texto; entrada, saída e cache dos tokens,
    também (cheio, tracejado, pontilhado). `c` = o resultado de `usage_charts.build`. #}
 {% macro _raw(v) %}{{ '' if v is none else v }}{% endmacro %}
 {% macro _money(real, est) %}{% if real is none and est is none %}—{% else %}{% if est is not none %}≈ {% endif %}{{ ((real or 0) + (est or 0))|usd2 }}{% endif %}{% endmacro %}
 
 {# amostra da legenda de custo #}
 {% macro legenda_custo() %}
-<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Efetivo (assinatura = 0)" if custo == "efetivo" else "Informado pela fonte" }}</span>
+<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Pago (assinatura = 0)" if custo == "pago" else "Informado pela fonte" }}</span>
   <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ (tabela de preços)</span></div>
 {% endmacro %}
 

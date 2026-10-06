@@ -149,16 +149,16 @@ def _env(zone=tz_mod.UTC):
 
 
 def cost_mode(q):
-    """`custo=efetivo` na URL = custo efetivo (#531: assinatura conta 0); qualquer outro valor ou ausente = custo de lista."""
-    return "efetivo" if q.get("custo") == "efetivo" else "lista"
+    """`custo=pago` na URL = custo pago (#531: assinatura conta 0); qualquer outro valor ou ausente = custo de lista."""
+    return "pago" if q.get("custo") == "pago" else "lista"
 
 
 @jinja2.pass_context
 def _com_custo(ctx, url):
-    """Link para outra tela levando a escolha do custo (#531): `custo=efetivo` só quando é o efetivo (o padrão é a lista)."""
-    if ctx.get("custo") != "efetivo" or "custo=" in url:
+    """Link para outra tela levando a escolha do custo (#531): `custo=pago` só quando é o pago (o padrão é a lista)."""
+    if ctx.get("custo") != "pago" or "custo=" in url:
         return url
-    return url + ("&" if "?" in url else "?") + "custo=efetivo"
+    return url + ("&" if "?" in url else "?") + "custo=pago"
 
 
 @jinja2.pass_context
@@ -301,14 +301,13 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         direção, tamanho e filtros: a página volta à primeira)."""
         q = QueryParams([(k, v) for k, v in q.multi_items() if k not in ("view", "full")])
         tables = [t for t, _, _ in tabs]
-        return [tabela_mod.apply(t, st, rows, tabela_mod.foreign_pairs(q, [t], lambda k, v: k == "custo" and v != "efetivo"), path) for t, st, rows in tabs], tabela_mod.own_pairs(q, tables)
+        return [tabela_mod.apply(t, st, rows, tabela_mod.foreign_pairs(q, [t], lambda k, v: k == "custo" and v != "pago"), path) for t, st, rows in tabs], tabela_mod.own_pairs(q, tables)
 
     def error(request, status, message):
         if hasattr(request.state, "block") or hasattr(request.state, "inline_block"):
             html = env.get_template("loading_error.html").render(message=message,
-                retry=request.url.path + "?" + request.url.query, full_url=full_url(request), expired=status == 410,
-                row=getattr(request.state, "inline_block", "") == "tabela",
-                reopen=getattr(request.state, "screen_path", request.url.path) + "?" + urlencode(loading_mod.pairs(request.query_params)))
+                retry=request.url.path + "?" + request.url.query, full_url=full_url(request),
+                row=getattr(request.state, "inline_block", "") == "tabela")
             return HTMLResponse(html, status_code=status, headers=HEADERS)
         return page(request, "error.html", status, message=message, code=status)
 
@@ -437,6 +436,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         view = getattr(request.state, "view", None)
         return view.window if view is not None and view.window is not None else path_window(path, request.query_params)
 
+    def view_window(path, q):
+        """Janela fixada na abertura (a relativa não anda entre um bloco e outro); `None` nas telas sem janela."""
+        return path_window(path, q) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas") else None
+
     def shell_info(path, request):
         title, nav, detail, blocks = loading_mod.SCREENS[path]
         back = "/" + nav
@@ -478,8 +481,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 except ValueError as exc:
                     return error(request, 400, str(exc))
                 request.state.screen_path = path
-                fixed_window = path_window(path, request.query_params) if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas") else None
-                request.state.view_id = views.open(path, loading_mod.pairs(request.query_params), fixed_window)
+                request.state.view_id = views.open(path, loading_mod.pairs(request.query_params), view_window(path, request.query_params))
                 return page(request, "loading.html", **shell_info(path, request),
                             full_url=full_url(request), loading_shell=True)
             return fn
@@ -507,9 +509,11 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as exc:
             return error(request, 400, str(exc))
         request.state.view_id = request.query_params.get("view", "")
-        request.state.view = views.find(request.state.view_id, path, loading_mod.pairs(request.query_params))
+        pairs = loading_mod.pairs(request.query_params)
+        request.state.view = views.find(request.state.view_id, path, pairs)
         if request.state.view_id and request.state.view is None:
-            return error(request, 410, "Este carregamento expirou. Reabra a tela para carregar os blocos.")
+            # #591: prazo vencido não pede que a tela seja reaberta: a abertura recomeça, ou o bloco lê sozinho
+            request.state.view = views.reopen(request.state.view_id, path, pairs, lambda: view_window(path, request.query_params))
         if block == "alertas":
             request.state.alerts = await active_alerts()
             await band_acks(request)
@@ -543,7 +547,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as e:
             return error(request, 400, str(e))
         snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz,
-                                  repo_mod.parse(repo), model or None, custo == "efetivo", sub)
+                                  repo_mod.parse(repo), model or None, custo == "pago", sub)
         if failed:
             return failed
         now = time.time_ns()
@@ -567,8 +571,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs += f"&repo={quote(repo, safe='')}"
         if sub:  # a assinatura também vai nos links (#679)
             qs += f"&{sub_mod.PARAM}={quote(sub, safe='')}"
-        if custo == "efetivo":  # #531
-            qs += "&custo=efetivo"
+        if custo == "pago":  # #531
+            qs += "&custo=pago"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
                     gates=len(ages), window_qs=qs, repo=repo, sub=sub or "", custo=custo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
@@ -584,8 +588,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         for key, value in (("host", host), ("agent", agent), ("repo", repo)):
             if value:
                 qs += f"&{key}={quote(value, safe='')}"
-        if cost_mode(q) == "efetivo":  # #531: a escolha do custo atravessa a tela
-            qs += "&custo=efetivo"
+        if cost_mode(q) == "pago":  # #531: a escolha do custo atravessa a tela
+            qs += "&custo=pago"
         return qs
 
     def tool_group(q):
@@ -682,7 +686,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "lista de conversas", store.conversations, from_ns, to_ns, config.prices,
-                                  "", "", repo_mod.parse(repo), cost_mode(q) == "efetivo", None)
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None)
         if failed:
             return failed
         (t,), keep = table_ctx(q, CONVERSAS, (conv_mod.TABLE, st, data["conversations"]))
@@ -698,7 +702,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, "Falta o id da conversa.")
         errors_only = request.query_params.get("erros") == "1"
         data, failed = await read(request, "conversa", store.conversation, session_id, config.prices, errors_only,
-                                  cost_mode(request.query_params) == "efetivo")
+                                  cost_mode(request.query_params) == "pago")
         if failed:
             return failed
         if data is None:
@@ -769,7 +773,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "lista de sessões", store.sessions, from_ns, to_ns, config.prices,
-                                  "", "", repo_mod.parse(repo), cost_mode(q) == "efetivo", None)
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None)
         if failed:
             return failed
         state = await with_state(data["sessions"])   # o estado antes da tabela: ele é uma coluna de filtro
@@ -785,7 +789,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if not task_id:
             return error(request, 400, "Falta o id da sessão.")
         data, failed = await read(request, "sessão", store.session, task_id, config.prices,
-                                  cost_mode(request.query_params) == "efetivo")
+                                  cost_mode(request.query_params) == "pago")
         if failed:
             return failed
         # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
@@ -812,7 +816,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo),
-                                  cost_mode(q) == "efetivo", sub)
+                                  cost_mode(q) == "pago", sub)
         if failed:
             return failed
         repos = []

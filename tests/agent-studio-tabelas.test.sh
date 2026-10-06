@@ -164,7 +164,7 @@ check("Sessões: ordem inválida = 400; vale o sufixo das conversas sem sessão 
       and q("/sessoes", "ord_p=start")[0] == 400 and q("/sessoes", "ord_c=cost&dir_c=asc&tam_c=50")[0] == 200)
 check("Uso: ordem fora da lista = 400 e não há página, tamanho nem filtro (só ordenação)", q("/uso", "ord_papel=nope")[0] == 400 and q("/uso", "dir_fase=x")[0] == 400
       and all(q("/uso", b)[0] == 400 for b in ("pag_papel=2", "tam_fase=50", "f_host=x", "ord=cost")))
-check("o que não é de tabela passa (repositório, custo)", all(q("/conversas", x)[0] == 200 for x in ("repo=", "custo=lista", "custo=efetivo")))
+check("o que não é de tabela passa (repositório, custo)", all(q("/conversas", x)[0] == 200 for x in ("repo=", "custo=lista", "custo=pago")))
 
 # ---------------------------------------------------------------- sem JavaScript: tudo é link
 foot = re.search(r'<nav class="tabela-rodape".*?</nav>', html, re.S).group(0)

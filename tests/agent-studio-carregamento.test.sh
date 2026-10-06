@@ -54,7 +54,7 @@ def denied(url):
     return status == 401 and headers.get('hx-redirect', '').startswith('/login?next=')
 
 
-queries = {p: 'hours=168&repo=owner%2Frepo&custo=efetivo' for p in
+queries = {p: 'hours=168&repo=owner%2Frepo&custo=pago' for p in
            ('/', '/conversas', '/sessoes', '/uso', '/ferramentas', '/precos', '/pedidos', '/rodadas')}
 queries.update({'/conversa': 'id=c', '/sessao': 'id=t', '/pedido': 'id=p', '/rodada': 'id=r',
            '/ciclo': 'id=owner%2Frepo%231', '/conversa/logs': 'id=c&offset=200',
@@ -162,10 +162,61 @@ check('outro bloco segue após falha', raw_get(app,'/bloco/conversas/decisoes','
 check('alertas que falham mostram aviso local', raw_get(create_app(Broken(),TOKEN),'/bloco/dashboard/alertas','hours=168')[0] == 200
       and 'não puderam ser calculados' in raw_get(create_app(Broken(),TOKEN),'/bloco/dashboard/alertas','hours=168')[1])
 check('decisões que falham mostram aviso local', 'não puderam ser lidas' in raw_get(create_app(Broken(),TOKEN),'/bloco/dashboard/decisoes','hours=168')[1])
-check('view de outra tela ou query não reutiliza resultados', loading.Views().find('nope','/',[]) is None
-      and raw_get(app,'/bloco/conversas/tabela','hours=168&view=inexistente')[0] == 410)
-check('view expirada oferece reabrir, sem retentativa impossível', 'Reabrir a tela' in raw_get(app,'/bloco/conversas/tabela','view=inexistente')[1]
-      and 'Tentar novamente' not in raw_get(app,'/bloco/conversas/tabela','view=inexistente')[1])
+check('view de outra tela ou query não reutiliza resultados', loading.Views().find('nope','/',[]) is None)
+
+
+# #591: o relógio do cache anda à mão, com folga do prazo de 120 s (100 s = dentro; 300 s = vencido).
+class Clock:
+    def __init__(self):
+        self.skip = 0.0
+
+    def monotonic(self):
+        return time.monotonic() + self.skip
+
+
+clock = loading.time = Clock()
+
+
+def late(body):
+    return 'Reabr' in body or 'expirou' in body or 'data-bloco-erro' in body
+
+
+def opened(path, query):
+    return {urlsplit(u).path.rsplit('/',1)[1]: u for _, _, u in Slots(raw_get(app, path, query)[1]).slots}
+
+
+uso = opened('/uso', 'hours=168')
+clock.skip += 300
+st, body = request_url(uso['custo-dia'])
+check('gráfico pedido depois do prazo de 120 s carrega, sem pedir que reabra a tela', st == 200 and '<svg' in body and not late(body))
+late_slots = opened('/conversas', 'hours=168')
+clock.skip += 300
+before = len(calls)
+(st1, b1), (st2, b2) = request_url(late_slots['tabela']), request_url(late_slots['filtros'])
+check('blocos pedidos depois do prazo abrem a abertura de novo e compartilham uma leitura', st1 == 200 and st2 == 200
+      and not late(b1) and not late(b2) and len(calls) == before + 1)
+renewed = opened('/conversas', 'hours=168')
+before = len(calls)
+clock.skip += 100
+st1, _ = request_url(renewed['tabela'])
+clock.skip += 100
+st2, b2 = request_url(renewed['filtros'])
+check('bloco servido renova o prazo: o seguinte, 200 s depois de abrir, usa a mesma leitura', st1 == 200 and st2 == 200
+      and not late(b2) and len(calls) == before + 1)
+before = len(calls)
+for view in ('inexistente', 'A' * 24):
+    st, body = raw_get(app, '/bloco/conversas/tabela', 'hours=168&view=' + view)
+    check(f'view desconhecida ({len(view)} caracteres) carrega o bloco, sem 410 nem pedido de reabrir', st == 200 and '<table' in body and not late(body))
+check('view fora do formato não vira abertura: cada pedido lê sozinho', raw_get(app, '/bloco/conversas/tabela', 'hours=168&view=inexistente')[0] == 200
+      and len(calls) == before + 3)
+store.conversations = lambda *args: (_ for _ in ()).throw(RuntimeError('causa-privada'))
+failed = opened('/conversas', 'hours=168')
+clock.skip += 300
+st, body = request_url(failed['tabela'])
+check('leitura que falha depois do prazo mostra o motivo e a retentativa, sem pedir que reabra', st == 500
+      and 'A consulta falhou' in body and 'Tentar novamente' in body and 'Reabr' not in body)
+store.conversations = counted
+check('a retentativa depois do prazo recupera o bloco', request_url(failed['tabela'])[0] == 200)
 
 # Cache: coalescência, cópia por consumidor, descarte por prazo/limite e escopo da URL.
 cache = loading.Views()
@@ -193,11 +244,33 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
 a['rows'].append(2)
 check('leituras simultâneas coalescem e recebem cópias próprias', len(count) == 1 and b == {'rows':[1]})
 check('cache respeita tela e query', cache.find(k,'/uso',[('hours','168')]) is None and cache.find(k,'/conversas',[('hours','24')]) is None)
-v.created -= loading.TTL + 1
+clock.skip += 100
+check('cache renova o prazo a cada pedido', cache.find(k,'/conversas',[('hours','168')]) is v)
+clock.skip += 100
+check('abertura pedida 200 s depois de abrir, com um pedido no meio, ainda vale', cache.find(k,'/conversas',[('hours','168')]) is v)
+windows = []
+
+
+def window():
+    windows.append(1)
+    return ('de', 'ate')
+
+
+check('abertura viva de outra tela não é trocada: o bloco fica sem abertura', cache.reopen(k,'/uso',[('hours','168')],window) is None
+      and cache.find(k,'/conversas',[('hours','168')]) is v and not windows)
+check('id fora do formato não vira abertura', cache.reopen('nope','/conversas',[],window) is None and 'nope' not in cache.entries and not windows)
+clock.skip += 300
 check('cache não serve abertura vencida', cache.find(k,'/conversas',[('hours','168')]) is None)
+again = cache.reopen(k,'/conversas',[('hours','168')],window)
+check('abertura vencida abre de novo com o mesmo id, sem as leituras antigas e com a janela de agora', again is not None and again is not v
+      and cache.find(k,'/conversas',[('hours','168')]) is again and again.results == {} and again.window == ('de', 'ate') and len(windows) == 1)
+clock.skip += 300
 for i in range(loading.MAX_VIEWS + 2):
     cache.open('/conversas', [])
 check('cache tem limite e remove as vencidas', len(cache.entries) == loading.MAX_VIEWS and k not in cache.entries)
+gone = cache.reopen(k,'/conversas',[('hours','168')],window)
+check('abertura descartada pelo limite abre de novo, dentro do limite', gone is not None and cache.entries.get(k) is gone
+      and len(cache.entries) == loading.MAX_VIEWS)
 check('cookie de marcação mantém Path=/rodada nas rotas novas', loading.block_url('/rodada','etapas',[]).startswith('/rodada/bloco/'))
 
 # Dashboard: cada gráfico/indicadores tem resposta própria. Não lê alertas nem decisões para um gráfico.
@@ -226,4 +299,6 @@ if [[ "$PY_RC" != 0 ]]; then cat "$TMP/py.out"; fi
 node "$ROOT/tests/lib/studio_loading_js.cjs" > "$TMP/js.out" 2>&1
 check "os eventos em JavaScript passam" test "$?" = 0
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/js.out")
+# #591: o ADR-08 não descreve mais a abertura vencida como motivo para reabrir a tela
+check "ADR-08: nenhuma frase manda reabrir a tela" bash -c 'cd "$1" && ! git grep -q -i -e "reabrir a tela" -e "reabra a tela" -- docs/adr/0008-agent-studio.md' _ "$ROOT"
 check_end

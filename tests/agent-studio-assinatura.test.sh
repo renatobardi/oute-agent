@@ -76,8 +76,8 @@ check("o total: custo real = claude + ai-memory (a zai não soma ao real) e o es
       near(u["totals"]["cost"]["real_usd"], 0.76) and near(u["totals"]["cost"]["estimated_usd"], EST_CODEX + USD["zai"]))
 check("glm-5.3 tem preço: não aparece em unpriced_models", u["unpriced_models"] == [] and u["totals"]["cost"]["unpriced_calls"] == 0)
 check("a soma das assinaturas é o total de chamadas", sum(r["calls"] for r in u["by_subscription"]) == u["totals"]["calls"] == 7)
-ue = st.usage(FROM, TO, prices, effective=True)
-check("custo efetivo: a zai é assinatura e custa 0 (real 0, sem estimativa); o ai-memory segue pago",
+ue = st.usage(FROM, TO, prices, paid=True)
+check("custo pago: a zai é assinatura e custa 0 (real 0, sem estimativa); o ai-memory segue pago",
       near(sub_rows(ue)["zai"]["cost"]["real_usd"], 0.0) and sub_rows(ue)["zai"]["cost"]["estimated_usd"] is None and near(ue["totals"]["cost"]["real_usd"], 0.01))
 uz = st.usage(FROM, TO, prices, sub="zai")
 check("filtro zai: só as 3 chamadas dela, e a quebra por assinatura só tem a zai",
@@ -90,8 +90,8 @@ det = CV.detail(st.con, "c-zai", prices)
 kinds = [(s["cost_kind"], round(s["cost"], 6)) for s in det["spans"] if s["is_call"]]
 check("detalhe da conversa zai: cada chamada é estimada (o custo do Claude Code é descartado)",
       [k for k, _ in kinds] == ["estimated"] * 3 and kinds[0][1] == round(1.4 + 0.44, 6) and kinds[2][1] == 1.4)
-dete = CV.detail(st.con, "c-zai", prices, effective=True)
-check("detalhe da conversa zai no custo efetivo: 0 em cada chamada", [s["cost_kind"] for s in dete["spans"] if s["is_call"]] == ["effective"] * 3)
+dete = CV.detail(st.con, "c-zai", prices, paid=True)
+check("detalhe da conversa zai no custo pago: 0 em cada chamada", [s["cost_kind"] for s in dete["spans"] if s["is_call"]] == ["paid"] * 3)
 
 # ---------------------------------------------------------------- as telas
 app = create_app(st, TOKEN, config=cfg)
@@ -141,8 +141,8 @@ check("Dashboard filtrado na zai: o KPI de custo estimado é o dela e os outros 
       and re.findall(r'data-modelo="([^"]*)" data-calls', dz) == ["glm-5.3", "glm-5.3"])
 check("Dashboard: as janelas prontas e os links levam a assinatura", "assinatura=zai" in re.findall(r'<nav class="janelas".*?</nav>', dz, re.S)[0] and 'href="/uso?hours=24&amp;assinatura=zai"' in get(app, "/", "hours=24&assinatura=zai")[1])
 check("Dashboard: o formulário do modelo leva a assinatura escondida", '<input type="hidden" name="assinatura" value="zai">' in dz)
-dc = get(app, "/", Q + "&assinatura=zai&custo=efetivo")[1]
-check("Dashboard filtrado na zai com custo efetivo: sem custo estimado, a chamada de assinatura custa 0",
+dc = get(app, "/", Q + "&assinatura=zai&custo=pago")[1]
+check("Dashboard filtrado na zai com custo pago: sem custo estimado, a chamada de assinatura custa 0",
       re.search(r'data-kpi="cost"[^>]*data-estimated-usd=""', dc) is not None)
 
 # ---------------------------------------------------------------- ingestão: a coluna `oute_subscription`
