@@ -121,7 +121,7 @@ studio() {
     "alertas_ativos\t\(.alerts | length)",
     (["ALERTA","tipo","host","instância","valor","unidade","limite","desde","detalhe"] | @tsv),
     (.alerts[] | ["ALERTA", .type, (.host // "-"), (.instance // "-"), (.value // "-"), (.unit // "-"), (.limit // "-"),
-                  (.since // "-"), (.evidence | (.exporter // .attribute // .note // "-") | tostring)] | @tsv),
+                  (.since // "-"), (.evidence | (.exporter // .attribute // .note // (if .round then "rodada \(.round) (\(.kind // "?"))" else null end) // "-") | tostring)] | @tsv),
     ((.config.errors // [])[] | ["AVISO","config","\(.)"] | @tsv),
     "### último dado por host (agent-studio)",
     (["host","sempre_ligado","último_dado_utc","parado_há_s"] | @tsv),

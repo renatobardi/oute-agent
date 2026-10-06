@@ -127,6 +127,8 @@ drop = {"timeUnixNano": ns(AT - 60 * M), "severityNumber": 17, "severityText": "
 #   r-antiga   aberta AT-30h, sessão o-1 em AT-26h                  -> mais de 24 h sem evento: "antiga sem fechamento"
 #   r-velha    aberta AT-60h, sem mais nada                         -> mais de 48 h: nem como antiga
 #   r-sem-open só session.spawned em AT-100m (a abertura nunca chegou) -> sem alerta
+#   r-por-fechar aberta AT-70m, sessão p-1 aberta em AT-60m e fechada em AT-40m, sem round.closed -> parada, com as sessões
+#              fechadas e sem fechamento (#654: `unclosed`, 40 min)
 n2 = 0
 def sw(t, name, rnd, slug=None):
     global n2; n2 += 1
@@ -146,6 +148,7 @@ swarm = [
     sw(AT - 30 * 60 * M, O, "r-antiga"), sw(AT - 26 * 60 * M, SP, "r-antiga", "o-1"),
     sw(AT - 60 * 60 * M, O, "r-velha"),
     sw(AT - 100 * M, SP, "r-sem-open", "x-1"),
+    sw(AT - 70 * M, O, "r-por-fechar"), sw(AT - 60 * M, SP, "r-por-fechar", "p-1"), sw(AT - 40 * M, CL, "r-por-fechar", "p-1"),
 ]
 logs = {"resourceLogs": [
     rl("oute-server", "oute", swarm),
@@ -297,7 +300,7 @@ out("cota desligada: sem alerta de cota e checks.quota falso", not any(a["type"]
 no_round = lambda r: [a["type"] for a in r["alerts"] if not a["type"].startswith("round_")]
 out("evaluate: tipos na ordem fixa", no_round(r) == ["queue", "destination_refusing", "spool"])
 r = alerts.evaluate(con, at, C())
-out("evaluate: cota depois dos outros, rodada parada por último (padrão ligado)", no_round(r)[:3] == ["queue", "destination_refusing", "spool"] and no_round(r)[-1] == "quota" and [a["type"] for a in r["alerts"]][-4:] == ["round_stalled"] * 3 + ["round_old"])
+out("evaluate: cota depois dos outros, rodada parada por último (padrão ligado)", no_round(r)[:3] == ["queue", "destination_refusing", "spool"] and no_round(r)[-1] == "quota" and [a["type"] for a in r["alerts"]][-5:] == ["round_stalled"] * 4 + ["round_old"])
 out("evaluate: host sem host_name nunca quebra (hosts só com nome)", all(h["host"] for h in r["hosts"]))
 PY
 check_py_lines "$TMP/py.out"
@@ -312,7 +315,9 @@ R="$(at 0)"
 check "rodada: checks lista os dois tipos"             jqe '.checks.round_stalled and .checks.round_old' <<<"$R"
 check "rodada ativa (último evento há 5 min): sem alerta" jqe "$(rs r-ativa) | length == 0" <<<"$R"
 check "rodada parada com sessão: a-1 aberta (b-2 fechada), há 80 min, desde o último evento" jqe --arg s "$(T -80)" "$(rs r-sess)"' | length == 1 and (.[0] | .type == "round_stalled" and .host == "oute-server" and .value == 4800 and .unit == "seconds" and .limit == 1800 and .since == $s and .evidence.kind == "sessions" and .evidence.sessions == ["a-1"] and .evidence.last_event == $s)' <<<"$R"
-check "rodada parada na triagem: sem sessão, 45 min"   jqe --arg s "$(T -45)" "$(rs r-triagem)"' | length == 1 and (.[0] | .type == "round_stalled" and .value == 2700 and .since == $s and .evidence.kind == "triage" and .evidence.sessions == [])' <<<"$R"
+check "rodada parada na triagem: sem sessão, 45 min"   jqe --arg s "$(T -45)" "$(rs r-triagem)"' | length == 1 and (.[0] | .type == "round_stalled" and .value == 2700 and .since == $s and .evidence.kind == "triage" and .evidence.sessions == [] and .evidence.spawned == 0)' <<<"$R"
+check "rodada com as sessões fechadas e sem fechamento (#654): unclosed, 40 min, 1 sessão aberta na rodada" jqe --arg s "$(T -40)" "$(rs r-por-fechar)"' | length == 1 and (.[0] | .type == "round_stalled" and .value == 2400 and .since == $s and .evidence.kind == "unclosed" and .evidence.sessions == [] and .evidence.spawned == 1 and .evidence.round == "r-por-fechar")' <<<"$R"
+check "rodada parada com sessão: o motivo segue sessions, com as duas sessões que abriu" jqe "$(rs r-sess)"' | .[0].evidence | .kind == "sessions" and .spawned == 2' <<<"$R"
 check "rodada fechada: sem alerta"                     jqe "$(rs r-fechada) | length == 0" <<<"$R"
 check "rodada antiga (26 h sem evento): round_old, uma entrada" jqe --arg s "$(T -1560)" "$(rs r-antiga)"' | length == 1 and (.[0] | .type == "round_old" and .evidence.kind == "old" and .value == 93600 and .since == $s)' <<<"$R"
 check "rodada com mais de 48 h: nem como antiga"       jqe "$(rs r-velha) | length == 0" <<<"$R"
@@ -339,16 +344,18 @@ cfg, errs = C.parse({"round_stalled_minutes": 0})
 out("round_stalled_minutes: padrão 30; zero cai no padrão com erro; 90 vale", C().round_stalled_minutes == 30 and cfg == C() and len(errs) == 1
     and C.parse({"round_stalled_minutes": 90})[0].round_stalled_minutes == 90)
 out("config do repo: round_stalled_minutes = 30 sem erro", config.load(repo_cfg).alerts.round_stalled_minutes == 30 and not config.load(repo_cfg).errors)
-out("limite de 90 min: r-sess (80 min) e r-triagem (45) não alertam", [a["evidence"]["round"] for a in rnd(alerts.evaluate(con, at, C(round_stalled_minutes=90)))] == ["r-antiga"])
+out("limite de 90 min: r-sess (80 min), r-triagem (45) e r-por-fechar (40) não alertam", [a["evidence"]["round"] for a in rnd(alerts.evaluate(con, at, C(round_stalled_minutes=90)))] == ["r-antiga"])
 r = alerts.evaluate(con, at, C())
-out("ordem: round_stalled antes de round_old, por rodada", [(a["type"], a["evidence"]["round"]) for a in rnd(r)] == [("round_stalled", "r-sess"), ("round_stalled", "r-triagem"), ("round_stalled", "r-volta"), ("round_old", "r-antiga")])
+out("ordem: round_stalled antes de round_old, por rodada", [(a["type"], a["evidence"]["round"]) for a in rnd(r)] == [("round_stalled", "r-por-fechar"), ("round_stalled", "r-sess"), ("round_stalled", "r-triagem"), ("round_stalled", "r-volta"), ("round_old", "r-antiga")])
 t = {a["evidence"]["round"]: a for a in rnd(r)}
 out("título e texto: parada com sessão", alert_text.title(t["r-sess"]) == "Rodada parada" and alert_text.text(t["r-sess"]) == "rodada r-sess com 1 sessão aberta (a-1); último evento há 1 h 20 min (limite 30 min 00 s)")
+out("texto: sessões fechadas e rodada sem fechamento (#654)", alert_text.text(t["r-por-fechar"]) == "rodada r-por-fechar com as sessões fechadas e sem fechamento (oute-swarm close --all --yes); último evento há 40 min 00 s (limite 30 min 00 s)")
+out("texto: alerta de rodada antigo, sem o motivo novo, segue como triagem", "triagem sem resposta" in alert_text.text({**t["r-por-fechar"], "evidence": {k: v for k, v in t["r-por-fechar"]["evidence"].items() if k != "kind"}}))
 out("texto: triagem", alert_text.text(t["r-triagem"]) == "rodada r-triagem sem sessão aberta, triagem sem resposta; último evento há 45 min 00 s (limite 30 min 00 s)")
 out("título e texto: rodada antiga", alert_text.title(t["r-antiga"]) == "Rodada antiga sem fechamento" and alert_text.text(t["r-antiga"]) == "rodada r-antiga aberta e sem fechamento; último evento há 26 h 00 min")
 out("texto: duas sessões abertas no plural", "2 sessões abertas (a, b)" in alert_text.text({**t["r-sess"], "evidence": {**t["r-sess"]["evidence"], "sessions": ["a", "b"]}}))
 snap = tray.snapshot(con, at, config.load(repo_cfg).prices, C())
-out("tray: os alertas de rodada saem com title e text", [(a["title"], bool(a["text"])) for a in snap["alerts"] if a["type"].startswith("round_")] == [("Rodada parada", True)] * 3 + [("Rodada antiga sem fechamento", True)])
+out("tray: os alertas de rodada saem com title e text", [(a["title"], bool(a["text"])) for a in snap["alerts"] if a["type"].startswith("round_")] == [("Rodada parada", True)] * 4 + [("Rodada antiga sem fechamento", True)])
 out("rodada antiga some depois de 48 h sem evento", [a for a in alerts._rounds(con, at + 30 * 3600 * 10**9, C()) if a["evidence"]["round"] == "r-antiga"] == [])
 out("23 h sem evento ainda é parada, não antiga", [a["type"] for a in alerts._rounds(con, at - 3 * 3600 * 10**9, C()) if a["evidence"]["round"] == "r-antiga"] == ["round_stalled"])
 class Boom:  # a consulta das rodadas falha; as outras seguem

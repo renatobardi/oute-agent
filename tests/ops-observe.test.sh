@@ -23,7 +23,7 @@ check "sintaxe (bash -n)"                              bash -n "$SCRIPT"
 # janela = últimas 24 h; base = os 7 dias antes dela. Na base, dois dias com dado (há 2 e há 4 dias).
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys, time
-from otlp_json import claude_call, kv, queue_metrics, rl, rs, span
+from otlp_json import claude_call, event, kv, queue_metrics, rl, rs, span
 tmp = sys.argv[1]
 NOW = int(time.time()); W = NOW - 3600; B1 = NOW - 2 * 86400; B2 = NOW - 4 * 86400
 claude = {"host.name": "oute-server", "service.name": "claude-code", "oute.agent": "claude"}
@@ -53,8 +53,11 @@ traces = {"resourceSpans": [
 ]}
 json.dump(traces, open(f"{tmp}/traces.json", "w"))
 def log(t, sev): return {"timeUnixNano": str(int(t * 1e9)), "severityNumber": sev, "body": {"stringValue": "x"}}
+# rodada do swarm aberta no Mac há 1 h e sem mais evento (#654): rodada parada, na triagem (limite de 30 min)
+swarm = {"host.name": "oute-mac", "oute.instance": "oute-agent", "service.name": "oute"}
 logs = {"resourceLogs": [rl(codex, [log(W, 17), log(W + 1, 21), log(W + 2, 9)]),
-                         rl(claude, [l for _, l in calls if l])]}
+                         rl(claude, [l for _, l in calls if l]),
+                         rl(swarm, [event(W, "oute.swarm.round.opened", "ev-r-parada", {"oute.swarm.round": "swarm-1006-0001"})])]}
 json.dump(logs, open(f"{tmp}/logs.json", "w"))
 # fila do collector do Mac em 90%, há 1 min: o Mac está no ar, o alerta liga
 json.dump(queue_metrics("oute-mac", NOW - 60, 900), open(f"{tmp}/metrics.json", "w"))
@@ -108,7 +111,8 @@ check "só as quatro anomalias"                         test "$(grep -c '^ANOMAL
 check "custo por modelo: do mais caro ao mais barato"  test "$(sed -n '/^### custo por modelo/,/^###/p' <<<"$OUT" | sed -n '3,5p')" = "oute-server	claude-sonnet-5	3	1.2	3	0
 oute-mac	gpt-5-codex	8	-	0.018	0
 oute-mac	gpt-9-sem-preco	2	-	-	2"
-check "alertas: os dois ativos contados"               has_line "alertas_ativos	2"
+check "alertas: os três ativos contados"               has_line "alertas_ativos	3"
+check "alerta de rodada parada: o detalhe traz o id da rodada e o motivo (#654)" has "^ALERTA	round_stalled	oute-mac	oute-agent	3[0-9]*	seconds	1800	.*Z	rodada swarm-1006-0001 [(]triage[)]$"
 check "alerta da fila do Mac, com o exporter"          has "^ALERTA	queue	oute-mac	oute-agent	0.9	ratio	0.5	.*Z	otlp_http/studio_logs$"
 check "alerta de host sem dado (oute-server, 1 h)"     has "^ALERTA	host_no_data	oute-server	-	3[0-9]*	seconds	1800	.*Z	-$"
 check "último dado por host"                           bash -c 'grep -q "^oute-mac	false	.*Z	[0-9]*$" <<<"$0" && grep -q "^oute-server	true	.*Z	3[0-9]*$" <<<"$0"' "$OUT"
@@ -142,7 +146,7 @@ check "401: sem tabela e sem a credencial na saída"    bash -c '! grep -q "^###
 run AGENT_STUDIO_URL="$STUDIO_URL/healthz?x=" studio
 check "resposta 200 que não é JSON: ERRO"              erro "/v1/usage da janela ilegível: a resposta não é um objeto JSON"
 run AGENT_STUDIO_URL="$STUDIO_URL/" studio
-check "URL com barra no fim: lê igual"                 bash -c '[ "$1" -eq 0 ] && grep -q "^alertas_ativos	2" <<<"$0"' "$OUT" "$RC"
+check "URL com barra no fim: lê igual"                 bash -c '[ "$1" -eq 0 ] && grep -q "^alertas_ativos	3" <<<"$0"' "$OUT" "$RC"
 
 # ---------------------------------------------------------------- all = studio + bucket
 run all --content-hours 0
@@ -153,7 +157,7 @@ run bucket --content-hours 0
 check "bucket: só a seção do bucket, sem chamada ao agent-studio" bash -c '[ "$1" -eq 0 ] && ! grep -q "agent-studio" <<<"$0" && [ ! -s "$2" ]' "$OUT" "$RC" "$ARGV"
 run F_RCLONE_FAIL=1 all --content-hours 0
 check "all com o bucket ilegível: ERRO, código 1"      erro "listagem de traces falhou: ERROR : falha de teste"
-check "all com o bucket ilegível: o studio sai inteiro" has_line "alertas_ativos	2"
+check "all com o bucket ilegível: o studio sai inteiro" has_line "alertas_ativos	3"
 run AGENT_STUDIO_READ_TOKEN= all --content-hours 0
 check "all com o studio ilegível: ERRO, código 1"      erro "AGENT_STUDIO_READ_TOKEN ausente"
 check "all com o studio ilegível: o bucket sai inteiro" has "^traces	h1	i1	"

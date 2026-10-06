@@ -18,8 +18,9 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
   mesmo agente abaixo do corte, não alerta; a 7d nunca tem exceção.
 - **Rodada parada** (`round_stalled`, #364): rodada do swarm aberta (`oute.swarm.round.opened`, sem `round.closed`) sem
   nenhum evento `oute.swarm.*` há mais de `round_stalled_minutes`, por host e rodada: com sessão aberta
-  (`session.spawned` sem `session.closed`; `evidence.kind = "sessions"`) ou sem nenhuma (triagem sem resposta;
-  `kind = "triage"`). Passadas `lookback_hours` sem evento a rodada deixa de ser "parada" e vira, por mais
+  (`session.spawned` sem `session.closed`; `evidence.kind = "sessions"`), sem nenhuma sessão até ali (triagem sem
+  resposta; `kind = "triage"`) ou com todas as sessões já fechadas e a rodada sem fechamento (`kind = "unclosed"`,
+  #654: falta o `oute-swarm close --all --yes`; `evidence.spawned` = quantas sessões a rodada abriu). Passadas `lookback_hours` sem evento a rodada deixa de ser "parada" e vira, por mais
   `lookback_hours`, `round_old` ("rodada antiga sem fechamento"); depois some. Falha deste cálculo não derruba os outros.
   A pergunta ao Bardi (`oute.swarm.round.asked`, #386) também é evento `oute.swarm.*`: rodada com a pergunta de menos de
   `round_stalled_minutes` não conta como parada. A decisão pendente em si não é alerta (`decisions.py`).
@@ -429,10 +430,15 @@ def _rounds(con, at, cfg):
                 state[e["slug"]] = e["event_name"].endswith(".spawned")
         slugs = sorted(k for k, v in state.items() if v)
         kind = ROUND_OLD if idle > day else ROUND_STALLED
+        if kind == ROUND_OLD:
+            why = "old"
+        elif slugs:
+            why = "sessions"
+        else:  # sem sessão aberta: nunca abriu nenhuma (triagem) ou todas já fecharam e falta fechar a rodada (#654)
+            why = "unclosed" if state else "triage"
         out.append(_alert(kind, r["host"], r["instance"], idle // 1_000_000_000, "seconds",
                           cfg.round_stalled_minutes * 60, r["last_t"], {
-                              "round": r["round"], "sessions": slugs,
-                              "kind": "old" if kind == ROUND_OLD else ("sessions" if slugs else "triage"),
+                              "round": r["round"], "sessions": slugs, "spawned": len(state), "kind": why,
                               "last_event": iso(r["last_t"]), "opened_at": iso(r["opened_t"])}))
     return out
 
