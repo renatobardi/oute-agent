@@ -78,6 +78,8 @@ services:
       oute:
         # IP fixo: o host só aceita o usuário oute-ops vindo daqui (lab#178, from="172.19.0.5/32")
         ipv4_address: ${OUTE_AGENT_IP:-172.19.0.5}
+      # #564: rede interna só com o ai-memory (hook, MCP e backup falam com ele por aqui)
+      memoria:
     init: true
     tty: true
     stdin_open: true
@@ -108,8 +110,10 @@ services:
     depends_on:
       volume-init:
         condition: service_completed_successfully
-    # llm: só para alcançar o llm-proxy (o agent não está nessa rede)
-    networks: [oute, llm]
+    # #564 (ADR-08, adendo): sem saída à internet, por construção. Só redes `internal` (sem rota para fora do compose):
+    # memoria = o agent alcança o ai-memory; llm = o ai-memory alcança o llm-proxy (e o collector). Nunca a rede oute
+    # nem a saida, que têm rota para fora. O que o ai-memory baixava da internet: docs/adr/0008-agent-studio.md.
+    networks: [memoria, llm]
 
   llm-proxy:
     # #459, ADR-08 (adendo): proxy do LLM do ai-memory ao OpenRouter. Repassa a chamada com a chave da memória
@@ -142,9 +146,10 @@ services:
     depends_on:
       otel-collector:
         condition: service_started
-    # #459: rede llm, que o agent (yolo) não enxerga: ele não alcança o proxy, que usa a chave da memória. Sai à internet
-    # (OpenRouter) pela própria rede e fala com o collector, que também está nela.
-    networks: [llm]
+    # #459: rede llm, que o agent (yolo) não enxerga: ele não alcança o proxy, que usa a chave da memória. Fala com o
+    # ai-memory e com o collector pela llm (interna) e sai à internet (OpenRouter) pela saida, a única rede com rota
+    # para fora que o ai-memory não tem (#564).
+    networks: [llm, saida]
 
   volume-init:
     # lab#181: migração one-shot do uid antigo (1001 = ubuntu do host) para o 10001 do container.
@@ -343,7 +348,16 @@ networks:
   studio:
     driver: bridge
     internal: true
-  # #459: rede do llm-proxy com o ai-memory e o collector. Não é internal (o proxy precisa chegar ao OpenRouter); o agent
-  # não está nela, então não alcança o proxy nem a chave da memória.
+  # #564: agent e ai-memory. internal = sem rota para fora do compose: o ai-memory fica sem saída à internet, e o agent
+  # continua saindo pela rede oute.
+  memoria:
+    driver: bridge
+    internal: true
+  # #459, #564: rede do llm-proxy com o ai-memory e o collector. internal: o ai-memory está nela e não pode ter saída.
+  # O agent não está nela, então não alcança o proxy nem a chave da memória.
   llm:
+    driver: bridge
+    internal: true
+  # #564: a saída do llm-proxy ao OpenRouter. Só ele está nela (nem o ai-memory, nem o agent).
+  saida:
     driver: bridge

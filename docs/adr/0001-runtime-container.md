@@ -1,6 +1,6 @@
 # ADR-01 — Runtime container do Oute Agent
 
-Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02) · agentes no home sem `curl | sh` (#199/#200, 2026-09-30)
+Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02) · agentes no home sem `curl | sh` (#199/#200, 2026-09-30) · assinatura `zai` (GLM): segredo novo e saída de código (#629, 2026-10-05, ADR-02)
 
 ## Contexto
 Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) MacBook (Apple Silicon), servindo de "casa" para agentes de código operados via terminal.
@@ -153,6 +153,17 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
   - Os dois instalam a versão **mais recente** e ela é conferida pelo código do fornecedor (manifest do Claude, `SHA256SUMS` do Codex), como no auto-update. No codex, fixar a versão da cópia do home desligaria o auto-update (com `CODEX_RELEASE=<versão>` o `install.sh` apaga o `auto-update-version`); no claude isso não foi verificado, e o `claude install` sem alvo é o que o `install.sh` oficial usa. Tirar o auto-update está fora de escopo (#195).
   - A release confere os pins com `scripts/agent-pins` (passo 6 da `oute-aidlc-ship-release`).
 - **Resíduo aceito:** o que entra depois do pin (instalação da mais recente e auto-update) é código e checksum do fornecedor, por TLS; o pin só ancora a entrada. O `postinstall` do pacote npm do claude continua rodando no build (é o que copia o binário nativo; o sha256 conferido em seguida cobre o resultado).
+
+## Adendo 2026-10-05 — assinatura `zai` (GLM): segredo novo e saída de código (#629, ADR-02)
+- **Contexto:** o ADR-02 (adendo #629) põe o GLM Coding Plan da Z.ai como a assinatura **`zai`**, servida pelo próprio Claude Code. O `claude` da sessão fala com `https://api.z.ai/api/anthropic` em vez da Anthropic. No grupo de execução, a Z.ai é o padrão; no de raciocínio, é a reserva.
+- **Segredo novo:** `OUTE_ZAI_API_KEY`, item `zai` da pasta **`oute-agent`** do vault. É o agente que usa, então não é segredo de serviço (adendo #256) → `agent_env` → `~/.oute_env` (o prefixo `OUTE_` já está na allowlist do entrypoint). É **opcional**: sem ela, a `zai` conta como indisponível e a sessão anda a cadeia.
+  - O valor só entra no ambiente do **processo da sessão** `zai`, como `ANTHROPIC_AUTH_TOKEN`, pelo `oute-task` e pelo shim. Nunca vai ao `~/.claude/settings.json`, a argv, log, aviso ou telemetria.
+  - No `oute-quota`, vai ao `curl` por `-K -`, como os outros tokens.
+- **Saída de código (decisão do Bardi, 2026-10-05):** **todos os repos** do Bardi podem mandar código e prompt à Z.ai (China), inclusive o `lab`, sem allowlist.
+  - O que vai: o que a sessão do Claude Code manda à Z.ai (prompt, contexto, arquivos lidos, saída de ferramenta), igual ao que hoje vai à Anthropic.
+  - Os dados são do projeto pessoal do Bardi; BACEN e LGPD não se aplicam a eles. O uso do oute-agent com código da empresa é outro tema (#630) e não herda esta decisão.
+- **Nenhum segredo no contexto da sessão:** isso já valia com a Anthropic, e a assinatura nova aumenta o alcance de um vazamento. Uma regra escrita para o agente (não imprimir o ambiente nem arquivo de credencial numa sessão) e a checagem na `oute-aidlc-qa-pr-audit` ficam como **proposta para a `spec` da fatia (a)**; não foram decididas neste gate.
+- **Resíduo aceito:** um agente em yolo no container pode ler o próprio ambiente, e com isso a chave da Z.ai e os demais valores do `agent_env`, e mandá-los à assinatura da vez. O que limita é a regra acima e o escopo de cada credencial, não o isolamento. A política de retenção e de treino da Z.ai para o plano de código não foi auditada (fica no spike da #629).
 
 ## LXD
 Container LXC precisa `security.nesting=true` e `security.syscalls.intercept.mknod=true` para Docker dentro. (Hoje o oute-agent roda direto no Docker do host oute-server — exceção registrada no lab.)
