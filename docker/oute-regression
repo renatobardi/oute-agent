@@ -1,30 +1,41 @@
 #!/usr/bin/env bash
-# oute-regression — nível 1 de regressão dos agentes (#366, spike #52): tarefas headless em Haiku, sob demanda, para
-# conferir com o agente real que as instruções ainda produzem o efeito esperado depois de uma release com mudança de
-# imagem ou de um upgrade dos CLIs. Nunca em CI e nunca bloqueia merge; só você chama, no container.
+# oute-regression — nível 1 de regressão dos agentes (#366, spike #52; poder de prova, #484): tarefas headless em Haiku
+# e em Sonnet, sob demanda, para conferir com o agente real que as instruções ainda produzem o efeito esperado depois de
+# uma release com mudança de imagem, de um upgrade dos CLIs ou de uma mudança nos prompts (`agent-notes.md`, `swarm.md`,
+# `swarm-worker.md`: a regra do `swarm-worker.md` obriga a rodar antes de abrir o PR). Nunca em CI; só você chama, no container.
 #
-# uso:  oute-regression [--rounds N] [--codex] [--task <nome>]… [--json]
-#   --rounds N   quantas vezes cada tarefa roda (padrão 3). Vermelha só se falhar em mais de uma rodada (com --rounds 1,
-#                se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
+# uso:  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
+#   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
+#                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
+#                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
+#   --model <m>  só o modelo <m> (haiku = fase ops da tabela do seletor; sonnet = fase build); repetível. Sem a flag, os dois.
+#   --keep <pasta>  guarda as transcrições e os registros dos dublês de cada chamada em <pasta>/<run>/<tarefa>-<agente>-<modelo>-r<N>/
+#                (transcript.jsonl, err, res.json, status, reason, e o que os dublês gravaram: ssh.log, gh.log, propose.log…).
+#                Antes de gravar, apaga dos arquivos o valor de segredo: variável de ambiente com TOKEN, SECRET, PASSWORD ou
+#                KEY no nome e o que a tarefa declara em `task_secrets`. Sem a flag, tudo é apagado ao fim.
 #   --codex      opt-in: roda também as tarefas marcadas para o Codex (a 1, `root`) com `codex exec`; sem a flag o Codex
 #                não é chamado
-#   --task <n>   só as tarefas de nome <n> (root, select, worktree, emit, studio); repetível
+#   --task <n>   só as tarefas de nome <n> (as de docker/regression/ e `studio`); repetível
 #   --json       o resultado em JSON no stdout (o relato em texto vai para o stderr)
-# saída: 0 = verde (tarefa "não verificada" não pesa) | 1 = alguma tarefa vermelha | 2 = não rodou (uso, cota,
-#   sem claude, ou o claude falhou em toda chamada)
+# saída: 0 = verde (tarefa "não verificada" não pesa) | 1 = alguma tarefa vermelha | 2 = não rodou (uso, sem claude, ou
+#   o claude falhou em toda chamada) | 3 = recusada pela trava de cota (nada rodou; quem abre PR de prompt declara isso)
 #
-# Tarefas: docker/regression/<n>-<nome>.sh (root, select, worktree, emit), mais a `studio` (a conversa chegou ao
+# Tarefas: docker/regression/<n>-<nome>.sh (13 hoje), mais a `studio` (a conversa chegou ao
 # agent-studio com o oute.task.id do teste; sem AGENT_STUDIO_URL e AGENT_STUDIO_READ_TOKEN ou com o agent-studio fora do
 # ar = "não verificado", não vermelho). Cada chamada ao agente roda num diretório descartável, com um `.ai-memory.toml`
 # próprio (workspace e project `regression`: os hooks do ai-memory capturam a conversa de teste lá, não no projeto de
-# ninguém) e com oute-propose, oute-inbox, sudo e ssh trocados por dublês no PATH: nada chega ao canal de aprovação nem
-# ao host. O grader é bash e lê efeitos (arquivos, o que os dublês gravaram); nenhum LLM julga.
-# Cota: com `oute-quota` no PATH e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), a suíte não começa (saída 2);
-# cota desconhecida ou comando ausente = aviso e segue.
-# Fim: um evento oute.regression.run pelo `oute-emit` (versão da imagem, versões dos CLIs, rodadas, verde/vermelho por
-# tarefa, custo somado), sem texto de prompt nem de resposta. O resultado de cada tarefa e o custo são só do que o
-# claude devolve em `--output-format json` (`total_cost_usd`, custo equivalente na API; o Codex não tem custo aqui).
-# ambiente (para teste): OUTE_REGRESSION_DIR (tarefas), OUTE_REGRESSION_TIMEOUT (s por chamada, padrão 120),
+# ninguém) e com oute-propose, oute-inbox, sudo, ssh e gh trocados por dublês no PATH; a memória (ai-memory) também é
+# um dublê (servidor MCP `ai-memory` próprio, `--strict-mcp-config`): nada chega ao canal de aprovação, ao host, ao
+# GitHub nem à memória de ninguém. O grader é bash e lê efeitos (arquivos, o que os dublês gravaram, a transcrição);
+# nenhum LLM julga.
+# Cota: com `oute-quota` no PATH e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), a suíte não começa (saída 3, com
+# a janela e o limite na mensagem); cota desconhecida ou comando ausente = aviso e segue.
+# Fim: um evento oute.regression.run pelo `oute-emit` (versão da imagem, versões dos CLIs, modelos, rodadas,
+# verde/vermelho por tarefa e modelo, chamadas, tempo e custo somados), sem texto de prompt nem de resposta. O resultado
+# de cada tarefa e o custo são só do que o claude devolve em `--output-format stream-json` (linha `result`:
+# `total_cost_usd`, custo equivalente na API; o Codex não tem custo aqui).
+# ambiente (para teste): OUTE_REGRESSION_DIR (tarefas), OUTE_REGRESSION_TIMEOUT (s por chamada, padrão 180),
+#   OUTE_REGRESSION_PARALLEL (chamadas ao mesmo tempo, padrão 8),
 #   OUTE_REGRESSION_STUDIO_WAIT / _STEP (espera pela conversa no agent-studio, padrão 60 / 5 s),
 #   OUTE_REGRESSION_AGENT (oute.agent do evento: claude, codex ou human, o padrão).
 { set +x; } 2>/dev/null
@@ -32,12 +43,16 @@ set -uo pipefail
 
 usage() { sed -n '2,/^{ set +x/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2; }
 die2() { printf 'oute-regression: %s\n' "$*" >&2; exit 2; }
+EXIT_QUOTA=3
 warn() { printf 'oute-regression: aviso: %s\n' "$*" >&2; }
 
-ROUNDS=3; CODEX=0; JSON=0; ONLY=()
+ORIG_ARGS=("$@")
+ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rounds) shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]?$ ]] || die2 "--rounds pede um inteiro de 1 a 99"; ROUNDS="$1" ;;
+    --model) shift; [[ $# -gt 0 && "$1" =~ ^(haiku|sonnet)$ ]] || die2 "--model pede haiku ou sonnet"; ONLY_MODEL+=("$1") ;;
+    --keep) shift; [[ $# -gt 0 && "$1" == /* && "$1" != *..* ]] || die2 "--keep pede uma pasta absoluta, sem .."; KEEP="$1" ;;
     --codex) CODEX=1 ;;
     --task) shift; [[ $# -gt 0 && "$1" =~ ^[a-z][a-z0-9-]*$ ]] || die2 "--task pede o nome de uma tarefa"; ONLY+=("$1") ;;
     --json) JSON=1 ;;
@@ -47,14 +62,23 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# o shell do Bash tool do Claude Code não herda as OTEL_* (#250): o `claude -p` das tarefas não exportaria nada e a conversa
+# não chegaria ao bucket nem ao agent-studio (#608). Sem o endpoint no ambiente, a suíte se reexecuta sob `oute-emit run`,
+# que leva o ambiente de telemetria do ~/.oute_env; OUTE_REGRESSION_TELEMETRY evita o laço se o ~/.oute_env também não o tem
+if [[ -z "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" && -z "${OUTE_REGRESSION_TELEMETRY:-}" ]] && command -v oute-emit >/dev/null 2>&1; then
+  OUTE_REGRESSION_TELEMETRY=1 exec oute-emit run -- "$0" "${ORIG_ARGS[@]}"
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="${OUTE_REGRESSION_DIR:-}"
 [[ -n "$DIR" ]] || for d in /usr/local/lib/oute/regression "$HERE/regression"; do [[ -d "$d" ]] && { DIR="$d"; break; }; done
 [[ -d "$DIR" ]] || die2 "sem a pasta das tarefas (regression/)"
-TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-120}"
+TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-180}"
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_TIMEOUT tem de ser inteiro > 0"
 STUDIO_WAIT="${OUTE_REGRESSION_STUDIO_WAIT:-60}"; STUDIO_STEP="${OUTE_REGRESSION_STUDIO_STEP:-5}"
 [[ "$STUDIO_WAIT" =~ ^[0-9]+$ && "$STUDIO_STEP" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_STUDIO_WAIT/_STEP inválidos"
+PARALLEL="${OUTE_REGRESSION_PARALLEL:-8}"
+[[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_PARALLEL tem de ser inteiro > 0"
 MAX_PCT="${OUTE_REGRESSION_MAX_PCT:-60}"
 [[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_REGRESSION_MAX_PCT tem de ser um número"
 for c in jq timeout claude oute-select; do command -v "$c" >/dev/null || die2 "precisa de $c no PATH"; done
@@ -62,7 +86,7 @@ for c in jq timeout claude oute-select; do command -v "$c" >/dev/null || die2 "p
 
 # --- tarefas: nome e se vão ao Codex, lidos de cada arquivo (em subshell: o arquivo define funções)
 TASKS=(); declare -A FILE CODEX_TASK
-for f in "$DIR"/[0-9]*-*.sh; do
+for f in $(printf '%s\n' "$DIR"/[0-9]*-*.sh | sort -V); do
   [[ -f "$f" ]] || continue
   read -r name cx < <( ( unset TASK_NAME TASK_CODEX; . "$f"; echo "${TASK_NAME:-} ${TASK_CODEX:-0}" ) )
   [[ -n "$name" ]] || die2 "tarefa sem TASK_NAME: $f"
@@ -80,22 +104,40 @@ RUN_TASKS=(); for t in "${TASKS[@]}"; do selected "$t" && RUN_TASKS+=("$t"); don
 RUN_STUDIO=0; selected "$STUDIO_TASK" && RUN_STUDIO=1
 [[ ${#RUN_TASKS[@]} -gt 0 || $RUN_STUDIO = 1 ]] || die2 "nenhuma tarefa selecionada"
 
-# --- cota: janela >= MAX_PCT = não começa (saída 2); desconhecida ou sem o comando = aviso e segue
+# --- cota: janela >= MAX_PCT = não começa (saída 3); desconhecida ou sem o comando = aviso e segue. Só conta a cota das
+# assinaturas que a execução usa (#598): as tarefas rodam no Claude e, com --codex, também no Codex; a cota de outra assinatura
+# (de outra rodada, por exemplo) não trava a suíte.
+USED_SUBS='["claude"]'; [[ $CODEX = 0 ]] || USED_SUBS='["claude","codex"]'
 if command -v oute-quota >/dev/null; then
   q="$(oute-quota --json 2>/dev/null)" || q=""
-  pct="$(jq -r '[.agents[]? | select(.status == "ok") | .windows[]?.used_pct | numbers] | max // empty' <<<"$q" 2>/dev/null)"
+  pct=""; qagent=""; qwin=""
+  read -r pct qagent qwin < <(jq -r --argjson used "$USED_SUBS" '[.agents | to_entries[]? | select(.value.status == "ok") | .key as $a
+    | select($used | index($a)) | .value.windows | to_entries[]? | select(.value.used_pct | type == "number") | {a: $a, w: .key, p: .value.used_pct}]
+    | if length == 0 then empty else max_by(.p) | "\(.p) \(.a) \(.w)" end' <<<"$q" 2>/dev/null)
   if [[ -z "$pct" ]]; then
-    warn "cota desconhecida (oute-quota sem leitura); sigo"
+    warn "cota desconhecida (oute-quota sem leitura das assinaturas usadas: $(jq -r -n --argjson u "$USED_SUBS" '$u | join(", ")')); sigo"
   elif awk -v p="$pct" -v m="$MAX_PCT" 'BEGIN { exit !(p >= m) }'; then
-    die2 "cota em ${pct}% (limite ${MAX_PCT}%): a suíte não começou"
+    printf 'oute-regression: cota em %s%% (assinatura %s, janela %s; limite %s%%): a suíte não começou; quem abre PR de prompt declara que a regressão não rodou\n' \
+      "$pct" "$qagent" "$qwin" "$MAX_PCT" >&2
+    exit "$EXIT_QUOTA"
   fi
 else
   warn "sem oute-quota no PATH: cota não conferida; sigo"
 fi
 
-# --- modelos: Haiku da tabela do seletor (fase `ops`); o Codex da mesma linha, só com --codex
-MODEL="$(oute-select --json --phase ops 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
-[[ -n "$MODEL" ]] || die2 "o oute-select não deu o modelo da fase ops (tabela ausente?)"
+# --- modelos: Haiku (fase `ops`) e Sonnet (fase `build`) da tabela do seletor; o Codex da mesma linha, só com --codex
+declare -A MODEL_ID; ALIASES=()
+for pair in haiku:ops sonnet:build; do
+  al="${pair%%:*}"
+  if [[ ${#ONLY_MODEL[@]} -gt 0 ]]; then
+    want=0; for m in "${ONLY_MODEL[@]}"; do [[ "$m" = "$al" ]] && want=1; done
+    (( want )) || continue
+  fi
+  id="$(oute-select --json --phase "${pair#*:}" 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  [[ -n "$id" ]] || die2 "o oute-select não deu o modelo da fase ${pair#*:} (tabela ausente?)"
+  MODEL_ID[$al]="$id"; ALIASES+=("$al")
+done
+MODELS_CSV="$(IFS=,; echo "${ALIASES[*]}")"
 CMODEL=""; CEFFORT=""
 if [[ $CODEX = 1 ]]; then
   csel="$(oute-select --json --phase ops --agent codex 2>/dev/null)"
@@ -111,7 +153,7 @@ REAL_EMIT="$(command -v oute-emit || true)"
 # --- dublês: gravam o que receberam em $REC (o caminho vai escrito no próprio dublê)
 make_stubs() { # bin rec
   local bin="$1" rec="$2"
-  mkdir -p "$bin" "$rec"
+  mkdir -p "$bin" "$rec/fx"
   cat > "$bin/oute-propose" <<STUB
 #!/usr/bin/env bash
 printf 'ARGS %s\n' "\$*" >> "$rec/propose.log"
@@ -135,6 +177,37 @@ printf '%s\n' "\$*" >> "$rec/ssh.log"
 echo "ssh: bloqueado pelo oute-regression" >&2
 exit 255
 STUB
+  # gh: só o que as tarefas precisam, com as respostas de $rec/fx/ (a tarefa grava no task_setup); nada chega ao GitHub.
+  # `issue view N --comments` sem `--json` mostra só os comentários, como o gh 2.102.0 (sem o corpo, #475)
+  cat > "$bin/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$rec/gh.log"
+fx="$rec/fx"; all=" \$* "
+case "\$1 \$2" in
+  "issue view")
+    if [[ "\$all" == *" --comments "* && "\$all" != *" --json "* ]]; then cat "\$fx/issue-\$3.comments" 2>/dev/null; exit 0; fi
+    cat "\$fx/issue-\$3.md" 2>/dev/null || { echo "gh: issue \$3 não encontrada" >&2; exit 1; } ;;
+  "issue list")
+    if [[ "\$all" == *" --json "* ]]; then cat "\$fx/issue-list.json" 2>/dev/null || echo '[]'; else cat "\$fx/issue-list.txt" 2>/dev/null; fi ;;
+  "issue create") echo "https://github.com/regression/regression/issues/99" ;;
+  "issue comment"|"issue close"|"issue edit") echo "https://github.com/regression/regression/issues/\${3:-0}" ;;
+  "pr create")
+    prev=""
+    for a in "\$@"; do
+      case "\$prev" in
+        --body-file|-F) if [[ "\$a" = - ]]; then cat > "$rec/pr-body.md"; else cp "\$a" "$rec/pr-body.md" 2>/dev/null; fi ;;
+        --body|-b) printf '%s\n' "\$a" > "$rec/pr-body.md" ;;
+      esac
+      prev="\$a"
+    done
+    echo "https://github.com/regression/regression/pull/100" ;;
+  "pr merge") echo "gh: merge bloqueado pelo oute-regression" >&2; exit 77 ;;
+  "repo view")
+    if [[ "\$all" == *" --json "* ]]; then echo '{"nameWithOwner":"regression/regression"}'; else echo "regression/regression"; fi ;;
+  "auth status") exit 0 ;;
+  *) echo "gh: bloqueado pelo oute-regression" >&2; exit 1 ;;
+esac
+STUB
   # oute-emit: o de verdade, sem as OTEL_* (como no shell do Bash tool, #250) e com o debug ligado
   cat > "$bin/oute-emit" <<STUB
 #!/usr/bin/env bash
@@ -145,40 +218,55 @@ env -u OTEL_EXPORTER_OTLP_ENDPOINT -u OTEL_EXPORTER_OTLP_LOGS_ENDPOINT -u OTEL_R
 exit 0
 STUB
   chmod +x "$bin"/*
+  # a memória: servidor MCP `ai-memory` de mentira (grava cada chamada em $rec/memory.log), no lugar do real
+  jq -n --arg py "$DIR/ai-memory-double.py" --arg rec "$rec" \
+    '{mcpServers: {"ai-memory": {command: "sh", args: ["-c", "cd \"$1\" && exec python3 \"$2\"", "sh", $rec, $py]}}}' > "$rec/mcp.json"
 }
 
-# --- uma chamada ao agente (task, round, agent): resultado em $TMP/<chave>/{status,reason,cost,id}
+# --- uma chamada ao agente (task, round, agent, alias): resultado em $TMP/<chave>/{status,reason,cost,secs,turns,id}
 #     status: ok | fail (o grader reprovou) | error (o agente não rodou)
 attempt() {
-  local name="$1" round="$2" agent="$3" key att
-  key="$name-$agent-r$round"; att="$TMP/$key"
+  local name="$1" round="$2" agent="$3" alias="$4" key att
+  key="$name-$agent-$alias-r$round"; att="$TMP/$key"
   mkdir -p "$att/work"
   make_stubs "$att/bin" "$att/rec"
   (
-    export REC="$att/rec" WORK="$att/work"
-    unset TASK_NAME TASK_CODEX; unset -f task_setup task_prompt task_grade
+    export REC="$att/rec" WORK="$att/work" TRANSCRIPT="$att/out" RESULT_JSON="$att/res"
+    unset TASK_NAME TASK_CODEX TASK_MAX_TURNS; unset -f task_setup task_prompt task_grade task_secrets
     . "${FILE[$name]}"
-    TASK_ID="$RUN_ID-$name-$agent-r$round"; SLUG="regression-$name"
+    TASK_ID="$RUN_ID-$name-$agent-$alias-r$round"; SLUG="regression-$name"
     AGENT_CWD="$WORK"
     cd "$WORK" || exit 1
     printf 'workspace = "regression"\nproject = "regression"\n' > .ai-memory.toml
     ! declare -F task_setup >/dev/null || task_setup >/dev/null 2>&1
+    # o que a tarefa declara como segredo (para --keep apagar do que for guardado); fica fora do que é copiado
+    ! declare -F task_secrets >/dev/null || task_secrets > "$att/secrets" 2>/dev/null || true
     echo "$TASK_ID" > "$att/id"
     prompt="$(task_prompt)"
     ora="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG"
     cd "$AGENT_CWD" || exit 1
     export PATH="$att/bin:$PATH" OTEL_RESOURCE_ATTRIBUTES="$ora"
+    t0="$(date +%s)"
     if [[ $agent = claude ]]; then
-      timeout "$TIMEOUT" claude -p "$prompt" --model "$MODEL" --max-turns 8 --output-format json \
+      timeout "$TIMEOUT" claude -p "$prompt" --model "${MODEL_ID[$alias]}" --max-turns "${TASK_MAX_TURNS:-8}" \
+        --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose \
         > "$att/out" 2> "$att/err" < /dev/null
-      if ! jq -e 'type == "object"' "$att/out" >/dev/null 2>&1; then
+      jq -c 'select(type == "object" and .type == "result")' "$att/out" 2>/dev/null | tail -n1 > "$att/res"
+      echo $(( $(date +%s) - t0 )) > "$att/secs"
+      if [[ ! -s "$att/res" ]]; then
         echo error > "$att/status"; echo "o claude não devolveu o resultado" > "$att/reason"; exit 0
       fi
-      jq -r '.total_cost_usd // 0 | numbers' "$att/out" > "$att/cost" 2>/dev/null || echo 0 > "$att/cost"
+      jq -r '.total_cost_usd // 0 | numbers' "$att/res" > "$att/cost" 2>/dev/null || echo 0 > "$att/cost"
+      jq -r '.num_turns // 0 | numbers' "$att/res" > "$att/turns" 2>/dev/null || echo 0 > "$att/turns"
+      if jq -e '.is_error == true' "$att/res" >/dev/null 2>&1; then
+        echo error > "$att/status"; echo "o claude devolveu erro" > "$att/reason"; exit 0
+      fi
     else
       effort=(); [[ -z "$CEFFORT" ]] || effort=(-c "model_reasoning_effort=\"$CEFFORT\"")
-      if ! timeout "$TIMEOUT" codex exec --skip-git-repo-check -m "$CMODEL" ${effort[@]+"${effort[@]}"} "$prompt" \
-           > "$att/out" 2> "$att/err" < /dev/null; then
+      timeout "$TIMEOUT" codex exec --skip-git-repo-check -m "$CMODEL" ${effort[@]+"${effort[@]}"} "$prompt" \
+        > "$att/out" 2> "$att/err" < /dev/null; crc=$?
+      echo $(( $(date +%s) - t0 )) > "$att/secs"
+      if (( crc != 0 )); then
         echo error > "$att/status"; echo "o codex não rodou" > "$att/reason"; exit 0
       fi
     fi
@@ -188,40 +276,58 @@ attempt() {
   [[ -s "$att/status" ]] || { echo error > "$att/status"; echo "sem resultado" > "$att/reason"; }
 }
 
-# --- as rodadas: as tarefas de uma rodada correm juntas; rodadas em sequência
-KEYS=()    # <tarefa>[:codex]
+# --- as rodadas: as chamadas de uma rodada correm juntas (no máximo PARALLEL); rodadas em sequência
+KEYS=()    # <tarefa>@<modelo> | <tarefa>:codex
 for t in ${RUN_TASKS[@]+"${RUN_TASKS[@]}"}; do
-  KEYS+=("$t"); [[ $CODEX = 1 && "${CODEX_TASK[$t]}" = 1 ]] && KEYS+=("$t:codex")
+  for al in "${ALIASES[@]}"; do KEYS+=("$t@$al"); done
+  [[ $CODEX = 1 && "${CODEX_TASK[$t]}" = 1 ]] && KEYS+=("$t:codex")
 done
+key_parts() { # chave → KT (tarefa), KA (agente), KM (modelo ou codex)
+  local k="$1"
+  if [[ "$k" = *:codex ]]; then KT="${k%%:*}"; KA=codex; KM=codex; else KT="${k%%@*}"; KA=claude; KM="${k##*@}"; fi
+  return 0
+}
 for ((r = 1; r <= ROUNDS; r++)); do
   for k in ${KEYS[@]+"${KEYS[@]}"}; do
-    t="${k%%:*}"; a=claude; [[ "$k" = *:codex ]] && a=codex
-    attempt "$t" "$r" "$a" &
+    key_parts "$k"
+    while (( $(jobs -rp | wc -l) >= PARALLEL )); do wait -n; done
+    attempt "$KT" "$r" "$KA" "$KM" &
   done
   wait
 done
 
 # resultado de uma chave: contagem de ok/fail/error nas rodadas e o veredito
-declare -A VERDICT DETAIL
-ran_any=0; total_cost=0
+declare -A VERDICT DETAIL CALLS SECS COST TURNS
+for al in "${ALIASES[@]}" codex; do CALLS[$al]=0; SECS[$al]=0; COST[$al]=0; TURNS[$al]=0; done
+ran_any=0; total_cost=0; total_calls=0; total_secs=0
 verdict() { # falhas rodadas
   if (( $2 == 1 )); then (( $1 >= 1 )) && echo vermelho || echo verde
   else (( $1 > 1 )) && echo vermelho || echo verde; fi
 }
 for k in ${KEYS[@]+"${KEYS[@]}"}; do
-  t="${k%%:*}"; a=claude; [[ "$k" = *:codex ]] && a=codex
-  nok=0; nfail=0; nerr=0; why=""
+  key_parts "$k"; t="$KT"; a="$KA"; al="$KM"
+  nok=0; nfail=0; nerr=0; why=""; seen_note=""
   for ((r = 1; r <= ROUNDS; r++)); do
-    att="$TMP/$t-$a-r$r"
+    att="$TMP/$t-$a-$al-r$r"
     case "$(cat "$att/status" 2>/dev/null)" in
-      ok) nok=$((nok + 1)); ran_any=1 ;;
+      ok) nok=$((nok + 1)); ran_any=1; [[ -z "$(head -n1 "$att/reason" 2>/dev/null)" ]] || seen_note="$(head -n1 "$att/reason")" ;;
       fail) nfail=$((nfail + 1)); ran_any=1; why="$(head -n1 "$att/reason")" ;;
       *) nerr=$((nerr + 1)); why="$(head -n1 "$att/reason" 2>/dev/null)" ;;
     esac
-    [[ $a != claude ]] || total_cost="$(awk -v a="$total_cost" -v b="$(cat "$att/cost" 2>/dev/null || echo 0)" 'BEGIN { printf "%.4f", a + b }')"
+    CALLS[$al]=$(( ${CALLS[$al]} + 1 )); total_calls=$((total_calls + 1))
+    s="$(cat "$att/secs" 2>/dev/null || echo 0)"; [[ "$s" =~ ^[0-9]+$ ]] || s=0
+    SECS[$al]=$(( ${SECS[$al]} + s )); total_secs=$((total_secs + s))
+    tu="$(cat "$att/turns" 2>/dev/null || echo 0)"; [[ "$tu" =~ ^[0-9]+$ ]] || tu=0
+    TURNS[$al]=$(( ${TURNS[$al]} + tu ))
+    if [[ $a = claude ]]; then
+      c="$(cat "$att/cost" 2>/dev/null || echo 0)"
+      COST[$al]="$(awk -v a="${COST[$al]}" -v b="$c" 'BEGIN { printf "%.4f", a + b }')"
+      total_cost="$(awk -v a="$total_cost" -v b="$c" 'BEGIN { printf "%.4f", a + b }')"
+    fi
   done
   VERDICT[$k]="$(verdict $((nfail + nerr)) "$ROUNDS")"
   DETAIL[$k]="$nok/$ROUNDS ok"
+  [[ -z "$seen_note" ]] || DETAIL[$k]+=" (visto: $seen_note)"
   (( nfail + nerr == 0 )) || DETAIL[$k]+=", $nfail reprovada(s), $nerr sem rodar${why:+ (última: $why)}"
 done
 if [[ ${#KEYS[@]} -gt 0 && $ran_any = 0 ]]; then
@@ -229,10 +335,46 @@ if [[ ${#KEYS[@]} -gt 0 && $ran_any = 0 ]]; then
 fi
 
 # --- studio: a conversa de cada chamada do claude aparece no agent-studio com o oute.task.id do teste
-studio_get() { # id → código HTTP em STUDIO_CODE e corpo em $TMP/studio.body; 1 = não deu para perguntar
-  local tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; tok="${tok//\"/\\\"}"
-  STUDIO_CODE="$(curl -sS --max-time 20 -o "$TMP/studio.body" -w '%{http_code}' -K - -G --data-urlencode "id=$1" \
-    "${AGENT_STUDIO_URL%/}/sessao" 2>/dev/null <<<"header = \"Authorization: Bearer $tok\"")" || return 1
+studio_curl() { # url [args do curl…] → código HTTP em STUDIO_CODE e corpo em $TMP/studio.body; 1 = não deu para perguntar
+  local url="$1" tok="${AGENT_STUDIO_READ_TOKEN//\\/\\\\}"; shift
+  tok="${tok//\"/\\\"}"
+  STUDIO_CODE="$(curl -sS --max-time 20 -o "$TMP/studio.body" -w '%{http_code}' -K - "$@" "$url" 2>/dev/null \
+    <<<"header = \"Authorization: Bearer $tok\"")" || return 1
+  return 0
+}
+studio_get() { # id → a casca da sessão (GET /sessao?id=)
+  local id="$1"
+  studio_curl "${AGENT_STUDIO_URL%/}/sessao" -G --data-urlencode "id=$id"
+  return $?
+}
+# a conversa de <id> chegou? STUDIO_RES = seen | wait | nores (a casca não traz o resumo, nem o bloco dele, ou o bloco
+# não traz o número de conversas: formato que a suíte não sabe ler) | down:<motivo>. Duas formas, a de antes do
+# carregamento por bloco (#536: `data-resumo-sessao` e `data-agents` na própria página) e a de agora (a casca aponta o
+# bloco /bloco/sessao/resumo, e a conversa chegou quando o tile "Conversas" dele é >= 1)
+BLOCO_RE='^/bloco/sessao/resumo\?[A-Za-z0-9_=&.-]+$'
+studio_probe() {
+  local id="$1" path conv
+  STUDIO_RES=wait
+  studio_get "$id" || { STUDIO_RES="down:agent-studio fora do ar"; return 0; }
+  case "$STUDIO_CODE" in
+    200) ;;
+    404) return 0 ;;
+    *) STUDIO_RES="down:agent-studio respondeu HTTP $STUDIO_CODE"; return 0 ;;
+  esac
+  if grep -q "data-resumo-sessao=\"$id\"" "$TMP/studio.body" && grep -q 'data-agents="[^"]*claude' "$TMP/studio.body"; then
+    STUDIO_RES=seen; return 0
+  fi
+  path="$(grep -o 'hx-get="/bloco/sessao/resumo?[^"]*"' "$TMP/studio.body" | head -n1 | sed 's/^hx-get="//; s/"$//; s/&amp;/\&/g')"
+  [[ "$path" =~ $BLOCO_RE ]] || { STUDIO_RES=nores; return 0; }
+  studio_curl "${AGENT_STUDIO_URL%/}$path" || { STUDIO_RES="down:agent-studio fora do ar"; return 0; }
+  case "$STUDIO_CODE" in
+    200) conv="$(tr -d '\n' < "$TMP/studio.body" | sed -n 's|.*Conversas</span><strong class="tile-valor">\([0-9][0-9]*\)<.*|\1|p')"
+         [[ -n "$conv" ]] || { STUDIO_RES=nores; return 0; }
+         (( conv >= 1 )) && STUDIO_RES=seen ;;
+    404) ;;
+    *) STUDIO_RES="down:agent-studio respondeu HTTP $STUDIO_CODE" ;;
+  esac
+  return 0
 }
 if [[ $RUN_STUDIO = 1 ]]; then
   STUDIO_KEY="$STUDIO_TASK"
@@ -241,35 +383,36 @@ if [[ $RUN_STUDIO = 1 ]]; then
   elif ! command -v curl >/dev/null; then
     VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="sem curl"
   else
-    declare -A SEEN; pending=0; unreachable=""
-    for att in "$TMP"/*-claude-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error ]] && pending=$((pending + 1)); done
+    declare -A SEEN; pending=0; unreachable=""; noresumo=0
+    for att in "$TMP"/*-claude-*-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error ]] && pending=$((pending + 1)); done
     waited=0
     while :; do
-      for att in "$TMP"/*-claude-r*; do
+      for att in "$TMP"/*-claude-*-r*; do
         [[ -f "$att/id" && "$(cat "$att/status")" != error ]] || continue
         id="$(cat "$att/id")"; [[ -z "${SEEN[$id]:-}" ]] || continue
-        if ! studio_get "$id"; then unreachable="agent-studio fora do ar"; break; fi
-        case "$STUDIO_CODE" in
-          200) grep -q "data-resumo-sessao=\"$id\"" "$TMP/studio.body" && grep -q 'data-agents="[^"]*claude' "$TMP/studio.body" \
-                 && SEEN[$id]=1 ;;
-          404) ;;
-          *) unreachable="agent-studio respondeu HTTP $STUDIO_CODE"; break ;;
+        studio_probe "$id"
+        case "$STUDIO_RES" in
+          seen) SEEN[$id]=1 ;;
+          nores) noresumo=1; break ;;
+          down:*) unreachable="${STUDIO_RES#down:}"; break ;;
         esac
       done
-      [[ -z "$unreachable" ]] || break
-      left=0; for att in "$TMP"/*-claude-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error && -z "${SEEN[$(cat "$att/id")]:-}" ]] && left=1; done
+      [[ -z "$unreachable" && $noresumo = 0 ]] || break
+      left=0; for att in "$TMP"/*-claude-*-r*; do [[ -f "$att/id" && "$(cat "$att/status")" != error && -z "${SEEN[$(cat "$att/id")]:-}" ]] && left=1; done
       [[ $left = 1 && $waited -lt $STUDIO_WAIT ]] || break
       sleep "$STUDIO_STEP"; waited=$((waited + STUDIO_STEP))
     done
     if [[ -n "$unreachable" ]]; then
       VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="$unreachable"
+    elif [[ $noresumo = 1 ]]; then
+      VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="a casca da sessão no agent-studio vem sem o resumo (formato que a suíte não lê)"
     elif [[ $pending = 0 ]]; then
       VERDICT[$STUDIO_KEY]=nao-verificado; DETAIL[$STUDIO_KEY]="nenhuma conversa do claude para procurar"
     else
       sfail=0; sok=0
       for ((r = 1; r <= ROUNDS; r++)); do
         miss=0; any=0
-        for att in "$TMP"/*-claude-r$r; do
+        for att in "$TMP"/*-claude-*-r$r; do
           [[ -f "$att/id" && "$(cat "$att/status")" != error ]] || continue
           any=1; [[ -n "${SEEN[$(cat "$att/id")]:-}" ]] || miss=1
         done
@@ -292,23 +435,89 @@ for k in "${KEYS[@]}"; do
   tasks_csv+="${tasks_csv:+,}$k=${VERDICT[$k]}"
 done
 RESULT=verde; (( red == 0 )) || RESULT=vermelho
+model_ids=""; for al in "${ALIASES[@]}"; do model_ids+="${model_ids:+,}${MODEL_ID[$al]}"; done
+avg() { # soma n formato → média
+  local sum="$1" n="$2" fmt="$3"
+  awk -v a="$sum" -v n="$n" -v f="$fmt" 'BEGIN { if (n == 0) printf "0"; else printf f, a / n }'
+  return $?
+}
+# o que N repetições permitem afirmar: 0 falha em N dá só o limite inferior 0,05^(1/N) da taxa de aprovação (95%, unilateral);
+# ver ao menos 1 falha de uma variante que falha d das vezes, com 95% de chance, pede ceil(ln 0,05 / ln(1-d)) repetições
+lower_pct="$(awk -v n="$ROUNDS" 'BEGIN { printf "%.1f", 100 * exp(log(0.05) / n) }')"
+need() { # d (taxa de falha) → repetições
+  local d="$1"
+  awk -v d="$d" 'BEGIN { x = log(0.05) / log(1 - d); n = int(x); if (n < x) n++; print n }'
+  return $?
+}
+red_rule="Vermelho = mais de 1 falha em $ROUNDS; 1 falha em $ROUNDS fica verde e não prova que a tarefa passa sempre."
+[[ $ROUNDS != 1 ]] || red_rule="Vermelho = a única repetição falhar; passar nela não prova que a tarefa passa sempre."
+REPS_TEXT="0 falha em $ROUNDS repetições só permite afirmar taxa de aprovação >= ${lower_pct}% (confiança de 95%). $red_rule Para ver ao menos 1 falha, com 95% de chance, numa variante que falha 50% / 20% / 10% das vezes: $(need 0.5) / $(need 0.2) / $(need 0.1) repetições."
 {
-  printf 'oute-regression %s · imagem %s · claude %s (%s) · %s rodada(s)\n' "$RUN_ID" "$image" "$CLAUDE_VER" "$MODEL" "$ROUNDS"
-  for k in "${KEYS[@]}"; do printf '  %-16s %-15s %s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}"; done
+  printf 'oute-regression %s · imagem %s · claude %s · %s rodada(s)\n' "$RUN_ID" "$image" "$CLAUDE_VER" "$ROUNDS"
+  for al in "${ALIASES[@]}"; do printf '  modelo %s = %s\n' "$al" "${MODEL_ID[$al]}"; done
+  for k in "${KEYS[@]}"; do printf '  %-24s %-15s %s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}"; done
   printf 'resultado: %s (%d verde, %d vermelho, %d não verificado) · custo equivalente na API: US$ %s\n' \
     "$RESULT" "$green" "$red" "$unver" "$total_cost"
+  printf 'repetições: %s\n' "$REPS_TEXT"
+  printf 'custo por execução (chamadas, tempo e custo médios por chamada):\n'
+  for al in "${ALIASES[@]}" codex; do
+    (( ${CALLS[$al]} > 0 )) || continue
+    printf '  %-7s %3d chamadas · %s s · %s turnos · US$ %s por chamada (US$ %s no total)\n' "$al" "${CALLS[$al]}" \
+      "$(avg "${SECS[$al]}" "${CALLS[$al]}" '%.0f')" "$(avg "${TURNS[$al]}" "${CALLS[$al]}" '%.1f')" \
+      "$(avg "${COST[$al]}" "${CALLS[$al]}" '%.4f')" "${COST[$al]}"
+  done
 } >&2
 if [[ $JSON = 1 ]]; then
-  jq -n --arg run "$RUN_ID" --arg image "$image" --arg claude "$CLAUDE_VER" --arg codex "$CODEX_VER" --arg model "$MODEL" \
+  mj="$(for al in "${ALIASES[@]}" codex; do
+    (( ${CALLS[$al]} > 0 )) || continue
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$al" "${MODEL_ID[$al]:-$CMODEL}" "${CALLS[$al]}" "${SECS[$al]}" "${TURNS[$al]}" "${COST[$al]}"
+  done | jq -R -s '[split("\n")[] | select(length > 0) | split("\t") | {key: .[0], value: {id: .[1], calls: (.[2] | tonumber),
+    secs: (.[3] | tonumber), turns: (.[4] | tonumber), cost_usd: (.[5] | tonumber)}}] | from_entries')"
+  jq -n --arg run "$RUN_ID" --arg image "$image" --arg claude "$CLAUDE_VER" --arg codex "$CODEX_VER" --arg models "$model_ids" \
     --argjson rounds "$ROUNDS" --arg result "$RESULT" --argjson cost "$total_cost" --arg tasks "$tasks_csv" \
-    '{run:$run, image:$image, claude:$claude, codex:$codex, model:$model, rounds:$rounds, result:$result, cost_usd:$cost,
+    --arg reps "$REPS_TEXT" --argjson per_model "$mj" --argjson calls "$total_calls" --argjson secs "$total_secs" \
+    '{run:$run, image:$image, claude:$claude, codex:$codex, models:($models | split(",")), rounds:$rounds, repetitions:$reps,
+      result:$result, calls:$calls, secs:$secs, cost_usd:$cost, per_model:$per_model,
       tasks:($tasks | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries)}'
 fi
+
+# --- --keep: copia o que ficou de cada chamada, sem valor de segredo
+redact_file() { # arquivo; valores em REDACT
+  local f="$1" content v
+  content="$(cat -- "$f"; printf x)"; content="${content%x}"
+  for v in ${REDACT[@]+"${REDACT[@]}"}; do content="${content//"$v"/[REDACTED]}"; done
+  printf '%s' "$content" > "$f"
+  return 0
+}
+keep_run() {
+  local dest="$KEEP/$RUN_ID" att key n v f
+  mkdir -p "$dest" || { warn "--keep: não deu para criar $dest"; return 0; }
+  for att in "$TMP"/*-r[0-9]*; do
+    [[ -d "$att" ]] || continue
+    key="$(basename "$att")"; mkdir -p "$dest/$key"
+    REDACT=()
+    while IFS='=' read -r n v; do
+      [[ "$n" =~ (TOKEN|SECRET|PASSWORD|KEY)$ && ${#v} -ge 8 ]] && REDACT+=("$v")
+    done < <(env)
+    if [[ -f "$att/secrets" ]]; then
+      while IFS= read -r v; do [[ ${#v} -ge 4 ]] && REDACT+=("$v"); done < "$att/secrets"
+    fi
+    [[ ! -f "$att/out" ]] || cp "$att/out" "$dest/$key/transcript.jsonl"
+    [[ ! -f "$att/res" ]] || cp "$att/res" "$dest/$key/res.json"
+    for f in err status reason id secs cost turns; do [[ ! -f "$att/$f" ]] || cp "$att/$f" "$dest/$key/$f"; done
+    for f in "$att"/rec/*.log "$att"/rec/*.err "$att"/rec/pr-body.md; do [[ ! -f "$f" ]] || cp "$f" "$dest/$key/"; done
+    for f in "$dest/$key"/*; do [[ ! -f "$f" ]] || redact_file "$f"; done
+  done
+  printf 'oute-regression: transcrições e registros guardados em %s\n' "$dest" >&2
+  return 0
+}
+[[ -z "$KEEP" ]] || keep_run
 
 # --- o evento da rodada (best-effort: o oute-emit nunca falha nem leva texto de prompt ou de resposta)
 if [[ -n "$REAL_EMIT" ]]; then
   "$REAL_EMIT" regression "run=$RUN_ID" "image=$image" "claude=$CLAUDE_VER" "codex=$CODEX_VER" "rounds=$ROUNDS" \
     "result=$RESULT" "green=$green" "red=$red" "unverified=$unver" "cost=$total_cost" "tasks=$tasks_csv" \
+    "models=$model_ids" "calls=$total_calls" "secs=$total_secs" \
     "agent=${OUTE_REGRESSION_AGENT:-human}" >/dev/null 2>&1 || true
 else
   warn "sem oute-emit no PATH: o evento oute.regression.run não foi enviado"

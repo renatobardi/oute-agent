@@ -39,6 +39,16 @@ check "config com --profile agent-studio: ai-memory está presente"       jqe '.
 check "config com --profile agent-studio: agent-studio presente"         jqe '.services."agent-studio" != null' <<<"$OUT"
 check "config com --profile agent-studio: surrealdb presente"            jqe '.services.surrealdb != null' <<<"$OUT"
 
+# ---- 2b. dados do agent-studio e do SurrealDB (#570): volume docker por padrão, pasta do host quando o .env aponta
+vol() { jq -e --arg s "$1" --arg t "$2" --arg ty "$3" --arg src "$4" \
+  '.services[$s].volumes[] | select(.target == $t) | .type == $ty and .source == $src' >/dev/null; }
+check "dados: por padrão o DuckDB fica no volume docker oute-agent-studio"   vol agent-studio /data/agent-studio volume oute-agent-studio <<<"$OUT"
+check "dados: por padrão o SurrealDB fica no volume docker oute-surrealdb"   vol surrealdb /data/surrealdb volume oute-surrealdb <<<"$OUT"
+OUT="$(compose_config "agent-studio" OUTE_AGENT_STUDIO_DIR=/srv/oute/duckdb OUTE_SURREALDB_DIR=/srv/oute/surrealdb 2>"$TMP/cfg.err")" || OUT=""
+check "dados: OUTE_AGENT_STUDIO_DIR monta a pasta do host no DuckDB"         vol agent-studio /data/agent-studio bind /srv/oute/duckdb <<<"$OUT"
+check "dados: OUTE_SURREALDB_DIR monta a pasta do host no SurrealDB"         vol surrealdb /data/surrealdb bind /srv/oute/surrealdb <<<"$OUT"
+check "dados: o volume-init acerta o dono da mesma pasta do SurrealDB"       vol volume-init /v/surrealdb bind /srv/oute/surrealdb <<<"$OUT"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"

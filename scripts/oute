@@ -217,6 +217,21 @@ agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}"
 # e sobe o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio
 # (config/otel/agent-studio.yaml, #189): pela rede docker no host com o agent-studio, pelo vhost nos outros (#190).
 # Sem a credencial de ingestão, none.yaml e o collector não muda (a fila não enche de 401).
+# Pasta do host para os dados do agent-studio (#570): OUTE_AGENT_STUDIO_DIR (DuckDB) e OUTE_SURREALDB_DIR, no .env ou no
+# ambiente. Pasta errada para a subida: o Docker criaria uma pasta vazia e o agent-studio subiria com um banco novo,
+# como se o histórico tivesse sumido. Sem a variável, o compose usa o volume docker.
+studio_data_dir() {
+  local var="$1" dir
+  dir="${!var:-$(env_get "$var" || true)}"   # sem .env, o env_get falha sob pipefail
+  [[ -n "$dir" ]] || return 0
+  [[ "$dir" == /* ]] || { echo "oute: $var=$dir precisa ser um caminho absoluto" >&2; return 1; }
+  [[ -d "$dir" ]] || { echo "oute: $var=$dir não existe. Crie a pasta e copie os dados antes de subir (o agent-studio" \
+    "não pode subir com um banco vazio no lugar do histórico)" >&2; return 1; }
+  local owner; owner="$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir")"
+  [[ "$owner" == "${CONTAINER_UID:-10001}" ]] || { echo "oute: $var=$dir tem dono $owner; o dono precisa ser" \
+    "${CONTAINER_UID:-10001} (o usuário do container)" >&2; return 1; }
+  export "$var=$dir"
+}
 agent_studio_up() {
   export OUTE_OTEL_STUDIO=none AGENT_STUDIO_URL="$STUDIO_LOCAL_URL"
   # transição (#256): sem a credencial nova, a ingestão segue com o token único de antes
@@ -240,6 +255,8 @@ agent_studio_up() {
     export AGENT_STUDIO_INGEST_TOKEN OUTE_OTEL_STUDIO=agent-studio
     return 0
   fi
+  studio_data_dir OUTE_AGENT_STUDIO_DIR
+  studio_data_dir OUTE_SURREALDB_DIR
   local v falta=""
   for v in AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
   if [[ -n "$falta" ]]; then
@@ -1035,9 +1052,13 @@ install_link() {
 # compila aqui, monta o .app sem ícone no Dock (LSUIElement) e abre no login por um LaunchAgent. Sem App Store nem
 # assinatura de desenvolvedor (só a ad-hoc, local). O app só lê o agent-studio; aprovar abre o Terminal no `oute approve`.
 TRAY_LABEL="pro.oute.tray"
+# o identificador do app é outro que o rótulo do LaunchAgent (#563): a Central de Notificações do macOS guarda o
+# ícone por identificador, e o `pro.oute.tray` ficou com o ícone genérico de quando o app não tinha ícone
+TRAY_BUNDLE_ID="pro.oute.outetray"
 TRAY_APP="$HOME/Applications/OuteTray.app"
 TRAY_PLIST="$HOME/Library/LaunchAgents/$TRAY_LABEL.plist"
 TRAY_HOSTS="$OUTE_HOME/tray-hosts"
+TRAY_ICON="AppIcon.icns"
 tray_usage() { echo "uso: oute tray install | oute tray uninstall   (só no macOS)" >&2; }
 # texto para dentro de um plist (XML)
 tray_xml() {
@@ -1058,7 +1079,7 @@ tray_stop() {
   return 0
 }
 tray_install() {
-  local bin url env_block=""
+  local bin url env_block="" icon_block=""
   need swift
   echo "compilando o tray (swift build -c release)…"
   swift build -c release --package-path "$ROOT/tray" --product OuteTray || die "o tray não compilou"
@@ -1069,18 +1090,28 @@ tray_install() {
   echo "montando ${TRAY_APP}…"
   rm -rf "$TRAY_APP"; mkdir -p "$TRAY_APP/Contents/MacOS"
   cp "$bin" "$TRAY_APP/Contents/MacOS/OuteTray"
+  # o ícone do app (a sakura do Kubo, #563): o próprio binário desenha e grava o .icns. O macOS mostra esse ícone
+  # na notificação de pedido novo. Sem ele o tray funciona igual, com o ícone genérico.
+  mkdir -p "$TRAY_APP/Contents/Resources"
+  if "$TRAY_APP/Contents/MacOS/OuteTray" --write-icon "$TRAY_APP/Contents/Resources/$TRAY_ICON" && [[ -s "$TRAY_APP/Contents/Resources/$TRAY_ICON" ]]; then
+    icon_block="
+  <key>CFBundleIconFile</key><string>$TRAY_ICON</string>"
+  else
+    rm -f "$TRAY_APP/Contents/Resources/$TRAY_ICON"
+    echo "aviso: o ícone do tray não foi gravado; o app fica com o ícone genérico" >&2
+  fi
   cat > "$TRAY_APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>$TRAY_LABEL</string>
+  <key>CFBundleIdentifier</key><string>$TRAY_BUNDLE_ID</string>
   <key>CFBundleName</key><string>OuteTray</string>
   <key>CFBundleExecutable</key><string>OuteTray</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tray_xml "$VERSION")</string>
   <key>CFBundleVersion</key><string>$(tray_xml "$VERSION")</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSUIElement</key><true/>
+  <key>LSUIElement</key><true/>$icon_block
 </dict>
 </plist>
 EOF

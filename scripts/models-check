@@ -10,6 +10,9 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
     ausente, ilegível ou com mais de 7 dias = `desconhecido`, com aviso (o Codex o renova ao abrir).
   - Revisor das etapas (#507): `[[reviewer]]` só com agent = "claude" (a linha com "codex" é recusada, código 2), o modelo conferido como os demais, o autor na tabela, o revisor diferente do
     autor e o autor do dispatcher (fase plan) com revisor.
+  - Assinaturas (#598): `[[subscription]]` com nomes únicos e `[select] reserve_mode` = `mais-livre` ou `ordem` (senão, código 2);
+    uma assinatura padrão só e uma coluna de modelo dessa assinatura em toda linha (senão, FALTA). Só `claude` e `codex`
+    têm conferência dos ids; o id de outra assinatura sai `desconhecido`, com aviso (entra com a conferência dela).
   - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, toda fase de `unless_phases` de uma
     exceção é do ADR-07 (#409), e toda exceção usa um label que existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
 
@@ -51,8 +54,26 @@ def report(state, what, where):
     print(f"{state} {what} ({where})")
 
 
+RESERVE_MODES = ("mais-livre", "ordem")
+SUB_NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
+
+
+def load_subscriptions(t, path):
+    """([assinatura], modo das reservas) de `[[subscription]]` e `[select]`; die (código 2) se estão fora do formato"""
+    subs, mode = t.get("subscription"), (t.get("select") or {}).get("reserve_mode", "mais-livre")
+    if not isinstance(subs, list) or not subs or not all(
+            isinstance(x, dict) and isinstance(x.get("name"), str) and SUB_NAME_RE.fullmatch(x["name"]) for x in subs):
+        die(f"tabela sem [[subscription]] com name válido ({path})")
+    names = [x["name"] for x in subs]
+    if len(set(names)) != len(names):
+        die(f"[[subscription]] com nome repetido ({path})")
+    if mode not in RESERVE_MODES:
+        die(f"[select] reserve_mode desconhecido: {mode!r} (use {' ou '.join(RESERVE_MODES)}) ({path})")
+    return subs, mode
+
+
 def load_table(path):
-    """linhas da tabela, na ordem: [(nome, linha)] do padrão, das fases e das exceções"""
+    """linhas da tabela, na ordem: [(nome, linha)] do padrão, das fases e das exceções; e as assinaturas"""
     try:
         with open(path, "rb") as f:
             t = tomllib.load(f)
@@ -62,13 +83,13 @@ def load_table(path):
     if (not isinstance(t.get("default"), dict) or not isinstance(lines, list) or not isinstance(exceptions, list)
             or not isinstance(reviewers, list)):
         die(f"tabela sem [default], ou com [[line]]/[[exception]] fora do formato ({path})")
+    subs, mode = load_subscriptions(t, path)
     rows = [("[default]", t["default"])]
     rows += [(f"[[line]] {i}", ln) for i, ln in enumerate(lines, 1)]
     rows += [(f"[[exception]] {i}", ex) for i, ex in enumerate(exceptions, 1)]
     for name, row in rows:
-        if not isinstance(row, dict) or not all(isinstance(row.get(k), str) and row[k]
-                                                for k in ("claude", "codex", "effort")):
-            die(f"{name} sem claude, codex ou effort ({path})")
+        if not isinstance(row, dict) or not isinstance(row.get("effort"), str) or not row["effort"]:
+            die(f"{name} sem effort ({path})")
     for i, ln in enumerate(lines, 1):
         if not isinstance(ln.get("phases"), list) or not all(isinstance(p, str) for p in ln["phases"]):
             die(f"[[line]] {i} sem phases ({path})")
@@ -85,7 +106,12 @@ def load_table(path):
                 or not isinstance(rv.get("writers"), list) or not rv["writers"]
                 or not all(isinstance(w, str) and w for w in rv["writers"])):
             die(f"[[reviewer]] {i} sem writers, agent (claude), model ou effort ({path})")
-    return rows, lines, exceptions, reviewers
+    return rows, lines, exceptions, reviewers, subs, mode
+
+
+def column(rows, name):
+    """os ids da coluna de uma assinatura nas linhas que a têm (string não vazia), sem repetir"""
+    return list(dict.fromkeys(r[name] for _, r in rows if isinstance(r.get(name), str) and r[name]))
 
 
 def claude_bin():
@@ -180,16 +206,26 @@ def repo_labels():
 def check_reviewers(lines, reviewers):
     """#507: o revisor de cada etapa é de outro modelo que o autor, o autor é um modelo da tabela, e o autor do
     dispatcher (fase plan, que escreve as etapas) tem revisor"""
-    known = {m for ln in lines for m in (ln["claude"], ln["codex"])}
+    known = {m for ln in lines for k, m in ln.items() if k not in ("phases", "effort") and isinstance(m, str)}
     for i, rv in enumerate(reviewers, 1):
         for w in rv["writers"]:
             report("ok" if w in known else "FALTA", f"autor {w} do revisor {i} é um modelo da tabela", "tabela")
             report("FALTA" if w == rv["model"] else "ok", f"revisor {rv['model']} é de outro modelo que o autor {w}", "tabela")
     plan = next((ln for ln in lines if "plan" in ln["phases"]), None)
     if plan:
-        for w in (plan["claude"], plan["codex"]):
+        for w in dict.fromkeys(m for k, m in plan.items() if k not in ("phases", "effort") and isinstance(m, str)):
             have = any(w in rv["writers"] for rv in reviewers)
             report("ok" if have else "FALTA", f"revisor do autor {w} (dispatcher, fase plan)", "tabela")
+
+
+def check_subscriptions(rows, subs):
+    """#598: uma assinatura padrão só; toda assinatura com o modelo em toda linha da tabela"""
+    defaults = [x["name"] for x in subs if x.get("default") is True]
+    report("ok" if len(defaults) == 1 else "FALTA", f"uma assinatura padrão só ({', '.join(defaults) or 'nenhuma'})", "tabela")
+    for x in subs:
+        for rname, row in rows:
+            have = isinstance(row.get(x["name"]), str) and bool(row[x["name"]])
+            report("ok" if have else "FALTA", f"modelo da assinatura {x['name']} em {rname}", "tabela")
 
 
 def check_structure(lines, exceptions):
@@ -221,9 +257,19 @@ def main(argv):
         table = next(it, None)
         if table is None:
             die(f"--table sem valor\n{USAGE}")
-    rows, lines, exceptions, reviewers = load_table(table)
-    check_claude(list(dict.fromkeys([r["claude"] for _, r in rows] + [rv["model"] for rv in reviewers])))
-    check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows)))
+    rows, lines, exceptions, reviewers, subs, _ = load_table(table)
+    check_subscriptions(rows, subs)
+    names = [x["name"] for x in subs]
+    if "claude" in names:
+        check_claude(list(dict.fromkeys(column(rows, "claude") + [rv["model"] for rv in reviewers])))
+    if "codex" in names:
+        check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows
+                                       if isinstance(r.get("codex"), str) and r["codex"])))
+    for name in names:
+        if name not in ("claude", "codex"):
+            warn(f"assinatura {name}: sem conferência dos ids (só claude e codex têm); fica `desconhecido`")
+            for m in column(rows, name):
+                report("desconhecido", m, name)
     check_reviewers(lines, reviewers)
     check_structure(lines, exceptions)
     if status["FALTA"]:

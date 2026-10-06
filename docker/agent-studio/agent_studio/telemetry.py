@@ -30,6 +30,9 @@ class Noop:
     def price_run(self, changes, failures):
         pass  # sem endpoint OTLP: não há o que contar
 
+    def phase(self, phase, seconds, label=None):
+        pass  # sem endpoint OTLP: não há o que medir
+
     def warn(self, kind, msg, *args, level=logging.WARNING):
         log.log(level, msg, *args)
 
@@ -38,9 +41,10 @@ class Noop:
 
 
 class Telemetry(Noop):
-    def __init__(self, meter, providers, every):
+    def __init__(self, meter, providers, every, slow=5.0):
         self.providers = providers
         self.every = every
+        self.slow = slow
         self.last, self.suppressed = {}, {}
         self.lock = threading.Lock()
         self.c_requests = meter.create_counter(
@@ -59,6 +63,10 @@ class Telemetry(Noop):
             description="falhas da conferência de preço, por fonte e código (#339)")
         self.h_write = meter.create_histogram(
             "agent_studio.write.duration", unit="s", description="duração da gravação (DuckDB + SurrealDB)")
+        self.h_phase = meter.create_histogram(
+            "agent_studio.phase.duration", unit="s",
+            description="duração de cada fase (#570): parse, lock_wait, existing, insert, surreal, commit, read_wait, read; "
+                        "`label` = tabela ou leitura")
 
     def request(self, signal, status):
         self.c_requests.add(1, {"signal": signal, "http.response.status_code": status})
@@ -68,6 +76,12 @@ class Telemetry(Noop):
             self.c_written.add(n, {"signal": signal})
             self.c_dup.add(dup, {"signal": signal})
         self.h_write.record(seconds, {"signal": signal, "result": "ok" if ok else "error"})
+
+    def phase(self, phase, seconds, label=None):
+        """Tempo de uma fase (#570): vai ao histograma e, passado `slow`, sai como aviso (com teto por tipo)."""
+        self.h_phase.record(seconds, {"phase": phase, **({"label": label} if label else {})})
+        if seconds > self.slow:
+            self.warn("slow-" + phase, "lento: %s levou %.1f s%s", phase, seconds, f" ({label})" if label else "")
 
     def price_run(self, changes, failures):
         """Uma conferência de preço: `failures` = {fonte: código} (`rotina` = falha interna)."""
@@ -122,4 +136,5 @@ def setup():
     # só o logger do agent-studio, só WARNING+: o SDK e o uvicorn ficam no stderr (erro de export não vira log OTel)
     log.addHandler(LoggingHandler(level=logging.WARNING, logger_provider=logs))
     return Telemetry(meters.get_meter("agent_studio"), [meters, logs],
-                     float(os.environ.get("AGENT_STUDIO_LOG_EVERY", "60")))
+                     float(os.environ.get("AGENT_STUDIO_LOG_EVERY", "60")),
+                     float(os.environ.get("AGENT_STUDIO_SLOW_S", "5")))

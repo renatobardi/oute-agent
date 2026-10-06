@@ -1,6 +1,6 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: provedor Z.ai (GLM) e cadeia por grupo de fase (gate de `arch` do Bardi, #629)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: assinatura padrão e reservas, dois modos de escolher a reserva (#598, gate de `spec` do Bardi) · adendo 2026-10-05: assinatura `zai` (GLM) e padrão por grupo de fase (gate de `arch` do Bardi, #629)
 
 ## Decisão
 O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
@@ -16,7 +16,7 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
 5. **Padrão Sonnet** quando nada acima decide: sem label e sem texto da tarefa (sessão aberta na mão), sem a chave da TypeSafe, ou `gh` fora do ar. O seletor avisa e nunca bloqueia a abertura.
 
 ### Tabela fase → modelo
-> Adendo 2026-10-05 (#629): o provedor Z.ai (GLM) e a cadeia por grupo de fase (raciocínio × execução) mudam esta tabela na fatia (c). Até lá, ela vale para quem não pede `zai`.
+> Adendo 2026-10-05 (#629): a assinatura `zai` (GLM) e o padrão por grupo de fase (raciocínio × execução) mudam esta tabela na fatia (c). Até lá, ela vale para quem não pede `zai`.
 
 | fase | Claude | reserva (Codex) |
 |---|---|---|
@@ -45,6 +45,27 @@ A sessão abre no Codex, na linha da mesma fase, em dois gatilhos:
 **`cota`, como foi implementado (fatia 3b, #355; regras do relatório do spike #55):** com o Claude disponível (`auth status` ok ou sem resposta no teto) e sem `--agent`, `--model` nem `--phase`, o `oute-select` lê `oute-quota --json` (teto de 3 s; o que passar disso é leitura que falhou). O corte vem do `max_pct` do JSON (98, `OUTE_QUOTA_MAX_PCT`; era 90 até a #558), **por janela**: qualquer janela do Claude (`5h` ou `7d`) ≥ 98% → `agent: codex`, mesma linha da fase, `reserve: "cota"`, e o aviso diz a janela, o % e a hora do reset (a da `7d` pode ser de dias). **Exceção, só para a janela de 5 h:** se ela é a única ≥ 98%, está abaixo de 100% e reseta em menos de `reset_grace_s` (1200 s, 20 min), a sessão só avisa e abre no Claude (a sessão `build` mediana dura 11 min; a `7d` nunca tem exceção, o veto dela dura dias). Cota do Claude `unknown` (ou `oute-quota` ausente, sem resposta ou com saída inválida) → só aviso, abre no Claude: cota desconhecida não troca. Claude ≥ 98% e Codex também ≥ 98% em alguma janela → aviso claro e abre no Claude. Codex `unknown` com o Claude esgotado → troca, com aviso (o `codex` renova o token ao abrir). `--agent`/`--model`/`--phase` não leem a cota nem caem na reserva. Com `claude auth status` falhando, vale o `indisponivel` e a cota não é lida. O revalidar do 20 min após duas semanas de snapshots reais continua em aberto (relatório do #55).
 
 Cota desconhecida (leitura falhou) não troca de agente: abre no Claude e avisa. Os dois esgotados: aviso claro, nunca bloqueio em silêncio.
+
+### Adendo 2026-10-05 — assinatura padrão e reservas (#598)
+Gate de `spec` do Bardi em 2026-10-05 ([comentário na #598](https://github.com/renatobardi/oute-agent/issues/598#issuecomment-5997023390)). Ter mais de uma assinatura serve para **alternar entre elas e não parar o trabalho esperando**; nenhum comando recusa ou adia trabalho porque a cota de **outra** assinatura está alta. O motivo: em 2026-10-05 a linha de base da #484 não rodou porque o `oute-regression` olhou a janela de 5 h do Codex (91%), consumida por outra rodada, e a suíte roda só no Claude ([auditoria do PR #597, achado 2](https://github.com/renatobardi/oute-agent/pull/597#issuecomment-5996350646)).
+
+- **Padrão e reservas.** A tabela (`config/select/models.toml`) lista as assinaturas em `[[subscription]]`: uma tem `default = true` (hoje o `claude`); as outras são **reservas** (hoje o `codex`). Cada linha de fase tem uma coluna de modelo por assinatura. Toda sessão abre na padrão enquanto ela está disponível e com todas as janelas abaixo do teto (98%, #558). O teto e o limite de 60% da regressão não mudam.
+- **Dois modos de escolher a reserva** (campo `[select] reserve_mode`, valor inicial `mais-livre`): `mais-livre` abre na reserva disponível com **mais cota livre** (cota livre = 100 − a janela mais cheia da assinatura: 5 h a 91% e 7 d a 39% = 9% livre); `ordem` abre na **primeira reserva da tabela** que está disponível e abaixo do teto (a 2ª ganha mesmo com menos folga que a 3ª). Entre candidatas abaixo do teto, a padrão vem antes das reservas.
+- **Todas no teto:** abre na que tem mais cota livre, a padrão incluída, com aviso, nos dois modos. O seletor nunca recusa abrir por cota.
+- **Cota desconhecida** (leitura falhou, ou o `oute-quota` não lê aquela assinatura): a assinatura fica por último entre as reservas, e o aviso diz que a cota não foi lida. Na assinatura de partida, a cota desconhecida só avisa e abre nela (como antes).
+- **Reserva pedida e cheia.** O `oute-select --prefer <assinatura>` pede uma assinatura que não é a padrão sem ser escolha explícita: com ela no teto, vale a mesma regra e a sessão pode voltar para a padrão. **Escolha explícita** do Bardi (`--agent`, `--model` no `oute-task` ou no `spawn`, `--phase`) continua mandando: só avisa, não troca, e a cota nem é lida. Nenhum chamador usa `--prefer` ainda (quem abre a rodada numa reserva é do `oute-swarm`, fora desta fatia).
+- **Registro.** O JSON do seletor ganha `reserve_from` (a assinatura de onde a sessão saiu) **só quando há reserva**; `reserve` segue `cota` ou `indisponivel`, e o `agent` é o de destino. O `oute-task` leva os dois ao evento (`oute.task.reserve`, `oute.task.reserve_from`). Sem reserva, a saída é a de antes da #598.
+- **`oute-regression`:** a trava de cota (limite de 60%, inalterado) conta só as janelas da assinatura que a execução usa: o Claude, mais o Codex quando se pede `--codex`. A mensagem de recusa diz a assinatura e a janela.
+- **`scripts/models-check`** confere a tabela: uma assinatura padrão só, uma coluna de modelo de cada assinatura em toda linha, nomes únicos e `reserve_mode` válido. Só `claude` e `codex` têm conferência dos ids; o id de outra assinatura fica `desconhecido`.
+
+**O que uma assinatura nova precisa para entrar** (cada uma é issue própria, depois da #598; Devin, Kimi, GLM, Grok e Groq foram citados e não entram aqui):
+1. o agente roda no container e abre sessão pelo `oute-task` e pelo herdr;
+2. leitura da cota dela no `oute-quota` (só leitura, sem tocar na credencial);
+3. linha de modelo por fase na tabela (e o autor dela em `[[reviewer]]`), conferida pelo `scripts/models-check`;
+4. consumo no bucket e no agent-studio (ADR-08 §11: sem isso a ferramenta não entra), com preço cadastrado;
+5. notas do agente, hooks do ai-memory e canal de aprovação funcionando nela;
+6. passa na regressão de agentes (#484) antes de virar reserva.
+Com 1 a 6 prontos, entrar é cadastro: um `[[subscription]]` e uma coluna na tabela, sem código novo no `oute-select`.
 
 ### Adendo 2026-10-03 — `kaizen` não vence fase de código (#409)
 Gate de `spec` do Bardi (opção 1, delegado à sessão de upstream, ciclo #233): a exceção `kaizen` só vale quando a issue **não** tem label de fase que mexe em código. Com `aidlc:build`, `qa`, `design`, `plan`, `ship` ou `iter`, vale a fase (Sonnet). `spike` (#379) continua vencendo as demais exceções, e `docs` não muda. Na tabela, a exceção `kaizen` leva `unless_phases` com essas fases; o `oute-select` pula a exceção quando a issue tem uma delas, e o `scripts/models-check` confere que cada fase listada é do ADR-07.
@@ -100,49 +121,43 @@ Implementação, em fatias (adendo 2026-10-02):
 
 Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tabela). Feitos: #217 (Pi) e #218 (router). O gatilho `indisponivel` não depende da cota; só o `cota` depende.
 
-### Adendo 2026-10-05 — provedor Z.ai (GLM) e cadeia por grupo de fase (gate de `arch` do Bardi, #629)
-**Problema:** as rodadas do swarm abrem vários workers em paralelo na mesma assinatura do Claude, e a janela de 5h se aproxima do gatilho `cota` (≥ 98%). Um CLI novo (Kimi, Devin, Gemini) custaria um épico de integração: pin com sha256, hooks e MCP da ai-memory, telemetria com `oute.agent`, `oute-quota`, coluna no `models.toml` e reserva. O GLM Coding Plan da Z.ai serve o **próprio Claude Code** por um endpoint compatível com a API da Anthropic (`https://api.z.ai/api/anthropic`). Com isso, o processo continua sendo o `claude`, com os mesmos hooks, MCP, skills, shim e telemetria.
+### Adendo 2026-10-05 — assinatura `zai` (GLM) e padrão por grupo de fase (gate de `arch` do Bardi, #629)
+**Problema:** as rodadas do swarm abrem vários workers em paralelo na mesma assinatura do Claude, e a janela de 5h se aproxima do teto (98%). Um CLI novo (Kimi, Devin, Gemini) passa pelos seis requisitos de assinatura nova do adendo #598, cada um com código próprio. O GLM Coding Plan da Z.ai serve o **próprio Claude Code** por um endpoint compatível com a API da Anthropic (`https://api.z.ai/api/anthropic`). Com isso, o processo continua sendo o `claude`, e os requisitos 1 (container, `oute-task`, herdr) e 5 (notas, hooks do ai-memory, canal de aprovação) já vêm prontos, a provar no spike.
 
-**Decisão:**
-1. **Provedor.** O conceito novo é o **provedor** do agente: `anthropic` (assinatura do Claude, como hoje), `zai` (GLM Coding Plan, pelo mesmo `claude`) e `openai` (o Codex, como hoje). O campo `provider` entra nas linhas, nas exceções e no `[default]` do `models.toml`. O `oute.agent` continua com os valores fechados (`claude` | `codex` | `human`); a telemetria ganha `oute.provider`.
+**Decisão** (sobre o modelo de assinaturas do adendo #598):
+1. **Assinatura nova `zai`**, um `[[subscription]]` da tabela com `agent = "claude"`. A sessão `zai` é o `claude` com as variáveis da Z.ai no ambiente do processo. O `oute.agent` segue `claude`; a telemetria ganha `oute.subscription` (`claude`, `zai` ou `codex`) para separar as duas sessões do mesmo agente.
 2. **Pareamento de modelos** (o mapeamento oficial da Z.ai para o Claude Code):
 
-   | Anthropic | Z.ai | OpenAI |
+   | `claude` | `zai` | `codex` |
    |---|---|---|
    | `claude-opus-5-5` | `glm-5.3` | `gpt-6-astra` |
    | `claude-sonnet-5-5` | `glm-5.3` | `gpt-6.1-sol` |
 
    Pressupõe a #615 (Sonnet em `ops`, `ctx`, `learn`, `kaizen` e `docs`): **nenhuma linha usa Haiku**, então `glm-5.3-flash` e `gpt-6-luna` também ficam fora da tabela. Se o Haiku voltar a alguma linha, o par dele é `glm-5.3-flash` ↔ `gpt-6-luna`.
-
-3. **Dois grupos de fase, cada um com sua cadeia de provedores.** A cadeia é a ordem em que a sessão tenta os provedores: o primeiro é o padrão, os seguintes são a reserva.
-   - **Raciocínio, cadeia `anthropic` → `zai` → `openai`:** `strat` `intent` `arch` `spec` (Opus), `design` `plan` `qa` `iter` `learn` (Sonnet), a exceção `spike` (Sonnet) e o dispatcher (fase `plan` fixa).
-   - **Execução, cadeia `zai` → `anthropic` → `openai`:** `build` `ship` `ops` `ctx` e as exceções `kaizen` e `docs`, todas em `glm-5.3`, com reserva no Sonnet e depois no `gpt-6.1-sol`. O `glm-5.3` e não o `glm-5.3-flash`, pela mesma lógica da #615 (o modelo cheio no lugar do leve).
-   - O modelo de cada provedor sai do pareamento da linha. Os modelos Claude da tabela de fase não mudam.
-4. **Reserva pela cadeia.** Os gatilhos passam a valer **por provedor**, e a sessão abre no próximo provedor da cadeia:
-   - `indisponivel`: `anthropic` com `claude auth status` ≠ 0 ou `claude` ausente; `zai` sem a chave (`OUTE_ZAI_API_KEY`) ou com o endpoint fora do ar; `openai` com `codex login status` ≠ 0 ou `codex` ausente;
-   - `cota`: qualquer janela do provedor ≥ 98% pelo `oute-quota`, com a mesma exceção da janela de 5h (abaixo de 100% e reset em menos de 20 min) e a mesma regra para cota `unknown` (não troca);
-   - o `reserve` do `oute.task.opened` passa a dizer o provedor e o motivo (`anthropic-cota`, `zai-indisponivel`, …).
-
-   Escolha explícita (`--provider`, `--agent`, `--model`, `--phase`) segue a regra atual: avisa e não cai na reserva. Com todos os provedores da cadeia fora: aviso claro e abre no primeiro, nunca bloqueio.
+3. **Padrão por grupo de fase.** O adendo #598 tem uma assinatura padrão para a tabela toda; este adendo passa a padrão para a **linha**, pelo **grupo de fase**. A **cadeia** de uma linha é a padrão seguida das reservas, na ordem do gate:
+   - **Raciocínio, cadeia `claude` → `zai` → `codex`:** `strat` `intent` `arch` `spec` (Opus), `design` `plan` `qa` `iter` `learn` (Sonnet), a exceção `spike` (Sonnet) e o dispatcher (fase `plan` fixa).
+   - **Execução, cadeia `zai` → `claude` → `codex`:** `build` `ship` `ops` `ctx` e as exceções `kaizen` e `docs`, todas em `glm-5.3`, com reserva no Sonnet e depois no `gpt-6.1-sol`. O `glm-5.3` e não o `glm-5.3-flash`, pela mesma lógica da #615 (o modelo cheio no lugar do leve).
+   - **Modo da reserva:** nas linhas com cadeia, vale o modo `ordem` do #598, porque a ordem foi decisão do gate. O `mais-livre` segue valendo para linha sem cadeia. Todas as regras do #598 continuam: disponibilidade, teto, "todas no teto → a de mais cota livre, com aviso", cota desconhecida por último, nunca recusa por cota.
+   - O `reserve_from` passa a dizer a padrão **da linha** (`zai` numa sessão de `build` que abriu no Claude).
+4. **Disponibilidade da `zai`:** indisponível sem a chave (`OUTE_ZAI_API_KEY`) ou com o endpoint fora do ar. A cota vem do `oute-quota` (requisito 2 do #598): `GET https://api.z.ai/api/monitor/usage/quota/limit`, só leitura, com a chave por `-K -`, e as janelas `5h` e `7d` em `used_pct`. O endpoint vem de ferramentas da comunidade, não da doc oficial; a prova é do spike.
 5. **Ligação em fatias**, sem mudar o padrão de ninguém antes da prova:
-   - (a) `--provider zai` explícito no `oute-task` e no `oute-swarm spawn`, já com a cadeia de reserva;
-   - (b) `oute-swarm <repo> --provider zai`, só para as sessões de execução da rodada; o dispatcher segue no `anthropic`;
-   - (c) as cadeias acima viram o padrão da tabela. Só entra depois de medir a qualidade das fatias (a) e (b) no agent-studio e nos PRs (ajustes até a auditoria passar, a mesma medida da #409).
+   - (a) `--subscription zai` explícito no `oute-task` e no `oute-swarm spawn`. É escolha explícita: só avisa e não troca, como `--agent` e `--model` no #598. O `--prefer zai` do #598 também passa a valer, e nele a reserva anda;
+   - (b) `oute-swarm <repo> --prefer zai`, só para as sessões de execução da rodada; o dispatcher segue no `claude`;
+   - (c) as cadeias acima viram o padrão da tabela. Só entra depois de medir a qualidade das fatias (a) e (b) no agent-studio e nos PRs (ajustes até a auditoria passar, a mesma medida da #409) e de a `zai` passar na regressão de agentes (#484), o requisito 6 do #598.
 
-   Até a fatia (c), a tabela de fase acima (Claude padrão, Codex reserva) segue valendo para quem não pede `zai`.
-6. **Revisor das etapas:** `glm-5.3` entra como autor revisado pelo `claude-opus-5-5`. O revisor continua sempre de outro modelo e só no `claude` headless; o revisor no próprio provedor `zai` fica fora.
-7. **Plano:** GLM Coding Plan **Lite** no spike e nas fatias (a) e (b); **Pro** na fatia (c), quando o `zai` vira o padrão da execução. A troca de plano é critério de `ship` da (c).
+   Até a fatia (c), a tabela segue o #598 (padrão `claude`).
+6. **Revisor das etapas:** `glm-5.3` entra como autor revisado pelo `claude-opus-5-5`, o requisito 3 do #598. O revisor continua sempre de outro modelo e só no `claude` headless da assinatura `claude`; revisor na `zai` fica fora.
+7. **Plano:** GLM Coding Plan **Lite** no spike e nas fatias (a) e (b); **Pro** na fatia (c), quando a `zai` vira a padrão da execução. A troca de plano é critério de `ship` da (c).
 
 **Como entra no código** (detalhe na `spec` de cada fatia):
-- O `oute-task` e o shim exportam as variáveis da Z.ai **só no ambiente do processo da sessão**, nunca no `~/.claude/settings.json`: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (de `OUTE_ZAI_API_KEY`), `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `API_TIMEOUT_MS` e `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. A marca da sessão guarda o provedor, e o restore do herdr reabre no mesmo provedor.
-- O `oute-quota` ganha o provedor `zai`: `GET https://api.z.ai/api/monitor/usage/quota/limit`, só leitura, com a chave por `-K -`, e as janelas `5h` e `7d` em `used_pct`. O endpoint vem de ferramentas da comunidade, não da doc oficial; a prova é do spike.
-- O `models.toml` troca a coluna fixa `codex` por uma linha com o modelo de cada provedor e a `chain` do grupo. O `scripts/models-check` confere que toda linha tem os três provedores, uma cadeia válida e um revisor para cada autor. Os ids `zai` são conferidos na API da Z.ai com a chave, e sem a chave ficam `desconhecido`.
-- **ADR-08** ganha um adendo na fatia (a): `oute.provider` nas conversas, e o custo das chamadas `zai` como **estimado** pelo preço do `config.toml`. O Claude Code calcula o custo pela própria tabela, que não tem `glm-*`, então esse custo é ignorado quando `oute.provider=zai`.
+- O `oute-task` e o shim exportam as variáveis da Z.ai **só no ambiente do processo da sessão `zai`**, nunca no `~/.claude/settings.json`: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (de `OUTE_ZAI_API_KEY`), `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `API_TIMEOUT_MS` e `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`. A marca da sessão guarda a assinatura, e o restore do herdr reabre nela.
+- O `models.toml` ganha o `[[subscription]]` `zai`, a coluna `zai` em cada linha e o campo da padrão por linha (o nome fica para a `spec`). O `scripts/models-check` confere a padrão de cada linha, os ids `zai` (na API da Z.ai com a chave; sem a chave, `desconhecido`, como o #598 já prevê) e um revisor para cada autor.
+- **ADR-08** ganha um adendo na fatia (a): `oute.subscription` nas conversas, e o custo das chamadas `zai` como **estimado** pelo preço do `config.toml` (requisito 4 do #598). O Claude Code calcula o custo pela própria tabela, que não tem `glm-*`, então esse custo é ignorado quando `oute.subscription=zai`.
 
 **Ressalvas registradas:**
-- **Não existe GLM no nível do Opus.** Nas fases do Opus, a reserva no `glm-5.3` piora mais a qualidade do que a reserva no `gpt-6-astra` (57,9% no Terminal-Bench 4; o GLM-5.3 não tem número publicado na mesma régua). A ordem `anthropic` → `zai` → `openai` também no raciocínio é decisão do Bardi e se revê com dado do agent-studio.
-- **A lição do Pi** (Histórico: modelo servido chamando ferramenta inexistente ou recusando o schema) vale aqui. A fatia (a) só fecha com o `oute-regression` passando no `zai` e o handoff da ai-memory provado entre sessões `zai` e `anthropic`.
-- **Revisão cruzada de PR** continua fora ("Fora", acima). Com o `build` no `zai` e o `qa` no `anthropic`, a auditoria passa a ser feita por outro fornecedor como efeito da tabela, sem regra nova.
+- **Não existe GLM no nível do Opus.** Nas fases do Opus, a reserva no `glm-5.3` piora mais a qualidade do que a reserva no `gpt-6-astra` (57,9% no Terminal-Bench 4; o GLM-5.3 não tem número publicado na mesma régua). A ordem `claude` → `zai` → `codex` também no raciocínio é decisão do Bardi e se revê com dado do agent-studio.
+- **A lição do Pi** (Histórico: modelo servido chamando ferramenta inexistente ou recusando o schema) vale aqui. A fatia (a) só fecha com o `oute-regression` passando na `zai` e o handoff da ai-memory provado entre sessões `zai` e `claude`.
+- **Revisão cruzada de PR** continua fora ("Fora", acima). Com o `build` na `zai` e o `qa` na `claude`, a auditoria passa a ser feita por outro fornecedor como efeito da tabela, sem regra nova.
 - **Saída de dados:** código e prompt de qualquer repo podem ir à Z.ai. O registro e as regras estão no ADR-01 (adendo #629).
 
 ## Histórico

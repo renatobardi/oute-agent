@@ -39,7 +39,7 @@
 {% call fragment("ferramentas") %}
 {% if not uses %}<p class="aviso" id="vazio">Nenhum uso de ferramenta nessa janela e com esses filtros.</p>{% endif %}
 <section class="cartao bloco" id="ferramentas" data-ferramentas="{{ tools|length }}">
-  <div class="grafico-topo"><h2>Por ferramenta</h2><span class="nota">p95 = duração da execução</span></div>
+  <div class="grafico-topo"><h2>Por ferramenta</h2><span class="nota">p95 = duração da execução · Bash aberto por tipo de comando (rótulo do Claude Code; o texto do comando não é lido)</span></div>
   <div class="rolagem">
   <table class="compacta empilha">
     <thead><tr><th>Ferramenta</th><th class="n">Usos</th><th class="n">Erros</th><th class="n">Taxa de erro</th><th class="n">p95</th></tr></thead>
@@ -53,6 +53,16 @@
       <td class="n{% if t.errors %} taxa-erro{% endif %}">{{ t.rate|pct(1) }}</td>
       <td class="n sec">{{ t.p95_ms|ms }}</td>
     </tr>
+    {% if t.tool == "Bash" %}{% for g in bash %}
+    <tr class="grupo-bash{% if g.errors %} com-erro{% endif %}" data-grupo="{{ g.id }}" data-usos="{{ g.uses }}" data-erros="{{ g.errors }}" data-taxa="{{ g.rate }}">
+      <td class="prim"><a href="/ferramenta?nome=Bash&amp;grupo={{ g.id }}&amp;{{ link_qs }}">{{ g.name }}</a></td>
+      <td class="n">
+        {% call mini(g.frac) %}Bash · {{ g.name }} · {{ g.uses|num }} usos{% endcall %}{{ g.uses|num }}</td>
+      <td class="n">{% if g.errors %}{{ badge(g.errors|num, "destrutivo") }}{% else %}0{% endif %}</td>
+      <td class="n{% if g.errors %} taxa-erro{% endif %}">{{ g.rate|pct(1) }}</td>
+      <td class="n sec">{{ g.p95_ms|ms }}</td>
+    </tr>
+    {% endfor %}{% endif %}
     {% endfor %}
     </tbody>
   </table>

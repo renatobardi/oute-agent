@@ -23,7 +23,7 @@ studio_init
 #   TB avulsa com fase hostil no evento ("<b>x</b>"): desconhecida; chamada real 0,04.
 #   TX sem nenhum evento de abertura, mas com rodada e sessão do swarm no resource: worker/desconhecida, real 0,02.
 #   TY com evento de outro nome levando oute.task.phase=ops: o evento não vale, fica desconhecida; real 0,03.
-#   conversa sem oute.task.id: avulsa/desconhecida, real 0,07; chamada sem preço de TW: fora das somas (unpriced).
+#   conversa sem oute.task.id: avulsa/interativa (#599), real 0,07; chamada sem preço de TW: fora das somas (unpriced).
 #   Chamada de TW em janeiro de 2025: fora da janela.
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
@@ -92,10 +92,11 @@ check "worker: o erro do span entra no grupo"          jqe ".errors.spans == 1" 
 check "avulsa: real 0,14 (TB, TY, sem sessão), est 1,25" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(role avulsa)"
 
 # ---------------------------------------------------------------- 2. por fase
-check "by_phase: plan, build e desconhecida"           jqe '[.by_phase[].phase] | sort == ["build", "desconhecida", "plan"]' <<<"$R"
+check "by_phase: plan, build, desconhecida e interativa" jqe '[.by_phase[].phase] | sort == ["build", "desconhecida", "interativa", "plan"]' <<<"$R"
 check "plan: o dispatcher"                             jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000)" <<<"$(phase plan)"
 check "build: TW (primeira fase conhecida vale)"       jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 150000) and (.cost.estimated_usd | $(usd .) == 3000000)" <<<"$(phase build)"
-check "desconhecida: sem evento, sem fase, hostil, outro evento, sem sessão" jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 160000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(phase desconhecida)"
+check "desconhecida: só sessão com id (sem evento, sem fase, hostil, outro evento)" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 90000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(phase desconhecida)"
+check "interativa: a conversa sem oute.task.id, real 0,07 (#599)" jqe ".calls == 1 and (.cost.real_usd | $(usd .) == 70000) and .cost.estimated_usd == null" <<<"$(phase interativa)"
 check "fase hostil não aparece em lugar nenhum"        bash -c '! grep -qF "<b>x</b>" <<<"$1"' _ "$R"
 
 # ---------------------------------------------------------------- 3. as somas batem com o total da janela
@@ -120,11 +121,11 @@ check "POST no /uso: 405"                              test "$(code -X POST "${A
 HTML="$(studio_page "${A[@]}" "$STUDIO_URL/uso?$WIN")"
 P="$(data <<<"$HTML")"
 check "tela: tabela por papel com as três linhas"      jqe '[.[] | select(.role) | .role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$P"
-check "tela: tabela por fase com as três linhas"       jqe '[.[] | select(.phase) | .phase] | sort == ["build", "desconhecida", "plan"]' <<<"$P"
+check "tela: tabela por fase com as quatro linhas"     jqe '[.[] | select(.phase) | .phase] | sort == ["build", "desconhecida", "interativa", "plan"]' <<<"$P"
 check "tela: linha do dispatcher = a da API"           jqe ".[] | select(.role == \"dispatcher\") | .calls == \"2\" and (.[\"real-usd\"] | $(usd .) == 800000)" <<<"$P"
 check "tela: mais cara primeiro (build antes de plan)" jqe '[.[] | select(.phase) | .phase] | index("build") < index("plan")' <<<"$P"
 check "tela: total da janela"                          jqe '.[] | select(.tag == "p" and .calls == "11")' <<<"$P"
-check "tela: gráfico por papel com as três linhas, por fase com as três" jqe '([.[] | select(.grafico == "uso-custo-role")] | length == 1) and ([.[] | select(.grafico == "uso-custo-phase")] | length == 1) and ([.[] | select(.nome)] | length == 6)' <<<"$P"
+check "tela: gráfico por papel com as três linhas, por fase com as quatro" jqe '([.[] | select(.grafico == "uso-custo-role")] | length == 1) and ([.[] | select(.grafico == "uso-custo-phase")] | length == 1) and ([.[] | select(.nome)] | length == 7)' <<<"$P"
 check "tela: barras de papel somam o total (real e estimado)" bash -c 'jq -n -e --argjson g "$1" "
   ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
   [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 2 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e / 2 - (\$c[\"estimated-usd\"] | tonumber)) | fabs) < 1e-9" >/dev/null' _ "$P"
