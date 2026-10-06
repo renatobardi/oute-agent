@@ -517,6 +517,93 @@ studio_rebuild_state() {
   return "$rc"
 }
 
+# --- oute studio backup (#570): cópia de segurança do DuckDB do agent-studio. O banco guarda tudo, sem retenção, e só o
+# próprio agent-studio abre o arquivo: a cópia consistente sai de dentro dele (`python -m agent_studio.backup`, no
+# container) e vai por pipe ao bucket de telemetria (o mesmo do bruto; nunca o oute-shared, que o agent monta e onde
+# qualquer sessão leria e apagaria o banco inteiro). Nada passa pelo disco do host. Confere o tamanho no bucket antes de
+# apagar a cópia local, e só então roda a retenção por origem (host + instância). `--check <nome>` baixa uma cópia por
+# pipe ao container, que a abre só para leitura num temporário e conta as linhas. bash 3.2: sem mapfile.
+STBK_DIR=backups/agent-studio
+STBK_CONTAINER=oute-agent-studio
+STBK_PY=/opt/agent-studio/venv/bin/python
+STBK_LOCAL=/data/agent-studio/backup
+studio_backup_usage() { echo "uso: oute studio backup | oute studio backup --check <nome da cópia no bucket>" >&2; }
+studio_backup_bucket() { printf '%s' "${OUTE_STUDIO_BACKUP_BUCKET:-${OUTE_OBSERVABILITY_BUCKET:-oute-observability}}"; }
+# nome;bytes de cada cópia no bucket; vazio se a pasta não existe (rclone rc 3)
+studio_backup_list() {
+  local rc=0
+  rclone lsf --files-only --format ps --separator ';' "oci:$(studio_backup_bucket)/$STBK_DIR" 2>/dev/null || rc=$?
+  [[ "$rc" == 0 || "$rc" == 3 ]]
+}
+studio_backup_ready() {
+  agent_studio_enabled \
+    || die "oute studio backup só roda no host com o agent-studio (OUTE_AGENT_STUDIO=1 no .env, o oute-server)"
+  need docker; need rclone
+  docker ps -q -f name="^$STBK_CONTAINER\$" -f status=running | grep -q . \
+    || die "o container $STBK_CONTAINER não está de pé (oute up)"
+  oci_remote_env || die "item oci-storage ausente no vault (rode: oute oci-bootstrap)"
+}
+# `"chave": valor` de uma linha JSON simples (a resposta do serviço), sem jq
+studio_backup_field() { sed -n "s/.*\"$1\": *\"\{0,1\}\([A-Za-z0-9._-]*\).*/\1/p" <<<"$2" | head -n 1; }
+studio_backup_rows() {
+  local t n out=""
+  for t in spans logs metrics; do n="$(studio_backup_field "$t" "$1")"; out="$out${out:+, }$t ${n:-?}"; done
+  printf '%s' "$out"
+}
+studio_backup() {
+  local keep="${OUTE_STUDIO_BACKUP_KEEP:-7}"
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || { echo "oute: OUTE_STUDIO_BACKUP_KEEP precisa ser um inteiro >= 1 (veio '$keep')" >&2; exit 2; }
+  studio_backup_ready
+  local bucket out rc=0 file bytes name list line tsize
+  bucket="$(studio_backup_bucket)"
+  echo "cópia do DuckDB no container $STBK_CONTAINER (a ingestão segue gravando)..."
+  out="$(docker exec "$STBK_CONTAINER" "$STBK_PY" -m agent_studio.backup)" || rc=$?
+  if [[ "$rc" == 3 ]]; then echo "oute: já há uma cópia em andamento no agent-studio; tente depois" >&2; exit 3; fi
+  [[ "$rc" == 0 ]] || die "a cópia falhou no agent-studio (rc $rc); nada foi enviado"
+  file="$(studio_backup_field file "$out")"; bytes="$(studio_backup_field bytes "$out")"
+  [[ "$file" =~ ^agent-studio-[0-9]{8}T[0-9]{6}Z\.duckdb$ && "$bytes" =~ ^[1-9][0-9]*$ ]] \
+    || die "resposta do agent-studio fora do formato; nada foi enviado"
+  name="$OUTE_HOST-$OUTE_INSTANCE-${file#agent-studio-}"
+  # do container direto ao bucket (pipefail: falha de qualquer lado conta)
+  docker exec "$STBK_CONTAINER" cat "$STBK_LOCAL/$file" | rclone rcat "oci:$bucket/$STBK_DIR/$name" \
+    || die "o envio ao bucket $bucket falhou; a cópia segue no container, em $STBK_LOCAL/$file"
+  line=""; list="$(studio_backup_list)" && line="$(grep -F "$name;" <<<"$list" | head -n 1)" || line=""
+  tsize="${line##*;}"
+  [[ "$line" == "$name;"* && "$tsize" == "$bytes" ]] \
+    || die "o tamanho no bucket não bate com o da cópia (${tsize:-ausente} x $bytes bytes); a cópia segue no container, em $STBK_LOCAL/$file"
+  docker exec "$STBK_CONTAINER" rm -f "$STBK_LOCAL/$file" || echo "aviso: não apaguei a cópia local $STBK_LOCAL/$file" >&2
+  echo "backup: oci:$bucket/$STBK_DIR/$name"
+  printf 'cópia:  %d bytes (%d MiB) em %s s\n' "$bytes" "$((bytes / 1048576))" "$(studio_backup_field seconds "$out")"
+  echo "linhas: $(studio_backup_rows "$out")"
+  # retenção: as $keep mais recentes da MESMA origem; nome de outra origem nunca entra
+  local re="^$OUTE_HOST-$OUTE_INSTANCE-[0-9]{8}T[0-9]{6}Z\\.duckdb\$" all n f rrc=0
+  list="$(studio_backup_list)" || { echo "oute: não consegui listar $STBK_DIR para a retenção; nada apagado" >&2; return 1; }
+  all="$(printf '%s\n' "$list" | cut -d';' -f1 | while IFS= read -r f; do if [[ "$f" =~ $re ]]; then printf '%s\n' "$f"; fi; done | LC_ALL=C sort)"
+  n="$(printf '%s\n' "$all" | grep -c .)" || n=0
+  if (( n > keep )); then
+    for f in $(printf '%s\n' "$all" | head -n "$((n - keep))"); do
+      [[ "$f" != "$name" ]] || continue
+      if rclone deletefile "oci:$bucket/$STBK_DIR/$f" >/dev/null 2>&1; then echo "retenção: apagado $f"
+      else echo "oute: retenção: não consegui apagar $f" >&2; rrc=1; fi
+    done
+  fi
+  echo "retenção: $((n > keep ? keep : n)) de $keep cópia(s) de $OUTE_HOST-$OUTE_INSTANCE no bucket"
+  return "$rrc"
+}
+studio_backup_check() {
+  local name="$1" bucket list out rc=0
+  [[ "$name" =~ ^[a-z0-9_-]+-[0-9]{8}T[0-9]{6}Z\.duckdb$ ]] \
+    || die "nome fora do formato (<host>-<instância>-<data UTC>.duckdb): use o nome de uma cópia do bucket"
+  studio_backup_ready
+  bucket="$(studio_backup_bucket)"
+  list="$(studio_backup_list)" || die "não consegui listar $STBK_DIR no bucket"
+  grep -qF "$name;" <<<"$list" || die "cópia não encontrada no bucket: $STBK_DIR/$name"
+  out="$(rclone cat "oci:$bucket/$STBK_DIR/$name" | docker exec -i "$STBK_CONTAINER" "$STBK_PY" -m agent_studio.backup --check)" || rc=$?
+  [[ "$rc" == 0 ]] || die "a cópia $name não abre como banco do agent-studio"
+  echo "cópia íntegra: oci:$bucket/$STBK_DIR/$name"
+  echo "linhas: $(studio_backup_rows "$out")"
+}
+
 # --- oute memory-backup (#369): backup do volume oute-memory pelo próprio `ai-memory backup` (wiki + db + config), rodado
 # no container agent (o volume está em /data/ai-memory), gravado em /data/shared/backups/ai-memory/ (o bucket oute-shared,
 # pelo mount; sem mount cai no volume local) e conferido no bucket com o rclone do `oute storage`. Retenção por origem
@@ -1255,7 +1342,12 @@ case "${1:-}" in
       replay) studio_replay "${@:3}" ;;
       rebuild-state) [[ $# == 2 ]] || { echo "uso: oute studio rebuild-state (sem argumentos)" >&2; exit 2; }
                      studio_rebuild_state ;;
-      *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state" >&2; exit 2 ;;
+      backup) case "${3:-}" in
+                "") [[ $# == 2 ]] || { studio_backup_usage; exit 2; }; studio_backup ;;
+                --check) [[ $# == 4 && -n "$4" ]] || { studio_backup_usage; exit 2; }; studio_backup_check "$4" ;;
+                *) studio_backup_usage; exit 2 ;;
+              esac ;;
+      *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state | oute studio backup [--check <nome>]" >&2; exit 2 ;;
     esac ;;
   memory-backup)  # #369: backup do volume oute-memory no bucket oute-shared; --check <arquivo> restaura num tmp e confere
     case "${2:-}" in
@@ -1310,6 +1402,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]  só no oute-server: reenvia o bucket de telemetria ao agent-studio (ADR-08 §7)
   studio rebuild-state  só no oute-server: remonta o estado do SurrealDB a partir do DuckDB, com o agent-studio parado (ADR-08 §7)
+  studio backup [--check <nome>]  só no oute-server: cópia consistente do DuckDB do agent-studio em backups/agent-studio/ do bucket de telemetria, com retenção; --check abre uma cópia do bucket e conta as linhas (#570)
   memory-backup [--check <arquivo>]  backup do volume oute-memory (ai-memory backup) em backups/ai-memory/ do oute-shared, com retenção; --check restaura num tmp e confere
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas

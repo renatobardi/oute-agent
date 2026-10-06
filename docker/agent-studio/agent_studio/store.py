@@ -6,6 +6,8 @@ nova.
 """
 import ctypes
 import importlib.util
+import os
+import re
 import sys
 import threading
 import time
@@ -171,6 +173,13 @@ def migrate(con):
         raise
 
 
+class BackupBusy(RuntimeError):
+    """Já há uma cópia de segurança em andamento."""
+
+
+BACKUP_FILE = re.compile(r"agent-studio-\d{8}T\d{6}Z\.duckdb(\.wal)?\Z")
+
+
 class Store:
     def __init__(self, path):
         self.path = path
@@ -183,6 +192,7 @@ class Store:
         # quanto vale o resultado do tray e dos alertas (#570): 0 = sempre refaz; o app liga com AGENT_STUDIO_READ_TTL_S
         self.read_ttl = 0.0
         self._cache, self._cache_lock = {}, threading.Lock()
+        self._backup_lock = threading.Lock()
         # tempo por fase (#570): `obs(fase, segundos, rótulo=None)`; o app liga na telemetria, sem ela não faz nada
         self.obs = lambda phase, seconds, label=None: None
         self._dash_cache = {}
@@ -255,6 +265,66 @@ class Store:
             value = fn()
             self._cache[key] = (time.monotonic(), value)
             return value
+
+    def _copy(self, dest):
+        """Cópia consistente do banco em `dest`, com a trava da cópia já tomada. O `COPY FROM DATABASE` lê um retrato num
+        cursor próprio: a ingestão segue gravando enquanto ele roda (medido: pior gravação de 68 ms durante a cópia)."""
+        if os.path.exists(dest):
+            raise FileExistsError(dest)
+        if "'" in dest:
+            raise ValueError("caminho com aspa")
+        t = time.monotonic()
+        name_thread("studio-backup")
+        cur = self.con.cursor()
+        attached = False
+        try:
+            db = cur.execute("SELECT current_database()").fetchone()[0]
+            cur.execute(f"ATTACH '{dest}' AS bak")
+            attached = True
+            cur.execute(f'COPY FROM DATABASE "{db}" TO bak')
+            rows = {table: cur.execute(f"SELECT count(*) FROM bak.{table}").fetchone()[0] for table in TABLES}
+            cur.execute("CHECKPOINT bak")
+        except BaseException:
+            if attached:
+                cur.execute("DETACH bak")
+                attached = False
+            for leftover in (dest, dest + ".wal"):
+                if os.path.exists(leftover):
+                    os.remove(leftover)
+            raise
+        finally:
+            if attached:
+                cur.execute("DETACH bak")
+            cur.close()
+        self._lap("backup", t)
+        return rows
+
+    def backup(self, dest):
+        """Cópia de segurança em `dest` (#570), uma por vez (`BackupBusy`). Devolve as linhas por tabela."""
+        if not self._backup_lock.acquire(blocking=False):
+            raise BackupBusy("cópia em andamento")
+        try:
+            return self._copy(dest)
+        finally:
+            self._backup_lock.release()
+
+    def backup_dir(self, directory):
+        """Cópia nova em `directory` (criada se preciso), tirando antes as cópias antigas de lá: o `oute studio backup`
+        leva a nova ao bucket, a pasta não acumula. Devolve nome, tamanho, tempo e linhas."""
+        if not self._backup_lock.acquire(blocking=False):
+            raise BackupBusy("cópia em andamento")
+        try:
+            os.makedirs(directory, exist_ok=True)
+            for old in os.listdir(directory):
+                if BACKUP_FILE.match(old):
+                    os.remove(os.path.join(directory, old))
+            name = time.strftime("agent-studio-%Y%m%dT%H%M%SZ.duckdb", time.gmtime())
+            t = time.monotonic()
+            rows = self._copy(os.path.join(directory, name))
+            return {"file": name, "bytes": os.path.getsize(os.path.join(directory, name)),
+                    "seconds": round(time.monotonic() - t, 3), "rows": rows}
+        finally:
+            self._backup_lock.release()
 
     def _lap(self, phase, since, label=None):
         """Reporta o tempo desde `since` e devolve o instante de agora, para a fase seguinte."""

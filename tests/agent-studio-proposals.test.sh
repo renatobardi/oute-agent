@@ -465,11 +465,13 @@ check("faixas: nos detalhes segue sem faixa", "id=\"alertas\"" not in body and "
 status, body = get(create_app(Fixed([], []), TOKEN), "/pedidos")
 check("faixas: sem alerta nem decisão, nada de faixa (alertas escondido)", 'data-alertas="0" hidden' in body and 'id="decisoes"' not in body)
 
-# a tela não tem ação: nenhuma rota que escreve além do login, do logout e da ingestão
+# a tela não tem ação: nenhuma rota que escreve além do login, do logout e das rotas do serviço, que só a credencial
+# de ingestão abre (a ingestão e a cópia de segurança do #570; a de leitura e o cookie da tela recebem 403/401 nelas,
+# conferido em tests/agent-studio-backup.test.sh)
 app = create_app(Store(), TOKEN, surreal=sdb)
 writes = sorted((r.path, m) for r in app.routes for m in (getattr(r, "methods", None) or ()) if m not in ("GET", "HEAD"))
-check("rotas que não são leitura: só login, logout e ingestão",
-      writes == [("/login", "POST"), ("/logout", "POST"), ("/v1/logs", "POST"), ("/v1/metrics", "POST"), ("/v1/traces", "POST")])
+check("rotas que não são leitura: só login, logout, ingestão e cópia de segurança",
+      writes == [("/login", "POST"), ("/logout", "POST"), ("/v1/backup", "POST"), ("/v1/logs", "POST"), ("/v1/metrics", "POST"), ("/v1/traces", "POST")])
 check("nenhuma rota de aprovar, recusar ou executar",
       not [r.path for r in app.routes if re.search(r"aprov|approv|recus|reject|decid|exec|run", r.path)])
 status, body = get(app, "/pedido", f"id={P1}", method="POST")
