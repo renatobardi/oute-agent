@@ -32,6 +32,9 @@ check "telemetry.metrics: um reader, OTLP http/protobuf" jqp '.service.telemetry
 check "telemetry.metrics: manda ao próprio receiver (loopback, porta do otlp http)" jqp '
   (.receivers.otlp.protocols.http.endpoint | split(":")[-1]) as $p
   | .service.telemetry.metrics.readers[0].periodic.exporter.otlp.endpoint == "http://127.0.0.1:\($p)/v1/metrics"'
+# #570: as métricas internas do collector eram 84% das linhas de métricas do agent-studio (uma coleta por minuto, por
+# host e por exporter). A cada 5 min elas caem ~80%, e os alertas seguem cabendo: sem dado = 30 min, recusa = 15 min
+check "telemetry.metrics: coleta a cada 5 min"            jqp '.service.telemetry.metrics.readers[0].periodic.interval == 300000'
 check "telemetry.metrics: nenhum reader pull (porta nova)" jqp '[.service.telemetry.metrics.readers[] | has("pull")] | any | not'
 check "metrics/archive recebe do otlp e vai ao bucket"  jqp '.service.pipelines["metrics/archive"]
   | (.receivers | index("otlp") != null) and .exporters == ["awss3/metrics"]'

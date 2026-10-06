@@ -54,6 +54,10 @@ check "collector: mem_limit de 768 MiB por padrão"       jqe '.services."otel-c
 OUT="$(compose_config "" OUTE_OTELCOL_MEM=1g 2>"$TMP/cfg.err")" || OUT=""
 check "collector: OUTE_OTELCOL_MEM troca o teto"         jqe '.services."otel-collector".mem_limit == "1073741824"' <<<"$OUT"
 
+# ---- 2d. métricas do próprio agent-studio a cada 5 min (#570): eram 10% das linhas de métricas do banco
+OUT="$(compose_config "agent-studio" 2>"$TMP/cfg.err")" || OUT=""
+check "agent-studio: exporta as próprias métricas a cada 5 min" jqe '.services."agent-studio".environment.OTEL_METRIC_EXPORT_INTERVAL == "300000"' <<<"$OUT"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"
