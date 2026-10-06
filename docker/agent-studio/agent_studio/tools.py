@@ -16,7 +16,7 @@ com `success` igual a `false`. Duração = a do `execution` (o `tool` inclui a e
 - **Janela:** o `execution` é procurado até `EXEC_PAD_NS` depois do fim da janela, para o filho de um uso do fim dela.
 - **No SQL:** filtros sempre em parâmetro; o resto do texto é constante deste módulo.
 """
-from . import dashboard as dash_mod, repo as repo_mod, tz as tz_mod
+from . import dashboard as dash_mod, repo as repo_mod, subscription as sub_mod, tz as tz_mod
 from .cost import SPAN_STATUS_ERROR
 
 NO_NAME = "(sem nome)"
@@ -53,10 +53,10 @@ def _group_sql():
     return f"CASE {whens} ELSE '{OTHER}' END"
 
 
-def _uses(from_ns, to_ns, repo=None, host=None, agent=None, tool=None, group=None):
+def _uses(from_ns, to_ns, repo=None, host=None, agent=None, tool=None, group=None, sub=None):
     """(CTE `uses`, parâmetros): um uso por linha, na janela, com os filtros. Colunas: conv, used_ns, host, agent, repo, tool,
     grp (o grupo do Bash), dur (ns), failed."""
-    rsql, rparams = repo_mod.clause(repo, "t.oute_repo")
+    rsql, rparams = sub_mod.scope(repo, sub, "t.oute_repo", "t.")
     extra, eparams = "", []
     for col, value in (("t.host_name", host), ("t.oute_agent", agent)):
         if value:
@@ -87,8 +87,8 @@ def _rate(errors, uses):
     return errors / uses if uses else None
 
 
-def _by_tool(con, from_ns, to_ns, repo=None, host=None, agent=None, limit=None):
-    cte, params = _uses(from_ns, to_ns, repo, host, agent)
+def _by_tool(con, from_ns, to_ns, repo=None, host=None, agent=None, limit=None, sub=None):
+    cte, params = _uses(from_ns, to_ns, repo, host, agent, sub=sub)
     rows = _rows(con, f"{cte} SELECT tool, count(*) AS uses, count(*) FILTER (WHERE failed) AS errors, "
                       "quantile_cont(CAST(dur AS DOUBLE), 0.95) / 1e6 AS p95_ms FROM uses GROUP BY tool "
                       f"ORDER BY uses DESC, tool{f' LIMIT {int(limit)}' if limit else ''}", params)
@@ -112,10 +112,10 @@ def _bash_groups(con, from_ns, to_ns, repo=None, host=None, agent=None):
     return rows
 
 
-def top(con, from_ns, to_ns, repo=None):
+def top(con, from_ns, to_ns, repo=None, sub=None):
     """As ferramentas mais usadas para o gráfico do Dashboard: `{"rows", "total", "errors"}` (total e erros = da janela inteira)."""
-    rows = _by_tool(con, from_ns, to_ns, repo, limit=TOP)
-    cte, params = _uses(from_ns, to_ns, repo)
+    rows = _by_tool(con, from_ns, to_ns, repo, limit=TOP, sub=sub)
+    cte, params = _uses(from_ns, to_ns, repo, sub=sub)
     total = _rows(con, f"{cte} SELECT count(*) AS uses, count(*) FILTER (WHERE failed) AS errors FROM uses", params)[0]
     return {"rows": rows, "total": total["uses"], "errors": total["errors"]}
 

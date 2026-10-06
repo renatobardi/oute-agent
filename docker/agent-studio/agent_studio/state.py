@@ -18,6 +18,8 @@ import base64
 import re
 from datetime import datetime, timezone
 
+from .cost import subscription_of
+
 # tabelas e campos são constantes deste módulo; valores vão sempre em variáveis
 UPSERT = 'UPSERT type::record("{t}", $v.id) MERGE $v.d;'
 TIMES = 'UPDATE type::record("{t}", $v.id) SET {sets};'
@@ -267,7 +269,9 @@ def statements(table, rows):
             # conversa -> sessão: a identidade da sessão vai no OTEL_RESOURCE_ATTRIBUTES das conversas (#128)
             conversas[r["session_id"]] = r
     for sid, r in conversas.items():
+        # `subscription` (#679): o `oute.subscription` da conversa; no histórico sem ele, `claude` ou `codex` pelo `oute.agent`
         out += upsert("conversa", sid, {"agent": r.get("oute_agent"), "host": r.get("host_name"),
+                                        "subscription": subscription_of(r.get("oute_agent"), r.get("oute_subscription")),
                                         "instance": r.get("oute_instance"), "service": r.get("service_name")},
                       links={"sessao": ("sessao", r.get("oute_task_id"))})
     return out

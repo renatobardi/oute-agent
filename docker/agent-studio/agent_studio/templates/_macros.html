@@ -95,13 +95,13 @@
 
 {# filtro das listas (conversas, sessões): janela, host e agente; o htmx troca só o conteúdo #}
 {# Controle de período das quatro telas com janela (#527): janelas prontas (links), De/Até com dia e hora no fuso da tela, o
-   repositório (`repos` = none: sem ele) e, nas listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam repositório, host e agente; o intervalo vai em `de`/`ate`. #}
-{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="", model="", custo_ctl=true, hidden=(), live=false) %}
+   repositório (`repos` = none: sem ele), a assinatura (`subs`, #679: Uso e Dashboard) e, nas listas, host e agente (`hosts` = none: sem eles). Os links das janelas levam repositório, host e agente; o intervalo vai em `de`/`ate`. #}
+{% macro filter(action, windows, hours, range, hosts=none, host="", agents=none, agent="", repos=none, repo="", model="", custo_ctl=true, hidden=(), live=false, subs=false, sub="") %}
 <form class="filtro" method="get" action="{{ action }}"{% if hosts is not none or live %} hx-get="{{ action }}" hx-trigger="submit, change from:select" hx-target="#conteudo"
       hx-select="#conteudo" hx-swap="outerHTML" hx-push-url="true"{% endif %}>
   <nav class="janelas" aria-label="Janela">
     {% for value, label in windows %}
-    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}{% if model %}{% set _ = keep.update({"model": model}) %}{% endif %}{% for k, v in hidden %}{% set _ = keep.update({k: v}) %}{% endfor %}{% if custo == "efetivo" %}{% set _ = keep.update({"custo": "efetivo"}) %}{% endif %}
+    {% set keep = {"hours": value} %}{% if host %}{% set _ = keep.update({"host": host}) %}{% endif %}{% if agent %}{% set _ = keep.update({"agent": agent}) %}{% endif %}{% if repo %}{% set _ = keep.update({"repo": repo}) %}{% endif %}{% if sub %}{% set _ = keep.update({sub_param: sub}) %}{% endif %}{% if model %}{% set _ = keep.update({"model": model}) %}{% endif %}{% for k, v in hidden %}{% set _ = keep.update({k: v}) %}{% endfor %}{% if custo == "efetivo" %}{% set _ = keep.update({"custo": "efetivo"}) %}{% endif %}
     <a href="{{ action }}?{{ keep|urlencode }}"{% if hours == value and not range.from %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
@@ -125,6 +125,14 @@
       {% for r in repos %}<option value="{{ r }}"{% if r == repo %} selected{% endif %}>{{ r }}</option>{% endfor %}
       <option value="{{ repo_none }}"{% if repo == repo_none %} selected{% endif %}>sem repositório</option>
       {% if repo and repo != repo_none and repo not in repos %}<option value="{{ repo }}" selected>{{ repo }}</option>{% endif %}
+    </select>
+  </label>
+  {% endif %}
+  {% if subs %}
+  <label>Assinatura
+    <select name="{{ sub_param }}">
+      <option value="">Todas</option>
+      {% for a in subscriptions %}<option value="{{ a }}"{% if a == sub %} selected{% endif %}>{{ a }}</option>{% endfor %}
     </select>
   </label>
   {% endif %}

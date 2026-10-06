@@ -199,8 +199,8 @@ check("Sessões: o link de página das sessões leva a ordem das conversas sem s
 # ---------------------------------------------------------------- Uso: só a ordenação
 st, uso = q("/uso")
 named = lambda h, k: re.findall(rf'<tr data-{k}="([^"]*)"', h)   # noqa: E731
-check("Uso: as duas tabelas ganham o cabeçalho com link e não ganham filtro nem rodapé", st == 200 and 'data-uso="role" data-tabela' in uso
-      and 'data-uso="phase" data-tabela' in uso and uso.count('data-col="name"') == 2 and "data-filtro" not in uso and "data-rodape" not in uso)
+check("Uso: as três tabelas ganham o cabeçalho com link e não ganham filtro nem rodapé", st == 200 and 'data-uso="role" data-tabela' in uso
+      and 'data-uso="phase" data-tabela' in uso and 'data-uso="subscription" data-tabela' in uso and uso.count('data-col="name"') == 3 and "data-filtro" not in uso and "data-rodape" not in uso)
 asc, desc = q("/uso", "ord_papel=name&dir_papel=asc")[1], q("/uso", "ord_papel=name&dir_papel=desc")[1]
 check("Uso: papel de A a Z e invertido, sem mexer na tabela por fase", named(asc, "role") == sorted(named(uso, "role")) and named(desc, "role") == sorted(named(uso, "role"), reverse=True)
       and named(asc, "phase") == named(uso, "phase") and len(named(uso, "role")) >= 1)

@@ -160,7 +160,7 @@ check "últimas 24 h: nada (tudo chegou agora, fato em 2025)" jqe '.totals.calls
 # ---------------------------------------------------------------- 5.1 os gráficos da tela /uso (#533)
 UH="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN")"
 G="$(data <<<"$UH")"
-check "/uso: os quatro gráficos"                       jqe '[.[] | select(.grafico) | .grafico] == ["uso-custo-dia", "uso-tokens-dia", "uso-custo-role", "uso-custo-phase"]' <<<"$G"
+check "/uso: os cinco gráficos"                        jqe '[.[] | select(.grafico) | .grafico] == ["uso-custo-dia", "uso-tokens-dia", "uso-custo-role", "uso-custo-phase", "uso-custo-subscription"]' <<<"$G"
 check "/uso: custo por dia = um item por dia (2 dias, 2 colunas)" jqe '([.[] | select(.grafico == "uso-custo-dia")][0].days == "2") and ([.[] | select(.bucket and has("real-usd"))] | length == 2)' <<<"$G"
 check "/uso: soma do custo por dia = total da API (real e estimado)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
   ([\$g[] | select(.bucket and has(\"real-usd\")) | (.[\"real-usd\"] | select(. != \"\") | tonumber)] | add) as \$r |
@@ -170,8 +170,10 @@ for K in uso-custo-dia uso-custo-role uso-custo-phase; do
   check "/uso: $K traz o total real e estimado da janela (= API)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" --arg k "$3" "
     [\$g[] | select(.grafico == \$k)][0] | ((.[\"real-usd\"] | tonumber) - \$t.real_usd | fabs) < 1e-9 and ((.[\"estimated-usd\"] | tonumber) - \$t.estimated_usd | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$K"
 done
-check "/uso: barras de papel e de fase: 1 linha cada, com o custo do total (a API só tem avulsa e desconhecida)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
-  ([\$g[] | select(.nome)] | length == 2) and ([\$g[] | select(.nome) | ((.[\"real-usd\"] | tonumber) - \$t.real_usd | fabs) < 1e-9 and ((.[\"estimated-usd\"] | tonumber) - \$t.estimated_usd | fabs) < 1e-9] | all)" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
+check "/uso: barras de papel e de fase (1 linha cada, com o custo do total) e as de assinatura (somam o total): três vezes o total no conjunto" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
+  ([\$g[] | select(.subscription)] | length) as \$s | ([\$g[] | select(.nome)] | length == 2 + \$s) and
+  ([\$g[] | select(.nome) | .[\"real-usd\"] | select(. != \"\") | tonumber] | add - 3 * \$t.real_usd | fabs) < 1e-9 and
+  ([\$g[] | select(.nome) | .[\"estimated-usd\"] | select(. != \"\") | tonumber] | add - 3 * \$t.estimated_usd | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
 check "/uso: tokens por dia = tokens da API (entrada, saída, cache)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
   [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
   (\$c.input | tonumber) == \$t.input and (\$c.output | tonumber) == \$t.output and (\$c[\"cache-read\"] | tonumber) == \$t.cache_read and (\$c[\"cache-creation\"] | tonumber) == \$t.cache_creation" >/dev/null' _ "$G" "$(jq -c '.totals.tokens' <<<"$R")"
@@ -182,9 +184,9 @@ check "/uso: tokens: a soma das colunas = a do gráfico" bash -c 'jq -n -e --arg
 check "/uso: informado pela fonte × estimado distinguidos por texto e traço"  bash -c 'grep -q "Informado pela fonte" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
 check "/uso: entrada, saída e cache distinguidos por texto e traço" bash -c 'for w in "Entrada (" "Saída (" "Cache, leitura" "t-ent" "t-sai" "t-cache"; do grep -q "$w" <<<"$1" || exit 1; done' _ "$UH"
 check "/uso: sem style= nas tags dos gráficos (CSP)"    bash -c '! grep -q "style=" <<<"$1"' _ "$UH"
-check "/uso: as tabelas por papel e por fase seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1' <<<"$G"
+check "/uso: as tabelas por papel, por fase e por assinatura (#679) seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1 and ([.[] | select(.uso == "subscription")] | length) == 1' <<<"$G"
 GE="$(data <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")")"
-check "/uso: janela vazia, gráficos sem coluna e sem barra" jqe '([.[] | select(.bucket or .nome)] | length) == 0 and ([.[] | select(.grafico)] | length) == 4' <<<"$GE"
+check "/uso: janela vazia, gráficos sem coluna e sem barra" jqe '([.[] | select(.bucket or .nome)] | length) == 0 and ([.[] | select(.grafico)] | length) == 5' <<<"$GE"
 
 studio_stop
 

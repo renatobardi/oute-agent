@@ -19,7 +19,7 @@ import duckdb
 if importlib.util.find_spec("pandas") is None:
     sys.modules["pandas"] = None
 
-from . import (acks as acks_mod, alerts as alerts_mod, conversations as conv_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
+from . import (acks as acks_mod, alerts as alerts_mod, conversations as conv_mod, cost as cost_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
                repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
@@ -37,6 +37,7 @@ TABLES = {
         ("oute_task_id", "VARCHAR"),
         ("oute_swarm_round", "VARCHAR"),
         ("oute_repo", "VARCHAR"),
+        ("oute_subscription", "VARCHAR"),
         ("event_name", "VARCHAR"),
         ("oute_event_id", "VARCHAR"),
         ("severity_number", "INTEGER"),
@@ -60,6 +61,7 @@ FIXED_COLS = [
     ("oute_task_id", "VARCHAR"),
     ("oute_swarm_round", "VARCHAR"),
     ("oute_repo", "VARCHAR"),
+    ("oute_subscription", "VARCHAR"),
 ]
 TABLES["spans"] = [
     ("dedupe_key", "VARCHAR PRIMARY KEY"),  # s:<trace_id>:<span_id>
@@ -173,6 +175,15 @@ def migrate(con):
         raise
 
 
+def migrate_subscription(con):
+    """Banco criado antes do #679: põe a coluna `oute_subscription` (vazia) onde falta. O histórico não é preenchido: a
+    assinatura dele sai do `oute.agent` na leitura (`cost.subscription_sql`), e o que o replay reenviar entra com o valor."""
+    have = {t for (t,) in con.execute("SELECT table_name FROM information_schema.columns WHERE column_name = ?",
+                                      [cost_mod.SUBSCRIPTION_COL]).fetchall()}
+    for table in (t for t in TABLES if t not in have):
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {cost_mod.SUBSCRIPTION_COL} VARCHAR")
+
+
 # Configuração do DuckDB (#570). O app não configurava nada: o `memory_limit` padrão é 80% da memória do container
 # (4,7 GiB de 6g), que somado ao heap do Python cabe mal no limite; e o `checkpoint_threshold` padrão (16 MiB) faz um
 # checkpoint a cada poucos minutos, que é o que deixa o COMMIT lento (medido: 17 de 400 lotes acima de 200 ms com 16 MiB,
@@ -234,6 +245,7 @@ class Store:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
             migrate(self.con)
+            migrate_subscription(self.con)
             repo_infer.apply(self.con)   # histórico da conversa aberta direto numa pasta (#599)
             repo_mod.apply_legacy(self.con)  # acerto único: o que sobrou sem repositório antes do corte (#617)
             prices_mod.create(self.con)  # histórico de preços (#339)
@@ -394,25 +406,25 @@ class Store:
                 cur.close()
                 self._lap("read", t, label)
 
-    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False):
-        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528) e `effective` (#531, custo
-        efetivo) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
-        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective), "usage")
+    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False, sub=None):
+        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528), `effective` (#531, custo
+        efetivo) e `sub` (#679, assinatura) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
+        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective, sub), "usage")
 
     def repos(self, from_ns, to_ns):
         """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
         return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns), "repos")
 
-    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False):
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False, sub=None):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
-        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532) e o custo efetivo (#531) fazem parte da chave."""
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532), o custo efetivo (#531) e a assinatura (#679) fazem parte da chave."""
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute
-        key = (("live", to_ns - from_ns, tzk, repo, model, effective) if live
-               else (from_ns // minute, to_ns // minute, tzk, repo, model, effective))
+        key = (("live", to_ns - from_ns, tzk, repo, model, effective, sub) if live
+               else (from_ns // minute, to_ns // minute, tzk, repo, model, effective, sub))
         with self._dash_lock:
             hit = self._dash_cache.get(key)
             if hit and time.monotonic() - hit[0] < DASH_TTL_S:
@@ -420,19 +432,19 @@ class Store:
             if hit and live:
                 if not self._dash_refreshing.get(key):
                     self._dash_refreshing[key] = True
-                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model, effective), daemon=True).start()
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model, effective, sub), daemon=True).start()
                 return hit[1]
-        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model, effective)
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model, effective, sub)
 
-    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None, effective=False):
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None, effective=False, sub=None):
         with self._dash_lock:
             try:
                 cur = self.con.cursor()
                 timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
                 timer.start()
                 try:
-                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model, effective)
-                    snap["tools"] = tools_mod.top(cur, from_ns, to_ns, repo)  # gráfico das ferramentas (#535)
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model, effective, sub)
+                    snap["tools"] = tools_mod.top(cur, from_ns, to_ns, repo, sub)  # gráfico das ferramentas (#535)
                 finally:
                     timer.cancel()
                     cur.close()

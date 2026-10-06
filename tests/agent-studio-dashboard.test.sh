@@ -173,8 +173,8 @@ check("insights: a cor é o tom (Gate âmbar, erros e p95 destrutivos) e o Gate 
 
 # ------------------------------------------------------------------------------ gráficos
 sec = lambda name: re.search(rf'<section class="cartao bloco grafico" data-grafico="{name}".*?</section>', html, re.S).group(0)
-check("8 gráficos, um cartão cada", re.findall(r'data-grafico="([\w-]+)"', html) ==
-      ["chamadas", "custo-modelo", "latencia", "fases", "atividade", "sessoes", "repos", "ferramentas"])
+check("9 gráficos, um cartão cada", re.findall(r'data-grafico="([\w-]+)"', html) ==
+      ["chamadas", "custo-modelo", "latencia", "fases", "atividade", "sessoes", "repos", "assinaturas", "ferramentas"])
 pts = re.findall(r'<g class="ponto" data-bucket="([^"]*)" data-calls="(\d+)">', sec("chamadas"))
 check("1) série por hora: 48 baldes que somam as chamadas da janela", len(pts) == 48 and sum(int(c) for _, c in pts) == 27
       and 'data-unit="hour"' in sec("chamadas") and pts[0][0] == "2025-10-01 00")

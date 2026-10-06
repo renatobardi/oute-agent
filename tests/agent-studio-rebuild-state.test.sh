@@ -61,7 +61,7 @@ b2 = {"resourceLogs": [rl(server, [
     event(T + 80, "oute.swarm.round.closed", "ev-r1c", {"oute.swarm.round": RND}),
 ])]}
 # spans e um log da conversa (session.id + oute.task.id nos resources): vira `conversa` ligada à sessão
-conv = {**server, "session.id": SESS, "oute.task.id": S1}
+conv = {**server, "session.id": SESS, "oute.task.id": S1, "oute.subscription": "zai"}  # #679: a assinatura da conversa
 spans = {"resourceSpans": [rs(conv, [span("claude_code.llm_request", T + 45, 2, {"model": "claude-sonnet-5"})])]}
 b3 = {"resourceLogs": [rl(conv, [event(T + 46, "claude_code.api_request", "ev-api", {})])]}
 for name, obj in (("b1", b1), ("b2", b2), ("spans", spans), ("b3", b3)):
@@ -84,6 +84,8 @@ check "o texto com ':' ficou inteiro (#337)" \
   test "$(surreal_q 'SELECT title FROM pedido:`20261001-120000-reiniciar-nginx`' | jq -r '.[0].title')" = "ship: verificar deploy"
 check "a conversa ficou ligada à sessão" \
   test "$(surreal_q 'SELECT sessao FROM conversa:`conv-0001`' | jq -r '.[0].sessao' | grep -c 11111111-1111-4111-8111-111111111111)" = 1
+check "a conversa trouxe a assinatura (#679)" \
+  test "$(surreal_q 'SELECT subscription FROM conversa:`conv-0001`' | jq -r '.[0].subscription')" = zai
 studio_stop   # o DuckDB só abre para leitura com o serviço parado
 
 # ---------------------------------------------------------------- 2. one-off direto, contra um SurrealDB vazio
@@ -98,6 +100,8 @@ check "lidas: 14 logs e 1 span" has_line "lidas: logs=14 spans=1 marcas=0"
 check "depois: a contagem da ingestão" has_line "depois: rodadas=1 workers=1 sessoes=2 pedidos=3 conversas=1 etapas=0 acoes=0"
 snap "$TMP/remontado.json"
 check "o estado remontado é igual ao da ingestão (as cinco tabelas, todos os campos)" cmp -s "$TMP/ingestao.json" "$TMP/remontado.json"
+check "o rebuild-state remontou a assinatura da conversa (#679)" \
+  test "$(surreal_q 'SELECT subscription FROM conversa:`conv-0001`' | jq -r '.[0].subscription')" = zai
 check "stderr vazio no caso feliz" test ! -s "$TMP/err"
 
 # ---------------------------------------------------------------- 3. idempotente, em blocos de 1 linha, sem apagar

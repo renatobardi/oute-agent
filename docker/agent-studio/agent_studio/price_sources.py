@@ -36,8 +36,10 @@ FIELDS = ("input", "output", "cache_read", "cache_creation")
 E_URL, E_NET, E_TIMEOUT, E_HTTP, E_REDIRECT, E_SIZE, E_JSON, E_FORMAT = (
     "url", "rede", "tempo", "http", "redirecionamento", "tamanho", "json", "formato")
 
-# provedor do models.dev e prefixo do OpenRouter, por família de modelo (primeira que casa)
-FAMILIES = (("claude-", "anthropic"), ("gpt-", "openai"))
+# por família de modelo (primeira que casa): prefixo do nosso id, provedor no models.dev, prefixo no OpenRouter e se o
+# provedor é obrigatório no models.dev (ausente = o formato mudou). A `zai` (#679) é opcional: sem o provedor, o `glm-*`
+# fica "sem fonte" (nunca troca), e a conferência dos outros modelos segue
+FAMILIES = (("claude-", "anthropic", "anthropic", True), ("gpt-", "openai", "openai", True), ("glm-", "zai", "z-ai", False))
 # exceções ao mapeamento por regra: {modelo nosso: {fonte: id na fonte}} (vazio = a regra serve a todos hoje)
 OVERRIDES = {}
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
@@ -53,9 +55,9 @@ class SourceError(Exception):
 
 
 def _provider(model):
-    for prefix, provider in FAMILIES:
+    for prefix, provider, router, _ in FAMILIES:
         if model.startswith(prefix):
-            return provider
+            return provider, router
     return None
 
 
@@ -63,18 +65,19 @@ def source_ids(model):
     """{fonte: id naquela fonte} do modelo `model` (nosso id, sem prefixo de provedor), ou `{}` se não há regra.
 
     - models.dev: `(provedor, mesmo id)`: `claude-opus-5-5` -> `("anthropic", "claude-opus-5-5")`.
-    - OpenRouter: `provedor/id` com a versão no formato dele: sem a data no fim (`-20251001`) e com ponto entre os
+    - OpenRouter: `prefixo/id` (o prefixo é o do provedor lá: `z-ai` para o `glm-*`) com a versão no formato dele: sem a data no fim (`-20251001`) e com ponto entre os
       dois últimos números do Claude (`claude-opus-5-5` -> `anthropic/claude-opus-5.5`); `gpt-*` já usa ponto."""
     m = (model or "").lower()
     if "/" in m:
         m = m.rsplit("/", 1)[1]
-    provider = _provider(m)
-    if provider is None:
+    found = _provider(m)
+    if found is None:
         return {}
+    provider, router = found
     ids = {MODELS_DEV: (provider, m)}
     base = _DATE_SUFFIX.sub("", m)
     base = _MINOR_SUFFIX.sub(r"\1.\2", base) if m.startswith("claude-") else base
-    ids[OPENROUTER] = f"{provider}/{base}"
+    ids[OPENROUTER] = f"{router}/{base}"
     for source, source_id in OVERRIDES.get(m, {}).items():
         ids[source] = source_id
     return ids
@@ -219,13 +222,15 @@ def _provider_models(data, provider):
 
 def parse_models_dev(data):
     """`{(provedor, id): preço parcial}` do JSON do models.dev (`{provedor: {models: {id: {cost: {...}}}}}`).
-    Os provedores das `FAMILIES` precisam existir com `models` (senão o formato mudou: `SourceError(E_FORMAT)`).
+    Os provedores obrigatórios das `FAMILIES` precisam existir com `models` (senão o formato mudou: `SourceError(E_FORMAT)`).
     Só o preço base (`cost.input/output/cache_read/cache_write`); faixas de contexto ficam de fora. Modelo sem
     preço válido não entra."""
     if not isinstance(data, dict):
         raise SourceError(E_FORMAT)
     out = {}
-    for _, provider in FAMILIES:
+    for _prefix, provider, _router, required in FAMILIES:
+        if not required and provider not in data:
+            continue  # provedor opcional que a fonte não traz (#679): os modelos dele ficam sem fonte
         for model_id, entry in _provider_models(data, provider).items():
             price = _partial(entry.get("cost") if isinstance(entry, dict) else None,
                              ("input", "output", "cache_read", "cache_write"), per_token=False)

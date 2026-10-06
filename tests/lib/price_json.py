@@ -4,7 +4,8 @@ o OpenRouter sai em USD por token, como texto. Uso: PYTHONPATH=tests/lib."""
 import json
 from decimal import Decimal
 
-PROVIDERS = (("claude-", "anthropic"), ("gpt-", "openai"))
+PROVIDERS = (("claude-", "anthropic"), ("gpt-", "openai"), ("glm-", "zai"))
+ROUTER = {"zai": "z-ai"}  # o prefixo do OpenRouter, onde difere do provedor do models.dev (#679)
 
 
 def models_dev(prices, extra=None):
@@ -14,7 +15,7 @@ def models_dev(prices, extra=None):
         cost = {"input": p["input"], "output": p["output"]}
         if "cache_read" in p: cost["cache_read"] = p["cache_read"]
         if "cache_creation" in p: cost["cache_write"] = p["cache_creation"]
-        out[provider]["models"][model] = {"id": model, "cost": cost}
+        out.setdefault(provider, {"models": {}})["models"][model] = {"id": model, "cost": cost}
     return json.dumps(out)
 
 
@@ -29,5 +30,5 @@ def openrouter(prices, ids=None):
         pricing = {"prompt": per_token(p["input"]), "completion": per_token(p["output"])}
         if "cache_read" in p: pricing["input_cache_read"] = per_token(p["cache_read"])
         if "cache_creation" in p: pricing["input_cache_write"] = per_token(p["cache_creation"])
-        data.append({"id": (ids or {}).get(model, f"{provider}/{model}"), "pricing": pricing})
+        data.append({"id": (ids or {}).get(model, f"{ROUTER.get(provider, provider)}/{model}"), "pricing": pricing})
     return json.dumps({"data": data})

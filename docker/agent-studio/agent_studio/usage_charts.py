@@ -91,5 +91,6 @@ def bars(rows, kind):
     } for r in rows]
 
 
-def build(data, by_role, by_phase):
-    return {"days": days(data["series"]), "roles": bars(by_role, "role"), "phases": bars(by_phase, "phase")}
+def build(data, by_role, by_phase, by_subscription=()):
+    return {"days": days(data["series"]), "roles": bars(by_role, "role"), "phases": bars(by_phase, "phase"),
+            "subscriptions": bars(by_subscription, "subscription")}

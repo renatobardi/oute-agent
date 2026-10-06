@@ -34,8 +34,9 @@ from starlette.staticfiles import StaticFiles
 from starlette.datastructures import QueryParams
 
 from . import (acks as acks_mod, acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
-               sessions as sess_mod, tabela as tabela_mod, tools as tools_mod, tz as tz_mod, usage as usage_mod)
+               sessions as sess_mod, subscription as sub_mod, tabela as tabela_mod, tools as tools_mod, tz as tz_mod, usage as usage_mod)
 from . import alerts as alerts_mod
+from . import cost as cost_mod
 from . import loading as loading_mod
 from . import marcar as marcar_mod
 from . import usage_charts as charts_mod
@@ -141,6 +142,8 @@ def _env(zone=tz_mod.UTC):
     env.globals["ack"] = {"enabled": False, "active": False, "csrf": "", "seen_at": 0, "back": HOME, "read": None}  # o padrão sem `page()` (#537)
     env.globals["com_custo"], env.globals["custo_nome"] = _com_custo, _custo_nome
     env.globals["repo_none"] = repo_mod.NONE  # o valor de "sem repositório" no filtro (#528)
+    env.globals["subscriptions"] = cost_mod.SUBSCRIPTIONS  # as opções do filtro de assinatura (#679)
+    env.globals["sub_param"] = sub_mod.PARAM
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
     return env
 
@@ -398,8 +401,10 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         # Mesmas regras das rotas completas, antes de abrir a primeira leitura.
         if path in ("/", CONVERSAS, SESSOES, "/uso", "/ferramentas", FERRAMENTA, "/rodadas"):
             path_window(path, q)
+        if path in ("/", "/uso"):
+            sub_mod.check(q.get(sub_mod.PARAM, ""))
         tables = {CONVERSAS: (conv_mod.TABLE,), SESSOES: (sess_mod.TABLE, sess_mod.LOOSE),
-                  "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE),
+                  "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE, usage_mod.SUBSCRIPTION_TABLE),
                   "/pedidos": (prop_mod.PENDING_TABLE, prop_mod.RECENT_TABLE), "/rodadas": (etapas_mod.TABLE,)}
         if path in tables:
             table_states(q, *tables[path])
@@ -533,8 +538,12 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         repo = q.get("repo", "")
         model = q.get("model", "")
         custo = cost_mode(q)
+        try:
+            sub = sub_mod.check(q.get(sub_mod.PARAM, ""))
+        except ValueError as e:
+            return error(request, 400, str(e))
         snap, failed = await read(request, "dashboard", store.dashboard, from_ns, to_ns, config.prices, config.tz,
-                                  repo_mod.parse(repo), model or None, custo == "efetivo")
+                                  repo_mod.parse(repo), model or None, custo == "efetivo", sub)
         if failed:
             return failed
         now = time.time_ns()
@@ -556,10 +565,12 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             qs = f"hours={quote(per['hours'], safe='')}"
         if repo:  # o repositório vai nos links para as outras telas (#528)
             qs += f"&repo={quote(repo, safe='')}"
+        if sub:  # a assinatura também vai nos links (#679)
+            qs += f"&{sub_mod.PARAM}={quote(sub, safe='')}"
         if custo == "efetivo":  # #531
             qs += "&custo=efetivo"
         return page(request, "dashboard.html", snap=snap, insights=dash_mod.insights(snap, ages, qs), gates_read=state_read,
-                    gates=len(ages), window_qs=qs, repo=repo, custo=custo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
+                    gates=len(ages), window_qs=qs, repo=repo, sub=sub or "", custo=custo, repos=snap["repos"], model=model, **per, from_ns=from_ns, to_ns=to_ns, windows=WINDOWS)
 
     # ------------------------------------------------ ferramentas (#535): só leitura
     def tools_qs(q, from_ns, to_ns, host, agent, repo):
@@ -795,12 +806,13 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as e:
             return error(request, 400, str(e))
         try:
-            st_role, st_phase = table_states(q, usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE)
+            st_role, st_phase, st_sub = table_states(q, usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE, usage_mod.SUBSCRIPTION_TABLE)
+            sub = sub_mod.check(q.get(sub_mod.PARAM, ""))
         except ValueError as e:
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "uso", store.usage, from_ns, to_ns, config.prices, config.tz, repo_mod.parse(repo),
-                                  cost_mode(q) == "efetivo")
+                                  cost_mode(q) == "efetivo", sub)
         if failed:
             return failed
         repos = []
@@ -813,9 +825,13 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             # o que mais custou primeiro (real + estimado); empate pela ordem da API
             return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
         by_role, by_phase = by_cost(data["by_role"]), by_cost(data["by_phase"])
-        (t_role, t_phase), keep = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase))
-        return page(request, "usage.html", totals=data["totals"], t_role=t_role, t_phase=t_phase, keep=keep, charts=charts_mod.build(data, by_role, by_phase),
-                    from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, repos=repos,
+        # a chamada sem assinatura (ai-memory) aparece com o nome de exibição, não como `null`
+        by_sub = by_cost([{**r, "subscription": r["subscription"] or usage_mod.NO_SUBSCRIPTION} for r in data["by_subscription"]])
+        (t_role, t_phase, t_sub), keep = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase),
+                                                   (usage_mod.SUBSCRIPTION_TABLE, st_sub, by_sub))
+        return page(request, "usage.html", totals=data["totals"], t_role=t_role, t_phase=t_phase, t_sub=t_sub, keep=keep,
+                    charts=charts_mod.build(data, by_role, by_phase, by_sub),
+                    from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, sub=sub or "", repos=repos,
                     **period(q, from_ns, to_ns, config.tz))
 
     # ------------------------------------------------ pedidos do canal de aprovação (#208): só leitura

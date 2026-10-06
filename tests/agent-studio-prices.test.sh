@@ -78,6 +78,7 @@ EXPECTED = {
     "gpt-5.1": ("openai", "openai/gpt-5.1"), "gpt-5.1-codex-mini": ("openai", "openai/gpt-5.1-codex-mini"),
     "gpt-5-nano": ("openai", "openai/gpt-5-nano"), "gpt-6-astra": ("openai", "openai/gpt-6-astra"),
     "gpt-6.1-sol": ("openai", "openai/gpt-6.1-sol"), "gpt-6-luna": ("openai", "openai/gpt-6-luna"),
+    "glm-5.3": ("zai", "z-ai/glm-5.3"),  # a assinatura `zai` (#679): provedor `zai` no models.dev, `z-ai` no OpenRouter
 }
 for model, (provider, or_id) in EXPECTED.items():
     ids = S.source_ids(model)
@@ -92,6 +93,12 @@ check("mapeamento: todo modelo da tabela do seletor e do config.toml do repo tem
       all(set(S.source_ids(m)) == {S.MODELS_DEV, S.OPENROUTER} for m in sel | cfg_models))
 check("seletor: a tabela do repo dá os ids Claude/Codex esperados",
       sel == {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "gpt-6-luna"})
+# o preço do glm-5.3 do config.toml (#679) é o que as duas fontes confirmam: a conferência o acha igual, não "sem fonte"
+glm = CF.load(f"{root}/config/agent-studio/config.toml").prices.lookup("glm-5.3")
+glm_src = {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_creation": 0.0}
+check("glm-5.3: tem preço no config.toml e a conferência o acha igual ao das fontes (não aparece como sem preço nem sem fonte)",
+      glm is not None and P.decide(glm, False, {S.MODELS_DEV: dict(glm_src), S.OPENROUTER: dict(glm_src)})[0] == P.EQUAL)
+check("glm-5.3: as fontes divergindo não trocam o preço (diverge)", P.decide(glm, False, {S.MODELS_DEV: dict(glm_src), S.OPENROUTER: {**glm_src, "input": 0.07}})[::2] == (P.DIVERGE, None))
 check("seletor: arquivo ausente = conjunto vazio com o motivo", P.select_models(f"{tmp}/nao-existe.toml") == (set(), "FileNotFoundError"))
 
 # ---------------------------------------------------------------- leitura e validação do JSON de terceiro
@@ -116,6 +123,14 @@ check("OpenRouter: preço -1 (dinâmico), texto e id que não é texto deixam o 
                                         {"id": 7, "pricing": {"prompt": "1", "completion": "1"}}, "x",
                                         {"id": "openai/c", "pricing": {"prompt": "0.000001", "completion": "0.000002"}}]})) == ["openai/c"])
 check("models.dev: raiz que não é objeto = formato", raises(lambda: S.parse_models_dev([]), "formato"))
+check("models.dev: o provedor zai é opcional (#679): sem ele a leitura segue e o glm-5.3 fica sem fonte",
+      ("zai", "glm-5.3") not in S.parse_models_dev({"anthropic": {"models": {"claude-x": {"cost": {"input": 1, "output": 2}}}}, "openai": {"models": {}}}))
+check("models.dev: com o provedor zai, o glm-5.3 entra com o preço base",
+      S.parse_models_dev({"anthropic": {"models": {"claude-x": {"cost": {"input": 1, "output": 2}}}}, "openai": {"models": {}},
+                          "zai": {"models": {"glm-5.3": {"cost": {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_write": 0}}}}})[("zai", "glm-5.3")]
+      == {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_creation": 0.0})
+check("models.dev: provedor zai que existe e não tem `models` = formato", raises(lambda: S.parse_models_dev(
+      {"anthropic": {"models": {"claude-x": {"cost": {"input": 1, "output": 2}}}}, "openai": {"models": {}}, "zai": {}}), "formato"))
 check("models.dev: sem o provedor esperado (formato mudou) = formato", raises(lambda: S.parse_models_dev({"anthropic": {"models": {}}}), "formato"))
 check("models.dev: nenhum preço válido = formato", raises(lambda: S.parse_models_dev({"anthropic": {"models": {}}, "openai": {"models": {}}}), "formato"))
 check("OpenRouter: sem a lista `data` = formato", raises(lambda: S.parse_openrouter({"models": []}), "formato"))

@@ -8,7 +8,7 @@ import json
 
 from . import repo as repo_mod, usage as usage_mod
 from .tabela import Col, Table, usage_cols
-from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, call_cost, is_subscription,
+from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR, SUBSCRIPTION_EXPR, call_cost, is_subscription,
                    spans_with_cost)
 
 LIST_LIMIT = 200    # conversas por página da lista (as mais recentes)
@@ -144,7 +144,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
     table, params = spans_with_cost("session_id = ?", [session_id], "session_id = ?", [session_id])
     spans = _dicts(con.execute(
         "SELECT trace_id, span_id, parent_span_id, name, time_unix_nano, duration_ns, model, input_tokens, "
-        f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, oute_agent, ({MODEL_CALL_SQL}) AS is_call "
+        f"output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, status_code, {SUBSCRIPTION_EXPR} AS subscription, ({MODEL_CALL_SQL}) AS is_call "
         f"FROM {table}{' WHERE status_code = ?' if errors_only else ''} ORDER BY time_unix_nano, trace_id, span_id LIMIT ?",
         [*MODEL_CALL_PARAMS, *params, *([SPAN_STATUS_ERROR] if errors_only else []), span_limit]))
     for s in spans:
@@ -155,7 +155,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
                 s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]))
-            if effective and is_subscription(s["oute_agent"]):
+            if effective and is_subscription(s["subscription"]):
                 s["cost_kind"], s["cost"] = "effective", 0.0
     if errors_only:
         # sem os pais a árvore não vale: uma lista plana, pela hora do fato

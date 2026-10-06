@@ -19,7 +19,7 @@
 <div class="titulo-linha">
   <div>{% if loading_target is none %}<h1>Dashboard</h1>{% endif %}
   <p class="nota janela" data-janela>{{ from_ns|ts }} a {{ to_ns|ts }} · {{ tzl() }} · comparado com a janela anterior de mesmo tamanho</p></div>
-  {{ filter("/", windows, hours, range, repos=repos, repo=repo, model=model) }}
+  {{ filter("/", windows, hours, range, repos=repos, repo=repo, model=model, subs=true, sub=sub) }}
 </div>
 </div>
 {% endcall %}
@@ -81,6 +81,7 @@
   <form class="filtro filtro-modelo" method="get" action="/" data-modelo-form>
     {% if range.from %}<input type="hidden" name="de" value="{{ range.from }}"><input type="hidden" name="ate" value="{{ range.to }}">{% else %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
     {% if repo %}<input type="hidden" name="repo" value="{{ repo }}">{% endif %}
+    {% if sub %}<input type="hidden" name="{{ sub_param }}" value="{{ sub }}">{% endif %}
     {% if custo == "efetivo" %}<input type="hidden" name="custo" value="efetivo">{% endif %}
     <label>Modelo
       <select name="model">
@@ -211,6 +212,23 @@
        title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
     <span class="rotulo mono">{{ r.repo }}</span>
     {% call barra(r.frac) %}{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}
+    <span class="valor">{{ r.calls|num }} · {% if r.cost is none %}sem preço{% else %}{{ money(r) }}{% endif %}</span>
+  </div>
+  {% else %}
+  <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
+  {% endfor %}
+</section>
+{% endcall %}
+
+{# 7b) chamadas e custo por assinatura (#679): claude, zai, codex; a `zai` entra como custo estimado (preço do config.toml) #}
+{% call fragment("assinaturas") %}
+<section class="cartao bloco grafico" data-grafico="assinaturas" data-assinaturas="{{ snap.by_subscription|length }}" data-total="{{ snap.by_subscription|sum(attribute="calls") }}">
+  <div class="grafico-topo"><h2>Chamadas por assinatura</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>
+  {% for r in snap.by_subscription %}
+  <div class="barra-linha" data-assinatura="{{ '' if r.none else r.subscription }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
+       title="{{ r.subscription }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
+    <span class="rotulo mono">{{ r.subscription }}</span>
+    {% call barra(r.frac) %}{{ r.subscription }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}
     <span class="valor">{{ r.calls|num }} · {% if r.cost is none %}sem preço{% else %}{{ money(r) }}{% endif %}</span>
   </div>
   {% else %}
