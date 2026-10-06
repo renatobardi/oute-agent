@@ -81,4 +81,5 @@ check "650: notas pedem no # RESUMO as rodadas abertas e as sessões que caem" g
 check "650: ship-release traz o passo da fila antes do pedido" bash -c 'grep -qF "oute-inbox " "$1" && grep -qF "oute-swarm busy" "$1" && grep -qF "quais rodadas estão abertas e quais sessões caem" "$1"' _ "$SR"
 check "665: notas mandam rodar gh issue list antes de todo gh issue create, em item próprio" grep -qF '**Before every `gh issue create`, run `gh issue list --state open --search' "$N"
 check "665: notas mandam comentar na issue aberta em vez de criar outra" grep -qF 'new evidence goes in a comment on it (`gh issue comment <n>`)' "$N"
+check "486: notas mandam só Refs e ## Falta com critério pendente, sem Closes nem negado" grep -qF 'write only `Refs #<n>` and list what is missing under `## Falta`; never write `Closes #<n>`' "$N"
 check_end
