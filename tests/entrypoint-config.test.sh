@@ -172,7 +172,7 @@ t=open(sys.argv[1]).read(); m=re.search(r"<!-- oute:managed:ops-handoff -->\n(.*
 sys.exit(0 if m and m.group(1)==open(sys.argv[2]).read().strip() else 1)
 PY' _ "$f" "$LIB_DIR/agent-notes.md"
 done
-check "notas: regra de pedido que remove/recria/para lista dependentes e para sem alterar" grep -qF 'first lists in the script what depends on it and **stops without changing anything**' "$LIB_DIR/agent-notes.md"
+check "notas: regra de pedido que remove/recria/para lista dependentes e para sem alterar" grep -qF 'the script itself lists what depends on it and **stops without changing anything**' "$LIB_DIR/agent-notes.md"
 check "notas: regra de pedido obsoleto: recusar antes e título do substituto"  grep -qF "replacement's title says it **replaces** the old one" "$LIB_DIR/agent-notes.md"
 check "notas: texto do usuário fora do bloco preservado (Claude)" grep -qxF 'texto do usuário no Claude' "$H/.claude/CLAUDE.md"
 check "notas: texto do usuário fora do bloco preservado (Codex)"  grep -qxF 'regra minha' "$H/.codex/AGENTS.md"

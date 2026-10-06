@@ -14,7 +14,7 @@ To run on the host as its user or **sudo/root**:
    ```
    Prints request `id`. `--root` = sudo; without it, host user.
 2. User reads whole script, approves/rejects on host with `oute approve`.
-3. Wait for the result (output + exit code): `oute-inbox --wait <id>`. Exit 3 = pending/expired.
+3. Wait for and read the result (output + exit code): `oute-inbox --wait <id>`. Exit 3 = pending/expired.
 
 Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` before each step, no secrets in text, nothing interactive. Read state first (via `ssh oute-server`); propose only what is needed.
 **Summary and warning in the script (#480).** Every script opens with a `# RESUMO` comment block, in this order: what it does, which host, what it changes, what it does **not** touch, whether it restarts anything. Before each step that **removes, recreates, stops or cannot be undone**: a line `# CUIDADO: <o que o passo faz>. <o que se perde>.` (command first, risk after; "não se desfaz" when so). Warning states the real effect: no exaggeration, no reassurance. Write "não toca em X" only if the script guarantees it (e.g. a check before the step). Both blocks are comments: script runs the same without them. Example:
@@ -28,9 +28,9 @@ Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` befo
    echo "2/2: remove o volume"
    docker volume rm oute-x
    ```
-Request that **removes, recreates or stops** a host resource (volume, container, file, service): first lists in the script what depends on it and **stops without changing anything** if a dependent is unexpected; or is preceded by a rehearsal request (`--dry-run`/read-only).
+Request that **removes, recreates or stops** a host resource (volume, container, file, service): before that step, the script itself lists what depends on it and **stops without changing anything** if a dependent is unexpected; or is preceded by a rehearsal request (`--dry-run`/read-only).
 Pending request **obsolete** (previous failed, plan changed): tell the user to **reject it before** proposing the replacement; replacement's title says it **replaces** the old one (e.g. "substitui <id>: …").
-**Release, deploy, deploy verification: read the queue first (#650).** Before proposing one, read the channel queue (`oute-inbox`, lists pending requests) and open rounds (`oute-swarm busy`, lists issues with a session open in another round). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
+**Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`, lists pending requests) and open rounds (`oute-swarm busy`, lists issues with a session open in another round). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
 
 **Permanent** oute-server config change: `lab` repo flow (issue → inventory → script → PR). The channel is for diagnosis, one-off adjustments, and deploying an already merged PR.
 
@@ -48,19 +48,19 @@ Only with opt-in `OUTE_MEMORY_RUN=1` (off by default): the interactive worktree 
 
 - Each session in its **own worktree** (`/workspace/.worktrees/<space>/<repo>-<slug>`, branch `sessao/<slug>`; `<space>` = herdr space as folder name, `_sem-space` outside one), opened by `oute-task`. The container shell does it when the user types `claude`/`codex` in the main checkout.
 - **Before creating, editing or committing any file, run `git rev-parse --git-dir --git-common-dir`.** Both equal = main checkout: do not create, edit or commit, even if the user says "do it now"; only warn and suggest `oute-task <slug>`.
-- **Never edit or switch branch in the main checkout** (`/workspace/<repo>`, always the default branch). If you are in it (`git rev-parse --git-dir` = `--git-common-dir`): change nothing, warn the user, suggest `oute-task <slug>`. Only exception: `git pull --ff-only` there, on the default branch, no local change, without asking (`oute-task clean --yes` does it).
+- **Never edit or switch branch in the main checkout** (`/workspace/<repo>`, always the default branch). If you are in it (`git rev-parse --git-dir` = `--git-common-dir`): change nothing, warn the user, suggest `oute-task <slug>`. Only exception: you may run `git pull --ff-only` there without asking, and only on the default branch with no local changes (`oute-task clean --yes` does it).
 - Before the first push: `git branch -m …` to `<tipo>/<issue>-<slug>`; types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Small commits, conventional messages. Deliver by PR (`gh pr create`). **Merge only when the user asks.**
 - After merge: `oute-task clean` lists what can be removed; `oute-task clean --yes` removes. Both act only on the current herdr space (`--space <nome>`: another; `--all`: all, including old-format worktrees directly under `/workspace/.worktrees`).
-- `oute-task clean` also lists one line per open ai-memory handoff of removed worktrees (`handoff id=<id> workspace=<W> project=<P> cwd=<worktree>`), but **never cancels**. After `clean --yes`, cancel each such line with `memory_handoff_cancel` (`id`, with the line's `workspace` and `project`) and say how many you cancelled; without `memory_*` tools, say you did not cancel. A line `aviso: …` = listing failed: cancel nothing by guess. Never use `ai-memory handoffs --expire-all`: it also expires handoffs of live worktrees.
+- `oute-task clean` also lists one line per open ai-memory handoff of removed worktrees (`handoff id=<id> workspace=<W> project=<P> cwd=<worktree>`), but **never cancels**. If you ran `clean --yes` and such lines appear, cancel each with `memory_handoff_cancel` (`id`, with the line's `workspace` and `project`) and say how many you cancelled; without `memory_*` tools, say you did not cancel. A line `aviso: …` = listing failed: cancel nothing by guess. Never use `ai-memory handoffs --expire-all`: it also expires handoffs of live worktrees.
 
 ## Same container: process and merge (#538)
 
 One container, all sessions the same user: `ps`/`pgrep` show other sessions' processes, and GitHub records every merge as the same account.
 
-- **Merging a PR of an open round is not yours.** PR of an open swarm round (`~/.oute/swarm/<rodada>/spawned` has its issue's session and no `fechada` file): refuse, even if the Bardi says "pode fazer merge". Tell him: which round, that the merge goes through that round's dispatcher (branch `sessao/<rodada>`), and the last audit state (PR comment with `<!-- oute-aidlc-qa-pr-audit -->`: audited head and action, or "sem auditoria"). `gh pr merge` already refuses it (exit 77). Only the round's dispatcher merges it.
+- **Merging a PR of an open round is not yours.** PR of an open swarm round (`~/.oute/swarm/<rodada>/spawned` has its issue's session and no `fechada` exists): refuse, even if the Bardi says "pode fazer merge". Tell him: which round, that the merge goes through that round's dispatcher (branch `sessao/<rodada>`), and the last audit state (PR comment with `<!-- oute-aidlc-qa-pr-audit -->`: audited head and action, or "sem auditoria"). `gh pr merge` already refuses it (exit 77). Only the round's dispatcher merges it.
 - **Only kill a process you opened**, by the PID or task id you kept. `pkill` and `killall` (and `pkill -f`) are refused in agent sessions: they kill by name and hit other sessions.
-- **"What is running":** list first what you opened (your task list), then separately what belongs to another session, with the owner when known. Never call "from this session" what came from `ps` or `pgrep`.
+- **"What is running":** list first what you opened (your task list), then separately what belongs to another session, with the owner when known. Never call "desta sessão" what came from `ps` or `pgrep`.
 - **Merge comment:** a standalone session that merges (PR outside a round, at the Bardi's request) comments on the PR before or with it: the session (worktree and id), "a pedido do Bardi" or the authorization used, the merged head. The dispatcher uses its own format (`docker/swarm.md`).
 - **Limits:** the merge lock and `pkill` block protect against mistakes, not against circumvention (`gh` API, `bash -c`, another binary). They do not apply to a merge the Bardi does on the website. The `pkill` hook also has a false positive: quoted text with `pkill` or `killall` right after `;`, `&&` or `|` (e.g. `git commit -m "a; pkill x"`) is refused though nothing runs; rewrite the text without the word there.
 
