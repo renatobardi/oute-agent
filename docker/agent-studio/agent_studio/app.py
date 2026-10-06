@@ -73,10 +73,13 @@ def _decompress(body, encoding):
 INGEST_SLOTS = 4        # ingestões ao mesmo tempo (o DuckDB tem um escritor só; as demais esperam a vaga)
 INGEST_WAIT_S = 20.0    # espera pela vaga antes do 503: abaixo do prazo do collector (60 s), que retenta da fila em disco
 INGEST_RETRY_AFTER = "5"
+READY_LOCK_WAIT_S = 2.0       # quanto o /readyz espera a trava do escritor antes de dizer que não está pronto
+READY_MAX_WRITE_AGE_S = 900   # ingestão chegando e nada gravado há mais que isto = não pronto (as métricas chegam a cada 5 min)
 
 
 def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None,
-               ingest_slots=INGEST_SLOTS, ingest_wait=INGEST_WAIT_S):
+               ingest_slots=INGEST_SLOTS, ingest_wait=INGEST_WAIT_S,
+               ready_lock_wait=READY_LOCK_WAIT_S, ready_max_write_age=READY_MAX_WRITE_AGE_S):
     """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256);
     `mark_token` = a de marcação (#510; sem ela, `POST /rodada/acao` não existe)."""
     auth = auth_mod.Auth(token, read_token, mark_token)
@@ -101,6 +104,9 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     # vagas de ingestão (#570): só o laço de eventos mexe na contagem, então não precisa de trava nem de semáforo
     app.state.ingest_slots = ingest_slots
     app.state.ingest_free = ingest_slots
+    # para o /readyz (#570): quando chegou a última ingestão e quando a última foi gravada (a subida conta como gravação)
+    app.state.last_attempt = None
+    app.state.last_ok = time.monotonic()
 
     async def ingest(signal, request):
         resp = await _ingest(signal, request)
@@ -136,8 +142,12 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             tel.warn("ingest-busy", "ingestão cheia, respondi 503 (%s): %d vagas ocupadas por mais de %.0f s", signal,
                      ingest_slots, ingest_wait)
             return JSONResponse({"message": "ingestão cheia; reenvie"}, status_code=503, headers={"Retry-After": INGEST_RETRY_AFTER})
+        app.state.last_attempt = time.monotonic()
         try:
-            return await _write(signal, request)
+            resp = await _write(signal, request)
+            if resp.status_code == 200:
+                app.state.last_ok = time.monotonic()
+            return resp
         finally:
             app.state.ingest_free += 1
 
@@ -218,6 +228,40 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     @app.get("/healthz")
     async def healthz():
         return PlainTextResponse("ok")
+
+    @app.get("/readyz")
+    async def readyz():
+        """Pronto de verdade (#570): a trava do escritor livre dentro do prazo, uma leitura no DuckDB e, se há ingestão
+        chegando, que ela esteja sendo gravada. Sem credencial, como o /healthz, então a resposta não leva dado do
+        banco. O /healthz segue sem tocar no banco: é o do healthcheck do container, que não pode reiniciar o serviço
+        porque ele está ocupado."""
+        def probe():
+            t = time.monotonic()
+            if not store.lock.acquire(timeout=ready_lock_wait):
+                return "lock", (time.monotonic() - t) * 1000, None
+            store.lock.release()
+            lock_ms = (time.monotonic() - t) * 1000
+            t = time.monotonic()
+            try:
+                store.ping()
+            except Exception:  # noqa: BLE001 — a causa fica no stderr; a resposta diz só qual checagem falhou
+                detail.exception("readyz: leitura falhou")
+                return "read", lock_ms, None
+            return None, lock_ms, (time.monotonic() - t) * 1000
+
+        reason, lock_ms, read_ms = await run_in_threadpool(probe)
+        now = time.monotonic()
+        age = now - app.state.last_ok
+        # ingestão que chegou depois da última gravação boa, e a última boa já passou do limite
+        if reason is None and app.state.last_attempt is not None and app.state.last_attempt > app.state.last_ok \
+                and age > ready_max_write_age:
+            reason = "ingest"
+        body = {"ready": reason is None, "lock_wait_ms": round(lock_ms, 1), "last_write_age_s": round(age, 1)}
+        if read_ms is not None:
+            body["read_ms"] = round(read_ms, 1)
+        if reason:
+            body["reason"] = reason
+        return JSONResponse(body, status_code=200 if reason is None else 503)
 
     # ------------------------------------------------ consulta agregada de uso (#203)
     @app.get("/v1/usage")

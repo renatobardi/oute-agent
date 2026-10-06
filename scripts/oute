@@ -527,7 +527,7 @@ STBK_DIR=backups/agent-studio
 STBK_CONTAINER=oute-agent-studio
 STBK_PY=/opt/agent-studio/venv/bin/python
 STBK_LOCAL=/data/agent-studio/backup
-studio_backup_usage() { echo "uso: oute studio backup | oute studio backup --check <nome da cópia no bucket>" >&2; }
+studio_backup_usage() { echo "uso: oute studio backup | oute studio backup --check <nome da cópia no bucket | latest>" >&2; }
 studio_backup_bucket() { printf '%s' "${OUTE_STUDIO_BACKUP_BUCKET:-${OUTE_OBSERVABILITY_BUCKET:-oute-observability}}"; }
 # nome;bytes de cada cópia no bucket; vazio se a pasta não existe (rclone rc 3)
 studio_backup_list() {
@@ -595,12 +595,17 @@ studio_backup() {
   return "$rrc"
 }
 studio_backup_check() {
-  local name="$1" bucket list out rc=0
-  [[ "$name" =~ ^[a-z0-9_-]+-[0-9]{8}T[0-9]{6}Z\.duckdb$ ]] \
-    || die "nome fora do formato (<host>-<instância>-<data UTC>.duckdb): use o nome de uma cópia do bucket"
+  local name="$1" bucket list out rc=0 re f
+  [[ "$name" == latest || "$name" =~ ^[a-z0-9_-]+-[0-9]{8}T[0-9]{6}Z\.duckdb$ ]] \
+    || die "nome fora do formato (<host>-<instância>-<data UTC>.duckdb): use o nome de uma cópia do bucket, ou latest"
   studio_backup_ready
   bucket="$(studio_backup_bucket)"
   list="$(studio_backup_list)" || die "não consegui listar $STBK_DIR no bucket"
+  if [[ "$name" == latest ]]; then  # a mais nova desta origem (o nome tem a data UTC: a ordem do texto é a do tempo)
+    re="^$OUTE_HOST-$OUTE_INSTANCE-[0-9]{8}T[0-9]{6}Z\\.duckdb\$"
+    name="$(printf '%s\n' "$list" | cut -d';' -f1 | while IFS= read -r f; do if [[ "$f" =~ $re ]]; then printf '%s\n' "$f"; fi; done | LC_ALL=C sort | tail -n 1)"
+    [[ -n "$name" ]] || die "nenhuma cópia de $OUTE_HOST-$OUTE_INSTANCE em $STBK_DIR no bucket"
+  fi
   grep -qF "$name;" <<<"$list" || die "cópia não encontrada no bucket: $STBK_DIR/$name"
   out="$(rclone cat "oci:$bucket/$STBK_DIR/$name" | docker exec -i "$STBK_CONTAINER" "$STBK_PY" -m agent_studio.backup --check)" || rc=$?
   [[ "$rc" == 0 ]] || die "a cópia $name não abre como banco do agent-studio"
@@ -1351,7 +1356,7 @@ case "${1:-}" in
                 --check) [[ $# == 4 && -n "$4" ]] || { studio_backup_usage; exit 2; }; studio_backup_check "$4" ;;
                 *) studio_backup_usage; exit 2 ;;
               esac ;;
-      *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state | oute studio backup [--check <nome>]" >&2; exit 2 ;;
+      *) echo "uso: oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy] | oute studio rebuild-state | oute studio backup [--check <nome|latest>]" >&2; exit 2 ;;
     esac ;;
   memory-backup)  # #369: backup do volume oute-memory no bucket oute-shared; --check <arquivo> restaura num tmp e confere
     case "${2:-}" in
@@ -1406,7 +1411,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   storage [ls|lsl|about] [path]  lista o bucket direto no OCI (confere o que o mount enviou)
   studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]  só no oute-server: reenvia o bucket de telemetria ao agent-studio (ADR-08 §7)
   studio rebuild-state  só no oute-server: remonta o estado do SurrealDB a partir do DuckDB, com o agent-studio parado (ADR-08 §7)
-  studio backup [--check <nome>]  só no oute-server: cópia consistente do DuckDB do agent-studio em backups/agent-studio/ do bucket de telemetria, com retenção; --check abre uma cópia do bucket e conta as linhas (#570)
+  studio backup [--check <nome|latest>]  só no oute-server: cópia consistente do DuckDB do agent-studio em backups/agent-studio/ do bucket de telemetria, com retenção; --check abre uma cópia do bucket e conta as linhas (#570)
   memory-backup [--check <arquivo>]  backup do volume oute-memory (ai-memory backup) em backups/ai-memory/ do oute-shared, com retenção; --check restaura num tmp e confere
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas

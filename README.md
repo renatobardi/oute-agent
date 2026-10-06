@@ -100,7 +100,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute sync-shared` | (re)monta o bucket |
 | `oute memory-backup [--check <arquivo>]` | backup do volume `oute-memory` (`ai-memory backup`) em `backups/ai-memory/` do `oute-shared`, com retenção por origem; `--check` restaura num tmp e confere o banco; ver **Backup da memória** |
 | `oute studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]` | **só no oute-server**: reenvia o bucket de telemetria à ingestão do agent-studio (remonta o DuckDB e, junto, o SurrealDB); ver **Observabilidade** |
-| `oute studio backup [--check <nome>]` | **só no oute-server**: cópia consistente do DuckDB do agent-studio (feita dentro do serviço, sem parar a ingestão) em `backups/agent-studio/` do bucket de telemetria, com retenção (`OUTE_STUDIO_BACKUP_KEEP`, padrão 7); `--check` abre uma cópia do bucket só para leitura e conta as linhas |
+| `oute studio backup [--check <nome\|latest>]` | **só no oute-server**: cópia consistente do DuckDB do agent-studio (feita dentro do serviço, sem parar a ingestão) em `backups/agent-studio/` do bucket de telemetria, com retenção (`OUTE_STUDIO_BACKUP_KEEP`, padrão 7); `--check` abre uma cópia do bucket só para leitura e conta as linhas (`latest` = a mais nova desta origem) |
 | `oute lock` / `version` | tranca o vault e apaga a sessão em cache das versões antigas / versão repo × imagem |
 
 Dentro do container: `claude`, `codex`, `herdr`, `gh`, `oci`, `gcloud`, `aws`, `firebase`, `rclone`, `ai-memory`.

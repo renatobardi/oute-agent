@@ -57,6 +57,7 @@ check "collector: OUTE_OTELCOL_MEM troca o teto"         jqe '.services."otel-co
 # ---- 2d. métricas do próprio agent-studio a cada 5 min (#570): eram 10% das linhas de métricas do banco
 OUT="$(compose_config "agent-studio" 2>"$TMP/cfg.err")" || OUT=""
 check "agent-studio: exporta as próprias métricas a cada 5 min" jqe '.services."agent-studio".environment.OTEL_METRIC_EXPORT_INTERVAL == "300000"' <<<"$OUT"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"
