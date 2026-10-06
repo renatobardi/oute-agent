@@ -160,7 +160,6 @@ button { cursor: pointer; }
 .pagina { display: flex; flex-direction: column; gap: 20px; }
 .pagina > h2, .pagina > .nota, .pagina > .aviso, .secao { margin: 0; }
 .duas { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-.metades { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .tile { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: var(--radius-2xl); background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent); min-width: 0; }
 .tile-rotulo { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
@@ -258,10 +257,9 @@ table.pedidos td.acao { white-space: normal; }
 .root { color: var(--destructive); font-weight: 600; }
 dd.erro { color: var(--destructive); }
 .so-celular-linha { display: none; }
-@media (max-width: 1280px) { .metades { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .metades, .fontes, .duas { grid-template-columns: minmax(0, 1fr); }
+  .fontes, .duas { grid-template-columns: minmax(0, 1fr); }
   .tile-valor { font-size: 18px; }
   .so-celular-linha { display: block; font-size: 12px; color: var(--muted-foreground); font-weight: 400; }
   /* tabelas viram cartões ou linhas de dois níveis: sem cabeçalho, só o que é principal; o resto vai na linha pequena */
