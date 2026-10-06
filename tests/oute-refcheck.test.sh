@@ -98,6 +98,11 @@ check "link de comentário que não existe: quebrada" bash -c '[ "$1" = 1 ] && g
 run "comentário https://github.com/o/r/issues/20#issuecomment-555"
 check "comentário de outra issue: quebrada" has 'comentário é de outra issue ou PR'
 
+rm -f "${FAKE:?}/gh.log"
+run "dono https://github.com/../r/issues/10#issuecomment-555 e repo https://github.com/o/../issues/10#issuecomment-555 e https://github.com/../../pull/10#issuecomment-555"
+check "link de comentário com .. no dono ou no repo: não é conferido" bash -c '! grep -q "comentario" <<<"$1"' _ "$OUT"
+check "link de comentário com ..: o gh não é chamado com .." bash -c '! grep -qF ".." "$1" 2>/dev/null' _ "$FAKE/gh.log"
+
 run "rascunho em /tmp/claude-1/x/relatorio.md e /tmp/claude-1/x/scratchpad/nota.txt"
 check "/tmp e scratchpad: nao-abre e saída 1" bash -c '[ "$1" = 1 ] && [ "$(grep -c "^nao-abre" <<<"$2")" = 2 ]' _ "$RCODE" "$OUT"
 run "arquivo /tmp/a/b.md:3"
