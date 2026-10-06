@@ -1,0 +1,2 @@
+### Changed
+- **`docker/agent-notes.md` em inglês enxuto** (#486, ADR-09 decisão 4). As notas que entram em toda sessão passam de pt-BR para inglês, com as mesmas regras e frases curtas (de 1994 para 1709 palavras e de 12365 para 11032 bytes; tokens não medidos). A regra da saída ao Bardi segue explícita: o texto para ele sai em pt-BR, mesmo com prompt, skill ou fonte em inglês. Comandos, rótulos, `# RESUMO`/`# CUIDADO` e as frases de contrato ficam em pt-BR. **Precisa de release** (`agent-notes.md` vai na imagem).
