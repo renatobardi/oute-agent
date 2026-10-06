@@ -129,8 +129,16 @@ if command -v codex >/dev/null 2>&1; then
 fi
 echo 'regra velha' > "$H/.codex/rules/oute-guard-kill.rules"; run "$H" setup_agents
 check "kill: regras alteradas voltam ao texto da imagem" cmp -s "$LIB_DIR/codex-kill.rules" "$H/.codex/rules/oute-guard-kill.rules"
+# falha ao copiar as regras (arquivo da imagem ausente): só AVISO, o setup segue (saída 0), sem regra nem .tmp, hook mantido
+FN_OK="$FN"; FN="$TMP/fn-sem-regras.sh"; sed "s#codex-kill\.rules#ausente-kill.rules#" "$FN_OK" > "$FN"
+H="$TMP/h2c"; run "$H" setup_agents FAKE_AI_MEMORY_BAK=0
+check "kill sem regras: setup_agents sai 0 (só AVISO)"   test "$RC" -eq 0
+check "kill sem regras: AVISO no stderr"                 bash -c 'echo "$1" | grep -qF "AVISO: falha ao gravar as regras do Codex"' _ "$OUT"
+check "kill sem regras: nenhum arquivo de regras nem .tmp" bash -c '! ls "$1"/.codex/rules/oute-guard-kill.rules* >/dev/null 2>&1' _ "$H"
+check "kill sem regras: o hook do Claude segue gravado"  jqe --arg c "$GK" '[.hooks.PreToolUse[] | select(any(.hooks[]; .command == $c))] | length == 1' "$H/.claude/settings.json"
+FN="$FN_OK"; H="$TMP/h2b"
 run "$H" setup_agents OUTE_AGENT_YOLO=0
-check "kill: yolo=0 mantém o hook"                      jqe --arg c "$GK" '[.hooks.PreToolUse[] | select(any(.hooks[]; .command == $c))] | length == 1' "$S"
+check "kill: yolo=0 mantém o hook"                     jqe --arg c "$GK" '[.hooks.PreToolUse[] | select(any(.hooks[]; .command == $c))] | length == 1' "$S"
 
 # ---------------------------------------------------------------- 3. OUTE_AGENT_YOLO=0
 # O codex_config.py grava sandbox_mode = danger-full-access sempre (bwrap sem userns no container, #5, ADR-01):

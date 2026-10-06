@@ -121,4 +121,13 @@ MIN="$TMP/min"; mkdir -p "$MIN"; for t in env bash dirname sed; do ln -s "$(comm
 OUT="$(cd "$TMP" && env HOME="$H" PATH="$SHIMS:$MIN" "$SHIMS/gh" pr list 2>&1 </dev/null)"; RC=$?
 check "sem gh real no PATH: 127 e mensagem"              bash -c 'test "$1" -eq 127 && echo "$2" | grep -q "gh não encontrado"' _ "$RC" "$OUT"
 
+# ---------------------------------------------------------------- 4b. sem jq
+# PATH sem jq (os dublês e o shim em $SHIMS/$REAL, só as ferramentas que o shim usa): o shim não resolve o PR e passa ao gh real,
+# mesmo com PR de rodada aberta (a trava depende do jq; sem ele vale o limite documentado).
+NOJQ="$TMP/nojq"; mkdir -p "$NOJQ"; for t in env bash dirname sed awk grep basename cat head git; do ln -s "$(command -v "$t")" "$NOJQ/$t"; done
+round swarm-1004-1306 /workspace/oute-agent 507-pagina-rodada
+reset; OUT="$(cd "$TMP" && env -u OUTE_SWARM_ID HOME="$H" FAKE="$FAKE" PATH="$SHIMS:$REAL:$NOJQ" "$SHIMS/gh" pr merge 517 --squash 2>&1 </dev/null)"; RC=$?
+check "sem jq: passa ao gh real (sem recusa), mesmo com PR de rodada aberta" bash -c 'test "$1" -eq 0 && grep -qx "pr merge 517 --squash" "$2"' _ "$RC" "$FAKE/gh.log"
+check "sem jq: o shim não consulta o PR (nenhum pr view)" bash -c '! grep -q "^pr view" "$1"' _ "$FAKE/gh.log"
+
 check_end
