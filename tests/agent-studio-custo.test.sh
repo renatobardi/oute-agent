@@ -129,7 +129,13 @@ check "tela: gráfico por papel com as três linhas, por fase com as quatro" jqe
 check "tela: barras de papel somam o total (real e estimado)" bash -c 'jq -n -e --argjson g "$1" "
   ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
   [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 2 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e / 2 - (\$c[\"estimated-usd\"] | tonumber)) | fabs) < 1e-9" >/dev/null' _ "$P"
-check "tela: menu com o link do uso"                   grep -q 'href="/uso"' <<<"$HTML"
+# as dicas de Papel e de Fase (#592): cada uma no cabeçalho da sua coluna, e só nela
+TH_ROLE="$(sed -n '/data-uso="role"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
+TH_PHASE="$(sed -n '/data-uso="phase"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
+check "tela: a coluna Papel leva a dica de dispatcher, worker e avulsa" grep -qF 'title="dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora de rodada (e a conversa sem sessão)"' <<<"$TH_ROLE"
+check "tela: a coluna Fase leva a dica do aidlc:<fase>, escapada" grep -qF 'title="o aidlc:&lt;fase&gt; que o seletor usou; sessão sem fase registrada fica em desconhecida, e conversa aberta fora do oute-task, em interativa"' <<<"$TH_PHASE"
+check "tela: a dica de Papel não está na coluna Fase, nem a de Fase na coluna Papel" bash -c '! grep -qF "aidlc:" <<<"$1" && ! grep -qF "dispatcher e worker" <<<"$2"' _ "$TH_ROLE" "$TH_PHASE"
+check "tela: menu com o link do uso"                  grep -q 'href="/uso"' <<<"$HTML"
 check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada ao modelo' <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")"
 
 # ---------------------------------------------------------------- 5. nada novo na origem

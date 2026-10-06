@@ -127,6 +127,14 @@ check("KPI cache: leitura sobre a entrada total", abs(float(KP["cache"]["value"]
 check("KPI cache: rótulo e dica dizem o que entra na conta", "Leitura de cache" in kpi(html, "cache") and "Cache de entrada" not in html
       and 'title="Tokens lidos do cache ÷ (entrada nova + leitura de cache + escrita de cache)' in html)
 check("KPI erros: a dica diz o denominador", 'title="Spans com erro ÷ todos os spans da janela' in html)
+# a dica do custo (#592): fica no próprio indicador, e a do custo efetivo troca o texto
+cost_tag = lambda page: kpi(page, "cost").split(">", 1)[0]
+check("KPI custo: a dica diz 'Preço de lista, não gasto'", 'title="Preço de lista, não gasto: os agentes rodam por assinatura."' in cost_tag(html)
+      and "Custo (lista)" in kpi(html, "cost"))
+efetivo = get(app, "/", Q + "&custo=efetivo")[1]
+check("KPI custo efetivo: a dica diz que a assinatura conta US$ 0, sem o texto do preço de lista",
+      'title="Custo efetivo: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece."' in cost_tag(efetivo)
+      and "Preço de lista" not in cost_tag(efetivo) and "Custo (efetivo)" in kpi(efetivo, "cost"))
 
 # ------------------------------------------------------------------------------ totais batendo com /uso e /v1/usage
 _, uso = get(app, "/uso", Q)
@@ -421,5 +429,5 @@ ST.dash_mod.snapshot = real_snapshot
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 92
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 94
 check_end
