@@ -173,12 +173,13 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 ### Adendo 2026-10-06 — a `zai` vira a padrão da execução numa entrega só; sessão `zai` não lê imagem (decisão do Bardi, #629)
 **Contexto:** o spike da #629 rodou os itens 1 a 5 no container do Mac, no plano Lite ([resultado](https://github.com/renatobardi/oute-agent/issues/629#issuecomment-6015525631)). Ferramentas, MCP e handoff do ai-memory, telemetria e o endpoint de cota passaram. A visão falhou.
 
-**Decisão** (troca os itens 5 e 7 do adendo de 2026-10-05; os itens 1 a 4 e 6 seguem valendo):
+**Decisão** (troca os itens 5 e 7 do adendo de 2026-10-05; os itens 1 a 4 e 6 seguem valendo; os itens 5 e 6 abaixo foram confirmados pelo Bardi em 2026-10-06):
 1. **Sem fatias.** As cadeias do item 3 viram o padrão da tabela na mesma entrega que traz a assinatura `zai`: execução `zai` → `claude` → `codex`, raciocínio `claude` → `zai` → `codex`. O `--subscription zai` e o `--prefer zai` entram juntos, com as regras do #598.
 2. **A medição de qualidade deixa de ser condição de entrada.** O item 6 do spike (uma issue real de `build` em GLM × a mesma em Sonnet) não rodou. A qualidade se mede em uso, pelos ajustes até a auditoria passar (a medida da #409) e pelo agent-studio.
 3. **A regressão de agentes continua condição:** a entrega só fecha com o `oute-regression` passando na `zai` (requisito 6 do #598 e a ressalva da lição do Pi).
 4. **Sessão `zai` não lê imagem.** No spike, o `Read` de um PNG não chegou ao modelo: a Z.ai subiu o arquivo para um CDN de terceiro e devolveu só o link (ADR-01, adendo de 2026-10-06). A sessão `zai` abre sem a leitura de imagem; o mecanismo fica para a `spec`.
 5. **Plano:** a entrega entra no **Lite**, o plano assinado. O Pro deixa de ser critério de `ship`: subir de plano é decisão do Bardi, com o dado do `oute-quota`.
+6. **Tarefa que precisa de imagem** (screenshot do `oute-shot`, por exemplo) numa fase de execução abre com `--subscription claude`. É escolha explícita de quem abre a sessão; o seletor não detecta a necessidade.
 
 **O que o spike mediu e a `spec` usa:**
 - O Claude Code preenche `cost_usd` para o `glm-5.3` com um valor que não é real (`costBasis: unknown`). Confirma o custo **estimado** do adendo de 2026-10-05.
@@ -190,7 +191,6 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 **Ressalvas registradas:**
 - **A janela do Lite pode não cobrir uma rodada.** Com a `zai` no teto, a sessão anda a cadeia e abre no `claude`, com o `reserve_from` dizendo `zai`. O efeito é o de hoje, não uma recusa.
 - **O limite de sessões simultâneas do Lite é incerto.** A página de rate limits da Z.ai vale só para a API com saldo. A primeira rodada com vários workers mede.
-- **Tarefa que precisa de imagem** (screenshot do `oute-shot`, por exemplo) numa fase de execução abre na `zai` sem ver a imagem. Proposta para a `spec`, não decidida: abrir essas tarefas com `--subscription claude`.
 
 ## Histórico
 
