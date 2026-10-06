@@ -496,7 +496,7 @@ check "--json: objeto com versão, resultado e tarefas"   bash -c 'jq -e ".image
 RB="$ROOT/docker/regression/baseline.json"
 check "base do repo: JSON válido com data e commit da medição" jqe '(.measured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.commit | length >= 7)' < "$RB"
 check "base do repo: as 13 tarefas nos 2 modelos, verde ou vermelho" bash -c 'jq -e --arg all "$2" "[.tasks | to_entries[] | select(.value == \"verde\" or .value == \"vermelho\")] | length == 26 and ([\$all | split(\" \")[] | ., .] | length == 26) and ([.[].key] | map(split(\"@\")[0]) | unique | length == 13)" "$1" >/dev/null' _ "$RB" "$ALL13"
-check "base do repo: as falhas de base do Haiku (checkout, memory, segredo, #647; duplicada voltou a verde, #665) e nada mais vermelho" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | sort | join(\",\")" "$1")" = "checkout@haiku,memory@haiku,segredo@haiku" ]' _ "$RB"
+check "base do repo: a falha de base do Haiku (memory, #647; duplicada voltou a verde, #665; checkout e segredo, #666) e nada mais vermelho" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | sort | join(\",\")" "$1")" = "memory@haiku" ]' _ "$RB"
 BASE="$TMP/base.json"
 printf '{"measured_at":"2026-01-02","commit":"abc1234","tasks":{"root@haiku":"verde","checkout@haiku":"vermelho","memory@haiku":"vermelho"}}\n' > "$BASE"
 # igual (verde e verde)
@@ -541,11 +541,15 @@ check "base com valor que não é verde nem vermelho: saída 2" [ "$RC" -eq 2 -a
 # --baseline vale mais que a variável
 FAKE_BAD="checkout:1 checkout:2 checkout:3" OUTE_REGRESSION_BASELINE="$TMP/nao-existe.json" run --model haiku --task checkout --baseline "$BASE"
 check "--baseline vence OUTE_REGRESSION_BASELINE" [ "$RC" -eq 0 ]
-# o critério da issue: as três falhas de base do Haiku, com a base do repo, saem verdes
-FAKE_BAD="checkout@haiku:1 checkout@haiku:2 checkout@haiku:3 memory@haiku:1 memory@haiku:2 memory@haiku:3 segredo@haiku:1 segredo@haiku:2 segredo@haiku:3" \
+# #666: checkout e segredo estão verdes na base; só a memory@haiku segue como falha de base
+FAKE_BAD="memory@haiku:1 memory@haiku:2 memory@haiku:3" \
   OUTE_REGRESSION_BASELINE="$RB" run --model haiku --task checkout --task memory --task segredo --task root
-check "base do repo: as 3 falhas de base do Haiku não reprovam, saída 0" [ "$RC" -eq 0 -a "$(verdict checkout@haiku)" = vermelho -a "$(verdict root@haiku)" = verde ]
-check "base do repo: o relato diz 3 falhas de base" has '1 igual, 3 falha de base, 0 piorou, 0 melhorou'
+check "base do repo: a falha de base da memory não reprova, saída 0" [ "$RC" -eq 0 -a "$(verdict memory@haiku)" = vermelho -a "$(verdict root@haiku)" = verde ]
+check "base do repo: o relato diz 3 iguais e 1 falha de base" has '3 igual, 1 falha de base, 0 piorou, 0 melhorou'
+for t in checkout segredo; do
+  FAKE_BAD="$t@haiku:1 $t@haiku:2 $t@haiku:3" OUTE_REGRESSION_BASELINE="$RB" run --model haiku --task "$t"
+  check "base do repo: $t@haiku voltou a falhar = piorou, saída 1" [ "$RC" -eq 1 -a "$(verdict "$t@haiku")" = vermelho ]
+done
 FAKE_BAD="root@haiku:1 root@haiku:2 root@haiku:3" OUTE_REGRESSION_BASELINE="$RB" run --model haiku --task checkout --task root
 check "base do repo: root@haiku piorou, saída 1" [ "$RC" -eq 1 ]
 # --json: o estado de cada tarefa contra a base

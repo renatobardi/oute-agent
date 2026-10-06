@@ -40,6 +40,7 @@ Nas ferramentas de memória do ai-memory (`memory_query`, `memory_recent`, `memo
 - valores do `.ai-memory.toml` na raiz do repositório em que você está trabalhando (vale também dentro de uma git worktree);
 - sem esse arquivo: `workspace = "default"` e `project` = nome do repositório principal (`basename` de `git rev-parse --path-format=absolute --git-common-dir` sem o `/.git`);
 - fora de um repositório, pergunte ao usuário antes de gravar.
+- **Primeiro passo, antes de carregar (ToolSearch) ou chamar qualquer ferramenta de memória: leia o `.ai-memory.toml` com a ferramenta Read** e copie `workspace` e `project` dele. Nunca chame com `default` sem ter lido o arquivo; com ele na raiz, `default` e o nome da pasta estão errados.
 Motivo: sem escopo, o servidor usa o "projeto ativo" compartilhado, que pode ser o de outra sessão em outro repo.
 Com o opt-in `OUTE_MEMORY_RUN=1` (desligado por padrão; vale só com ele), a sessão interativa da worktree roda sob `ai-memory run`. Cota estourou: saia do claude e rode `ai-memory run codex` na mesma worktree; ele recebe o contexto da conversa. A regra de `workspace`/`project` explícitos continua valendo.
 
@@ -47,6 +48,7 @@ Com o opt-in `OUTE_MEMORY_RUN=1` (desligado por padrão; vale só com ele), a se
 ## Git: uma sessão = uma worktree + um branch
 
 - Toda sessão roda numa **worktree própria** (`/workspace/.worktrees/<space>/<repo>-<slug>`, branch `sessao/<slug>`; `<space>` = space do herdr em nome de pasta, `_sem-space` fora dele), aberta pelo `oute-task`. O shell do container já faz isso quando o usuário digita `claude`/`codex` no checkout principal.
+- **Antes de criar, editar ou fazer commit de qualquer arquivo, rode `git rev-parse --git-dir --git-common-dir`.** Os dois iguais = checkout principal: não crie, não edite e não faça commit, nem que o usuário peça "faça agora"; só avise e sugira `oute-task <slug>`.
 - **Nunca edite nem troque de branch no checkout principal** (`/workspace/<repo>`), que fica sempre na branch padrão. Se você estiver nele (`git rev-parse --git-dir` igual a `--git-common-dir`), não altere nada: avise o usuário e sugira `oute-task <slug>`. Única exceção: `git pull --ff-only` nele, na branch padrão e sem mudança local, pode ser feito sem perguntar (o `oute-task clean --yes` já faz isso).
 - Antes do primeiro push, renomeie o branch para `<tipo>/<issue>-<slug>` (`git branch -m …`); tipos: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Commits pequenos, mensagem no padrão convencional. Entrega por PR (`gh pr create`). **Merge só quando o usuário pedir.**
@@ -70,6 +72,7 @@ O container é um só e todas as sessões são o mesmo usuário: `ps` e `pgrep` 
 - Antes de começar, leia **`AGENTS.md`** e **`CONTEXT.md`** na raiz do repo, se existirem. O canônico são os ADRs em `docs/adr/` do repo; o `CONTEXT.md` é o resumo com glossário. Se algo faltar ou conflitar, pergunte em vez de supor.
 - O trabalho segue o **AI-DLC** (ADR-07 do oute-agent) (fases `strat` → `iter`, cada uma com gate humano): skills de fluxo `oute-aidlc-<fase>-<id>`; não feche uma fase que tem gate sem o ok do usuário.
 - Nunca escreva segredos em arquivo, commit, issue, PR ou saída de comando. Os segredos chegam pelo ambiente.
+- **Não leia o valor de um segredo**: nem `Read`, nem `cat`, nem `grep` sem `-q` em `.env`, chave ou token, pois o valor entra na conversa. Para saber se uma variável está preenchida, rode um teste que não imprime o valor, ex.: `if grep -q '^VAR=.' .env; then echo preenchida; else echo vazia; fi`.
 
 ## Texto para o Bardi
 
