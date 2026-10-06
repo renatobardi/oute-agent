@@ -553,6 +553,10 @@ studio_backup_rows() {
 studio_backup() {
   local keep="${OUTE_STUDIO_BACKUP_KEEP:-7}"
   [[ "$keep" =~ ^[1-9][0-9]*$ ]] || { echo "oute: OUTE_STUDIO_BACKUP_KEEP precisa ser um inteiro >= 1 (veio '$keep')" >&2; exit 2; }
+  # bloco do envio: o padrão do rclone (5 MiB x 10000 partes) limita o arquivo a 48,8 GiB, e o banco não tem retenção;
+  # 64 MiB dá 625 GiB (custa ~256 MB de RAM no host durante o envio)
+  local chunk="${OUTE_STUDIO_BACKUP_CHUNK:-64Mi}"
+  [[ "$chunk" =~ ^[1-9][0-9]*(Mi|Gi)$ ]] || { echo "oute: OUTE_STUDIO_BACKUP_CHUNK precisa ser um tamanho como 64Mi ou 1Gi" >&2; exit 2; }
   studio_backup_ready
   local bucket out rc=0 file bytes name list line tsize
   bucket="$(studio_backup_bucket)"
@@ -565,7 +569,7 @@ studio_backup() {
     || die "resposta do agent-studio fora do formato; nada foi enviado"
   name="$OUTE_HOST-$OUTE_INSTANCE-${file#agent-studio-}"
   # do container direto ao bucket (pipefail: falha de qualquer lado conta)
-  docker exec "$STBK_CONTAINER" cat "$STBK_LOCAL/$file" | rclone rcat "oci:$bucket/$STBK_DIR/$name" \
+  docker exec "$STBK_CONTAINER" cat "$STBK_LOCAL/$file" | rclone rcat --s3-chunk-size "$chunk" "oci:$bucket/$STBK_DIR/$name" \
     || die "o envio ao bucket $bucket falhou; a cópia segue no container, em $STBK_LOCAL/$file"
   line=""; list="$(studio_backup_list)" && line="$(grep -F "$name;" <<<"$list" | head -n 1)" || line=""
   tsize="${line##*;}"

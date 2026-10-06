@@ -99,8 +99,12 @@ slow = [x for x in catch.msgs if "lento" in x]
 check("telemetria: fase acima do limite vira um aviso, com o nome e o tempo", len(slow) == 1 and "existing" in slow[0] and "3.0" in slow[0])
 check("telemetria: o aviso tem teto por tipo (o segundo é suprimido)", len(slow) == 1)
 check("telemetria: sem endpoint (Noop) a fase não faz nada", TEL.Noop().phase("commit", 9.0) is None)
+catch.msgs.clear()
+tel.phase("backup", 99.0)
+check("telemetria: a cópia de segurança é longa por natureza: vai ao histograma, sem aviso de lento",
+      ("record", 99.0, {"phase": "backup"}) in h.calls and catch.msgs == [])
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL ' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 16
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 17
 check_end
