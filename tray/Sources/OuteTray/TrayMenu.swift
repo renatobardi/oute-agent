@@ -55,6 +55,9 @@ struct TrayMenu: View {
         Button { model.openStudio() } label: { MenuLabel("Abrir o agent-studio", .openStudio) }
         Button { Task { await model.refresh() } } label: { MenuLabel("Atualizar agora", .refresh) }
         Divider()
+        // qual tray está instalado (#516): a versão e o commit que o `oute tray install` gravou no Info.plist
+        row(AppVersion.line(version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                            commit: Bundle.main.object(forInfoDictionaryKey: AppVersion.commitKey) as? String), .version)
         Button { NSApplication.shared.terminate(nil) } label: { MenuLabel("Sair do tray", .quit) }
     }
 

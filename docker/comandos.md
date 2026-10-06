@@ -30,6 +30,7 @@ Dois lugares, dois conjuntos de comandos:
   oute tray install    só no macOS: compila o tray (barra de menu que lê o agent-studio), monta o .app e
                        abre no login; aprovar pelo tray abre o Terminal no oute approve <id>
   oute tray uninstall  tira o tray (a tabela ~/.oute/tray-hosts editada fica)
+  oute tray sync       reinstala o tray só se o app instalado está atrás do repo (o oute update já chama)
   oute up | down | restart | status
   oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
                                        (no oute-server, com OUTE_AGENT_STUDIO=1 no .env, o up liga também
