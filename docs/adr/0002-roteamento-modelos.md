@@ -1,6 +1,6 @@
 # ADR-02 — Seleção de agente e modelo por sessão
 
-Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: assinatura padrão e reservas, dois modos de escolher a reserva (#598, gate de `spec` do Bardi)
+Status: aceito · 2026-09-30 (#215, gate de `arch` do Bardi, PR #221) · substitui o roteamento anterior, de 2026-09-23 a 2026-09-30 (ver **Histórico**) · adendo 2026-10-02: precedência da rodada, reserva do Sonnet em `gpt-6.1-sol` e seletor em fatias (gate de `spec` do Bardi, ciclo #233) · adendo 2026-10-03: como o Jev é chamado (fatia 2, #257) · adendo 2026-10-03: a reserva `indisponivel` (fatia 3a, #258) · adendo 2026-10-03: a reserva `cota` (fatia 3b, #355) · adendo 2026-10-03: exceção por label `spike` → Sonnet (gate de `spec` do Bardi, #379) · adendo 2026-10-03: `kaizen` não vence fase de código (gate de `spec` do Bardi, #409) · adendo 2026-10-05: Sonnet nas fases `ops`, `ctx`, `learn` e nas exceções `kaizen`, `docs` (decisão do Bardi, #615) · adendo 2026-10-05: assinatura padrão e reservas, dois modos de escolher a reserva (#598, gate de `spec` do Bardi)
 
 ## Decisão
 O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por assinatura. Cada sessão (`oute-task`, `oute-swarm spawn`) abre com o modelo Claude da **fase** da tarefa, escolhido por uma tabela fixa em `config/`, sem o Bardi escolher na mão. **O Pi e o roteador de modelos (ver Histórico) saem do stack** (#217, #218): sem o Pi, o router não tem cliente, e as quedas da rodada `swarm-0929-2356` (modelo servido chamando ferramenta inexistente ou recusando o schema, sem fallback) mostraram que o custo de manter o roteamento não compensa.
@@ -9,8 +9,8 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
 1. **`--model` / `--agent` explícitos** vencem tudo, dados na sessão ou na abertura da rodada (`oute-swarm <repo> --agent`, #212). `--agent codex` força o Codex. Escolha explícita não cai na reserva: só avisa. O `claude` posicional que o shim passa ao `oute-task` não conta como explícito.
 2. **Exceção por label de tipo** na issue, antes da fase, em ordem de precedência:
    - `spike` → Sonnet (investigação com relatório e análise; amostra pequena #379: três spikes em Sonnet fecharam na primeira, Haiku precisou de três correções de contagem);
-   - `kaizen` → Haiku (issue de lição, de qualquer origem; hoje elas carregam `aidlc:spec` e cairiam no Opus), **salvo** com label de fase que mexe em código (`build`, `qa`, `design`, `plan`, `ship`, `iter`): aí vale a fase (adendo #409, abaixo). Sem label de fase, ou com `strat`, `intent`, `arch`, `spec`, `ops`, `ctx` ou `learn`, segue Haiku;
-   - `docs` → Haiku (doc que não é ADR: README, `AGENTS.md`, `CONTEXT.md`, guias). ADR segue a fase dele (`arch`).
+   - `kaizen` → Sonnet (issue de lição, de qualquer origem; hoje elas carregam `aidlc:spec` e cairiam no Opus), **salvo** com label de fase que mexe em código (`build`, `qa`, `design`, `plan`, `ship`, `iter`): aí vale a fase (adendo #409, abaixo). Sem label de fase, ou com `strat`, `intent`, `arch`, `spec`, `ops`, `ctx` ou `learn`, segue Sonnet;
+   - `docs` → Sonnet (doc que não é ADR: README, `AGENTS.md`, `CONTEXT.md`, guias). ADR segue a fase dele (`arch`).
 3. **Fase**, pelo label `aidlc:<fase>` da issue (tabela abaixo).
 4. **Jev**, só quando não há label de fase e há texto da tarefa: sessão avulsa sem issue, ou issue sem `aidlc:<fase>`. O Jev classifica a fase pelo texto da tarefa e a tabela dá o modelo. Confiança < 0,6 ou falha do Jev (erro, tempo esgotado) → Sonnet.
 5. **Padrão Sonnet** quando nada acima decide: sem label e sem texto da tarefa (sessão aberta na mão), sem a chave da TypeSafe, ou `gh` fora do ar. O seletor avisa e nunca bloqueia a abertura.
@@ -20,9 +20,9 @@ O **Claude Code é o agente principal** e o **Codex é a reserva**, os dois por 
 |---|---|---|
 | `strat` `intent` `arch` `spec` | `claude-opus-5-5` | `gpt-6-astra`, esforço `high` |
 | `build` `qa` `design` `plan` `ship` `iter` | `claude-sonnet-5-5` | `gpt-6.1-sol`, esforço `high` |
-| `ops` `ctx` `learn` | `claude-haiku-4-5-20251001` | `gpt-6-luna`, esforço `medium` |
+| `ops` `ctx` `learn` | `claude-sonnet-5-5` | `gpt-6-luna`, esforço `medium` |
 
-- A tabela é indexada só por fase do ADR-07. `kaizen` e `docs` não são fases: entram como exceção (acima), com a reserva da linha do Haiku.
+- A tabela é indexada só por fase do ADR-07. `kaizen` e `docs` não são fases: entram como exceção (acima), com a reserva `gpt-6-luna`, esforço `medium`.
 - `ship` e `iter` ficam no Sonnet: release/deploy e reescrita do que já existe não descem para o Haiku.
 - **Ids exatos, sem alias** (`opus`, `sonnet`): a troca de versão é uma mudança visível na tabela, não um efeito colateral de upgrade do CLI. Todo id da tabela precisa existir no CLI instalado; o check é a #220 (checklist da `oute-aidlc-ship-release` ou nível 0 da #52).
 - A série `gpt-5.x` do Codex fica fora (marcada como antiga pelo próprio CLI).
@@ -69,6 +69,15 @@ Com 1 a 6 prontos, entrar é cadastro: um `[[subscription]]` e uma coluna na tab
 Gate de `spec` do Bardi (opção 1, delegado à sessão de upstream, ciclo #233): a exceção `kaizen` só vale quando a issue **não** tem label de fase que mexe em código. Com `aidlc:build`, `qa`, `design`, `plan`, `ship` ou `iter`, vale a fase (Sonnet). `spike` (#379) continua vencendo as demais exceções, e `docs` não muda. Na tabela, a exceção `kaizen` leva `unless_phases` com essas fases; o `oute-select` pula a exceção quando a issue tem uma delas, e o `scripts/models-check` confere que cada fase listada é do ADR-07.
 
 **Evidência (amostra única):** na rodada `swarm-1003-1210`, a #230 (`kaizen` + `aidlc:build`, `scripts/oute`) abriu em Haiku e o PR #362 precisou de 3 auditorias e 2 ajustes: 1º head com validação que aceitava o que o critério manda recusar, variáveis mortas, nenhum teste do caminho `oute up` e corpo com "13 testes, todos verdes"; 2º head só com os prefixos `/16`, `/17` e `/24`; 3º head corrigido. As outras sete sessões da rodada (Sonnet, label de fase) tiveram no máximo um ajuste. **Ressalva:** é uma sessão só, e Sonnet versus Haiku não foi medido de forma controlada; a decisão é política (código vence o label de tipo) e se revê com mais rodadas.
+
+### Adendo 2026-10-05 — Sonnet no lugar do Haiku automático (#615)
+Decisão do Bardi por segurança: `ops`, `ctx`, `learn`, `kaizen` e `docs` passam a usar `claude-sonnet-5-5`. O seletor mantém a escolha explícita de Haiku por `--model claude-haiku-4-5-20251001`.
+
+Os comentários da #484 relatam duas rodadas, com três repetições por tarefa e modelo, e descrevem falhas do Haiku em `checkout`, `memory` e `segredo` e aprovação do Sonnet. Esses números e resultados históricos não têm registros reproduzíveis versionados neste repositório e ficam **não verificados** nesta decisão. Fontes do relato: [rodada 1](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5997065952) e [rodada 2](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5998479095). A regressão local deste PR verifica somente os graders falsos e não revalida essas rodadas históricas.
+
+A reserva dessas fases e exceções permanece `gpt-6-luna`, esforço `medium`. A #615 manda registrar o modelo pequeno no PR e não trocá-lo sem evidência.
+
+A regra da #481 continua valendo para a escolha explícita de Haiku: a redação final passa a um subagente Sonnet. A regressão mantém Haiku como modelo de teste explícito. As falhas reais de `checkout`, `memory` e `segredo` continuam registradas na #484. Esta decisão não reforça as notas nem muda os critérios que reprovam essas tarefas.
 
 ### Sessão do dispatcher
 A sessão que coordena uma rodada do swarm (o dispatcher) abre na fase **`plan`** fixa, sem Jev: triagem e acompanhamento são planejamento, e o `swarm.md` inteiro não é texto de tarefa para classificar.

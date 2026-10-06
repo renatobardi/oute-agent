@@ -6,7 +6,7 @@ resposta (no mesmo instante vale a pergunta: o dispatcher responde e pergunta de
 Aparece no `GET /v1/tray` (`decisions`, junto dos pedidos do canal) e no topo das telas. Não é alerta: a pergunta pendente
 já conta como evento da rodada, então o `round_stalled` (#364) só dispara depois de `round_stalled_minutes` sem nada.
 """
-from . import alerts as alerts_mod
+from . import alerts as alerts_mod, etapas as etapas_mod
 
 ASKED, ANSWERED = "oute.swarm.round.asked", "oute.swarm.round.answered"
 CLOSED = "oute.swarm.round.closed"
@@ -31,4 +31,7 @@ def pending(con, at_ns, cfg, limit=LIMIT):
     out = [{"round": r["round"], "host": r["host"], "instance": r["instance"], "question": r["question"],
             "asked_at": alerts_mod.iso(r["asked_t"]), "age_seconds": max(0, (at_ns - r["asked_t"]) // 1_000_000_000)}
            for r in rows]
+    # nome amigável da rodada (#605), do evento de abertura; rodada antiga ou sem o evento: `None`
+    for d in out[:limit]:
+        d["name"] = etapas_mod.round_name(con, d["round"])
     return {"total": len(out), "pending": out[:limit]}

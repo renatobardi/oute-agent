@@ -229,6 +229,70 @@ OUT="$(AGENT_STUDIO_REBUILD_CHUNK=1 "${REB[@]}" 2>&1)"
 sr "SELECT * FROM etapa ORDER BY id" > "$TMP/etapas-2.json"
 check "rebuild-state de novo, em blocos de 1 linha: o mesmo estado (idempotente)" cmp -s "$TMP/etapas-1.json" "$TMP/etapas-2.json"
 
+# ---------------------------------------------------------------- 8b. nome amigável da rodada (#605)
+# N1 (swarm-1005-1200): aberta com o nome Brave_Otter e uma etapa; N2 (swarm-1005-1200-a3f): mesmo minuto, com sufixo, nome Calm_Fox,
+# sem etapa; N3 (swarm-1005-1201): rodada antiga, evento de abertura sem nome; N4 (swarm-1005-1202): nome fora do formato (HTML),
+# que a tela nunca mostra.
+N1=swarm-1005-1200; N2=swarm-1005-1200-a3f; N3=swarm-1005-1201; N4=swarm-1005-1202
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" "$NOW" "$N1" "$N2" "$N3" "$N4" <<'PY'
+import hashlib, json, sys
+from otlp_json import event, rl
+tmp, NOW = sys.argv[1], int(sys.argv[2])
+n1, n2, n3, n4 = sys.argv[3:7]
+res = {"host.name": "oute-server", "oute.instance": "oute-agent", "service.name": "oute", "oute.agent": "claude"}
+def opened(t, rnd, **extra):
+    return event(t, "oute.swarm.round.opened", f"op-{rnd}", {"oute.swarm.round": rnd, "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3, **extra})
+text = "## Decisão\n1. abrir a #605\n"
+trg = event(NOW - 50, "oute.swarm.step.published", "ev-n1-t", {"oute.swarm.round": n1, "oute.swarm.step.kind": "triagem", "oute.swarm.step.rev": 1,
+            "oute.swarm.step.sha256": hashlib.sha256(text.encode()).hexdigest(), "oute.swarm.step.review": "aprovado",
+            "oute.swarm.step.writer": "claude-sonnet-5-5", "oute.swarm.step.reviewer": "claude-opus-5-5", "oute.swarm.step.refcheck": "ausente"}, text)
+batch = [opened(NOW - 400, n1, **{"oute.swarm.round.name": "Brave_Otter"}), opened(NOW - 390, n2, **{"oute.swarm.round.name": "Calm_Fox"}),
+         opened(NOW - 380, n3), opened(NOW - 370, n4, **{"oute.swarm.round.name": "<b>x</b>"}), trg]
+json.dump({"resourceLogs": [rl(res, batch)]}, open(f"{tmp}/b3.json", "w"))
+PY
+studio_start "$TMP/s2" "${SENV[@]}" || { cat "$TMP/s2/stderr"; die "agent-studio (8b) não subiu"; }
+check "nome: a ingestão dos eventos de abertura = 200"  test "$(post logs "$TMP/b3.json")" = 200
+check "nome: o SurrealDB guarda o nome do evento de abertura" jqe '.[0].name == "Brave_Otter"' <<<"$(sr "SELECT name FROM rodada:\`$N1\`")"
+check "nome: a rodada com sufixo guarda o seu (dois ids no mesmo minuto)" jqe '.[0].name == "Calm_Fox"' <<<"$(sr "SELECT name FROM rodada:\`$N2\`")"
+check "nome: rodada antiga (evento sem nome) fica sem nome" jqe '.[0] | (has("name") | not) or .name == null' <<<"$(sr "SELECT name FROM rodada:\`$N3\`")"
+check "nome: /v1/rodada leva o nome e o id"             jqe --arg r "$N1" '.name == "Brave_Otter" and .round == $r' <<<"$(page "/v1/rodada?id=$N1")"
+check "nome: /v1/rodada de rodada sem nome: name nulo"  jqe '.name == null' <<<"$(page "/v1/rodada?id=$R1")"
+page "/rodada?id=$N1" > "$TMP/n1.html"
+check "nome: a página da rodada mostra o nome junto do id" bash -c 'grep -qF "<p class=\"rodada-nome\" data-nome-rodada>Brave_Otter (<code>$1</code>)</p>" "$2"' _ "$N1" "$TMP/n1.html"
+check "nome: o título da página leva nome e id"         bash -c 'grep -qF "<title>Rodada Brave_Otter ($1) · Agent Studio</title>" "$2"' _ "$N1" "$TMP/n1.html"
+page "/rodada?id=$R1" > "$TMP/r1-sem-nome.html"
+check "nome: a rodada antiga aparece só com o id"       bash -c 'grep -qF "<code>$1</code>" "$2" && ! grep -q "data-nome-rodada" "$2"' _ "$R1" "$TMP/r1-sem-nome.html"
+page /rodadas > "$TMP/list-nomes.html"
+check "nome: /rodadas mostra nome e id da rodada com nome" bash -c 'grep -qF "<span data-nome-rodada>Brave_Otter</span> (<code>$1</code>)" "$3" && grep -qF "<span data-nome-rodada>Calm_Fox</span> (<code>$2</code>)" "$3"' _ "$N1" "$N2" "$TMP/list-nomes.html"
+check "nome: /rodadas, rodada sem nome só com o id"     bash -c 'row="$(tr "\n" " " <"$2" | grep -oE "<tr data-rodada=\"$1\".{0,900}" | head -1)"; [ -n "$row" ] && grep -qF ">$1</a>" <<<"$row" && ! grep -q data-nome-rodada <<<"$row"' _ "$N3" "$TMP/list-nomes.html"
+check "nome: o id segue sendo o link e a chave (data-rodada, href)" bash -c 'grep -qF "data-rodada=\"$1\"" "$3" && grep -qF "data-rodada=\"$2\"" "$3" && grep -qF "href=\"/rodada?id=$1\"" "$3" && grep -qF "f_round=$2" "$3"' _ "$N1" "$N2" "$TMP/list-nomes.html"
+check "nome: nome fora do formato nunca vai à tela (nem escapado)" bash -c '! grep -qF "&lt;b&gt;x" "$1" && ! grep -qF "<b>x</b>" "$1"' _ "$TMP/list-nomes.html"
+check "nome: nome fora do formato: a página da rodada sai sem ele" bash -c 'b="$(studio_page -H "Authorization: Bearer $2" "$1/rodada?id=$3")"; ! grep -qF "data-nome-rodada" <<<"$b" && ! grep -qF "x&lt;/b&gt;" <<<"$b" && ! grep -qF "<b>x</b>" <<<"$b"' _ "$STUDIO_URL" "$STUDIO_TOKEN" "$N4"
+check "nome: a rodada com sufixo abre pelo id (a chave é o id)" test "$(code "${C[@]}" "$STUDIO_URL/rodada/bloco/resumo?id=$N1")" = 200
+studio_stop
+DB2="$TMP/s2/db.duckdb"
+# o nome vem também do evento de abertura do DuckDB (página sem o estado) e o rebuild-state o remonta
+PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" - "$DB2" "$N1" "$N2" "$N3" "$N4" > "$TMP/py-nome.out" 2>&1 <<'PY'
+import sys
+import duckdb
+from agent_studio import etapas
+db, n1, n2, n3, n4 = sys.argv[1:6]
+con = duckdb.connect(db, read_only=True)
+got = [etapas.round_name(con, r) for r in (n1, n2, n3, n4, "swarm-nao-existe")]
+print("nomes", got)
+names = {r["round"]: r["name"] for r in etapas.listing(con, 0, 2**62)}
+print("lista", names.get(n1), names.get(n2), names.get(n3), names.get(n4))
+print("rotulo", etapas.label("Brave_Otter", n1), etapas.label(None, n3), etapas.valid_name("x_y"), etapas.valid_name("Ab_Cd"), etapas.valid_name(None))
+PY
+check "nome: round_name lê o evento de abertura (DuckDB), nome inválido e rodada sem evento = None" grep -qxF "nomes ['Brave_Otter', 'Calm_Fox', None, None, None]" "$TMP/py-nome.out"
+check "nome: o histórico (listing) leva o nome do evento de abertura" grep -qxF "lista Brave_Otter Calm_Fox None <b>x</b>" "$TMP/py-nome.out"
+check "nome: rótulo Nome (id), id sozinho sem nome, formato validado" grep -qxF "rotulo Brave_Otter (swarm-1005-1200) swarm-1005-1201 None Ab_Cd None" "$TMP/py-nome.out"
+sr "DELETE rodada; DELETE etapa" >/dev/null
+OUT="$(env AGENT_STUDIO_DB="$DB2" AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$ROOT/docker/agent-studio" "$STUDIO_PY" -m agent_studio.rebuild_state 2>"$TMP/err")"; RC=$?
+check "rebuild-state (8b): rc 0 e o stderr vazio"       bash -c '[ "$1" = 0 ] && [ ! -s "$2" ]' _ "$RC" "$TMP/err"
+check "rebuild-state: o nome é remontado do evento de abertura" jqe '.[0].name == "Brave_Otter"' <<<"$(sr "SELECT name FROM rodada:\`$N1\`")"
+check "rebuild-state: o nome da rodada com sufixo também" jqe '.[0].name == "Calm_Fox"' <<<"$(sr "SELECT name FROM rodada:\`$N2\`")"
+
 # ---------------------------------------------------------------- 9. lógica direto em Python
 SURREAL_URL="$SURREAL_URL" SURREAL_TEST_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" \
   "$STUDIO_PY" - "$DB" > "$TMP/py.out" 2>&1 <<'PY'

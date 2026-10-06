@@ -11,6 +11,8 @@ from .store import Store
 from .surreal import Surreal
 from . import telemetry
 
+MARK_TOKEN_MIN = 32  # tamanho mínimo da credencial de marcação (#577)
+
 
 def price_urls():
     """As duas URLs de preço: as fixas do código; o ambiente só as troca para os testes, e só por `https://`."""
@@ -43,6 +45,11 @@ def main():
     if mark_token and mark_token in (token, read_token):
         print("agent-studio: aviso: AGENT_STUDIO_MARK_TOKEN igual à de ingestão ou à de leitura; sem marcação de ação "
               "(a credencial de marcação precisa ser própria)", file=sys.stderr)
+        mark_token = ""
+    if mark_token and len(mark_token) < MARK_TOKEN_MIN:
+        # o agente alcança o studio pela rede docker e pode chutar o campo `token` do /marcar (#577): valor curto não vale
+        print(f"agent-studio: aviso: AGENT_STUDIO_MARK_TOKEN com menos de {MARK_TOKEN_MIN} caracteres; sem marcação de ação "
+              "(a credencial de marcação precisa ser longa)", file=sys.stderr)
         mark_token = ""
     # SurrealDB (#187): o compose sempre passa a URL; sem ela (só nos testes de ingestão), grava só no DuckDB
     surreal = None

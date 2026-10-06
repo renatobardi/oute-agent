@@ -167,6 +167,7 @@ App de barra de menu (Swift, `MenuBarExtra`; ADR-08 §10) que mostra, sem abrir 
 ```bash
 oute tray install     # compila, monta ~/Applications/OuteTray.app e abre no login
 oute tray uninstall   # desfaz (a tabela ~/.oute/tray-hosts editada fica)
+oute tray sync        # reinstala só se o app instalado está atrás do repo (o oute update já chama)
 ```
 
 - Precisa do Swift no Mac (`xcode-select --install`) e do macOS 13 ou mais novo. Sem App Store nem assinatura de desenvolvedor.
@@ -177,6 +178,7 @@ oute tray uninstall   # desfaz (a tabela ~/.oute/tray-hosts editada fica)
 - Visual (Kubo, #473): símbolos SF Symbols sem cor, pintados pelo sistema. O âmbar do Gate aparece só no pedido pendente e na decisão pendente do swarm; erro e alerta usam o mesmo símbolo, sem cor. A regra fica em `tray/Sources/TrayCore/MenuSymbol.swift`.
 - Logo (#563): a barra de menu mostra a sakura do Kubo sem cor, pintada pelo sistema. O ícone do app é a sakura com a pétala rosa do agent-studio, que o macOS mostra na notificação. O identificador do app passou a ser `pro.oute.outetray`: a Central de Notificações guarda o ícone por identificador e mantinha o genérico para o `pro.oute.tray` (estudo em `docs/research/2026-10-tray-icone-notificacao.md`). Na primeira instalação com o identificador novo, o macOS pede de novo a permissão de notificação. O `oute tray install` grava o ícone chamando o binário com `--write-icon`; o desenho fica em `tray/Sources/TrayCore/Sakura.swift` e é o mesmo do sprite do agent-studio (`tests/oute-tray.test.sh` confere).
 - Menu curto (#611): pedidos, decisões e etapas vêm primeiro. Máquinas, custo de hoje e erros ocupam uma linha de resumo cada, com o detalhe em submenu. O menu mostra no máximo 3 alertas (os 3 primeiros da API); os demais ficam no submenu `mais N alertas…`.
+- Versão (#516): o menu diz a versão e o commit do app instalado (ex.: `OuteTray 0.7.42 (54e0c51)`). O `oute tray install` grava o commit do repo no `Info.plist`. No Mac com o tray instalado, o `oute update` termina com o `oute tray sync`, que reinstala o tray quando esse commit difere do commit do repo; falha na reinstalação vira aviso.
 - Testes: `swift test` em `tray/` (o `TrayCore`) e `tests/oute-tray.test.sh` (o `oute tray`, com `swift` e `launchctl` falsos).
 
 ## Segurança

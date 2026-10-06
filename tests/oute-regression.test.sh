@@ -159,7 +159,7 @@ QOK="$(quota 10 20)"
 
 # run <args…>: roda a suíte; stdout em $STDOUT, stderr em $OUT, código em $RC; logs zerados antes
 run() {
-  rm -rf "$LOG"; mkdir -p "$LOG"
+  rm -rf "${LOG:?}"; mkdir -p "$LOG"
   STDOUT="$("$REG" "$@" 2>"$TMP/stderr")"; RC=$?; OUT="$(cat "$TMP/stderr")"
   [[ -z "${DEBUG_RUN:-}" ]] || { echo "--- rc=$RC"; echo "$OUT"; }
 }
@@ -178,7 +178,7 @@ for t in $ALL13; do
 done
 check "verde: studio sem credencial = não verificado"    [ "$(verdict studio)" = nao-verificado ]
 check "claude chamado 13 tarefas x 2 modelos x 3 rodadas" [ "$(nclaude)" -eq 78 ]
-check "o relato nomeia os dois modelos da tabela"        bash -c 'grep -q "modelo haiku = $1" <<<"$3" && grep -q "modelo sonnet = $2" <<<"$3"' _ "$HAIKU" "$SONNET" "$OUT"
+check "o relato nomeia Haiku explícito e Sonnet da tabela"        bash -c 'grep -q "modelo haiku = $1" <<<"$3" && grep -q "modelo sonnet = $2" <<<"$3"' _ "$HAIKU" "$SONNET" "$OUT"
 check "claude: 39 chamadas em cada modelo, json em fluxo, MCP só do dublê, -p" bash -c \
   'h=$(grep -c -- "--model $2 --max-turns [0-9]* --mcp-config .*/rec/mcp.json --strict-mcp-config --output-format stream-json --verbose" "$1"); s=$(grep -c -- "--model $3 --max-turns [0-9]* --mcp-config .*/rec/mcp.json --strict-mcp-config --output-format stream-json --verbose" "$1"); [ "$h" -eq 39 ] && [ "$s" -eq 39 ] && ! grep -qv -- "^-p " "$1"' _ "$LOG/claude.argv" "$HAIKU" "$SONNET"
 check "o servidor MCP da chamada é o dublê ai-memory (não o real)" bash -c '[ "$(grep -c "\"ai-memory\"" "$1")" -eq 78 ] && ! grep -q "oute-memory\|http" "$1"' _ "$LOG/mcp.json"
@@ -197,7 +197,7 @@ check "oute.task.id e slug do teste no resource"         bash -c 'grep -q "^ora=
 check "evento oute.regression.run uma vez ao fim"        [ "$(grep -c '^ARGS regression ' "$LOG/emit.calls")" -eq 1 ]
 ev="$(grep '^ARGS regression ' "$LOG/emit.calls")"
 check "evento: imagem, CLIs, rodadas, resultado, custo, chamadas" bash -c 'grep -q "image=9.9.9-test claude=2.1.9 codex=0.5.0 rounds=3 result=verde green=26 red=0 unverified=1 cost=1.5600" <<<"$1" && grep -q " calls=78 secs=[0-9]* " <<<"$1"' _ "$ev"
-check "evento: o modelo de cada execução (ids da tabela e uma chave por tarefa e modelo)" bash -c 'grep -q "models=$2,$3 " <<<"$1" && grep -q "tasks=root@haiku=verde,root@sonnet=verde,select@haiku=verde" <<<"$1" && grep -q "segredo@sonnet=verde,studio=nao-verificado" <<<"$1"' _ "$ev" "$HAIKU" "$SONNET"
+check "evento: o modelo de cada execução (ids de teste e uma chave por tarefa e modelo)" bash -c 'grep -q "models=$2,$3 " <<<"$1" && grep -q "tasks=root@haiku=verde,root@sonnet=verde,select@haiku=verde" <<<"$1" && grep -q "segredo@sonnet=verde,studio=nao-verificado" <<<"$1"' _ "$ev" "$HAIKU" "$SONNET"
 check "evento sem texto de prompt nem de resposta"       bash -c '! grep -qi -e nginx -e pronto -e feito -e "sel.txt" -e turquesa <<<"$1"' _ "$ev"
 check "duplicada e issue: a pasta da tarefa é repositório git com origin fictício (12 chamadas)" bash -c '[ "$(grep -c "^true$" "$1")" -eq 12 ] && [ "$(grep -c "^https://github.com/regression/regression.git$" "$1")" -eq 6 ]' _ "$LOG/gitrepo"
 check "issue: a sessão abre numa worktree (git-dir diferente do git-common-dir), nunca no checkout principal" bash -c '[ "$(grep -c "^worktree$" "$1")" -eq 6 ]' _ "$LOG/issue-wt"
@@ -239,6 +239,12 @@ for t in $ALL13; do
     closes-refs) check "closes-refs: motivo = Closes com critério pendente" has 'usou Closes com critério pendente' ;;
     segredo) check "segredo: motivo = valor na conversa"   has 'o valor do segredo apareceu na conversa' ;;
   esac
+done
+# #615: as falhas reais da linha de base do Haiku continuam reprovadas pelos mesmos graders.
+for t in checkout memory segredo; do
+  FAKE_BAD="$t@haiku:1 $t@haiku:2 $t@haiku:3" run --task "$t" --model haiku
+  check "Haiku: $t continua vermelho com três falhas, saída 1" bash -c \
+    '[ "$1" -eq 1 ] && [ "$2" = vermelho ] && grep -q "0/3 ok, 3 reprovada(s)" <<<"$3"' _ "$RC" "$(verdict "$t@haiku")" "$OUT"
 done
 check "nenhum grader reprovado levou algo ao oute-propose de verdade" [ ! -s "$LOG/real-propose.log" ]
 FAKE_EMIT_ERR='oute-emit: coletor indisponível: evento guardado no spool (x.json, spool com 100 bytes)' run --task emit --model haiku
@@ -437,13 +443,13 @@ for _ in $(seq 1 50); do [[ -s "$SD/port" ]] && break; sleep 0.1; done
 [[ -s "$SD/port" ]] || die "o agent-studio falso não subiu"
 SCHEME=http; STUDIO_ADDR="$SCHEME://127.0.0.1:$(cat "$SD/port")"
 studio() { AGENT_STUDIO_URL="$STUDIO_ADDR" AGENT_STUDIO_READ_TOKEN="$TOKEN" run --task root --task select --task studio "$@"; }
-rm -f "$SD/deny" "$SD/code" "$SD/requests.log"
+rm -f "${SD:?}/deny" "${SD:?}/code" "${SD:?}/requests.log"
 studio
 check "studio: todas as conversas lá: verde, saída 0"    [ "$RC" -eq 0 -a "$(verdict studio)" = verde ]
 check "studio: perguntou por 12 conversas, com a credencial de leitura" bash -c '[ "$(grep -c "^/sessao regression-.* auth=ok$" "$1")" -eq 12 ] && ! grep -q "auth=no" "$1"' _ "$SD/requests.log"
 check "studio: credencial nunca no relato nem no evento" bash -c '! grep -qF "$1" "$2" "$3"' _ "$TOKEN" "$TMP/stderr" "$LOG/emit.calls"
 check "studio: evento com studio=verde"                  bash -c 'grep "^ARGS regression " "$1" | grep -q "studio=verde"' _ "$LOG/emit.calls"
-echo "-r2" > "$SD/deny"; rm -f "$SD/requests.log"
+echo "-r2" > "${SD:?}/deny"; rm -f "${SD:?}/requests.log"
 studio
 check "studio: conversa ausente em 1 rodada: verde"      [ "$RC" -eq 0 -a "$(verdict studio)" = verde ]
 printf -- '-r2\n-r3\n' > "$SD/deny"
@@ -451,7 +457,7 @@ studio
 check "studio: ausente em 2 rodadas: vermelho, saída 1"  [ "$RC" -eq 1 -a "$(verdict studio)" = vermelho ]
 check "studio: os grader das outras tarefas seguem verdes" [ "$(verdict root@haiku)" = verde ]
 # a forma de agora (#536): a casca aponta o bloco de resumo, e a conversa chegou com o tile "Conversas" >= 1
-echo bloco > "$SD/mode"; rm -f "$SD/deny" "$SD/code" "$SD/conv" "$SD/requests.log"
+echo bloco > "${SD:?}/mode"; rm -f "${SD:?}/deny" "${SD:?}/code" "${SD:?}/conv" "${SD:?}/requests.log"
 studio
 check "studio (bloco): conversas nos blocos: verde, saída 0"   [ "$RC" -eq 0 -a "$(verdict studio)" = verde ]
 check "studio (bloco): perguntou a casca e o bloco de cada conversa, só com a credencial de leitura" bash -c '[ "$(grep -c "^/sessao regression-" "$1")" -eq 12 ] && [ "$(grep -c "^/bloco/sessao/resumo regression-" "$1")" -eq 12 ] && ! grep -q "auth=no" "$1"' _ "$SD/requests.log"
@@ -465,21 +471,21 @@ check "studio (bloco): o relato diz que o resumo não é lido"   has 'sem o resu
 echo 1 > "$SD/conv"; printf -- '-r2\n-r3\n' > "$SD/deny"
 studio
 check "studio (bloco): bloco 404 em 2 rodadas: vermelho"       [ "$RC" -eq 1 -a "$(verdict studio)" = vermelho ]
-rm -f "$SD/deny"; echo casca > "$SD/mode"
+rm -f "${SD:?}/deny"; echo casca > "${SD:?}/mode"
 studio
 check "studio: casca sem resumo nem bloco: não verificado"     [ "$RC" -eq 0 -a "$(verdict studio)" = nao-verificado ]
 echo direct > "$SD/mode"
-rm -f "$SD/deny"; echo 500 > "$SD/code"
+rm -f "${SD:?}/deny"; echo 500 > "${SD:?}/code"
 studio
 check "studio: HTTP 500 = não verificado, não vermelho"  [ "$RC" -eq 0 -a "$(verdict studio)" = nao-verificado ]
 check "studio: HTTP 500 dito no relato" has 'HTTP 500'
-rm -f "$SD/code"
+rm -f "${SD:?}/code"
 AGENT_STUDIO_URL="$SCHEME://127.0.0.1:$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')" \
   AGENT_STUDIO_READ_TOKEN="$TOKEN" run --task root --task select --task studio
 check "studio fora do ar: não verificado, saída 0"       [ "$RC" -eq 0 -a "$(verdict studio)" = nao-verificado ]
 AGENT_STUDIO_URL="$STUDIO_ADDR" run --task root --task select --task studio
 check "studio sem a credencial de leitura: não verificado" [ "$RC" -eq 0 -a "$(verdict studio)" = nao-verificado ]
-rm -f "$SD/requests.log"
+rm -f "${SD:?}/requests.log"
 AGENT_STUDIO_URL="$STUDIO_ADDR" AGENT_STUDIO_READ_TOKEN="$TOKEN" run --task root --task studio
 check "studio só pergunta pelas conversas das tarefas que rodaram" bash -c '[ "$(grep -c . "$1")" -eq 6 ] && ! grep -q -e select -e worktree -e emit "$1"' _ "$SD/requests.log"
 studio --json --rounds 1

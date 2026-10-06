@@ -26,6 +26,7 @@ public enum MenuSymbol: CaseIterable {
     case refuse
     case openStudio
     case refresh
+    case version
     case quit
 
     public var systemName: String {
@@ -43,6 +44,7 @@ public enum MenuSymbol: CaseIterable {
         case .refuse: return "xmark"
         case .openStudio: return "arrow.up.right.square"
         case .refresh: return "arrow.clockwise"
+        case .version: return "info.circle"
         case .quit: return "power"
         }
     }
