@@ -10,7 +10,7 @@
     "checkout@sonnet": "verde",
     "closes-refs@haiku": "verde",
     "closes-refs@sonnet": "verde",
-    "duplicada@haiku": "vermelho",
+    "duplicada@haiku": "verde",
     "duplicada@sonnet": "verde",
     "emit@haiku": "verde",
     "emit@sonnet": "verde",

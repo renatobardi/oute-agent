@@ -65,7 +65,8 @@ O container é um só e todas as sessões são o mesmo usuário: `ps` e `pgrep` 
 
 ## Issues e contexto do repositório
 
-- Backlog = **issues do GitHub do próprio repo**, via `gh` (`gh issue view <n> --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))'`, `gh issue create`, `gh issue comment`, `gh issue close`). O que ficar pendente ao fim da tarefa vira issue. Antes de `gh issue create`, procure issue **aberta** sobre o mesmo ponto: `gh issue list --state open --search '<arquivo ou termo> in:title,body'`. Se existe, a evidência nova vai num comentário nela (`gh issue comment <n>`), e não numa issue nova.
+- Backlog = **issues do GitHub do próprio repo**, via `gh` (`gh issue view <n> --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))'`, `gh issue create`, `gh issue comment`, `gh issue close`). O que ficar pendente ao fim da tarefa vira issue.
+- **Antes de todo `gh issue create`, rode `gh issue list --state open --search '<arquivo ou termo> in:title,body'`.** Nunca crie a issue sem essa busca. Se existe issue aberta sobre o mesmo ponto, a evidência nova vai num comentário nela (`gh issue comment <n>`), e não numa issue nova.
 - Antes de começar, leia **`AGENTS.md`** e **`CONTEXT.md`** na raiz do repo, se existirem. O canônico são os ADRs em `docs/adr/` do repo; o `CONTEXT.md` é o resumo com glossário. Se algo faltar ou conflitar, pergunte em vez de supor.
 - O trabalho segue o **AI-DLC** (ADR-07 do oute-agent) (fases `strat` → `iter`, cada uma com gate humano): skills de fluxo `oute-aidlc-<fase>-<id>`; não feche uma fase que tem gate sem o ok do usuário.
 - Nunca escreva segredos em arquivo, commit, issue, PR ou saída de comando. Os segredos chegam pelo ambiente.
