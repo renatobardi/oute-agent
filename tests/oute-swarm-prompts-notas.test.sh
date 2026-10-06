@@ -65,4 +65,6 @@ check "650: notas mandam ler a fila (oute-inbox) e as rodadas (oute-swarm busy) 
 check "650: notas não propõem outro com pedido pendente de outra sessão e avisam o Bardi" grep -qF 'de **outra sessão**, não proponha outro: avise o Bardi' "$N"
 check "650: notas pedem no # RESUMO as rodadas abertas e as sessões que caem" grep -qF 'quais rodadas estão abertas e quais sessões caem' "$N"
 check "650: ship-release traz o passo da fila antes do pedido" bash -c 'grep -qF "oute-inbox " "$1" && grep -qF "oute-swarm busy" "$1" && grep -qF "quais rodadas estão abertas e quais sessões caem" "$1"' _ "$SR"
+check "665: notas mandam rodar gh issue list antes de todo gh issue create, em item próprio" grep -qF '**Antes de todo `gh issue create`, rode `gh issue list --state open --search' "$N"
+check "665: notas mandam comentar na issue aberta em vez de criar outra" grep -qF 'a evidência nova vai num comentário nela (`gh issue comment <n>`)' "$N"
 check_end
