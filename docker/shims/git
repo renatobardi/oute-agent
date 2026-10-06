@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Shim do `git` (vem antes do binário real no PATH, #651): no checkout principal de um repo de /workspace, `git checkout`,
+# `git switch`, `git commit`, `git merge` e `git rebase` são recusados com o código 77 e a instrução de abrir uma worktree
+# (`oute-task <slug>`). O resto do `git` passa direto, com os mesmos argumentos: leitura, `fetch`, `pull`, `worktree add`…
+# Checkout principal = `git rev-parse --git-dir` igual a `--git-common-dir`, com a pasta do repo direto em /workspace
+# (`/workspace/<repo>`, a regra das notas globais). Dentro de uma worktree e em repo de outra pasta (o temporário de um
+# teste, um clone em /tmp) nada muda.
+# Exceção: `git merge --ff-only` na branch padrão, sem mudança local em arquivo versionado. É o que o `git pull --ff-only`
+# faz depois do fetch e o que o `oute-task clean --yes` usa para avançar o checkout principal.
+# Limite: protege contra ENGANO, não contra quem contorna (/usr/bin/git, `bash -c` com outro PATH, alias do git, outro
+# comando que move o HEAD). Sem resolver o repo (fora de repositório, git-dir ilegível), passa ao git real, que dá o erro dele.
+set -uo pipefail
+self="${BASH_SOURCE[0]}"
+real=""
+IFS=: read -ra path_dirs <<<"$PATH"
+for d in ${path_dirs[@]+"${path_dirs[@]}"}; do
+  [[ -n "$d" && -f "$d/git" && -x "$d/git" ]] || continue
+  [[ ! "$d/git" -ef "$self" ]] || continue
+  real="$d/git"; break
+done
+[[ -n "$real" ]] || { echo "oute: git não encontrado" >&2; exit 127; }
+ROOT_DIR="${OUTE_GIT_GUARD_ROOT:-/workspace}"   # a variável só existe para os testes
+
+# subcomando: o primeiro argumento depois das opções globais do git (as que levam valor separado pulam dois)
+args=("$@"); i=0; sub=""
+while (( i < ${#args[@]} )); do
+  case "${args[$i]}" in
+    -C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source) i=$((i + 2)); continue ;;
+    -*) i=$((i + 1)); continue ;;
+  esac
+  sub="${args[$i]}"; break
+done
+case "$sub" in
+  checkout|switch|commit|merge|rebase) ;;
+  *) exec "$real" "$@" ;;
+esac
+globals=(); (( i == 0 )) || globals=("${args[@]:0:$i}")
+rest=("${args[@]:$((i + 1))}")
+rgit() { "$real" ${globals[@]+"${globals[@]}"} "$@"; return $?; }
+
+# checkout principal de /workspace? Sem resposta do git, ou fora dele, passa
+dirs="$(rgit rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null)" || exec "$real" "$@"
+gd="$(sed -n 1p <<<"$dirs")"; cd_="$(sed -n 2p <<<"$dirs")"
+gd="$(cd "$gd" 2>/dev/null && pwd -P)" || exec "$real" "$@"
+cd_="$(cd "$cd_" 2>/dev/null && pwd -P)" || exec "$real" "$@"
+[[ "$gd" == "$cd_" ]] || exec "$real" "$@"
+root="$(cd "$ROOT_DIR" 2>/dev/null && pwd -P)" || exec "$real" "$@"
+top="${gd%/.git}"
+[[ "$top" != "$gd" && "${top%/*}" == "$root" ]] || exec "$real" "$@"
+
+why=""
+if [[ "$sub" == merge ]]; then
+  ff=0
+  for a in ${rest[@]+"${rest[@]}"}; do [[ "$a" != --ff-only ]] || ff=1; done
+  if (( ff )); then
+    def="$(rgit symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)" || def=""
+    def="${def#origin/}"
+    cur="$(rgit symbolic-ref -q --short HEAD 2>/dev/null)" || cur=""
+    dirty="$(rgit status --porcelain --untracked-files=no 2>/dev/null)" || dirty="?"
+    if [[ -z "$def" ]]; then why="a branch padrão não está definida (refs/remotes/origin/HEAD)"
+    elif [[ "$cur" != "$def" ]]; then why="o checkout está em '${cur:-HEAD solto}', e não na branch padrão '$def'"
+    elif [[ -n "$dirty" ]]; then why="há mudança local em arquivo versionado"
+    else exec "$real" "$@"
+    fi
+  fi
+fi
+{
+  echo "oute: git $sub recusado no checkout principal ($top): abra uma worktree: oute-task <slug>"
+  [[ -z "$why" ]] || echo "oute: o merge --ff-only só passa na branch padrão, sem mudança local: $why."
+  echo "oute: aqui continuam valendo a leitura, o git fetch e o git pull --ff-only na branch padrão, sem mudança local."
+  echo "oute: esta trava protege contra engano, não contra contorno."
+} >&2
+exit 77
