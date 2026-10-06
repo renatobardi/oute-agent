@@ -5,7 +5,7 @@ Origem de sempre (`OTEL_RESOURCE_ATTRIBUTES`: host.name, oute.instance; ADR-04) 
 `oute.agent` fixo por ferramenta.
 
 Sem laço: o que o agent-studio manda ao collector volta a ele pela ingestão (#155). Por isso:
-- métricas são contadores agregados, exportados a cada `OTEL_METRIC_EXPORT_INTERVAL` (padrão 60 s): gravar um lote
+- métricas são contadores agregados, exportados a cada `OTEL_METRIC_EXPORT_INTERVAL` (padrão do SDK 60 s; o compose põe 5 min, #570): gravar um lote
   soma números, não cria registro novo;
 - só WARNING ou pior sai como log OTel (recusa, gravação que falhou), e cada tipo de aviso sai no máximo uma vez
   por janela (`AGENT_STUDIO_LOG_EVERY`, padrão 60 s), com a contagem do que foi suprimido. O log de sucesso por

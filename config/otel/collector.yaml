@@ -133,7 +133,9 @@ service:
       level: basic
       readers:
         - periodic:
-            interval: 60000
+            # 5 min (#570): a cada 1 min estas métricas eram 84% das linhas de métricas do agent-studio. Os alertas de
+            # fila e de recusa passam a ter resolução de 5 min (sem dado = 30 min e janela de recusa = 15 min seguem cabendo)
+            interval: 300000
             exporter:
               otlp: {protocol: http/protobuf, endpoint: "http://127.0.0.1:4318/v1/metrics"}
   pipelines:
