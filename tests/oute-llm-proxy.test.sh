@@ -202,4 +202,26 @@ check "certificado não confiável: 502 e nenhum pedido chega"  bash -c '[ "$1" 
 export SSL_CERT_FILE="$SSL_SAVE"
 px_stop
 
+# ---------------------------------------------------------------- 12. pedido acima de 8 MiB (#564)
+or_reset; px_start LLM_PROXY_API_KEY="$KEY" LLM_PROXY_UPSTREAM="$OR_BASE" OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" LLM_PROXY_HEARTBEAT_SECONDS=0 || die "o proxy não subiu (413)"
+N="$(span_count)"; call -H "Content-Length: $((8 * 1024 * 1024 + 1))"
+check "pedido acima de 8 MiB: 413, nada vai ao OpenRouter"    bash -c '[ "$1" = 413 ] && [ "$2" -eq 0 ] && grep -q "pedido grande demais" "$3"' _ "$CODE" "$(or_requests)" "$TMP/resp"
+sleep 0.3
+check "pedido acima de 8 MiB: não vira consumo"               test "$(span_count)" -eq "$N"
+call
+check "pedido acima de 8 MiB: o proxy segue respondendo"      test "$CODE" = 200
+px_stop
+
+# ---------------------------------------------------------------- 13. upstream que não responde dentro do prazo (#564)
+# o prazo de produção é 300 s (UPSTREAM_TIMEOUT); aqui 1 s, e o OpenRouter falso demora 30 s
+or_reset; or_mode hang; px_start LLM_PROXY_API_KEY="$KEY" LLM_PROXY_UPSTREAM="$OR_BASE" LLM_PROXY_UPSTREAM_TIMEOUT=1 OTEL_EXPORTER_OTLP_ENDPOINT="$OTEL_EXPORTER_OTLP_ENDPOINT" LLM_PROXY_HEARTBEAT_SECONDS=0 || die "o proxy não subiu (timeout)"
+N="$(span_count)"; T0="$(date +%s)"; call; T1="$(date +%s)"
+check "upstream lento: 502 com erro fixo, sem a chave"        bash -c '[ "$1" = 502 ] && ! grep -qF -- "$2" "$3" && grep -q "upstream indispon" "$3"' _ "$CODE" "$KEY" "$TMP/resp"
+check "upstream lento: o proxy desiste no prazo, não espera o upstream" test $((T1 - T0)) -lt 15
+wait_spans $((N + 1)) || bad "upstream lento: o span não chegou"
+check "upstream lento: span de erro"                          jqe '.status.code == 2 and .status.message == "upstream indisponível"' <<<"$(last_span)"
+or_mode ok; call
+check "upstream lento: o proxy segue respondendo depois"      test "$CODE" = 200
+px_stop
+
 check_end

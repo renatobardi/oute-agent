@@ -233,7 +233,8 @@ cenv() { sed -n "s/^$1=//p" "$F_ENV"; }
 quiet() { local v; for v in "$T_OLD" "$S_OLD" "$T_ING" "$T_READ" "$S_NEW" "$T_GH" "$T_FOO"; do ! grep -qF -- "$v" <<<"$OUT" || return 1; done; }
 # vault falso: uma pasta = um arquivo em $F_VAULT com as linhas do `oute-secrets export`; pasta sem arquivo = rc 4
 # (como o scripts/oute-secrets.sh de verdade); <pasta>.rc = falha de leitura com esse código. Chamadas em $F_VAULT_LOG.
-# <pasta>.hang (ou session.hang) = a chamada avisa em $F_VAULT/hanging e fica parada até existir $F_VAULT/release (#297)
+# <pasta>.hang (ou session.hang) = a chamada avisa em $F_VAULT/hanging e fica parada até existir $F_VAULT/release ou o
+# processo que a chamou morrer (#297); sem prazo fixo (#564)
 export F_VAULT="$TMP/vault" F_VAULT_LOG="$TMP/vault.log"; mkdir -p "$F_VAULT"; : > "$F_VAULT_LOG"
 cat > "$REPO/scripts/oute-secrets.sh" <<'SH'
 #!/usr/bin/env bash
@@ -241,8 +242,8 @@ folder="${OUTE_VAULT_FOLDER:-oute-agent}"
 echo "$1 $folder sessao=${BW_SESSION:-nenhuma}" >> "$F_VAULT_LOG"
 hang() {
   [[ -e "$F_VAULT/$1.hang" ]] || return 0
-  local i=0; : > "$F_VAULT/hanging"
-  until [[ -e "$F_VAULT/release" || $i -ge 100 ]]; do sleep 0.1; i=$((i + 1)); done
+  : > "$F_VAULT/hanging"
+  until [[ -e "$F_VAULT/release" ]] || ! kill -0 "$PPID" 2>/dev/null; do sleep 0.1; done
 }
 case "$1" in session) hang session ;; export) hang "$folder" ;; esac
 case "$1" in
@@ -416,13 +417,14 @@ rc_lock() { [[ "$RC" -eq "$1" && "$(grep -cx 'bw lock' "$F_VAULT_LOG")" == 1 && 
 # segundo plano de script nasce com ele ignorado), espera o vault falso parar na chamada e manda o sinal ao grupo
 # inteiro (Ctrl+C no terminal) ou só ao `oute` (kill <pid>; a chamada é solta depois). Saída em $OUT, código em $RC
 sig() {
-  local s="$1" alvo="$2" onde="$3" pid i=0; shift 3
+  local s="$1" alvo="$2" onde="$3" pid; shift 3
   rm -f "$F_VAULT"/*.hang "$F_VAULT/hanging" "$F_VAULT/release" "$TMP/sig.pid"; : > "$F_VAULT/$onde.hang"; : > "$F_VAULT_LOG"
   oute_env python3 -c 'import os, signal, sys
 os.setsid(); signal.signal(signal.SIGINT, signal.SIG_DFL)
 open(sys.argv[1], "w").write(str(os.getpid()))
 os.execv(sys.argv[2], sys.argv[2:])' "$TMP/sig.pid" "$REPO/scripts/oute" "$@" > "$TMP/sig.out" 2>&1 &
-  until [[ -e "$F_VAULT/hanging" || $i -ge 100 ]]; do sleep 0.1; i=$((i + 1)); done
+  # espera o vault falso avisar que parou, sem prazo fixo: só desiste se o `oute` já morreu (o caso então falha pelo RC)
+  until [[ -e "$F_VAULT/hanging" ]] || ! kill -0 "$!" 2>/dev/null; do sleep 0.1; done
   pid="$(cat "$TMP/sig.pid")"
   if [[ "$alvo" == grupo ]]; then kill "-$s" -- "-$pid"; else kill "-$s" "$pid"; sleep 0.3; : > "$F_VAULT/release"; fi
   wait $!; RC=$?; OUT="$(cat "$TMP/sig.out")"
