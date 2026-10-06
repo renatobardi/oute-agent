@@ -7,7 +7,7 @@
 {% from "_graficos_painel.html" import barra_modelo, composicao %}
 {# Dashboard (#469): KPIs, insights por regra e 6 gráficos. Os gráficos são SVG gerado aqui mesmo, sem JS e sem estilo na tag: a escala vem
    do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
-   distingue o informado pela fonte (ou efetivo) do estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
+   distingue o informado pela fonte (ou pago) do estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
 {% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
 {% macro money(c) %}{% if c.real_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
 {% block title %}Dashboard · Agent Studio{% endblock %}
@@ -82,7 +82,7 @@
     {% if range.from %}<input type="hidden" name="de" value="{{ range.from }}"><input type="hidden" name="ate" value="{{ range.to }}">{% else %}<input type="hidden" name="hours" value="{{ hours }}">{% endif %}
     {% if repo %}<input type="hidden" name="repo" value="{{ repo }}">{% endif %}
     {% if sub %}<input type="hidden" name="{{ sub_param }}" value="{{ sub }}">{% endif %}
-    {% if custo == "efetivo" %}<input type="hidden" name="custo" value="efetivo">{% endif %}
+    {% if custo == "pago" %}<input type="hidden" name="custo" value="pago">{% endif %}
     <label>Modelo
       <select name="model">
         <option value="">Todos</option>
@@ -105,7 +105,7 @@
 {% call fragment("custo-modelo") %}
 {% set comp = snap.composition %}
 <section class="cartao bloco grafico" data-grafico="custo-modelo" data-models="{{ snap.models_total }}">
-  <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">{{ "custo efetivo" if custo == "efetivo" else "preço de lista" }} · ≈ estimado</span></div>
+  <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">{{ "custo pago" if custo == "pago" else "preço de lista" }} · ≈ estimado</span></div>
   {% for m in snap.models %}
   <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
        title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'informado pela fonte' }}">
@@ -122,7 +122,7 @@
     {% set est_f = (comp.estimated_usd or 0) / comp.total if comp.total else 0 %}
     {{ composicao(real_f, est_f) }}
     <div class="legenda">
-      <span>{{ amostra("real") }}{{ 'Efetivo' if custo == 'efetivo' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
+      <span>{{ amostra("real") }}{{ 'Pago' if custo == 'pago' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
       <span>{{ amostra("estimado") }}Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
       {% if comp.unpriced_calls %}<span class="nota">{{ comp.unpriced_calls|num }} {{ "chamada sem preço" if comp.unpriced_calls == 1 else "chamadas sem preço" }}, fora da soma</span>{% endif %}
     </div>
@@ -206,7 +206,7 @@
 {# 7) chamadas e custo por repositório (#532): barra nas chamadas, do maior para o menor; sem repositório = a conversa aberta fora de repositório (#599) #}
 {% call fragment("repos") %}
 <section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
-  <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>
+  <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo pago" if custo == "pago" else "custo de lista" }}</span></div>
   {% for r in snap.by_repo %}
   <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
        title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
@@ -223,7 +223,7 @@
 {# 7b) chamadas e custo por assinatura (#679): claude, zai, codex; a `zai` entra como custo estimado (preço do config.toml) #}
 {% call fragment("assinaturas") %}
 <section class="cartao bloco grafico" data-grafico="assinaturas" data-assinaturas="{{ snap.by_subscription|length }}" data-total="{{ snap.by_subscription|sum(attribute="calls") }}">
-  <div class="grafico-topo"><h2>Chamadas por assinatura</h2><span class="nota">chamadas ao modelo · {{ "custo efetivo" if custo == "efetivo" else "custo de lista" }}</span></div>
+  <div class="grafico-topo"><h2>Chamadas por assinatura</h2><span class="nota">chamadas ao modelo · {{ "custo pago" if custo == "pago" else "custo de lista" }}</span></div>
   {% for r in snap.by_subscription %}
   <div class="barra-linha" data-assinatura="{{ '' if r.none else r.subscription }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
        title="{{ r.subscription }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">

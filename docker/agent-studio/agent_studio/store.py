@@ -406,25 +406,25 @@ class Store:
                 cur.close()
                 self._lap("read", t, label)
 
-    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, effective=False, sub=None):
-        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528), `effective` (#531, custo
-        efetivo) e `sub` (#679, assinatura) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
-        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, effective, sub), "usage")
+    def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub=None):
+        """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528), `paid` (#531, custo
+        pago) e `sub` (#679, assinatura) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
+        return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, paid, sub), "usage")
 
     def repos(self, from_ns, to_ns):
         """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
         return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns), "repos")
 
-    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False, sub=None):
+    def dashboard(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, paid=False, sub=None):
         """Leitura do Dashboard (#469). Roda num cursor próprio, **fora da trava do escritor**: a consulta é longa e,
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
-        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532), o custo efetivo (#531) e a assinatura (#679) fazem parte da chave."""
+        ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532), o custo pago (#531) e a assinatura (#679) fazem parte da chave."""
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute
-        key = (("live", to_ns - from_ns, tzk, repo, model, effective, sub) if live
-               else (from_ns // minute, to_ns // minute, tzk, repo, model, effective, sub))
+        key = (("live", to_ns - from_ns, tzk, repo, model, paid, sub) if live
+               else (from_ns // minute, to_ns // minute, tzk, repo, model, paid, sub))
         with self._dash_lock:
             hit = self._dash_cache.get(key)
             if hit and time.monotonic() - hit[0] < DASH_TTL_S:
@@ -432,18 +432,18 @@ class Store:
             if hit and live:
                 if not self._dash_refreshing.get(key):
                     self._dash_refreshing[key] = True
-                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model, effective, sub), daemon=True).start()
+                    threading.Thread(target=self._dash_refresh, args=(key, from_ns, to_ns, prices, tz, repo, model, paid, sub), daemon=True).start()
                 return hit[1]
-        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model, effective, sub)
+        return self._dash_refresh(key, from_ns, to_ns, prices, tz, repo, model, paid, sub)
 
-    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None, effective=False, sub=None):
+    def _dash_refresh(self, key, from_ns, to_ns, prices, tz, repo=None, model=None, paid=False, sub=None):
         with self._dash_lock:
             try:
                 cur = self.con.cursor()
                 timer = threading.Timer(DASH_DEADLINE_S, cur.interrupt)
                 timer.start()
                 try:
-                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model, effective, sub)
+                    snap = dash_mod.snapshot(cur, from_ns, to_ns, prices, tz, repo, model, paid, sub)
                     snap["tools"] = tools_mod.top(cur, from_ns, to_ns, repo, sub)  # gráfico das ferramentas (#535)
                 finally:
                     timer.cancel()
@@ -467,9 +467,9 @@ class Store:
         return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg), "decisions")
 
     # leituras da tela (#206), sob a mesma trava
-    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
+    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT):
         with self.lock:
-            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, effective=effective)
+            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid)
 
     def tools(self, from_ns, to_ns, tz=tz_mod.UTC, repo=None, host=None, agent=None):
         """Tela Ferramentas (#535), sob a mesma trava."""
@@ -480,9 +480,9 @@ class Store:
         with self.lock:
             return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent, group)
 
-    def conversation(self, session_id, prices, errors_only=False, effective=False):
+    def conversation(self, session_id, prices, errors_only=False, paid=False):
         with self.lock:
-            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only, effective=effective)
+            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only, paid=paid)
 
     def conversation_logs(self, session_id, offset, errors_only=False):
         with self.lock:
@@ -493,13 +493,13 @@ class Store:
             return conv_mod.span(self.con, trace_id, span_id)
 
     # leituras da tela de sessões (#207), sob a mesma trava
-    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, effective=False, limit=conv_mod.LIST_LIMIT):
+    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT):
         with self.lock:
-            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, effective=effective)
+            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid)
 
-    def session(self, task_id, prices, effective=False):
+    def session(self, task_id, prices, paid=False):
         with self.lock:
-            return sess_mod.detail(self.con, task_id, prices, effective=effective)
+            return sess_mod.detail(self.con, task_id, prices, paid=paid)
 
     # leitura da página do pedido (#208), sob a mesma trava
     def proposal(self, proposal_id):

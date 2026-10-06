@@ -114,12 +114,12 @@ def _kpi_calls(cur, prev, before):
     return _kpi("calls", "Chamadas ao modelo", "activity", cur["calls"], prev["calls"], rel, badge, "secundario", before)
 
 
-def _kpi_cost(cur, prev, before, effective=False):
+def _kpi_cost(cur, prev, before, paid=False):
     total, ptotal = _cost(cur), _cost(prev)
     est_share = _div((cur["estimated_usd"] or 0), total) if total else None
     note = before if est_share is None else f"{_pct(est_share)} estimado"
     rel = _rel(total, ptotal)
-    label, hint = (("Custo (efetivo)", "Custo efetivo: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece.") if effective
+    label, hint = (("Custo (pago)", "Custo pago: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece.") if paid
                    else ("Custo (lista)", "Preço de lista, não gasto: os agentes rodam por assinatura."))
     return _kpi("cost", label, "receipt", total, ptotal, rel, _delta_badge(rel), "secundario", note,
                 hint=hint, real_usd=cur["real_usd"], estimated_usd=cur["estimated_usd"], estimated_share=est_share,
@@ -171,10 +171,10 @@ def _kpi_cache(cur, prev, _before):
     return kpi
 
 
-def _kpis(cur, prev, span_ns, effective=False):
+def _kpis(cur, prev, span_ns, paid=False):
     """Os 5 KPIs com o valor, o da janela anterior e o Badge de variação (texto, tendência e variante)."""
     before = f"vs. {_span_label(span_ns)} antes"
-    return [_kpi_calls(cur, prev, before), _kpi_cost(cur, prev, before, effective), _kpi_p95(cur, prev, before),
+    return [_kpi_calls(cur, prev, before), _kpi_cost(cur, prev, before, paid), _kpi_p95(cur, prev, before),
             _kpi_errors(cur, prev, before), _kpi_cache(cur, prev, before)]
 
 
@@ -427,19 +427,19 @@ def _regroup(fine, keys):
     return usage_mod.regroup(fine, FINE, keys)
 
 
-def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, effective=False, sub=None):
+def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, paid=False, sub=None):
     """Tudo o que a tela mostra, do DuckDB, na janela [from_ns, to_ns) e na anterior de mesmo tamanho. `repo` (#528) =
     só os fatos desse repositório (`repo.NONE` = sem repositório) em todos os blocos, nas duas janelas; `repos` = as
     opções do filtro (da janela, sem filtrar). `model` (#532) = só o gráfico de chamadas por hora ou dia, uma série só
     (`None` = Todos); `sub` (#679) = só as chamadas dessa assinatura, em todos os blocos e nas duas janelas (`None` = Todas); `model_options` = os modelos com chamada na janela (no filtro de repositório, sem o de modelo).
-    `effective` (#531) = custo efetivo: a chamada de assinatura conta 0 em todo número de custo; o "sem cache" do insight
+    `paid` (#531) = custo pago: a chamada de assinatura conta 0 em todo número de custo; o "sem cache" do insight
     de cache é preço de lista e some nesse modo."""
     span = to_ns - from_ns
     prev_from = from_ns - span
-    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False, repo=repo, effective=effective, sub=sub)
+    fine = usage_mod.aggregate(con, from_ns, to_ns, prices, FINE, tz, p95=False, repo=repo, paid=paid, sub=sub)
     cur = _regroup(fine, ())[()]
     cur["p95"] = usage_mod.aggregate_p95(con, from_ns, to_ns, tz, repo, sub)
-    prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz, repo=repo, effective=effective, sub=sub)[()]
+    prev = usage_mod.aggregate(con, prev_from, from_ns, prices, (), tz, repo=repo, paid=paid, sub=sub)[()]
     by_model = _regroup(fine, ("model",))
     total_cost = _cost(cur) or 0.0
     models = _models(by_model, total_cost, cur["calls"])
@@ -448,7 +448,7 @@ def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, 
     return {
         "from_ns": from_ns, "to_ns": to_ns, "span_ns": span, "prev_from_ns": prev_from,
         "totals": usage_mod.render((), cur, ()), "prev_totals": usage_mod.render((), prev, ()),
-        "repos": repo_mod.options(con, from_ns, to_ns), "effective": effective, "kpis": _kpis(cur, prev, span, effective), "series": _series(con, from_ns, to_ns, tz, repo, model, sub),
+        "repos": repo_mod.options(con, from_ns, to_ns), "paid": paid, "kpis": _kpis(cur, prev, span, paid), "series": _series(con, from_ns, to_ns, tz, repo, model, sub),
         "model": model, "model_options": sorted({m["model"] for m in models}),
         "by_repo": _repos(_regroup(fine, ("repo",)), cur["calls"]),
         "by_subscription": _subscriptions(_regroup(fine, ("subscription",)), cur["calls"]),
@@ -462,7 +462,7 @@ def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, 
         "rules": {"p95": _p95_regression(con, latency, _model_latency(con, prev_from, from_ns, repo, sub), from_ns, to_ns, repo, sub),
                   "tool_errors": _tool_errors(con, from_ns, to_ns, repo, sub),
                   "span_errors": cur["span_errors"], "cache_share": _cache_share(cur),
-                  "cache_saving": None if effective else _cache_saving(by_model, prices.snapshot()), "effective": effective,
+                  "cache_saving": None if paid else _cache_saving(by_model, prices.snapshot()), "paid": paid,
                   "unpriced_models": sorted(m or NO_MODEL for m in cur["unpriced_models"]),
                   "unpriced_calls": cur["unpriced_calls"], "by_model": models},
     }
@@ -505,7 +505,7 @@ def _rule_model_cost(rules, uso, _gates):
         if m["calls_share"] < MODEL_MAX_CALLS_SHARE and m["cost_share"] > MODEL_MIN_COST_SHARE:
             return _insight("model_cost", "chart-pie", "neutral",
                             f"{m['model']} é {_pct(m['calls_share'])} das chamadas e {_pct(m['cost_share'])} do custo",
-                            f"{'Custo efetivo' if rules.get('effective') else 'Custo de lista'} na janela. O uso por papel e por fase mostra onde ele entrou.", uso, "Ver uso por fase")
+                            f"{'Custo pago' if rules.get('paid') else 'Custo de lista'} na janela. O uso por papel e por fase mostra onde ele entrou.", uso, "Ver uso por fase")
     return None
 
 

@@ -60,7 +60,7 @@
       <td class="n custo">
         {% if s.cost_kind == "real" %}<span class="real" title="informado pela fonte (preço de lista, não gasto)">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
-        {% elif s.cost_kind == "effective" %}<span class="real" title="custo efetivo: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
+        {% elif s.cost_kind == "paid" %}<span class="real" title="custo pago: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
         {% else %}<span class="semp" title="sem custo informado pela fonte e sem preço na tabela">sem preço</span>{% endif %}
       </td>
       {% else %}
