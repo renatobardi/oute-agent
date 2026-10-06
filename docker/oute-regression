@@ -5,6 +5,7 @@
 # `swarm-worker.md`: a regra do `swarm-worker.md` obriga a rodar antes de abrir o PR). Nunca em CI; só você chama, no container.
 #
 # uso:  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
+#                       [--baseline <arquivo>] [--write-baseline]
 #   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
 #                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
 #                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
@@ -16,7 +17,15 @@
 #   --codex      opt-in: roda também as tarefas marcadas para o Codex (a 1, `root`) com `codex exec`; sem a flag o Codex
 #                não é chamado
 #   --task <n>   só as tarefas de nome <n> (as de docker/regression/ e `studio`); repetível
-#   --json       o resultado em JSON no stdout (o relato em texto vai para o stderr)
+#   --json       o resultado em JSON no stdout (o relato em texto vai para o stderr); traz `vs_baseline` (o estado de cada
+#                tarefa contra a linha de base) e `baseline` (arquivo, se existe, se foi gravada)
+#   --baseline <arquivo>  a linha de base (JSON, #647); padrão: $OUTE_REGRESSION_BASELINE ou baseline.json ao lado das tarefas
+#                (no container, a cópia da imagem: PR que muda a base roda com o arquivo da worktree). Com a base, cada tarefa
+#                e modelo sai igual (verde e verde), falha de base (vermelha e vermelha), piorou (era verde, ficou vermelha)
+#                ou melhorou (era vermelha, ficou verde); tarefa sem entrada na base vale como verde esperada. A saída é 1 só
+#                se alguma piorou. Sem o arquivo vale a regra antiga: qualquer vermelha reprova (saída 1).
+#   --write-baseline  grava a linha de base a partir desta execução (só quando pedido): atualiza só as tarefas e os modelos
+#                que rodaram e mantém o resto do arquivo; não grava tarefa não verificada. Sai 0 e diz que a base mudou.
 # saída: 0 = verde (tarefa "não verificada" não pesa) | 1 = alguma tarefa vermelha | 2 = não rodou (uso, sem claude, ou
 #   o claude falhou em toda chamada) | 3 = recusada pela trava de cota (nada rodou; quem abre PR de prompt declara isso)
 #
@@ -47,7 +56,7 @@ EXIT_QUOTA=3
 warn() { printf 'oute-regression: aviso: %s\n' "$*" >&2; }
 
 ORIG_ARGS=("$@")
-ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""
+ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""; BASELINE_ARG=""; WRITE_BASE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rounds) shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]?$ ]] || die2 "--rounds pede um inteiro de 1 a 99"; ROUNDS="$1" ;;
@@ -56,6 +65,8 @@ while [[ $# -gt 0 ]]; do
     --codex) CODEX=1 ;;
     --task) shift; [[ $# -gt 0 && "$1" =~ ^[a-z][a-z0-9-]*$ ]] || die2 "--task pede o nome de uma tarefa"; ONLY+=("$1") ;;
     --json) JSON=1 ;;
+    --baseline) shift; [[ $# -gt 0 && -n "$1" ]] || die2 "--baseline pede um arquivo"; BASELINE_ARG="$1" ;;
+    --write-baseline) WRITE_BASE=1 ;;
     -h|--help) usage; exit 0 ;;
     *) die2 "argumento desconhecido: $1 (oute-regression --help)" ;;
   esac
@@ -79,6 +90,17 @@ STUDIO_WAIT="${OUTE_REGRESSION_STUDIO_WAIT:-60}"; STUDIO_STEP="${OUTE_REGRESSION
 [[ "$STUDIO_WAIT" =~ ^[0-9]+$ && "$STUDIO_STEP" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_STUDIO_WAIT/_STEP inválidos"
 PARALLEL="${OUTE_REGRESSION_PARALLEL:-8}"
 [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_PARALLEL tem de ser inteiro > 0"
+# --- linha de base (#647): {"tasks": {"<tarefa>@<modelo>": "verde|vermelho"}, "measured_at", "commit"}; ausente = regra antiga
+BASE_FILE="${BASELINE_ARG:-${OUTE_REGRESSION_BASELINE:-$DIR/baseline.json}}"
+declare -A BASE; BASE_PRESENT=0
+if [[ -f "$BASE_FILE" ]]; then
+  jq -e '(.tasks | type == "object") and ([.tasks[]] | all(. == "verde" or . == "vermelho"))' "$BASE_FILE" >/dev/null 2>&1 \
+    || die2 "linha de base inválida: $BASE_FILE (esperado {\"tasks\": {\"<tarefa>@<modelo>\": \"verde\" ou \"vermelho\"}})"
+  while IFS=$'\t' read -r bk bv; do BASE[$bk]="$bv"; done < <(jq -r '.tasks | to_entries[] | "\(.key)\t\(.value)"' "$BASE_FILE")
+  BASE_PRESENT=1
+elif [[ -n "$BASELINE_ARG" && $WRITE_BASE = 0 ]]; then
+  warn "linha de base $BASE_FILE não existe: vale a regra antiga (qualquer tarefa vermelha reprova)"
+fi
 MAX_PCT="${OUTE_REGRESSION_MAX_PCT:-60}"
 [[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_REGRESSION_MAX_PCT tem de ser um número"
 for c in jq timeout claude oute-select; do command -v "$c" >/dev/null || die2 "precisa de $c no PATH"; done
@@ -433,12 +455,30 @@ fi
 image="${OUTE_VERSION:-desconhecida}"
 cli_ver() { local v; v="$("$1" --version 2>/dev/null | head -n1 | grep -o '[0-9][0-9A-Za-z._+-]*' | head -n1)"; echo "${v:-desconhecida}"; }
 CLAUDE_VER="$(cli_ver claude)"; CODEX_VER="desconhecida"; command -v codex >/dev/null && CODEX_VER="$(cli_ver codex)"
-red=0; green=0; unver=0; tasks_csv=""
+red=0; green=0; unver=0; tasks_csv=""; vs_csv=""
 for k in "${KEYS[@]}"; do
   case "${VERDICT[$k]}" in vermelho) red=$((red + 1)) ;; verde) green=$((green + 1)) ;; *) unver=$((unver + 1)) ;; esac
   tasks_csv+="${tasks_csv:+,}$k=${VERDICT[$k]}"
 done
-RESULT=verde; (( red == 0 )) || RESULT=vermelho
+# contra a linha de base (#647): igual | falha-de-base | piorou | melhorou | nao-verificado | sem-base (arquivo ausente)
+declare -A STATE; worse=0; better=0; basefail=0; same=0; worse_l=""; better_l=""; basefail_l=""
+for k in "${KEYS[@]}"; do
+  v="${VERDICT[$k]}"; exp="${BASE[$k]:-verde}"
+  if [[ $v = nao-verificado ]]; then STATE[$k]=nao-verificado
+  elif (( ! BASE_PRESENT )); then STATE[$k]=sem-base
+  else
+    case "$exp/$v" in
+      verde/verde) STATE[$k]=igual; same=$((same + 1)) ;;
+      vermelho/vermelho) STATE[$k]=falha-de-base; basefail=$((basefail + 1)); basefail_l+="${basefail_l:+, }$k" ;;
+      verde/vermelho) STATE[$k]=piorou; worse=$((worse + 1)); worse_l+="${worse_l:+, }$k" ;;
+      *) STATE[$k]=melhorou; better=$((better + 1)); better_l+="${better_l:+, }$k" ;;
+    esac
+  fi
+  vs_csv+="${vs_csv:+,}$k=${STATE[$k]}"
+done
+RESULT=verde
+if (( BASE_PRESENT && ! WRITE_BASE )); then (( worse == 0 )) || RESULT=vermelho
+else (( red == 0 )) || RESULT=vermelho; fi
 model_ids=""; for al in "${ALIASES[@]}"; do model_ids+="${model_ids:+,}${MODEL_ID[$al]}"; done
 avg() { # soma n formato → média
   local sum="$1" n="$2" fmt="$3"
@@ -459,9 +499,24 @@ REPS_TEXT="0 falha em $ROUNDS repetições só permite afirmar taxa de aprovaç�
 {
   printf 'oute-regression %s · imagem %s · claude %s · %s rodada(s)\n' "$RUN_ID" "$image" "$CLAUDE_VER" "$ROUNDS"
   for al in "${ALIASES[@]}"; do printf '  modelo %s = %s\n' "$al" "${MODEL_ID[$al]}"; done
-  for k in "${KEYS[@]}"; do printf '  %-24s %-15s %s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}"; done
+  for k in "${KEYS[@]}"; do
+    case "${STATE[$k]}" in piorou|melhorou|falha-de-base) sfx=" [${STATE[$k]//-/ }]" ;; *) sfx="" ;; esac
+    printf '  %-24s %-15s %s%s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}" "$sfx"
+  done
   printf 'resultado: %s (%d verde, %d vermelho, %d não verificado) · custo equivalente na API: US$ %s\n' \
     "$RESULT" "$green" "$red" "$unver" "$total_cost"
+  if (( WRITE_BASE )); then
+    printf 'linha de base: será gravada em %s (a comparação não vale nesta execução)\n' "$BASE_FILE"
+  elif (( BASE_PRESENT )); then
+    printf 'linha de base: %s (medida em %s, commit %s): %d igual, %d falha de base, %d piorou, %d melhorou\n' "$BASE_FILE" \
+      "$(jq -r '.measured_at // "data desconhecida"' "$BASE_FILE")" "$(jq -r '.commit // "desconhecido"' "$BASE_FILE")" \
+      "$same" "$basefail" "$worse" "$better"
+    [[ -z "$worse_l" ]] || printf 'piorou (era verde na linha de base, ficou vermelha; reprova): %s\n' "$worse_l"
+    [[ -z "$basefail_l" ]] || printf 'falha de base (vermelha na linha de base e vermelha agora; não reprova): %s\n' "$basefail_l"
+    [[ -z "$better_l" ]] || printf 'melhorou (era vermelha na linha de base, ficou verde): %s; atualize a linha de base no mesmo PR: oute-regression --write-baseline --baseline <worktree>/docker/regression/baseline.json\n' "$better_l"
+  else
+    printf 'linha de base: ausente (%s); vale a regra antiga: qualquer tarefa vermelha reprova\n' "$BASE_FILE"
+  fi
   printf 'repetições: %s\n' "$REPS_TEXT"
   printf 'custo por execução (chamadas, tempo e custo médios por chamada):\n'
   for al in "${ALIASES[@]}" codex; do
@@ -480,10 +535,33 @@ if [[ $JSON = 1 ]]; then
   jq -n --arg run "$RUN_ID" --arg image "$image" --arg claude "$CLAUDE_VER" --arg codex "$CODEX_VER" --arg models "$model_ids" \
     --argjson rounds "$ROUNDS" --arg result "$RESULT" --argjson cost "$total_cost" --arg tasks "$tasks_csv" \
     --arg reps "$REPS_TEXT" --argjson per_model "$mj" --argjson calls "$total_calls" --argjson secs "$total_secs" \
+    --arg vs "$vs_csv" --arg bfile "$BASE_FILE" --argjson bpresent "$BASE_PRESENT" --argjson bwrite "$WRITE_BASE" \
     '{run:$run, image:$image, claude:$claude, codex:$codex, models:($models | split(",")), rounds:$rounds, repetitions:$reps,
       result:$result, calls:$calls, secs:$secs, cost_usd:$cost, per_model:$per_model,
-      tasks:($tasks | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries)}'
+      tasks:($tasks | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries),
+      baseline:{file:$bfile, present:($bpresent == 1), writing:($bwrite == 1)},
+      vs_baseline:($vs | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries)}'
 fi
+
+# --- --write-baseline (#647): só quando pedido; atualiza as chaves que rodaram e mantém o resto; não grava não verificada
+write_baseline() {
+  local out="$BASE_FILE" tmp k old="{}" commit
+  [[ ! -f "$out" ]] || old="$(jq -c '.tasks' "$out")"
+  commit="$(git -C "$(dirname "$out")" rev-parse --short=12 HEAD 2>/dev/null)" || commit=""
+  mkdir -p "$(dirname "$out")" || { warn "não deu para criar a pasta de $out"; return 1; }
+  tmp="$(mktemp "$out.XXXXXX")" || { warn "não deu para gravar em $out"; return 1; }
+  for k in "${KEYS[@]}"; do [[ ${VERDICT[$k]} = nao-verificado ]] || printf '%s\t%s\n' "$k" "${VERDICT[$k]}"; done \
+    | jq -R -s --argjson old "$old" --arg when "$(date -u +%Y-%m-%d)" --arg commit "${commit:-desconhecido}" --arg image "$image" \
+        --argjson rounds "$ROUNDS" \
+      '{measured_at:$when, commit:$commit, image:$image, rounds:$rounds,
+        tasks:($old + ([split("\n")[] | select(length > 0) | split("\t") | {key:.[0], value:.[1]}] | from_entries))}' \
+    | jq -S . > "$tmp" || { rm -f "$tmp"; warn "não deu para montar a linha de base"; return 1; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  printf 'oute-regression: a linha de base MUDOU: gravada em %s (medida em %s, commit %s); commite o arquivo no PR\n' \
+    "$out" "$(date -u +%Y-%m-%d)" "${commit:-desconhecido}" >&2
+  return 0
+}
+if (( WRITE_BASE )); then write_baseline || exit 2; fi
 
 # --- --keep: copia o que ficou de cada chamada, sem valor de segredo
 redact_file() { # arquivo; valores em REDACT
@@ -527,5 +605,6 @@ else
   warn "sem oute-emit no PATH: o evento oute.regression.run não foi enviado"
 fi
 
+(( WRITE_BASE )) && exit 0
 [[ $RESULT = verde ]] || exit 1
 exit 0
