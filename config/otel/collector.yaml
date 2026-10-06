@@ -23,8 +23,10 @@ receivers:
 processors:
   memory_limiter:
     check_interval: 5s
-    limit_mib: 256
-    spike_limit_mib: 64
+    # #570: com 256 MiB o collector do oute-server batia no limite e recusava dado a cada poucos minutos. O container
+    # tem teto de 768 MiB no compose, acima daqui, para o limiter recusar antes de o kernel matar
+    limit_mib: 512
+    spike_limit_mib: 128
   resource:
     attributes:
       - {key: service.namespace, value: oute-agent, action: upsert}

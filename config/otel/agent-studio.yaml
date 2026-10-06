@@ -6,6 +6,9 @@
 # Sem perda como o bucket (#161, #152): fila em disco própria por exporter (arquivo próprio na mesma file_storage/queue),
 # retry sem prazo e lote formado na fila. O agent-studio só responde 2xx depois do commit e 503 (retentável) se a
 # gravação falha (#185). Teste: tests/otelcol-studio.test.sh.
+# Contrapressão (#570): o agent-studio tem um escritor só. Com os 10 consumidores padrão por fila, 3 sinais e cada host,
+# os POSTs só esperavam na trava, estouravam o prazo e reenviavam o mesmo lote. Agora 2 consumidores por fila e prazo de
+# 60 s por envio, acima da espera por vaga de ingestão do agent-studio (20 s, depois 503 com Retry-After).
 exporters:
   otlp_http/studio_traces:
     endpoint: ${env:AGENT_STUDIO_URL}
@@ -13,7 +16,7 @@ exporters:
     headers: &studio_auth
       Authorization: "Bearer ${env:AGENT_STUDIO_INGEST_TOKEN}"
     compression: gzip
-    timeout: 30s
+    timeout: 60s
     # agent-studio fora (ou sem tailnet, no Mac): retenta para sempre; o limite é o tamanho da fila
     retry_on_failure: &studio_retry {enabled: true, max_elapsed_time: 0}
     # 1 GB do destino dividido como no bucket (#161): logs 600 / traces 300 / metrics 100 MB. Um exporter só para os
@@ -21,6 +24,7 @@ exporters:
     sending_queue:
       enabled: true
       storage: file_storage/queue
+      num_consumers: 2
       sizer: bytes
       queue_size: 314572800  # 300 MB
       block_on_overflow: false
@@ -32,11 +36,12 @@ exporters:
     encoding: json
     headers: *studio_auth
     compression: gzip
-    timeout: 30s
+    timeout: 60s
     retry_on_failure: *studio_retry
     sending_queue:
       enabled: true
       storage: file_storage/queue
+      num_consumers: 2
       sizer: bytes
       queue_size: 104857600  # 100 MB
       block_on_overflow: false
@@ -46,11 +51,12 @@ exporters:
     encoding: json
     headers: *studio_auth
     compression: gzip
-    timeout: 30s
+    timeout: 60s
     retry_on_failure: *studio_retry
     sending_queue:
       enabled: true
       storage: file_storage/queue
+      num_consumers: 2
       sizer: bytes
       queue_size: 629145600  # 600 MB
       block_on_overflow: false
