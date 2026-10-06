@@ -1,2 +1,0 @@
-### Added
-- **agent-studio: o Bash por tipo de comando na tela Ferramentas** (#600). A linha "Bash" abre em até 8 grupos ("cd e encadeado", "ler arquivo", "buscar", "git", "GitHub (gh)", "linguagem (python e outras)", "shell e texto", "outros"), com usos, erros, taxa de erro e p95, e cada grupo leva às conversas dele (`/ferramenta?nome=Bash&grupo=<id>`). O grupo sai dos rótulos `bash_command_class` e `bash_argv0` do Claude Code; o texto do comando não é lido (regra no ADR-08). O Dashboard segue com o Bash numa barra só. **Precisa de release** (o agent-studio vai na imagem).
