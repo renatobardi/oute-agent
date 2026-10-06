@@ -10,9 +10,10 @@ Idempotente: rodar de novo não muda o resultado.
 - Ambiente (o do serviço no compose): `AGENT_STUDIO_DB`, `AGENT_STUDIO_SURREAL_URL`, `AGENT_STUDIO_SURREAL_PASS`
   (e, se fugirem do padrão, `AGENT_STUDIO_SURREAL_USER|NS|DB`). Costura para os testes: `AGENT_STUDIO_REBUILD_CHUNK`
   (linhas por bloco, padrão 2000).
-- Saída (stdout), três linhas: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n> acoes=<n>`,
-  `lidas: logs=<n> spans=<n> marcas=<n>` (marcas = linhas da `action_marks`, #510) e `depois: …` (a contagem do SurrealDB antes e depois). O stderr diz só o tipo do erro,
-  nunca texto de linha do DuckDB nem de resposta do SurrealDB.
+- Saída (stdout), quatro linhas; as três primeiras: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n> acoes=<n>`,
+  `lidas: logs=<n> spans=<n> marcas=<n>` (marcas = linhas da `action_marks`, #510) e `depois: …` (a contagem do SurrealDB antes e depois).
+  Mais uma quarta linha, a do ack (#537): `vistos: marcas=<n> antes=<n> depois=<n>` (linhas da `ack_marks` lidas e os registros do
+  `ack` no SurrealDB antes e depois). O stderr diz só o tipo do erro, nunca texto de linha do DuckDB nem de resposta do SurrealDB.
 - Sai 0 se aplicou tudo; 1 se o DuckDB não abre ou o SurrealDB falha (o que já entrou fica: rodar de novo termina);
   2 se faltar a URL ou a senha do SurrealDB.
 """
@@ -22,7 +23,7 @@ import sys
 
 import duckdb
 
-from . import marks, state
+from . import acks, marks, state
 from .surreal import Surreal, SurrealError
 
 TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa", "acao")
@@ -87,6 +88,25 @@ def rebuild(con, surreal, chunk=2000):
     return read["logs"], read["spans"], marked
 
 
+def count_acks(surreal):
+    """Registros do `ack` no SurrealDB (0 sem a tabela)."""
+    existing = (surreal.query("INFO FOR DB")[0].get("result") or {}).get("tables") or {}
+    if "ack" not in existing:
+        return 0
+    res = surreal.query("SELECT count() FROM ack GROUP ALL")[0].get("result") or []
+    return int(res[0]["count"]) if res else 0
+
+
+def rebuild_acks(con, surreal, chunk=2000):
+    """-> linhas da `ack_marks` lidas (#537). A fonte do `ack`: o replay do bucket não as traz. O prazo de cada marca vem da
+    linha: remontar não renova ack nenhum."""
+    read = 0
+    for block in acks.rows(con, chunk):
+        read += len(block)
+        surreal.apply([s for row in block for s in state.ack_statements(row)])
+    return read
+
+
 def main():
     url = os.environ.get("AGENT_STUDIO_SURREAL_URL", "")
     password = os.environ.get("AGENT_STUDIO_SURREAL_PASS", "")
@@ -107,9 +127,12 @@ def main():
     try:
         con.execute("SET TimeZone = 'UTC'")
         print(line("antes", counts(surreal)))
+        acks_before = count_acks(surreal)
         logs, spans, marked = rebuild(con, surreal, chunk)
+        acked = rebuild_acks(con, surreal, chunk)
         print(f"lidas: logs={logs} spans={spans} marcas={marked}")
         print(line("depois", counts(surreal)))
+        print(f"vistos: marcas={acked} antes={acks_before} depois={count_acks(surreal)}")
     except (SurrealError, duckdb.Error) as e:
         print(f"rebuild-state: falhou ({type(e).__name__}); o que já entrou fica, rode de novo", file=sys.stderr)
         return 1

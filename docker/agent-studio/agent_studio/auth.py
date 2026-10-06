@@ -4,9 +4,9 @@
   container `agent`. `Authorization: Bearer <credencial de ingestão>`.
 - **Leitura** (`GET /v1/usage|alerts|tray` e a tela): agente, tray e navegador; pasta `oute-agent`. Com ela, a
   ingestão responde 403. A de ingestão não lê.
-- **Marcação** (`POST /rodada/acao`, #510): a **credencial de marcação**, terceira, que só o navegador do Bardi tem; pasta
+- **Marcação** (`POST /rodada/acao`, #510, e `POST /ack`, #537): a **credencial de marcação**, terceira, que só o navegador do Bardi tem; pasta
   `oute-services` do vault, nunca vai ao container `agent` (o agente tem a de leitura e alcança o studio pela rede docker: se a
-  rota aceitasse a leitura, aceitaria o agente). Cookie próprio (`agent_studio_mark`), `HttpOnly`, `Secure`, `SameSite=Strict`,
+  rota aceitasse a leitura, aceitaria o agente). Cookie próprio (`agent_studio_mark`), `Path=/`, `HttpOnly`, `Secure`, `SameSite=Strict`,
   que leva um HMAC dela, como o de leitura. Mais um campo oculto com outro HMAC (`csrf`), que só a página para quem tem o cookie
   de marcação mostra. Sem a credencial configurada (`mark` falso), a rota e a tela de entrada não existem. Ela precisa ser
   diferente da de ingestão e da de leitura: igual a uma delas, o `__main__` a descarta.
@@ -25,8 +25,11 @@ COOKIE_MAX_AGE = 90 * 86400  # "cola o token uma vez": 90 dias
 # POST nem em sub-recurso de outro site; link de fora para a tela continua abrindo logado)
 COOKIE_FLAGS = {"path": "/", "secure": True, "httponly": True, "samesite": "lax"}
 MARK_COOKIE = "agent_studio_mark"
-# o cookie de marcação só vai às páginas da rodada e à rota de marcar (`/rodada`, `/rodada/acao`); Strict: nem em navegação vinda de outro site
-MARK_COOKIE_FLAGS = {"path": "/rodada", "secure": True, "httponly": True, "samesite": "strict"}
+# o cookie de marcação vai a todo o servidor (#537: o formulário do ack está nas faixas de todas as telas e a rota é `/ack`);
+# Strict: nem em navegação vinda de outro site. Cada rota de escrita segue conferindo a permissão no servidor
+MARK_COOKIE_FLAGS = {"path": "/", "secure": True, "httponly": True, "samesite": "strict"}
+# o caminho de antes da #537: a entrada apaga o cookie antigo, para o navegador não mandar dois com o mesmo nome
+MARK_COOKIE_OLD_FLAGS = {**MARK_COOKIE_FLAGS, "path": "/rodada"}
 
 
 class Auth:
@@ -87,4 +90,5 @@ class Auth:
         return self.mark and hmac.compare_digest((got or "").encode(), self.mark_csrf.encode())
 
     def set_mark_cookie(self, response):
+        response.delete_cookie(MARK_COOKIE, **MARK_COOKIE_OLD_FLAGS)
         response.set_cookie(MARK_COOKIE, self.mark_cookie_value, max_age=COOKIE_MAX_AGE, **MARK_COOKIE_FLAGS)

@@ -89,6 +89,26 @@ OUT="$(env AGENT_STUDIO_READ_TOKEN="$READ" AGENT_STUDIO_DB="$TMP/x.duckdb" PYTHO
 check "sem a de ingestão: não sobe e diz a pasta"       bash -c '[[ $0 -ne 0 ]] && grep -q "AGENT_STUDIO_INGEST_TOKEN vazio (item agent-studio da pasta oute-services" <<<"$1"' "$RC" "$OUT"
 check "sem a de ingestão: não cria o banco"             test ! -e "$TMP/x.duckdb"
 
+# ---------------------------------------------------------------- 2b. o cookie de marcação (#510; em Path=/ desde a #537)
+MARK="$(python3 -c "import secrets; print(secrets.token_hex(16))")"
+studio_start "$TMP/s5" AGENT_STUDIO_READ_TOKEN="$READ" AGENT_STUDIO_MARK_TOKEN="$MARK" || { cat "$TMP/s5/stderr"; die "agent-studio (com marcação) não subiu"; }
+login "$READ" >/dev/null; COOKIE="$(tr -d '\r' < "$TMP/h" | grep -i '^set-cookie: agent_studio=' | sed 's/^[^:]*: *//; s/;.*//')"
+M="$(curl -s -D "$TMP/hm" -o /dev/null -w '%{http_code}' -X POST -H "Cookie: $COOKIE" -H "Origin: $STUDIO_URL" --data-urlencode "token=$MARK" "$STUDIO_URL/marcar")"
+# a linha que põe o cookie (com valor) e a que apaga o antigo (valor vazio)
+SET="$(tr -d '\r' < "$TMP/hm" | grep -i '^set-cookie: agent_studio_mark=[0-9a-f]')"
+OLD="$(tr -d '\r' < "$TMP/hm" | grep -i '^set-cookie: agent_studio_mark=' | grep -vi '^set-cookie: agent_studio_mark=[0-9a-f]')"
+check "entrada de marcação: 303 e um cookie de marcação só"  bash -c '[ "$1" = 303 ] && [ "$(grep -c . <<<"$2")" = 1 ]' _ "$M" "$SET"
+check "cookie de marcação: Path=/ (vai às faixas de todas as telas e ao /ack)" grep -qiE '; *Path=/(;|$)' <<<"$SET"
+check "cookie de marcação: mantém HttpOnly"                  grep -qiE '; *HttpOnly(;|$)' <<<"$SET"
+check "cookie de marcação: mantém Secure"                    grep -qiE '; *Secure(;|$)' <<<"$SET"
+check "cookie de marcação: mantém SameSite=Strict"           grep -qiE '; *SameSite=Strict(;|$)' <<<"$SET"
+check "cookie de marcação: não leva a credencial"            bash -c '! grep -qF "$1" "$2"' _ "$MARK" "$TMP/hm"
+check "a entrada apaga o cookie antigo de Path=/rodada (um nome, um cookie)" bash -c '[ "$(grep -c . <<<"$1")" = 1 ] && grep -qiE "; *Path=/rodada(;|\$)" <<<"$1" && grep -qiE "Max-Age=0(;|\$)" <<<"$1"' _ "$OLD"
+check "cookie de leitura: segue em Path=/ com SameSite=Lax"  bash -c 'c="$(tr -d "\r" < "$1" | grep -i "^set-cookie: agent_studio=")"; grep -qiE "; *Path=/(;|\$)" <<<"$c" && grep -qi "SameSite=Lax" <<<"$c"' _ "$TMP/h"
+check "a credencial de leitura na entrada de marcação: 401 e nenhum cookie de marcação" bash -c 'st="$(curl -s -D "$4" -o /dev/null -w "%{http_code}" -X POST -H "Cookie: $1" -H "Origin: $2" --data-urlencode "token=$3" "$2/marcar")"; [ "$st" = 401 ] && ! grep -qi "^set-cookie: agent_studio_mark=[0-9a-f]" "$4"' _ "$COOKIE" "$STUDIO_URL" "$READ" "$TMP/hx"
+studio_stop
+check "stderr sem a credencial de marcação"                  bash -c '! grep -qF "$1" "$0"' "$TMP/s5/stderr" "$MARK"
+
 # ---------------------------------------------------------------- 3. compose: o que cada serviço recebe e a rede
 COMPOSE="$ROOT/docker/compose.yaml"
 nocomment() { grep -v '^ *#'; }

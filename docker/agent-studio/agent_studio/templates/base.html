@@ -77,13 +77,47 @@
         <form method="post" action="/logout"><button type="submit" class="botao">{{ icon("log-out") }}Sair</button></form>
       </div>
     </header>
+{# ack (#537): o botão "Visto" só existe para quem tem o cookie de marcação, com as marcas lidas e em item com `since`; os campos são
+   a referência do item, o que a página mostrou e o `csrf`. O servidor calcula a identidade, a hora e o prazo #}
+{% macro ack_form(info) %}
+{% if ack.active and ack.read and info.can %}
+        <form class="ack-form" method="post" action="/ack" data-ack-form="{{ info.target }}">
+          <input type="hidden" name="alvo" value="{{ info.target }}">
+          <input type="hidden" name="desde" value="{{ info.since }}">
+          <input type="hidden" name="visto" value="{{ ack.seen_at }}">
+          <input type="hidden" name="voltar" value="{{ ack.back }}">
+          <input type="hidden" name="csrf" value="{{ ack.csrf }}">
+          <button type="submit" class="botao" title="Tira o item da faixa por 24 horas, ou até a ocorrência acabar ou mudar. Não resolve nem responde nada.">Visto</button>
+        </form>
+{% endif %}
+{% endmacro %}
+{% macro ack_nota() %}
+{% if ack.read is false %}<p class="nota" data-ack-indisponivel>As marcas de visto não puderam ser lidas: todos os itens aparecem.</p>
+{% elif ack.enabled and not ack.active and ack.read %}<p class="nota" data-ack-entrar><a href="/marcar?next={{ ack.back|urlencode }}">Entrar para marcar como visto</a> (credencial de marcação)</p>
+{% endif %}
+{% endmacro %}
+{% macro vistos(items, id, decisao=false) %}
+{% if items %}
+<details class="vistos" id="{{ id }}" data-vistos="{{ items|length }}">
+  <summary>vistos ({{ items|length }})</summary>
+  <ul>
+    {% for it in items %}
+    <li data-visto="{{ it.ack.target }}" data-visto-em="{{ it.ack.acked_at or '' }}" data-vale-ate="{{ it.ack.expires_at or '' }}">
+      {% if decisao %}<strong>Decisão pendente na rodada {{ it.round }}</strong> · {{ it.host or "—" }}: {{ it.question or "—" }}{% else %}<strong>{{ it|alert_title }}</strong> · {{ it.host or "—" }}{% if it.instance %} ({{ it.instance }}){% endif %}: {{ it|alert_value }}{% endif %}
+      · visto em {{ it.ack.acked_at|when }} {{ tzl() }}, vale até {{ it.ack.expires_at|when }} {{ tzl() }}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endmacro %}
 {% macro alerta_lista(items) %}
     <ul>
       {% for a in items %}
       <li data-alerta="{{ a.type }}" data-host="{{ a.host or '' }}" data-unit="{{ a.unit }}" data-value="{{ '' if a.value is none else a.value }}" data-since="{{ a.since or '' }}">
         <strong>{% if a|price_alert %}<a href="/precos">{{ a|alert_title }}</a>{% else %}{{ a|alert_title }}{% endif %}</strong> · {{ a.host or "—" }}{% if a.instance %} ({{ a.instance }}){% endif %}{% if a.evidence.get("exporter") %} · exporter <code>{{ a.evidence.get("exporter") }}</code>{% endif %}{% if a.evidence.get("agent") %} · {{ a.evidence.get("agent") }}{% endif %}:
         {{ a|alert_value }}{% if a.since %} · desde {{ a.since|when }} {{ tzl() }}{% endif %}
-      </li>
+{{ ack_form(a.ack) }}      </li>
       {% endfor %}
     </ul>
 {% endmacro %}
@@ -92,7 +126,7 @@
       {% for d in items %}
       <li data-decisao="{{ d.round }}" data-host="{{ d.host or '' }}" data-age="{{ d.age_seconds }}" data-since="{{ d.asked_at }}">
         <strong>Decisão pendente na rodada {{ d.round }}</strong> · {{ d.host or "—" }}: {{ d.question or "—" }} · há {{ (d.age_seconds * 1000000000)|dur }} (perguntada em {{ d.asked_at|when }} {{ tzl() }})
-      </li>
+{{ ack_form(d.ack) }}      </li>
       {% endfor %}
     </ul>
 {% endmacro %}
@@ -120,11 +154,13 @@
       {{ alerta_lista(alerts_old) }}
     </details>
     {% endif %}
+    {{ ack_nota() }}
   </div>
 </section>
 {% else %}
 <div id="alertas" data-alertas="0" hidden></div>
 {% endif %}
+{{ vistos(alerts_seen, "alertas-vistos") }}
 {% endif %}
 {% endif %}
 {% endcall %}
@@ -145,10 +181,12 @@
       {{ decisao_lista(decisions_old) }}
     </details>
     {% endif %}
+    {{ ack_nota() }}
   </div>
   <a class="faixa-link" href="/pedidos">Ver pedidos</a>
 </section>
 {% endif %}
+{% if decisions is defined and not _detail %}{{ vistos(decisions_seen, "decisoes-vistas", true) }}{% endif %}
 {% if loading_target == "decisoes" and decisions is none %}<p class="aviso erro" role="alert">As decisões pendentes não puderam ser lidas.</p>{% endif %}
 {% endif %}
 {% endcall %}
