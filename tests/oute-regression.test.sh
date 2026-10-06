@@ -19,7 +19,7 @@ REG="$ROOT/docker/oute-regression"
 # --- ambiente isolado: HOME, PATH e credenciais reais fora
 BIN="$TMP/bin"; LOG="$TMP/log"; mkdir -p "$BIN" "$LOG" "$TMP/home"
 export HOME="$TMP/home" OUTE_REGRESSION_DIR="$ROOT/docker/regression" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" \
-  OUTE_VERSION=9.9.9-test OUTE_REGRESSION_TIMEOUT=30 OUTE_REGRESSION_STUDIO_WAIT=0 OUTE_REGRESSION_STUDIO_STEP=1 \
+  OUTE_REGRESSION_BASELINE="$TMP/sem-base.json" OUTE_VERSION=9.9.9-test OUTE_REGRESSION_TIMEOUT=30 OUTE_REGRESSION_STUDIO_WAIT=0 OUTE_REGRESSION_STUDIO_STEP=1 \
   FAKE_LOG="$LOG" FAKE_REAL_PROPOSE_LOG="$LOG/real-propose.log"
 unset OUTE_TYPESAFE_API_KEY AGENT_STUDIO_URL AGENT_STUDIO_READ_TOKEN OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_LOGS_ENDPOINT \
   OTEL_RESOURCE_ATTRIBUTES GH_TOKEN OCI_S3_ACCESS_KEY OUTE_REGRESSION_AGENT OUTE_REGRESSION_MAX_PCT FAKE_BAD FAKE_EMIT_ERR \
@@ -490,6 +490,87 @@ AGENT_STUDIO_URL="$STUDIO_ADDR" AGENT_STUDIO_READ_TOKEN="$TOKEN" run --task root
 check "studio só pergunta pelas conversas das tarefas que rodaram" bash -c '[ "$(grep -c . "$1")" -eq 6 ] && ! grep -q -e select -e worktree -e emit "$1"' _ "$SD/requests.log"
 studio --json --rounds 1
 check "--json: objeto com versão, resultado e tarefas"   bash -c 'jq -e ".image == \"9.9.9-test\" and .claude == \"2.1.9\" and .rounds == 1 and .result == \"verde\" and .tasks[\"root@haiku\"] == \"verde\" and .tasks.studio == \"verde\" and .cost_usd == 0.08" <<<"$1" >/dev/null' _ "$STDOUT"
+
+# ---------------------------------------------------------------- 7. linha de base (#647)
+# as seções 1 a 6 rodam sem o arquivo (OUTE_REGRESSION_BASELINE aponta para um caminho que não existe): regra antiga.
+RB="$ROOT/docker/regression/baseline.json"
+check "base do repo: JSON válido com data e commit da medição" jqe '(.measured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.commit | length >= 7)' < "$RB"
+check "base do repo: as 13 tarefas nos 2 modelos, verde ou vermelho" bash -c 'jq -e --arg all "$2" "[.tasks | to_entries[] | select(.value == \"verde\" or .value == \"vermelho\")] | length == 26 and ([\$all | split(\" \")[] | ., .] | length == 26) and ([.[].key] | map(split(\"@\")[0]) | unique | length == 13)" "$1" >/dev/null' _ "$RB" "$ALL13"
+check "base do repo: as falhas de base do Haiku (checkout, memory, segredo, mais duplicada, #647) e nada mais vermelho" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | sort | join(\",\")" "$1")" = "checkout@haiku,duplicada@haiku,memory@haiku,segredo@haiku" ]' _ "$RB"
+BASE="$TMP/base.json"
+printf '{"measured_at":"2026-01-02","commit":"abc1234","tasks":{"root@haiku":"verde","checkout@haiku":"vermelho","memory@haiku":"vermelho"}}\n' > "$BASE"
+# igual (verde e verde)
+OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task root
+check "base: verde e verde = igual, saída 0, com data e commit da medição" bash -c '[ "$1" -eq 0 ] && grep -q "linha de base: .* (medida em 2026-01-02, commit abc1234): 1 igual, 0 falha de base, 0 piorou, 0 melhorou" <<<"$2"' _ "$RC" "$OUT"
+# falha de base: vermelha e vermelha
+FAKE_BAD="checkout:1 checkout:2 checkout:3" OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task checkout
+check "base: vermelha e vermelha = falha de base, saída 0" [ "$RC" -eq 0 -a "$(verdict checkout@haiku)" = vermelho ]
+check "base: o relato lista a falha de base" bash -c 'grep -q "^falha de base (.*): checkout@haiku$" <<<"$1" && grep -q "reprovada(s).* \[falha de base\]$" <<<"$1"' _ "$OUT"
+check "base: falha de base sem tarefa que piorou nem que melhorou" bash -c '! grep -q -e "^piorou" -e "^melhorou" <<<"$1"' _ "$OUT"
+check "base: o evento leva result=verde e a tarefa vermelha em red=" bash -c 'grep "^ARGS regression " "$1" | grep -q "result=verde green=0 red=1"' _ "$LOG/emit.calls"
+# piorou: era verde, ficou vermelha
+FAKE_BAD="root:1 root:2 root:3" OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task root --task checkout
+check "base: verde que ficou vermelha = piorou, saída 1" [ "$RC" -eq 1 -a "$(verdict root@haiku)" = vermelho ]
+check "base: o relato lista o que piorou e marca a linha" bash -c 'grep -q "^piorou (.*): root@haiku$" <<<"$1" && grep -q "reprovada(s).* \[piorou\]$" <<<"$1"' _ "$OUT"
+check "base: só o que piorou conta: checkout verde na base vermelha melhorou, não reprova" bash -c 'grep -q "^melhorou (.*): checkout@haiku;" <<<"$1"' _ "$OUT"
+check "base: o evento leva result=vermelho" bash -c 'grep "^ARGS regression " "$1" | grep -q "result=vermelho"' _ "$LOG/emit.calls"
+# melhorou: era vermelha, ficou verde
+OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task memory
+check "base: vermelha que ficou verde = melhorou, saída 0" [ "$RC" -eq 0 -a "$(verdict memory@haiku)" = verde ]
+check "base: melhorou pede atualizar a linha de base no mesmo PR" bash -c 'grep -q "^melhorou (.*): memory@haiku; atualize a linha de base no mesmo PR: oute-regression --write-baseline --baseline " <<<"$1"' _ "$OUT"
+# tarefa nova (sem entrada) = verde esperada
+OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task select
+check "base: tarefa sem entrada e verde = igual, saída 0" [ "$RC" -eq 0 -a "$(verdict select@haiku)" = verde ] 
+check "base: tarefa sem entrada conta como igual no resumo" has '1 igual, 0 falha de base, 0 piorou, 0 melhorou'
+FAKE_BAD="select:1 select:2 select:3" OUTE_REGRESSION_BASELINE="$BASE" run --model haiku --task select
+check "base: tarefa sem entrada e vermelha = piorou, saída 1" [ "$RC" -eq 1 ] 
+check "base: tarefa nova vermelha aparece em piorou" has '^piorou (.*): select@haiku$'
+# sem o arquivo: regra antiga
+FAKE_BAD="root:1 root:2 root:3" OUTE_REGRESSION_BASELINE="$TMP/nao-existe.json" run --model haiku --task root
+check "sem a base: qualquer vermelha reprova (regra antiga), saída 1" [ "$RC" -eq 1 -a "$(verdict root@haiku)" = vermelho ]
+check "sem a base: o relato diz que vale a regra antiga" has '^linha de base: ausente (.*nao-existe.json); vale a regra antiga'
+FAKE_BAD="root:1 root:2 root:3" run --model haiku --task root --baseline "$TMP/nao-existe.json"
+check "--baseline com arquivo ausente: aviso e regra antiga" bash -c '[ "$1" -eq 1 ] && grep -q "aviso: linha de base .*nao-existe.json não existe" <<<"$2"' _ "$RC" "$OUT"
+# a base inválida não é ignorada
+printf 'isto não é json\n' > "$TMP/ruim.json"
+OUTE_REGRESSION_BASELINE="$TMP/ruim.json" run --model haiku --task root
+check "base ilegível: saída 2 e nada rodou" [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
+printf '{"tasks":{"root@haiku":"amarelo"}}\n' > "$TMP/ruim.json"
+OUTE_REGRESSION_BASELINE="$TMP/ruim.json" run --model haiku --task root
+check "base com valor que não é verde nem vermelho: saída 2" [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
+# --baseline vale mais que a variável
+FAKE_BAD="checkout:1 checkout:2 checkout:3" OUTE_REGRESSION_BASELINE="$TMP/nao-existe.json" run --model haiku --task checkout --baseline "$BASE"
+check "--baseline vence OUTE_REGRESSION_BASELINE" [ "$RC" -eq 0 ]
+# o critério da issue: as três falhas de base do Haiku, com a base do repo, saem verdes
+FAKE_BAD="checkout@haiku:1 checkout@haiku:2 checkout@haiku:3 memory@haiku:1 memory@haiku:2 memory@haiku:3 segredo@haiku:1 segredo@haiku:2 segredo@haiku:3" \
+  OUTE_REGRESSION_BASELINE="$RB" run --model haiku --task checkout --task memory --task segredo --task root
+check "base do repo: as 3 falhas de base do Haiku não reprovam, saída 0" [ "$RC" -eq 0 -a "$(verdict checkout@haiku)" = vermelho -a "$(verdict root@haiku)" = verde ]
+check "base do repo: o relato diz 3 falhas de base" has '1 igual, 3 falha de base, 0 piorou, 0 melhorou'
+FAKE_BAD="root@haiku:1 root@haiku:2 root@haiku:3" OUTE_REGRESSION_BASELINE="$RB" run --model haiku --task checkout --task root
+check "base do repo: root@haiku piorou, saída 1" [ "$RC" -eq 1 ]
+# --json: o estado de cada tarefa contra a base
+FAKE_BAD="root:1 root:2 root:3 checkout:1 checkout:2 checkout:3" OUTE_REGRESSION_BASELINE="$BASE" run --json --model haiku --task root --task checkout --task memory --task select
+check "--json: vs_baseline com piorou, falha-de-base, melhorou e igual" bash -c 'jq -e ".vs_baseline == {\"root@haiku\":\"piorou\",\"checkout@haiku\":\"falha-de-base\",\"memory@haiku\":\"melhorou\",\"select@haiku\":\"igual\"} and .baseline.present == true and .baseline.writing == false and .result == \"vermelho\"" <<<"$1" >/dev/null' _ "$STDOUT"
+run --json --model haiku --task select
+check "--json sem a base: vs_baseline = sem-base e baseline.present = false" bash -c 'jq -e ".vs_baseline == {\"select@haiku\":\"sem-base\"} and .baseline.present == false" <<<"$1" >/dev/null' _ "$STDOUT"
+# --write-baseline: só quando pedido; mantém o que não rodou; diz que mudou
+W="$TMP/escrita/base.json"; rm -rf "${TMP:?}/escrita"
+run --model haiku --task select
+check "sem --write-baseline nada é gravado" [ ! -e "$W" ]
+FAKE_BAD="root:1 root:2 root:3" run --write-baseline --baseline "$W" --model haiku --task root --task select
+check "--write-baseline: grava a base, saída 0 mesmo com tarefa vermelha" [ "$RC" -eq 0 -a -s "$W" ]
+check "--write-baseline: diz que a linha de base mudou e onde" bash -c 'grep -q "a linha de base MUDOU: gravada em $2 " <<<"$1"' _ "$OUT" "$W"
+check "--write-baseline: tarefas e modelos que rodaram, data e commit" jqe '.tasks == {"root@haiku":"vermelho","select@haiku":"verde"} and (.measured_at | test("^[0-9]{4}-")) and (.commit | length > 0) and .rounds == 3' < "$W"
+FAKE_BAD="" run --write-baseline --baseline "$W" --model sonnet --task select
+check "--write-baseline de outro modelo mantém as entradas que não rodaram" jqe '.tasks == {"root@haiku":"vermelho","select@haiku":"verde","select@sonnet":"verde"}' < "$W"
+run --baseline "$W" --model haiku --task root --task select
+check "a base gravada vale na execução seguinte: root@haiku melhorou" bash -c '[ "$1" -eq 0 ] && grep -q "^melhorou (.*): root@haiku;" <<<"$2"' _ "$RC" "$OUT"
+printf '{"tasks":{}}\n' > "$W"; rm -f "${LOG:?}/emit.calls"
+AGENT_STUDIO_URL= run --write-baseline --baseline "$W" --model haiku --task root --task studio
+check "--write-baseline: tarefa não verificada (studio) não entra na base" jqe '.tasks == {"root@haiku":"verde"}' < "$W"
+: > "$TMP/arquivo-comum"
+run --write-baseline --baseline "$TMP/arquivo-comum/base.json" --model haiku --task select
+check "--write-baseline sem poder gravar: saída 2 e aviso" bash -c '[ "$1" -eq 2 ] && grep -q "aviso: não deu para criar a pasta" <<<"$2"' _ "$RC" "$OUT"
 
 # telemetria do claude -p (#608): sem o endpoint no ambiente a suíte se reexecuta sob `oute-emit run`
 export FAKE_ENDPOINT="coletor-falso:4318"
