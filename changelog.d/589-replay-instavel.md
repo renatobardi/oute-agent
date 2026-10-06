@@ -1,0 +1,2 @@
+### Fixed
+- **Teste do replay do agent-studio: espera do servidor falso e logs na falha** (#589). O `tests/agent-studio-replay.test.sh` esperava a porta do servidor falso da ingestão por 5 s fixos e, estourado o prazo, seguia com a porta vazia (6 casos em falha). Agora espera pelo prazo de subida dos outros serviços (`spawn_wait`, 60 s) e para se o servidor não sobe. Quando o teste falha, a saída traz o fim do stderr de cada agent-studio (sem as linhas `INFO`) e do log do SurrealDB. A falha de 23 casos citada no PR #553 não se repetiu. **Não precisa de release** (só teste).
