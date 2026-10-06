@@ -30,6 +30,7 @@ Dois lugares, dois conjuntos de comandos:
   oute tray install    só no macOS: compila o tray (barra de menu que lê o agent-studio), monta o .app e
                        abre no login; aprovar pelo tray abre o Terminal no oute approve <id>
   oute tray uninstall  tira o tray (a tabela ~/.oute/tray-hosts editada fica)
+  oute tray sync       reinstala o tray só se o app instalado está atrás do repo (o oute update já chama)
   oute up | down | restart | status
   oute up --refresh-secrets            relê o Vaultwarden antes de subir (pede a master password)
                                        (no oute-server, com OUTE_AGENT_STUDIO=1 no .env, o up liga também
@@ -163,7 +164,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     --deliver (dispatcher fora do Claude, aberto por `--agent codex`): digita os eventos,
                                     agrupados numa mensagem, no campo do dispatcher parado (idle/done, campo achado e
                                     vazio); ocupado, com diálogo ou com texto no campo, adia (fila em watch.queue, motivo no log)
-  oute-swarm list                   abas abertas por rodada + worktrees
+  oute-swarm list                   abas abertas por rodada (nome e id) + worktrees
+  oute-swarm busy [--repo <repo>]   issues com sessão aberta em outra rodada do repo (a triagem não as oferece; #605)
   Fim de cada sessão: `PRONTO #n: <url do PR>` ou `BLOQUEADO #n: <pergunta>`.
 
 ## CONTAINER — canal de aprovação (agente → host)
@@ -219,7 +221,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 ## CONTAINER — regressão dos agentes (oute-regression, #366, #484)
   oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--keep <pasta>] [--json]
                                     regressão dos agentes: 13 tarefas headless do claude (docker/regression/), cada uma em
-                                    Haiku (fase ops da tabela do seletor) e em Sonnet (fase build), num diretório descartável,
+                                    Haiku (id explícito de teste, #615) e em Sonnet (fase build da tabela do seletor), num diretório descartável,
                                     com oute-propose/oute-inbox/sudo/ssh/gh e a memória (ai-memory) trocados por dublês (nada
                                     chega ao canal, ao host, ao GitHub nem à memória). Tarefas: root, select, worktree, emit,
                                     memory (workspace e project explícitos), branch (renomeia antes do push), duplicada (procura

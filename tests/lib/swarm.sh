@@ -22,6 +22,8 @@ case "$1 ${2:-}" in
                 w="$4"   # --workspace <id>: o formato real do herdr 0.9 (root_pane e tab no result, #276)
                 echo "{\"id\":\"cli:tab:create\",\"result\":{\"root_pane\":{\"pane_id\":\"$w:p$n\",\"tab_id\":\"$w:t$n\"},\"tab\":{\"tab_id\":\"$w:t$n\",\"label\":\"x\"}}}" ;;
   "tab close") [[ ! -e "$FAKE/tab-close.fail" ]] || exit 1 ;;
+  "tab rename") echo "$3 $4" >> "$FAKE/tab-rename.log" ;;   # rótulo da aba do dispatcher (#605): id e rótulo
+  "workspace get") echo "{\"result\":{\"workspace\":{\"label\":\"${FAKE_SPACE:-Codigo}\"}}}" ;;   # space do herdr (#605)
   "pane list") cat "$FAKE/panes.json" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
   "pane run") ;;
   "pane read") if [[ -e "$FAKE/pane-style" ]]; then cat "$FAKE/pane-style"   # tela fixa (diálogo, campo ausente…); "codex" = campo do Codex
@@ -89,6 +91,8 @@ ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"; cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/codex"
 # o gatilho de cota do seletor (#355) lê o oute-quota: o falso (cota folgada), nunca o de verdade; a seção 12 troca por um que repassa ao dela
 cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"
+# nome da rodada (#605): sem as listas do agent-studio por padrão (a abertura sai só com o id, como antes); o tema `nomes` aponta para o names.py do repo
+export OUTE_NAMES_PY="$TMP/sem-names.py"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
@@ -148,7 +152,11 @@ opn() {
   OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" \
          OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 HERDR_PANE_ID=w1:p0 "$SWARM" "$REPO" "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
 }
-nova() { ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1; }
+# a rodada aberta por último (#605: abrir duas no mesmo minuto dá dois ids; antes a segunda reusava a pasta da primeira)
+nova() {
+  ls -t "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1
+  return 0
+}
 so_teste() { [ "$(ls "$H/.oute/swarm")" == swarm-test ] && [ ! -e "$FAKE/oute-task.last" ]; }
 sp_agent() { awk -v s="$2" '$1 == s {print $3}' "$H/.oute/swarm/$1/spawned"; }
 ran() { grep -qF -- "oute-task -r $REPO $1 $2 " "$FAKE/herdr.log"; }

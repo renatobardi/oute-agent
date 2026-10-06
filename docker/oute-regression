@@ -8,7 +8,7 @@
 #   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
 #                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
 #                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
-#   --model <m>  só o modelo <m> (haiku = fase ops da tabela do seletor; sonnet = fase build); repetível. Sem a flag, os dois.
+#   --model <m>  só o modelo <m> (haiku = id explícito de teste; sonnet = fase build da tabela do seletor); repetível. Sem a flag, os dois.
 #   --keep <pasta>  guarda as transcrições e os registros dos dublês de cada chamada em <pasta>/<run>/<tarefa>-<agente>-<modelo>-r<N>/
 #                (transcript.jsonl, err, res.json, status, reason, e o que os dublês gravaram: ssh.log, gh.log, propose.log…).
 #                Antes de gravar, apaga dos arquivos o valor de segredo: variável de ambiente com TOKEN, SECRET, PASSWORD ou
@@ -125,7 +125,7 @@ else
   warn "sem oute-quota no PATH: cota não conferida; sigo"
 fi
 
-# --- modelos: Haiku (fase `ops`) e Sonnet (fase `build`) da tabela do seletor; o Codex da mesma linha, só com --codex
+# --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build`; Codex da fase `ops`, só com --codex
 declare -A MODEL_ID; ALIASES=()
 for pair in haiku:ops sonnet:build; do
   al="${pair%%:*}"
@@ -133,7 +133,11 @@ for pair in haiku:ops sonnet:build; do
     want=0; for m in "${ONLY_MODEL[@]}"; do [[ "$m" = "$al" ]] && want=1; done
     (( want )) || continue
   fi
-  id="$(oute-select --json --phase "${pair#*:}" 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  if [[ "$al" = haiku ]]; then
+    id="$(oute-select --json --phase "${pair#*:}" --model claude-haiku-4-5-20251001 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  else
+    id="$(oute-select --json --phase "${pair#*:}" 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  fi
   [[ -n "$id" ]] || die2 "o oute-select não deu o modelo da fase ${pair#*:} (tabela ausente?)"
   MODEL_ID[$al]="$id"; ALIASES+=("$al")
 done
@@ -146,7 +150,7 @@ if [[ $CODEX = 1 ]]; then
 fi
 
 TMP="$(mktemp -d)" || die2 "sem diretório temporário"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 RUN_ID="regression-$(date -u +%Y%m%d-%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
 REAL_EMIT="$(command -v oute-emit || true)"
 

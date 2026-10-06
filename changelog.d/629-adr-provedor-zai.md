@@ -2,7 +2,7 @@
 - **ADR-02 e ADR-01: assinatura `zai` (GLM) e padrão por grupo de fase** (#629, gate de `arch` do Bardi).
   - **ADR-02**, sobre o modelo de assinaturas da #598:
     - o GLM Coding Plan entra como a assinatura `zai`, servida pelo próprio Claude Code (`oute.agent` segue `claude`; `oute.subscription` novo);
-    - pareamento Opus ↔ `glm-5.3` ↔ astra e Sonnet ↔ `glm-5.3` ↔ sol (pressupõe a #615, sem Haiku na tabela);
+    - pareamento Opus ↔ `glm-5.3` ↔ astra e Sonnet ↔ `glm-5.3` ↔ sol/luna (depois da #615, sem Haiku na tabela);
     - a padrão passa a ser por grupo de fase, com cadeia no modo `ordem`: raciocínio `claude` → `zai` → `codex`, execução `zai` → `claude` → `codex`;
     - o revisor das etapas cobre o `glm-5.3`;
     - entra em três fatias, e a (c), que muda o padrão da tabela, só depois da medição e da regressão.

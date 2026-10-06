@@ -45,11 +45,11 @@ public enum MenuText {
         case "sem-revisor": review = "sem revisor"
         default: review = nil
         }
-        return join([step.title, step.round, review, step.ageSeconds.map(Age.text(seconds:))])
+        return join([step.title, roundLabel(step.round, name: step.name), review, step.ageSeconds.map(Age.text(seconds:))])
     }
 
     public static func decision(_ decision: TraySnapshot.Decision) -> String {
-        join([decision.round, decision.question, decision.ageSeconds.map(Age.text(seconds:))])
+        join([decision.round.map { roundLabel($0, name: decision.name) }, decision.question, decision.ageSeconds.map(Age.text(seconds:))])
     }
 
     public static func cost(_ cost: TraySnapshot.Cost) -> String {
@@ -97,6 +97,12 @@ public enum MenuText {
             text += " · \(calls) \(calls == 1 ? "chamada" : "chamadas") sem preço"
         }
         return text
+    }
+
+    /// "Brave_Otter (swarm-1005-1258)": o nome amigável junto do id técnico (#605); rodada sem nome, só o id.
+    private static func roundLabel(_ round: String, name: String?) -> String {
+        guard let name = name, !name.isEmpty else { return round }
+        return "\(name) (\(round))"
     }
 
     private static func join(_ parts: [String?]) -> String {

@@ -1059,7 +1059,17 @@ TRAY_APP="$HOME/Applications/OuteTray.app"
 TRAY_PLIST="$HOME/Library/LaunchAgents/$TRAY_LABEL.plist"
 TRAY_HOSTS="$OUTE_HOME/tray-hosts"
 TRAY_ICON="AppIcon.icns"
-tray_usage() { echo "uso: oute tray install | oute tray uninstall   (só no macOS)" >&2; }
+tray_usage() { echo "uso: oute tray install | oute tray uninstall | oute tray sync   (só no macOS)" >&2; }
+# o commit do repo, que o install grava no Info.plist e o tray mostra no menu (#516); vazio fora de um repo git
+tray_repo_commit() {
+  git -C "$ROOT" rev-parse --short=7 HEAD 2>/dev/null || true
+  return 0
+}
+# o commit gravado no app instalado; vazio se não há app ou se ele é de antes da #516
+tray_app_commit() {
+  sed -n 's/.*<key>OuteTrayCommit<\/key><string>\([^<]*\)<\/string>.*/\1/p' "$TRAY_APP/Contents/Info.plist" 2>/dev/null | head -1
+  return 0
+}
 # texto para dentro de um plist (XML)
 tray_xml() {
   local text="$1"
@@ -1079,7 +1089,7 @@ tray_stop() {
   return 0
 }
 tray_install() {
-  local bin url env_block="" icon_block=""
+  local bin url env_block="" icon_block="" commit
   need swift
   echo "compilando o tray (swift build -c release)…"
   swift build -c release --package-path "$ROOT/tray" --product OuteTray || die "o tray não compilou"
@@ -1100,6 +1110,7 @@ tray_install() {
     rm -f "$TRAY_APP/Contents/Resources/$TRAY_ICON"
     echo "aviso: o ícone do tray não foi gravado; o app fica com o ícone genérico" >&2
   fi
+  commit="$(tray_repo_commit)"
   cat > "$TRAY_APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
@@ -1110,6 +1121,7 @@ tray_install() {
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tray_xml "$VERSION")</string>
   <key>CFBundleVersion</key><string>$(tray_xml "$VERSION")</string>
+  <key>OuteTrayCommit</key><string>$(tray_xml "$commit")</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>$icon_block
 </dict>
@@ -1155,9 +1167,29 @@ tray_uninstall() {
   fi
   return 0
 }
+# reinstala o tray só se o app instalado está atrás do repo (#516): compara o commit gravado no app com o do repo
+tray_sync() {
+  local have want
+  [[ -d "$TRAY_APP" ]] || { echo "tray não instalado; nada a fazer (instalar: oute tray install)"; return 0; }
+  have="$(tray_app_commit)"; want="$(tray_repo_commit)"
+  if [[ -n "$want" && "$have" == "$want" ]]; then
+    echo "tray em dia ($VERSION, $want)"
+    return 0
+  fi
+  echo "tray atrás do repo (instalado: ${have:-sem commit}; repo: ${want:-sem commit}): reinstalando…"
+  tray_install
+  return $?
+}
+# depois do `oute update` (#516): no macOS e com o tray instalado, traz o tray para o commit do repo. Falha aqui é
+# aviso: o update já terminou.
+tray_after_update() {
+  [[ "$(uname -s)" == Darwin && -d "$TRAY_APP" ]] || return 0
+  "$0" tray sync || echo "aviso: o tray não foi reinstalado; rode: oute tray install" >&2
+  return 0
+}
 tray_cmd() {
   local sub="${1:-}"
-  [[ $# == 1 && ( "$sub" == install || "$sub" == uninstall ) ]] || { tray_usage; exit 2; }
+  [[ $# == 1 && ( "$sub" == install || "$sub" == uninstall || "$sub" == sync ) ]] || { tray_usage; exit 2; }
   [[ "$(uname -s)" == Darwin ]] || die "o tray é só no macOS (este host é $(uname -s))"
   "tray_$sub"
   return $?
@@ -1171,7 +1203,7 @@ case "${1:-}" in
   update)  # de qualquer diretório: repo (git pull --tags) + imagem da versão nova + restart
            git -C "$ROOT" pull --tags --ff-only || die "git pull falhou em $ROOT (mudanças locais?)"
            exec "$ROOT/scripts/oute" _update2 ;;
-  _update2) oute_pull && "$0" down && "$0" up && "$0" version ;;   # 2ª etapa já com o script novo
+  _update2) oute_pull && "$0" down && "$0" up && "$0" version && tray_after_update ;;   # 2ª etapa já com o script novo
   approve) approve "${@:2}" ;;
   tray)    tray_cmd "${@:2}" ;;
   watch)   # atalho: aprovação em modo espera. Com host: roda no host remoto via ssh (ex.: oute watch oute-server)
@@ -1256,7 +1288,8 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
   approve <id>       decide só aquele pedido (id do oute-propose); não pendente = rc 1, id inválido = rc 2
-  tray install|uninstall  só no macOS: compila o tray (barra de menu, lê o agent-studio), monta o .app e abre no login; uninstall desfaz
+  tray install|uninstall|sync  só no macOS: compila o tray (barra de menu, lê o agent-studio), monta o .app e abre no login; uninstall desfaz;
+               sync reinstala só se o app instalado está atrás do repo (o update já chama)
   watch [host]       = approve --watch; com host (ex.: oute-server), abre a espera naquele host via ssh
   pull         baixa a imagem da versão atual do ghcr (feita pelo CI na tag)
   build        constrói a imagem localmente (fallback; normal é o CI) (arm64; mantém cache usado nas últimas 72h)

@@ -277,7 +277,7 @@ in_use() {   # <worktree>
   b="$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
   r=""
   [[ "$b" =~ ^sessao/(swarm-[A-Za-z0-9-]+)$ ]] && r="${BASH_REMATCH[1]}"
-  [[ -n "$r" ]] || { [[ "${wt##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4})$ ]] && r="${BASH_REMATCH[1]}"; }
+  [[ -n "$r" ]] || { [[ "${wt##*/}" =~ -(swarm-[0-9]{4}-[0-9]{4}(-[0-9a-f]{3})?)$ ]] && r="${BASH_REMATCH[1]}"; }
   if [[ -n "$r" && -f "$SWARM_STATE/$r/meta" && ! -f "$SWARM_STATE/$r/fechada" ]]; then IN_USE="dispatcher da rodada $r"; return 0; fi
   f="$(mark_path "$wt")" || f=""
   r="$(mark_get "$f" round)"; s="$(mark_get "$f" session)"

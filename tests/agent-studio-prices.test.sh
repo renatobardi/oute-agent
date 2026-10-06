@@ -13,7 +13,7 @@ TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 . "$ROOT/tests/lib/price-sources.sh"
-trap 'studio_stop; ps_stop; rm -rf "$TMP"' EXIT
+trap 'studio_stop; ps_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 ps_off
 NAO_SOBE="agent-studio não subiu"
@@ -90,8 +90,8 @@ sel, _ = P.select_models(f"{root}/config/select/models.toml")
 cfg_models = set(tomllib.load(open(f"{root}/config/agent-studio/config.toml", "rb"))["prices"])
 check("mapeamento: todo modelo da tabela do seletor e do config.toml do repo tem id nas duas fontes",
       all(set(S.source_ids(m)) == {S.MODELS_DEV, S.OPENROUTER} for m in sel | cfg_models))
-check("seletor: a tabela do repo dá os 6 ids Claude/Codex esperados",
-      sel == {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "claude-haiku-4-5-20251001", "gpt-6-luna"})
+check("seletor: a tabela do repo dá os ids Claude/Codex esperados",
+      sel == {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "gpt-6-luna"})
 check("seletor: arquivo ausente = conjunto vazio com o motivo", P.select_models(f"{tmp}/nao-existe.toml") == (set(), "FileNotFoundError"))
 
 # ---------------------------------------------------------------- leitura e validação do JSON de terceiro

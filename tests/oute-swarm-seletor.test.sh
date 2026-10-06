@@ -7,11 +7,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+trap 'rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #219: seletor de modelo (ADR-02)
 # 11. spawn: fase da issue, exceção, sem label, gh fora
@@ -24,7 +24,7 @@ check "fase: o oute-task recebe a escolha e o agente"    grep -qF -- "OUTE_SWARM
 check "fase: saída com agente, modelo, fase e origem"    [ "$OUT" == "aberta: #8 → pane w1:p2 · worktree repo-8-arq · agente claude · modelo claude-opus-5-5 (fase spec, label)" ]
 check "fase: a issue é lida no repo da sessão"           grep -qxF "repo 8" "$FAKE/gh-issue.log"
 sw spawn 9-licao "instrução" --kaizen
-check "kaizen: Haiku pela exceção do label"              [ "$RC" -eq 0 -a "$(sel 9-licao model) $(sel 9-licao origin)" == "claude-haiku-4-5-20251001 label" ]
+check "kaizen: Sonnet pela exceção do label"              [ "$RC" -eq 0 -a "$(sel 9-licao model) $(sel 9-licao origin)" == "claude-sonnet-5-5 label" ]
 sw spawn 10-semlabel "instrução"
 check "sem label: abre no Sonnet, código 0"              [ "$RC" -eq 0 -a "$(sel 10-semlabel model) $(sel 10-semlabel origin) $(sp_agent swarm-test 10-semlabel)" == "claude-sonnet-5-5 padrao claude" ]
 check "sem label: aviso (sem a chave, o Jev não é chamado)" [ "$ERR" == "oute-select: aviso: issue #10 sem label aidlc:<fase>, e sem a chave da TypeSafe (\$OUTE_TYPESAFE_API_KEY) o Jev não classifica; abrindo no padrão (claude-sonnet-5-5)" ]
@@ -32,7 +32,7 @@ touch "$FAKE/gh.down"
 MAX=5 sw spawn 12-fora "instrução"
 check "gh fora: abre no Sonnet, código 0"                [ "$RC" -eq 0 -a "$(sel 12-fora model) $(sel 12-fora origin)" == "claude-sonnet-5-5 padrao" ]
 check "gh fora: aviso, e a aba abre"                     bash -c 'grep -qF "o gh não respondeu para a issue #12" <<<"$1" && grep -q "^12-fora " "$2"' _ "$ERR" "$STATE/spawned"
-rm "$FAKE/gh.down"
+rm "${FAKE:?}/gh.down"
 # 11b. escolha explícita: --model, --agent e os dois; o agente gravado é o que de fato abre
 CASE=seletor-manual; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
 labels 8 aidlc:spec
@@ -71,7 +71,7 @@ sw spawn 8-rod "instrução"
 check "rodada codex: Codex da linha da fase, origem manual" [ "$RC" -eq 0 -a "$(sel 8-rod agent) $(sel 8-rod model) $(sel 8-rod effort) $(sel 8-rod origin) $(sel 8-rod phase)" == "codex gpt-6-astra high manual spec" ]
 check "rodada codex: spawned e oute-task com codex"      bash -c '[ "$1" == codex ] && grep -qF -- "oute-task -r $2 8-rod codex " "$3"' _ "$(sp_agent swarm-test 8-rod)" "$REPO" "$FAKE/herdr.log"
 sw spawn 9-ovr "instrução" --agent claude
-check "spawn --agent claude sobrepõe a rodada: Haiku da fase ops" [ "$(sel 9-ovr agent) $(sel 9-ovr model) $(sel 9-ovr origin)" == "claude claude-haiku-4-5-20251001 manual" ]
+check "spawn --agent claude sobrepõe a rodada: Sonnet da fase ops" [ "$(sel 9-ovr agent) $(sel 9-ovr model) $(sel 9-ovr origin)" == "claude claude-sonnet-5-5 manual" ]
 # 11e. Jev (#257): issue sem label de fase, a instrução do spawn é o texto da tarefa
 CASE=seletor-jev; round "$CASE"; ts_start "$TMP/$CASE/ts"
 labels 8 aidlc:build; labels 10 bug; labels 13 agentes
