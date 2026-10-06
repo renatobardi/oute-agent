@@ -16,7 +16,7 @@ Eram 47 issues abertas. Ficaram 34 (mais as que outras sessões abriram depois).
 | #598 | Assinatura padrão, reservas e os dois modos entregues. O resto está na #621. | PR #616 (`4f9b433`) |
 | #640 | Pedia corrigir o corpo de um PR já mergeado e avaliar sugestões do SonarCloud sem lista de arquivos. O ADR-02 já marca as repetições como "não verificadas". | `docs/adr/0002-roteamento-modelos.md:78`@794c979 |
 
-### Consolidadas (9 fechadas como duplicadas, 5 sobreviventes)
+### Consolidadas (9 fechadas como duplicadas, 6 sobreviventes)
 | Sobrevivente | Absorveu | Por que juntar |
 |---|---|---|
 | #578 (bloco "antes de abrir o PR" do worker) | #579, #580, #631 | As quatro mudam só `docker/swarm-worker.md`. Quatro PRs no mesmo arquivo conflitam entre si. |
