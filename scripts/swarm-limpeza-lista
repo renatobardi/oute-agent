@@ -28,10 +28,11 @@ LIMIT="${OUTE_HANDOFFS_LIMIT:-500}"
 WARN=0
 REPOS=()
 
-die() {
+# fail <mensagem>: o erro de uso em stderr; devolve 2 (quem chama sai: `fail "…" || exit 2`)
+fail() {
   local msg="$1"
   printf 'swarm-limpeza-lista: %s\n' "$msg" >&2
-  exit 2
+  return 2
 }
 
 warn() {
@@ -118,7 +119,8 @@ list_rounds() {
 
 # list_handoffs <repo principal>: os handoffs abertos do escopo do repo, com a pasta de cada um conferida
 list_handoffs() {
-  local repo="$1" toml="$1/.ai-memory.toml" ws="" proj="" out now n id cwd created wt age state keep=0 cand=0 unsure=0
+  local repo="$1" toml ws="" proj="" out now n id cwd created wt age state keep=0 cand=0 unsure=0
+  toml="$repo/.ai-memory.toml"
   if [[ -f "$toml" ]]; then
     ws="$(sed -n 's/^[[:space:]]*workspace[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
     proj="$(sed -n 's/^[[:space:]]*project[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
@@ -150,14 +152,14 @@ list_handoffs() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo) [[ $# -ge 2 ]] || die "--repo pede o caminho do repo principal"
-            EXTRA="$(main_root "$2")" || die "não é um repo git: $2"
+    --repo) [[ $# -ge 2 ]] || fail "--repo pede o caminho do repo principal" || exit 2
+            EXTRA="$(main_root "$2")" || fail "não é um repo git: $2" || exit 2
             add_repo "$EXTRA"; shift 2 ;;
     -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "opção desconhecida: $1 (uso: swarm-limpeza-lista [--repo <repo principal>]…)" ;;
+    *) fail "opção desconhecida: $1 (uso: swarm-limpeza-lista [--repo <repo principal>]…)" || exit 2 ;;
   esac
 done
-[[ "$LIMIT" =~ ^[1-9][0-9]*$ ]] || die "OUTE_HANDOFFS_LIMIT inválido: $LIMIT"
+[[ "$LIMIT" =~ ^[1-9][0-9]*$ ]] || fail "OUTE_HANDOFFS_LIMIT inválido: $LIMIT" || exit 2
 
 echo "# Lista da limpeza (#654) · host $(hostname 2>/dev/null || echo '?') · $(date -u +%FT%TZ) · só leitura"
 if [[ -d "$STATE_ROOT" ]]; then list_rounds
