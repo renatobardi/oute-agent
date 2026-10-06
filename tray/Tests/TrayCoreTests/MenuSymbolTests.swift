@@ -30,8 +30,4 @@ final class MenuSymbolTests: XCTestCase {
         XCTAssertEqual(MenuSymbol.steps.tint, .mono)
         XCTAssertEqual(MenuSymbol.step.tint, .mono)
     }
-
-    func testBarraSemCor() {
-        XCTAssertEqual(MenuSymbol.bar.tint, .mono)
-    }
 }

@@ -1035,9 +1035,13 @@ install_link() {
 # compila aqui, monta o .app sem ícone no Dock (LSUIElement) e abre no login por um LaunchAgent. Sem App Store nem
 # assinatura de desenvolvedor (só a ad-hoc, local). O app só lê o agent-studio; aprovar abre o Terminal no `oute approve`.
 TRAY_LABEL="pro.oute.tray"
+# o identificador do app é outro que o rótulo do LaunchAgent (#563): a Central de Notificações do macOS guarda o
+# ícone por identificador, e o `pro.oute.tray` ficou com o ícone genérico de quando o app não tinha ícone
+TRAY_BUNDLE_ID="pro.oute.outetray"
 TRAY_APP="$HOME/Applications/OuteTray.app"
 TRAY_PLIST="$HOME/Library/LaunchAgents/$TRAY_LABEL.plist"
 TRAY_HOSTS="$OUTE_HOME/tray-hosts"
+TRAY_ICON="AppIcon.icns"
 tray_usage() { echo "uso: oute tray install | oute tray uninstall   (só no macOS)" >&2; }
 # texto para dentro de um plist (XML)
 tray_xml() {
@@ -1058,7 +1062,7 @@ tray_stop() {
   return 0
 }
 tray_install() {
-  local bin url env_block=""
+  local bin url env_block="" icon_block=""
   need swift
   echo "compilando o tray (swift build -c release)…"
   swift build -c release --package-path "$ROOT/tray" --product OuteTray || die "o tray não compilou"
@@ -1069,18 +1073,28 @@ tray_install() {
   echo "montando ${TRAY_APP}…"
   rm -rf "$TRAY_APP"; mkdir -p "$TRAY_APP/Contents/MacOS"
   cp "$bin" "$TRAY_APP/Contents/MacOS/OuteTray"
+  # o ícone do app (a sakura do Kubo, #563): o próprio binário desenha e grava o .icns. O macOS mostra esse ícone
+  # na notificação de pedido novo. Sem ele o tray funciona igual, com o ícone genérico.
+  mkdir -p "$TRAY_APP/Contents/Resources"
+  if "$TRAY_APP/Contents/MacOS/OuteTray" --write-icon "$TRAY_APP/Contents/Resources/$TRAY_ICON" && [[ -s "$TRAY_APP/Contents/Resources/$TRAY_ICON" ]]; then
+    icon_block="
+  <key>CFBundleIconFile</key><string>$TRAY_ICON</string>"
+  else
+    rm -f "$TRAY_APP/Contents/Resources/$TRAY_ICON"
+    echo "aviso: o ícone do tray não foi gravado; o app fica com o ícone genérico" >&2
+  fi
   cat > "$TRAY_APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>$TRAY_LABEL</string>
+  <key>CFBundleIdentifier</key><string>$TRAY_BUNDLE_ID</string>
   <key>CFBundleName</key><string>OuteTray</string>
   <key>CFBundleExecutable</key><string>OuteTray</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tray_xml "$VERSION")</string>
   <key>CFBundleVersion</key><string>$(tray_xml "$VERSION")</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>LSUIElement</key><true/>
+  <key>LSUIElement</key><true/>$icon_block
 </dict>
 </plist>
 EOF
