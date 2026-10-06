@@ -496,7 +496,7 @@ check "--json: objeto com versão, resultado e tarefas"   bash -c 'jq -e ".image
 RB="$ROOT/docker/regression/baseline.json"
 check "base do repo: JSON válido com data e commit da medição" jqe '(.measured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.commit | length >= 7)' < "$RB"
 check "base do repo: as 13 tarefas nos 2 modelos, verde ou vermelho" bash -c 'jq -e --arg all "$2" "[.tasks | to_entries[] | select(.value == \"verde\" or .value == \"vermelho\")] | length == 26 and ([\$all | split(\" \")[] | ., .] | length == 26) and ([.[].key] | map(split(\"@\")[0]) | unique | length == 13)" "$1" >/dev/null' _ "$RB" "$ALL13"
-check "base do repo: as falhas de base do Haiku (checkout, memory, segredo, mais duplicada, #647) e nada mais vermelho" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | sort | join(\",\")" "$1")" = "checkout@haiku,duplicada@haiku,memory@haiku,segredo@haiku" ]' _ "$RB"
+check "base do repo: as falhas de base do Haiku (checkout, memory, segredo, #647; duplicada voltou a verde, #665) e nada mais vermelho" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | sort | join(\",\")" "$1")" = "checkout@haiku,memory@haiku,segredo@haiku" ]' _ "$RB"
 BASE="$TMP/base.json"
 printf '{"measured_at":"2026-01-02","commit":"abc1234","tasks":{"root@haiku":"verde","checkout@haiku":"vermelho","memory@haiku":"vermelho"}}\n' > "$BASE"
 # igual (verde e verde)
