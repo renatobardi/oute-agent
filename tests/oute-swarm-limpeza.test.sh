@@ -67,9 +67,9 @@ check "executável"                                      test -x "$LISTA"
 ANTES="$(retrato)"; : > "$FAKE_AI_MEMORY_LOG"
 lista
 # ---------------------------------------------------------------- 1. rodadas sem a marca
-check "rodada com sessão aberta: viva (2 sessões, 1 aberta)" has_line "rodada id=r-sess nome=- aberta=2026-10-02T10:00:00Z sessoes=2 abertas=1 dispatcher=ausente ultimo=2026-10-02T10:05:00Z estado=viva"
-check "rodada sem sessão e com a worktree do dispatcher: viva" has_line "rodada id=r-disp nome=- aberta=2026-10-02T10:00:00Z sessoes=0 abertas=0 dispatcher=existe ultimo=2026-10-02T10:05:00Z estado=viva"
-check "rodada com as sessões fechadas e sem dispatcher: candidata, com o nome e o último evento" has_line "rodada id=r-cand nome=Wise_Gecko aberta=2026-10-02T10:00:00Z sessoes=1 abertas=0 dispatcher=ausente ultimo=2026-10-02T11:30:00Z estado=candidata"
+check "rodada com sessão aberta: viva (2 sessões, 1 aberta)" has_line "rodada id=r-sess repo=proj nome=- aberta=2026-10-02T10:00:00Z sessoes=2 abertas=1 dispatcher=ausente ultimo=2026-10-02T10:05:00Z estado=viva"
+check "rodada sem sessão e com a worktree do dispatcher: viva" has_line "rodada id=r-disp repo=proj nome=- aberta=2026-10-02T10:00:00Z sessoes=0 abertas=0 dispatcher=existe ultimo=2026-10-02T10:05:00Z estado=viva"
+check "rodada com as sessões fechadas e sem dispatcher: candidata, com o nome e o último evento" has_line "rodada id=r-cand repo=proj nome=Wise_Gecko aberta=2026-10-02T10:00:00Z sessoes=1 abertas=0 dispatcher=ausente ultimo=2026-10-02T11:30:00Z estado=candidata"
 check "rodada com a marca (com hora ou vazia) e pasta sem meta ficam de fora" test "$(grep -c '^rodada ' <<<"$OUT")" = 3
 check "resumo das rodadas"                              has_line "resumo rodadas: 3 sem a marca; 2 viva(s), 1 candidata(s), 0 incerta(s)"
 # ---------------------------------------------------------------- 2. handoffs por worktree
@@ -99,7 +99,7 @@ check "rodado numa worktree: o repo é o principal (uma seção de handoffs)" te
 # ---------------------------------------------------------------- 5. fonte que não foi lida: aviso e código 3
 rodada r-sem-repo "$TMP/ws/nao-existe"
 lista
-check "repo da rodada ilegível: incerta, dispatcher=?"  has_line "rodada id=r-sem-repo nome=- aberta=2026-10-02T10:00:00Z sessoes=0 abertas=0 dispatcher=? ultimo=2026-10-02T10:05:00Z estado=incerta"
+check "repo da rodada ilegível: incerta, dispatcher=?"  has_line "rodada id=r-sem-repo repo=nao-existe nome=- aberta=2026-10-02T10:00:00Z sessoes=0 abertas=0 dispatcher=? ultimo=2026-10-02T10:05:00Z estado=incerta"
 check "repo da rodada ilegível: aviso, resumo e código 3" bash -c '[ "$1" -eq 3 ] && grep -qxF "aviso: 1 rodada(s) com o repo ilegível (dispatcher=?); ficam fora da limpeza" <<<"$2" && grep -qxF "resumo rodadas: 4 sem a marca; 2 viva(s), 1 candidata(s), 1 incerta(s)" <<<"$2"' _ "$RC" "$OUT"
 rm -rf "${ST:?}/r-sem-repo"
 FAKE_AI_MEMORY_RC=1 lista

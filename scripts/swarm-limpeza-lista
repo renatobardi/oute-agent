@@ -8,8 +8,8 @@
 # `ai-memory handoffs --expire-all`. Marcar e cancelar é outro passo, com a aprovação do Bardi.
 #
 # 1. Rodadas sem a marca `fechada` em ~/.oute/swarm (pasta com `meta`). Uma linha por rodada:
-#      rodada id=<id> nome=<nome|-> aberta=<hora|-> sessoes=<n> abertas=<n> dispatcher=<existe|ausente|?> ultimo=<hora|-> estado=<…>
-#    abertas = sessões do `spawned` que não estão no `closed`; dispatcher = a worktree do dispatcher (`<repo>-<id>` ou o
+#      rodada id=<id> repo=<nome|-> nome=<nome|-> aberta=<hora|-> sessoes=<n> abertas=<n> dispatcher=<existe|ausente|?> ultimo=<hora|-> estado=<…>
+#    repo = o nome da pasta do repo da rodada (o `repo=` do meta); abertas = sessões do `spawned` que não estão no `closed`; dispatcher = a worktree do dispatcher (`<repo>-<id>` ou o
 #    branch `sessao/<id>`) no `git worktree list` do repo da rodada; ultimo = a hora da última linha do log.
 #    estado: `viva` (há sessão aberta ou a worktree do dispatcher existe), `candidata` (nenhuma das duas) ou `incerta`
 #    (o repo da rodada não foi lido: não entra na limpeza).
@@ -109,8 +109,8 @@ list_rounds() {
     elif [[ "$disp" == "?" ]]; then state=incerta; unsure=$((unsure + 1))
     else state=candidata; cand=$((cand + 1)); fi
     count=$((count + 1))
-    printf 'rodada id=%s nome=%s aberta=%s sessoes=%s abertas=%s dispatcher=%s ultimo=%s estado=%s\n' \
-      "$id" "${name:--}" "${started:--}" "${total:-0}" "$open" "$disp" "${last:--}" "$state"
+    printf 'rodada id=%s repo=%s nome=%s aberta=%s sessoes=%s abertas=%s dispatcher=%s ultimo=%s estado=%s\n' \
+      "$id" "$(basename "${repo:--}")" "${name:--}" "${started:--}" "${total:-0}" "$open" "$disp" "${last:--}" "$state"
   done
   (( unsure == 0 )) || warn "$unsure rodada(s) com o repo ilegível (dispatcher=?); ficam fora da limpeza"
   echo "resumo rodadas: $count sem a marca; $alive viva(s), $cand candidata(s), $unsure incerta(s)"
