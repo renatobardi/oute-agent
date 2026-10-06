@@ -750,6 +750,16 @@ w_pfx() { [[ "$1" == "$2" ]] || printf '%s#' "$(basename "$1")"; }
 w_ref() { if [[ "$1" == *"#"* ]]; then printf '%s' "$1"; else printf '#%s' "$1"; fi; }
 w_hdr() { sed -n "s/^# $2: //p;/^\$/q" "$1" 2>/dev/null | head -1 || true; }
 
+# marca do pedido (#455): ` (da rodada)` se o `# sessao:` do cabeçalho é uma sessão do spawned da rodada, ` (alheio)` se é
+# de outra; sem o campo (pedido antigo), nada, e a rodada atribui pelo #<n> do título
+w_ask_mark() {
+  local f="$1" s
+  s="$(w_hdr "$f" sessao)"
+  [[ -n "$s" ]] || return 0
+  if awk -v s="$s" '$1 == s { f = 1 } END { exit !f }' "$W_STATE/spawned" 2>/dev/null; then printf ' (da rodada)'; else printf ' (alheio)'; fi
+  return 0
+}
+
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
   local gh_ok=1 oid old cur k pend seen
@@ -920,7 +930,7 @@ w_diff() {
       ask)
         [[ "$new" == pending ]] || continue
         f="$W_OUTBOX/$a.sh"
-        w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como)) — aprovação no host: oute watch" ;;
+        w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como))$(w_ask_mark "$f") — aprovação no host: oute watch" ;;
       res)
         [[ -n "$new" && "$new" != 0 ]] || continue
         if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
