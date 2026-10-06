@@ -159,7 +159,11 @@ def with_state(rows, states):
     for r in rows:
         rec = (states or {}).get(r["round"]) or {}
         r["repo"], r["label"] = r["repo"] or rec.get("repo"), r["label"] or rec.get("label")
-        r["status"] = "fechada" if r["closed_ns"] else "aberta" if r["opened_ns"] else rec.get("state")
+        r["status"] = rec.get("state")
+        if r["opened_ns"]:
+            r["status"] = "aberta"
+        if r["closed_ns"]:
+            r["status"] = "fechada"
         r["start_ns"] = r["opened_ns"] or r["first_ns"]
         r["prs"] = r["prs"] if r["steps"] else None
         r["cycle"] = rec.get("cycle") if cycle_url(rec.get("cycle")) else None
