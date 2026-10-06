@@ -91,7 +91,8 @@ def main():
                      price_job=price_job, mark_token=mark_token,
                      # vagas de ingestão e espera por elas (#570); padrões no app.py
                      ingest_slots=int(os.environ.get("AGENT_STUDIO_INGEST_SLOTS", app_mod.INGEST_SLOTS)),
-                     ingest_wait=float(os.environ.get("AGENT_STUDIO_INGEST_WAIT_S", app_mod.INGEST_WAIT_S)))
+                     ingest_wait=float(os.environ.get("AGENT_STUDIO_INGEST_WAIT_S", app_mod.INGEST_WAIT_S)),
+                     ready_max_write_age=float(os.environ.get("AGENT_STUDIO_READY_MAX_WRITE_AGE_S", app_mod.READY_MAX_WRITE_AGE_S)))
     uvicorn.run(app, host=os.environ.get("AGENT_STUDIO_BIND", "0.0.0.0"),
                 port=int(os.environ.get("AGENT_STUDIO_PORT", "8430")),
                 workers=1, access_log=False, log_config=None)

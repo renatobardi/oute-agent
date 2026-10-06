@@ -286,6 +286,15 @@ class Store:
             self._lap("insert", t, table)
         return len(new), len(rows) - len(new)
 
+    def ping(self):
+        """Leitura mínima no DuckDB, num cursor próprio e sem ocupar vaga de leitura: é a do `/readyz` (#570), que não
+        pode esperar atrás de duas consultas longas."""
+        cur = self.con.cursor()
+        try:
+            cur.execute("SELECT 1").fetchone()
+        finally:
+            cur.close()
+
     def _cached(self, key, fn):
         """Resultado de `fn()` por `read_ttl` s. Uma chamada só o refaz: as outras esperam e recebem o mesmo (o tray, a
         barra de alertas de cada tela e o `/v1/alerts` pediam a mesma conta ao mesmo tempo)."""

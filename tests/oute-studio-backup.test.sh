@@ -156,6 +156,14 @@ oute studio backup --check "nao-existe-20260101T000000Z.duckdb"
 check "--check de nome que não está no bucket: rc != 0"                 bash -c '[[ "$1" != 0 ]] && grep -q "não encontrad" <<<"$2"' _ "$RC" "$OUT"
 oute studio backup --check "../../segredo"
 check "--check com nome fora do formato: rc != 0, sem ler o bucket"     bash -c '[[ "$1" != 0 ]] && ! tail -n 1 "$2" | grep -q "^rclone cat"' _ "$RC" "$F_LOG"
+seed 3; FENV=()
+oute studio backup
+oute studio backup --check latest
+check "--check latest: confere a cópia mais nova desta origem"         bash -c '[[ "$1" == 0 ]] && grep -qF "$3" <<<"$2" && grep -qF "spans 7" <<<"$2"' _ "$RC" "$OUT" "$NEW"
+check "--check latest: lê do bucket só a mais nova"                    bash -c '[[ "$(grep -c "^rclone cat " "$1")" == 1 ]] && grep -q "^rclone cat oci:.*/$2\$" "$1"' _ "$F_LOG" "$NEW"
+rm -rf "${F_BUCKET:?}/$PFX"; mkdir -p "$F_BUCKET/$PFX"; printf 'outro' > "$F_BUCKET/$PFX/oute-mac-oute-agent-20260101T000000Z.duckdb"; : > "$F_LOG"
+oute studio backup --check latest
+check "--check latest sem cópia desta origem: rc != 0 e diz que não há" bash -c '[[ "$1" != 0 ]] && grep -q "nenhuma cópia" <<<"$2" && ! grep -q "^rclone cat" "$3"' _ "$RC" "$OUT" "$F_LOG"
 oute studio backup --outra
 check "opção desconhecida: rc 2"                                        test "$RC" = 2
 check_end
