@@ -90,7 +90,8 @@ check "backup: rc 0"                                                    test "$R
 check "a cópia chega ao bucket de telemetria como <host>-<instância>-<data UTC>.duckdb" test -f "$F_BUCKET/$PFX/$NEW"
 check "o conteúdo no bucket é o da cópia do container"                  grep -qF "$MARKER" "$F_BUCKET/$PFX/$NEW"
 check "nunca vai ao oute-shared (o bucket que o agent monta)"           bash -c '! grep -q "oute-shared" "$1"' _ "$F_LOG"
-check "sai do container por pipe ao rclone rcat (sem arquivo no host)"  bash -c 'grep -q "^docker exec oute-agent-studio cat /data/agent-studio/backup/" "$1" && grep -q "^rclone rcat oci:oute-observability/backups/agent-studio/" "$1" && [[ -z "$(ls "$2" | grep -i duckdb)" ]]' _ "$F_LOG" "$TMP"
+check "sai do container por pipe ao rclone rcat (sem arquivo no host)"  bash -c 'grep -q "^docker exec oute-agent-studio cat /data/agent-studio/backup/" "$1" && grep -q "^rclone rcat .*oci:oute-observability/backups/agent-studio/" "$1" && [[ -z "$(ls "$2" | grep -i duckdb)" ]]' _ "$F_LOG" "$TMP"
+check "envia em blocos de 64 MiB (o padrão de 5 MiB limita o arquivo a 48,8 GiB; o banco não tem retenção)" grep -q "^rclone rcat --s3-chunk-size 64Mi oci:" "$F_LOG"
 check "a cópia local do container some depois de conferida"             bash -c '[[ -z "$(ls "$1")" ]]' _ "$F_CT/backup"
 check "imprime o destino"                                               grep -qF "backup: oci:$PFX/$NEW" <<<"$OUT"
 check "imprime o tamanho e as linhas"                                   bash -c 'grep -qE "^cópia: +[0-9]+ bytes" <<<"$1" && grep -qF "spans 7" <<<"$1" && grep -qF "metrics 9" <<<"$1"' _ "$OUT"
@@ -106,6 +107,12 @@ check "retenção: outra origem e arquivo estranho ficam"                 bash -
 seed 9; FENV=(OUTE_STUDIO_BACKUP_KEEP=2)
 oute studio backup
 check "OUTE_STUDIO_BACKUP_KEEP=2: ficam 2"                              test "$(mine | wc -l | tr -d ' ')" = 2
+seed 1; FENV=(OUTE_STUDIO_BACKUP_CHUNK=128Mi)
+oute studio backup
+check "OUTE_STUDIO_BACKUP_CHUNK troca o tamanho do bloco"              grep -q "^rclone rcat --s3-chunk-size 128Mi oci:" "$F_LOG"
+seed 1; FENV=(OUTE_STUDIO_BACKUP_CHUNK='1Mi; rm -rf /')
+oute studio backup
+check "OUTE_STUDIO_BACKUP_CHUNK inválido: rc 2, nada feito"            bash -c '[[ "$1" == 2 ]] && ! grep -q "^docker exec" "$2"' _ "$RC" "$F_LOG"
 seed 1; FENV=(OUTE_STUDIO_BACKUP_KEEP=zero)
 oute studio backup
 check "OUTE_STUDIO_BACKUP_KEEP inválido: rc 2, nada feito"              bash -c '[[ "$1" == 2 ]] && ! grep -q "^docker exec" "$2"' _ "$RC" "$F_LOG"

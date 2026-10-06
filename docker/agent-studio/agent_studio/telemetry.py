@@ -40,6 +40,11 @@ class Noop:
         pass  # nada a exportar
 
 
+# fases longas por natureza: vão ao histograma, mas não viram aviso de "lento" (a cópia de segurança leva dezenas de
+# segundos e cresce com o banco, que não tem retenção)
+LONG_PHASES = frozenset({"backup"})
+
+
 class Telemetry(Noop):
     def __init__(self, meter, providers, every, slow=5.0):
         self.providers = providers
@@ -80,7 +85,7 @@ class Telemetry(Noop):
     def phase(self, phase, seconds, label=None):
         """Tempo de uma fase (#570): vai ao histograma e, passado `slow`, sai como aviso (com teto por tipo)."""
         self.h_phase.record(seconds, {"phase": phase, **({"label": label} if label else {})})
-        if seconds > self.slow:
+        if seconds > self.slow and phase not in LONG_PHASES:
             self.warn("slow-" + phase, "lento: %s levou %.1f s%s", phase, seconds, f" ({label})" if label else "")
 
     def price_run(self, changes, failures):
