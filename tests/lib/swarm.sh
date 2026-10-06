@@ -93,6 +93,8 @@ cp "$ROOT/tests/lib/fake-agent.sh" "$BIN/claude"; cp "$ROOT/tests/lib/fake-agent
 cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"
 # nome da rodada (#605): sem as listas do agent-studio por padrão (a abertura sai só com o id, como antes); o tema `nomes` aponta para o names.py do repo
 export OUTE_NAMES_PY="$TMP/sem-names.py"
+# carga do container (#623): sem o /proc/loadavg de quem roda o teste (o aviso do spawn dependeria da carga da máquina); o tema `carga` aponta para o arquivo dele
+export OUTE_SWARM_LOADAVG="$TMP/sem-loadavg"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
