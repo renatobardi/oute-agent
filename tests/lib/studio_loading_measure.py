@@ -4,7 +4,8 @@ Reprodução: PYTHONPATH=tests/lib:docker/agent-studio <python do venv dos teste
             tests/lib/studio_loading_measure.py
 Cinco bancos novos, 700 spans / 700 conversas. Não mede navegador, rede ou host.
 Janela maior e gráfico das ferramentas (#592): `--hours <h>` (padrão 168), `--spans <n>` (chamadas ao modelo, padrão 700) e
-`--tools <n>` (spans de ferramenta, padrão 0), espalhados pela janela; com `--tools`, sai também o tempo do bloco `ferramentas`.
+`--tools <n>` (spans de ferramenta, padrão 0), espalhados pela janela. Com `--tools`, sai também `consulta`: o tempo da
+consulta do gráfico das ferramentas sozinha (`tools.top`), que no Dashboard roda no mesmo cursor do resto, sob o prazo de 50 s.
 Um único event loop atende os pedidos, como o servidor; até oito simultâneos.
 Copiar este apoio e studio_asgi.py / studio_loading.py para a base permite medir o mesmo conjunto antes da mudança.
 """
@@ -16,6 +17,7 @@ import time
 from urllib.parse import urlsplit
 
 from agent_studio.app import create_app
+from agent_studio import tools as tools_mod
 from agent_studio.config import load
 from studio_db import StudioDB
 import studio_asgi
@@ -52,30 +54,36 @@ for run in range(5):
             assert status == 200
             slots = Slots(html).slots
             if not slots:
-                return shell_ms, shell_ms, None
+                return shell_ms, shell_ms
             limit = asyncio.Semaphore(8)
-            block_ms = {}
 
             async def fetch(slot):
                 url = urlsplit(slot[2])
                 async with limit:
-                    asked = time.perf_counter()
                     code, _ = await raw_get(app, url.path, url.query)
                     assert code == 200
-                    block_ms[url.path.rsplit('/', 1)[-1]] = (time.perf_counter() - asked) * 1000
 
             await asyncio.gather(*(fetch(slot) for slot in slots))
-            return shell_ms, (time.perf_counter() - start) * 1000, block_ms.get('ferramentas')
+            return shell_ms, (time.perf_counter() - start) * 1000
 
-        rows.append(asyncio.run(measure()))
+        shell, last = asyncio.run(measure())
+        query_ms = None
+        if args.tools:
+            cur = store.con.cursor()
+            asked = time.perf_counter()
+            top = tools_mod.top(cur, now - window_ns, now)
+            query_ms = (time.perf_counter() - asked) * 1000
+            cur.close()
+            assert top['total'] == args.tools, top['total']   # todo span de ferramenta está na janela e conta um uso
+        rows.append((shell, last, query_ms))
         store.close()
 days = f'{args.hours // 24} dias' if args.hours % 24 == 0 else f'{args.hours} h'
 tools_note = f'; {args.tools} spans de ferramenta' if args.tools else ''
 print(f'{args.spans} spans / {args.spans} conversas{tools_note}; {days}; 5 bancos novos; ASGI local; blocos em até 8 pedidos simultâneos')
-for i, (shell, last, tools) in enumerate(rows, 1):
-    tools_ms = '' if tools is None else f'; ferramentas={tools:.3f} ms'
-    print(f'{i}: casco={shell:.3f} ms; último={last:.3f} ms{tools_ms}')
+for i, (shell, last, query) in enumerate(rows, 1):
+    query_ms = '' if query is None else f'; consulta={query:.3f} ms'
+    print(f'{i}: casco={shell:.3f} ms; último={last:.3f} ms{query_ms}')
 median = f'mediana: casco={statistics.median(r[0] for r in rows):.3f} ms; último={statistics.median(r[1] for r in rows):.3f} ms'
-if all(r[2] is not None for r in rows):
-    median += f'; ferramentas={statistics.median(r[2] for r in rows):.3f} ms'
+if args.tools:
+    median += f'; consulta={statistics.median(r[2] for r in rows):.3f} ms'
 print(median)
