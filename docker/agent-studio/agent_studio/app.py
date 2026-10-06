@@ -112,13 +112,19 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             tel.warn("content-type", "recusado: %s com Content-Type que não é application/json", signal)
             return JSONResponse({"message": "só OTLP/HTTP JSON (application/json)"}, status_code=415)
         received_ns = time.time_ns()
-        try:
-            raw = _decompress(await request.body(), request.headers.get("content-encoding"))
+        body = await request.body()
+        encoding = request.headers.get("content-encoding")
+        build, table = SIGNALS[signal]
+
+        def parse():
+            # fora do laço de eventos (#570): descomprimir e ler um lote de até 64 MB travava todas as rotas
             t_parse = time.monotonic()
-            payload = json.loads(raw)
-            build, table = SIGNALS[signal]
-            rows = build(payload, received_ns)
-            tel.phase("parse", time.monotonic() - t_parse, signal)  # no laço de eventos: se for caro, trava todas as rotas
+            rows = build(json.loads(_decompress(body, encoding)), received_ns)
+            tel.phase("parse", time.monotonic() - t_parse, signal)
+            return rows
+
+        try:
+            rows = await run_in_threadpool(parse)
         except OverflowError:
             tel.warn("too-large", "recusado: %s com corpo acima de %d bytes", signal, MAX_BODY)
             return JSONResponse({"message": "corpo grande demais"}, status_code=413)

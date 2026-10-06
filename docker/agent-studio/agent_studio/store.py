@@ -173,6 +173,36 @@ def migrate(con):
         raise
 
 
+# Configuração do DuckDB (#570). O app não configurava nada: o `memory_limit` padrão é 80% da memória do container
+# (4,7 GiB de 6g), que somado ao heap do Python cabe mal no limite; e o `checkpoint_threshold` padrão (16 MiB) faz um
+# checkpoint a cada poucos minutos, que é o que deixa o COMMIT lento (medido: 17 de 400 lotes acima de 200 ms com 16 MiB,
+# 2 com 256 MB; no disco do oute-server eram 6 a 7 s). Com 256 MB, no volume de produção, é cerca de um por dia; o custo
+# é reler até 256 MB de WAL depois de uma queda.
+DUCKDB_DEFAULTS = {"memory_limit": "3GB", "threads": "2", "checkpoint_threshold": "256MB"}
+DUCKDB_ENV = {"memory_limit": "AGENT_STUDIO_DUCKDB_MEMORY", "threads": "AGENT_STUDIO_DUCKDB_THREADS",
+              "checkpoint_threshold": "AGENT_STUDIO_DUCKDB_CHECKPOINT"}
+_SIZE = re.compile(r"[1-9]\d*(MB|GB|MiB|GiB)\Z")
+_THREADS = re.compile(r"([1-9]|[1-5]\d|6[0-4])\Z")
+
+
+def settings_from_env(env):
+    """As variáveis `AGENT_STUDIO_DUCKDB_*` que vieram com valor, como {configuração: valor}. Sem elas, valem os padrões."""
+    return {name: env[var] for name, var in DUCKDB_ENV.items() if env.get(var)}
+
+
+def duckdb_settings(settings):
+    """Os padrões com o que veio por cima. O valor vai no texto do `SET` (ele não aceita parâmetro), então só passa o
+    que casa com o formato: tamanho com unidade, e de 1 a 64 threads."""
+    unknown = set(settings or {}) - set(DUCKDB_DEFAULTS)
+    if unknown:
+        raise ValueError(f"configuração desconhecida do DuckDB: {sorted(unknown)}")
+    out = {**DUCKDB_DEFAULTS, **(settings or {})}
+    for name, value in out.items():
+        if not isinstance(value, str) or not (_THREADS if name == "threads" else _SIZE).match(value):
+            raise ValueError(f"{name} fora do formato: use um tamanho como 3GB ou 256MB (threads: de 1 a 64)")
+    return out
+
+
 class BackupBusy(RuntimeError):
     """Já há uma cópia de segurança em andamento."""
 
@@ -181,9 +211,12 @@ BACKUP_FILE = re.compile(r"agent-studio-\d{8}T\d{6}Z\.duckdb(\.wal)?\Z")
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, settings=None):
         self.path = path
+        applied = duckdb_settings(settings)  # valor fora do formato para aqui, antes de abrir o arquivo
         self.con = duckdb.connect(path)
+        for name, value in applied.items():
+            self.con.execute(f"SET {name} = '{value}'" if name != "threads" else f"SET threads = {value}")
         # a hora é sempre UTC, qualquer que seja o TZ do container (a imagem usa America/Sao_Paulo)
         self.con.execute("SET TimeZone = 'UTC'")
         self.lock = threading.Lock()
