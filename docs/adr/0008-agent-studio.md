@@ -50,14 +50,14 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 ### 5. Topologia (#141)
 - **Nome: agent-studio** (`agent-studio.oute.pro`). O `studio.oute.pro` é outro app, fora do oute-agent.
 - Roda **só no oute-server**, instância central que recebe de todos os hosts. Serviços `agent-studio` e `surrealdb` no **compose do oute-agent**, ligados só no servidor (profile do compose, ativado pelo `oute up`); no Mac não sobem.
-- `mem_limit`: ~2 GB (agent-studio) e ~1 GB (SurrealDB; sem ele o cache do RocksDB mede pela RAM do host). SurrealDB **fixado por digest**, RocksDB em volume nomeado, **sem porta publicada**, autenticação ligada. DuckDB em volume nomeado.
+- `mem_limit`: ~2 GB (agent-studio) e ~1 GB (SurrealDB; sem ele o cache do RocksDB mede pela RAM do host). SurrealDB **fixado por digest**, RocksDB em volume nomeado, **sem porta publicada**, autenticação ligada. DuckDB em volume nomeado. Com `OUTE_AGENT_STUDIO_DIR` (DuckDB) e `OUTE_SURREALDB_DIR` (RocksDB) no `.env`, os dados ficam numa pasta do host, que o `oute up` confere (existe, é do usuário do container); sem a variável, o volume nomeado continua (#570).
 - **Como os hosts chegam (padrão do vault):** o agent-studio publica **só em `127.0.0.1`**, nunca `0.0.0.0`. O nginx do oute-server tem o vhost `agent-studio.oute.pro` **só na tailnet** (TLS), com proxy para ele (mudança do repo `lab`). O collector do Mac manda OTLP a esse endereço com token; o do oute-server fala direto pela rede docker `oute`. O mesmo endereço serve a API do tray e a tela.
 - **Host offline por dias:** coberto pela fila de 1 GB por destino (alerta aos 50%); o backlog chega com a hora original. O tray mostra "último dado há X" por host.
 - Descartado: túnel SSH (cai e precisa de alguém mantendo de pé no Mac).
 
 ### 6. Autenticação (#150)
 - **Duas credenciais** (#256; até a #256 era um token só, `AGENT_STUDIO_TOKEN`, que também chegava ao `agent`):
-  - **Ingestão** (`AGENT_STUDIO_INGEST_TOKEN`): só o collector de cada host tem. Aceita em `POST /v1/logs|traces|metrics` e em mais nada (não lê). Item **`agent-studio`** da pasta **`oute-services`** do vault, que vai ao `~/.oute/services.env` do host e, dali, só aos serviços do compose. **Nunca chega ao container `agent`.** O mesmo item leva a senha do root do SurrealDB (`AGENT_STUDIO_SURREAL_PASS`).
+  - **Ingestão** (`AGENT_STUDIO_INGEST_TOKEN`): só o collector de cada host tem. Aceita em `POST /v1/logs|traces|metrics` e em `POST /v1/backup` (cópia de segurança do DuckDB, #570) e em mais nada (não lê). Item **`agent-studio`** da pasta **`oute-services`** do vault, que vai ao `~/.oute/services.env` do host e, dali, só aos serviços do compose. **Nunca chega ao container `agent`.** O mesmo item leva a senha do root do SurrealDB (`AGENT_STUDIO_SURREAL_PASS`).
   - **Leitura** (`AGENT_STUDIO_READ_TOKEN`): agente (`ops-observe`), tray e navegador (cola uma vez → cookie). Aceita em `GET /v1/usage|alerts|tray` e na tela. Item **`agent-studio`** da pasta **`oute-agent`**, via `agent.env`. Na ingestão, responde **403**.
 - Sem credencial ou com credencial errada = **401**.
 - **Por quê:** a telemetria é a fonte do que a tela de pedidos e o tray mostram ao Bardi para decidir. Agente em yolo com a credencial de ingestão forja evento (um `oute.canal.proposed` com o id de outro pedido); com a senha do SurrealDB, altera o estado de um pedido. Ler, o agente já lê tudo pelo bucket: esconder a leitura não protege nada.
@@ -67,7 +67,7 @@ Base: mapa #135 e as decisões #136 (pipeline sem perda), #137 (medir o collecto
 
 ### 7. Bucket = arquivo frio e backup (#142)
 - **O bucket fica como está:** recebe tudo direto do collector (lote de 5 min), independente do agent-studio; lifecycle do ADR-03 mantido (Infrequent aos 30 d, Archive aos 90 d); **nunca apagado**.
-- **O bucket é o backup.** Sem dump do SurrealDB nem do DuckDB e sem job de backup: o DuckDB é remontado do bucket (`oute studio replay`, rodado quando precisar; "Replay do bucket (#159)") e o SurrealDB, do DuckDB.
+- **O bucket é o backup do que ele recebe; o DuckDB tem também cópia própria (#570).** Sem dump do SurrealDB. A cópia consistente do DuckDB (`Store.backup`, com a ingestão gravando; `POST /v1/backup`) é levada pelo `oute studio backup` a `backups/agent-studio/` do bucket de telemetria, com retenção. Sem a cópia, o DuckDB é remontado do bucket (`oute studio replay`, rodado quando precisar; "Replay do bucket (#159)") e o SurrealDB, do DuckDB.
 - **Objeto com mais de 90 dias está em Archive e precisa de restore antes do replay.** O `oute studio replay` não restaura (nem lê o bucket em escrita): o objeto que o rclone não consegue ler é listado, pulado, e o comando termina com código ≠ 0. Restaure os objetos da faixa com a credencial de admin do OCI (console ou `oci os object restore --bucket-name oute-observability --name <objeto>`; ficam legíveis depois de ~1 h) e rode o replay de novo: o que já entrou volta como repetido.
 - **Toda mudança de estado vira evento** no pipeline. Nada existe só no SurrealDB.
 
@@ -386,7 +386,7 @@ Desenho e medida anterior: [comentário da #536](https://github.com/renatobardi/
   - **Fixture do app** (#344): `tray/Tests/Fixtures/tray.json` (pedido local e de outro host, id com caractere inválido, custo estimado e chamada sem preço, um alerta) e `tray-sem-surrealdb.json` (`bar.pending` nulo, `proposals.available` = `false`). O `tests/agent-studio-tray.test.sh` confere, contra a resposta real, que a fixture tem as mesmas chaves e os mesmos tipos (`null` casa com qualquer tipo: campo anulável); o app Swift usa a fixture nos testes dele.
   - `config.errors`: os erros da config (preços e `[alerts]`).
 - **Falhas:** leitura do DuckDB que falha = **500** (`{"message": "consulta falhou"}`, causa só no stderr, aviso `tray-failed`). O tray mantém o último menu e mostra que não leu.
-- **Tempo de resposta (medido em 2026-10-02, no oute-server):** os blocos do DuckDB saem numa passada sob a trava do escritor; o SurrealDB é lido ao mesmo tempo.
+- **Tempo de resposta (medido em 2026-10-02, no oute-server):** os blocos do DuckDB saem numa passada; desde o #570 as leituras do tray, do uso, dos alertas, das decisões e dos repositórios rodam num cursor próprio, **fora da trava do escritor** (`Store.read_free`: 2 por vez, prazo de 50 s), e a ingestão não espera por elas; o SurrealDB é lido ao mesmo tempo. (A medição abaixo é anterior a isso.)
   - Produção de hoje (2 hosts, ~3 dias de dado, 500 a 900 chamadas ao modelo por dia): as peças que o endpoint reusa respondem em **~0,15 s** (`/v1/alerts`) e **~0,04 s** (`/v1/usage` de 24 h); o `/v1/tray` soma as duas e mais ~0,01 s, **~0,2 s** (a conferir no host depois do deploy).
   - Banco de exemplo com mais volume que a produção (3 dias: 561.600 métricas, 43.200 spans, 64.800 logs): **0,43 s** de mediana, 0,44 s de máximo. Com dez vezes mais histórico (30 dias, 6,7 milhões de linhas): 0,49 s. O tempo depende da janela lida (24 h dos alertas, o dia e a última hora do uso), não do tamanho do banco.
   - Quase todo o tempo é dos alertas do #204 (recusa ~0,29 s e fila ~0,09 s no banco de exemplo); o que o tray acrescenta (máquinas, custo e erros) fica em ~0,05 s. A cada 15 s isso é ~3% do tempo com a trava do DuckDB tomada: a ingestão espera no máximo esse meio segundo.
@@ -575,7 +575,7 @@ O Bardi decidiu, em 2026-10-05 ([comentário na #564](https://github.com/renatob
 - **API com ação (aprovar pelo tray assinando com chave do Mac):** muda o ADR-01 e cria uma peça sensível; volta como melhoria se abrir o Terminal incomodar no uso.
 
 ## Consequências
-- O agent-studio passa a ser um serviço com estado no oute-server: disco (DuckDB + RocksDB) e memória (~3 GB somados) a vigiar. O banco não tem backup próprio: perdido, é remontado do bucket.
+- O agent-studio passa a ser um serviço com estado no oute-server: disco (DuckDB + RocksDB) e memória (~3 GB somados) a vigiar. O DuckDB tem cópia de segurança no bucket de telemetria (§7, #570); perdido, é restaurado dela ou remontado do bucket.
 - O dado de um host só chega ao agent-studio depois do vhost na tailnet (repo `lab`) e do exporter no collector (#155). Até lá, o bucket continua completo.
 - Toda mudança no agent-studio precisa de release (vai na imagem do `oute-agent`).
 - O SurrealDB é BSL: uso interno ok (#139); não redistribuímos.
