@@ -78,6 +78,14 @@ check "sem credencial de marcação: a página diz que a marcação está deslig
 check "sem credencial de marcação: o estado das ações sai do SurrealDB (pendente) e o csrf não existe em lugar nenhum" bash -c '! grep -qF "$2" "$1" && grep -q "data-estado=\"pendente\"" "$1"' _ "$TMP/off.html" "$CSRF"
 studio_stop
 
+# ---------------------------------------------------------------- 1b. credencial de marcação curta (#577): descartada, com aviso
+SHORT_T="$(python3 -c 'import secrets; print(secrets.token_hex(15))')"   # 30 caracteres
+studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_MARK_TOKEN="$SHORT_T" || { cat "$TMP/s/stderr"; die "agent-studio não subiu com a credencial curta"; }
+check "credencial de marcação com menos de 32 caracteres: POST /rodada/acao = 404 (a rota não existe)" test "$(acao "$RC_" "$STUDIO_URL" "$(form "$R" merge:12 a1 feita)")" = 404
+check "credencial de marcação curta: GET /marcar = 404" test "$(code -H "$RC_" "$STUDIO_URL/marcar")" = 404
+check "credencial de marcação curta: aviso no stderr, sem o valor" bash -c 'grep -q "AGENT_STUDIO_MARK_TOKEN com menos de 32 caracteres" "$1" && ! grep -qF "$2" "$1"' _ "$TMP/s/stderr" "$SHORT_T"
+studio_stop
+
 # ---------------------------------------------------------------- 2. com a credencial: quem pode e de onde
 studio_start "$TMP/s" "${SENV[@]}" AGENT_STUDIO_MARK_TOKEN="$MARK_T" || { cat "$TMP/s/stderr"; die "agent-studio não subiu com a credencial de marcação"; }
 O="$STUDIO_URL"
