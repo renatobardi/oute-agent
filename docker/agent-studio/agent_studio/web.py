@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 from starlette.datastructures import QueryParams
 
-from . import (acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
+from . import (acks as acks_mod, acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
                sessions as sess_mod, tabela as tabela_mod, tools as tools_mod, tz as tz_mod, usage as usage_mod)
 from . import alerts as alerts_mod
 from . import loading as loading_mod
@@ -138,6 +138,7 @@ def _env(zone=tz_mod.UTC):
     env.globals["loading_target"] = None
     env.globals["loading_shell"] = False
     env.globals["custo"] = "lista"  # o padrão de quem renderiza sem a escolha (#531); `page()` põe a da URL
+    env.globals["ack"] = {"enabled": False, "active": False, "csrf": "", "seen_at": 0, "back": HOME, "read": None}  # o padrão sem `page()` (#537)
     env.globals["com_custo"], env.globals["custo_nome"] = _com_custo, _custo_nome
     env.globals["repo_none"] = repo_mod.NONE  # o valor de "sem repositório" no filtro (#528)
     env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
@@ -246,20 +247,36 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             (old if a is not None and a > limit else recent).append(it)
         return recent, old
 
+    def band_back(request):
+        """Para onde o ack volta: a tela de agora (a do bloco, quando o pedido é de um trecho), só com os parâmetros dela."""
+        path = getattr(request.state, "screen_path", request.url.path)
+        query = urlencode(loading_mod.pairs(request.query_params))
+        back = path + ("?" + query if query else "")
+        return back if len(back) <= marcar_mod.ACK_BACK_MAX else path
+
     def page(request, name, status=200, headers=None, **ctx):
         # os alertas só existem em página de quem passou pelo `gate` (o login não os mostra)
         ctx.setdefault("custo", cost_mode(request.query_params))  # #531: os links e rótulos do casco leem daqui
         shown = hasattr(request.state, "alerts")
         # o casco (barra lateral e cabeçalho, #467) só aparece para quem entrou; o login e o erro de quem não entrou saem sem ele
-        now = time.time()
-        alerts_new, alerts_old = band_split(getattr(request.state, "alerts", None), alert_age, now)
-        decisions_new, decisions_old = band_split(getattr(request.state, "decisions", None), lambda d, _now: d["age_seconds"], now)
+        now, now_ns = time.time(), time.time_ns()
+        # ack (#537): o item com ack válido sai da faixa e vai para "vistos"; estado não lido = tudo na faixa
+        marks = getattr(request.state, "acks", None)
+        alerts_in, alerts_seen = acks_mod.split(getattr(request.state, "alerts", None), acks_mod.alert_item, marks, now_ns)
+        decisions_in, decisions_seen = acks_mod.split(getattr(request.state, "decisions", None), acks_mod.decision_item, marks, now_ns)
+        alerts_new, alerts_old = band_split(alerts_in, alert_age, now)
+        decisions_new, decisions_old = band_split(decisions_in, lambda d, _now: d["age_seconds"], now)
+        marker = auth.marker(request)
+        # `read`: True = marcas lidas; False = a leitura falhou (aviso); None = sem SurrealDB ou página sem as faixas
+        ctx["ack"] = {"enabled": auth.mark, "active": marker, "csrf": auth.mark_csrf if marker else "", "seen_at": now_ns,
+                      "back": band_back(request), "read": None if marks is None else marks is not False}
         target = getattr(request.state, "block", None)
         found = []
         ctx.update(fragment=loading_mod.render_fragment(target, found), loading_target=target,
                    loading_slot=lambda n, shape, anchor="": slot(request, n, shape, anchor))
         html = env.get_template(name).render(**ctx, alerts_shown=shown, alerts=alerts_new, alerts_old=alerts_old,
                                              decisions=decisions_new, decisions_old=decisions_old,
+                                             alerts_seen=alerts_seen, decisions_seen=decisions_seen,
                                              authed=shown or bool(auth.reader(request)))
         if target is not None:
             if not found:
@@ -316,6 +333,26 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             detail_log.exception("tela: decisões pendentes falhou")
             return None
 
+    async def band_acks(request):
+        """Os acks ainda no prazo, do SurrealDB, para as faixas (#537): `request.state.acks` = {alvo: marca}; `False` = a leitura
+        falhou (os itens ficam todos visíveis, com aviso); `None` = este processo não tem SurrealDB."""
+        request.state.acks = None
+        if surreal is None:
+            return
+        try:
+            request.state.acks = await run_in_threadpool(acks_mod.states, surreal, time.time_ns())
+        except Exception as e:  # noqa: BLE001 — sem as marcas a faixa sai inteira
+            tel.warn("web-acks-failed", "tela: leitura dos acks falhou, as faixas saíram sem eles: %s", type(e).__name__, level=logging.ERROR)
+            detail_log.exception("tela: leitura dos acks falhou")
+            request.state.acks = False
+
+    async def ack_items():
+        """Os itens vigentes das faixas, para o `POST /ack`: levanta se o cálculo falhar (a rota responde 503)."""
+        now = time.time_ns()
+        found = await run_in_threadpool(store.alerts, now, config.alerts)
+        pending = await run_in_threadpool(store.decisions, now, config.alerts)
+        return [acks_mod.alert_item(a) for a in found["alerts"]] + [acks_mod.decision_item(d) for d in pending["pending"]]
+
     async def gate(request):
         """`None` se pode ler (e a página leva os alertas); senão a resposta que manda para o login."""
         if auth.reader(request):
@@ -323,6 +360,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             if request.query_params.get("full") == "1" and not is_htmx(request):
                 request.state.alerts = await active_alerts()
                 request.state.decisions = await pending_decisions()
+                await band_acks(request)
             return None
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         login = "/login?next=" + quote(target, safe="")
@@ -469,15 +507,17 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 410, "Este carregamento expirou. Reabra a tela para carregar os blocos.")
         if block == "alertas":
             request.state.alerts = await active_alerts()
+            await band_acks(request)
             return page(request, "base.html")
         if block == "decisoes":
             request.state.decisions = await pending_decisions()
+            await band_acks(request)
             return page(request, "base.html")
         return await screens[path](request)
 
     @app.get("/rodada/bloco/{block}")
     async def round_block(request: Request, block: str):
-        # O cookie de marcação da #510 tem Path=/rodada: esta rota mantém seu escopo.
+        # A #510 pôs os trechos da rodada aqui por causa do cookie de marcação em Path=/rodada; a #537 levou o cookie a Path=/ e a rota fica.
         return await block_screen(request, "rodada", block)
 
     # ------------------------------------------------ dashboard (#469): só leitura
@@ -919,9 +959,9 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             etapas_mod.render([data["summary"]])
         return page(request, "ciclo.html", c=data, state_read=data["state_read"])
 
-    # ------------------------------------------------ marcar ação (#510): a única escrita do navegador além do login; só com a credencial de marcação
+    # ------------------------------------------------ marcar ação (#510) e ack (#537): as únicas escritas do navegador além do login; só com a credencial de marcação
     if auth.mark:
-        marcar_mod.mount(app, store, auth, tel, surreal, page, error, gate, safe_next, HEADERS)
+        marcar_mod.mount(app, store, auth, tel, surreal, page, error, gate, safe_next, HEADERS, ack_items)
 
     # ------------------------------------------------ preços (#340): só leitura
     @screen("/precos")

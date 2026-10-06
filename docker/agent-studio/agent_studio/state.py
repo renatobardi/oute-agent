@@ -74,6 +74,30 @@ def mark_statements(row):
                            "b": {k: b64(fields[k]) for k in _MARK_TEXT}})]
 
 
+# ack de alerta e de decisão pendente (#537, ADR-08 §10): vem da `ack_marks`, não dos logs. Como o `acao`: só grava se a marca é
+# mais nova que a gravada. O prazo (`expires_ns`) vem da linha, então remontar o estado não o renova
+ACK_TARGET_RE = re.compile(r"^[0-9a-f]{32}\Z")
+ACK_KINDS = ("alerta", "decisao")
+_ACK_TEXT = ("target", "kind", "since", "rule", "by")
+ACK_UPSERT = (
+    'IF (array::first(SELECT VALUE acked_ns FROM [type::record("ack", $v.id)]) ?? 0) <= $v.ns THEN { '
+    'UPSERT type::record("ack", $v.id) SET acked_ns = $v.ns, expires_ns = $v.x, acked_at = <datetime> $v.t, expires_at = <datetime> $v.xt, '
+    + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _ACK_TEXT) + "; } END;")
+
+
+def ack_statements(row):
+    """Uma linha da `ack_marks` (`acks.COLUMNS`) -> statements do `ack` (id = [alvo]). Linha fora do formato não vira estado:
+    o fato continua no DuckDB."""
+    target, kind, since, rule = row["target"], row["kind"], row["since"], row["rule"]
+    if (not isinstance(target, str) or not ACK_TARGET_RE.match(target) or kind not in ACK_KINDS
+            or not isinstance(since, str) or not since or not isinstance(rule, str) or not rule):
+        return []
+    ns, expires = int(row["acked_unix_nano"]), int(row["expires_unix_nano"])
+    fields = {"target": target, "kind": kind, "since": since, "rule": rule, "by": row["acked_by"]}
+    return [(ACK_UPSERT, {"id": [target], "ns": ns, "x": expires, "t": iso(ns), "xt": iso(expires),
+                          "b": {k: base64.b64encode(str(fields[k]).encode()).decode() for k in _ACK_TEXT}})]
+
+
 def iso(ns):
     s, rest = divmod(int(ns), 1_000_000_000)
     return datetime.fromtimestamp(s, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + f".{rest:09d}Z"

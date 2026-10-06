@@ -293,7 +293,14 @@ dd.erro { color: var(--destructive); }
 .alertas ul, .decisoes ul { margin: 0; padding: 0; list-style: none; }
 .faixa-link { flex-shrink: 0; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
 .faixa-corpo details.antigos > summary { cursor: pointer; font-size: 13px; font-weight: 500; }
-@media (max-width: 640px) { .alertas, .decisoes { padding: 10px 16px; } }
+/* ack (#537): o botão "Visto" na linha do item e, fora da faixa, a lista recolhida do que já foi visto */
+.ack-form { display: inline; margin-left: 8px; }
+.ack-form .botao { padding: 2px 10px; font-size: 13px; }
+.faixa-corpo .nota { margin: 4px 0 0; font-size: 13px; }
+details.vistos { margin: 0; padding: 6px 24px; font-size: 13px; color: var(--muted-foreground); }
+details.vistos > summary { cursor: pointer; font-weight: 500; }
+details.vistos ul { margin: 4px 0 0; padding: 0; list-style: none; }
+@media (max-width: 640px) { .alertas, .decisoes { padding: 10px 16px; } details.vistos { padding: 6px 16px; } }
 /* tela Entrar (#467): painel --primary à esquerda e formulário à direita; uma coluna só no celular */
 .entrar { display: flex; flex-wrap: wrap; min-height: 100vh; }
 .entrar-painel { flex: 1 1 520px; display: flex; flex-direction: column; justify-content: space-between; gap: 48px; padding: 48px 56px;

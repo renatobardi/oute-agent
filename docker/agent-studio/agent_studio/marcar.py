@@ -1,6 +1,6 @@
 """Marcar ação como feita na página da rodada (#510, ADR-08 "Página da rodada e do ciclo", exceção ao §10).
 
-`POST /rodada/acao` é a **única escrita do navegador além do login e do logout**. Ela só grava a marca (uma linha de
+`POST /rodada/acao` e `POST /ack` (#537, abaixo) são as **únicas escritas do navegador além do login e do logout**. A primeira só grava a marca (uma linha de
 `action_marks`, `marks.py`, e o `acao` derivado no SurrealDB): não faz o host rodar nada, não faz merge e não fecha issue (ADR-01
 não muda). Só existe com a credencial de marcação configurada (`auth.mark`); sem ela, nem esta rota nem `/marcar` são registradas.
 
@@ -15,21 +15,38 @@ não muda). Só existe com a credencial de marcação configurada (`auth.mark`);
 - **2xx só depois do commit:** o `acao` do SurrealDB é gravado dentro da transação do DuckDB, antes do `COMMIT`; qualquer
   falha = 503 e nada fica (como a ingestão). A marca nunca vai ao bucket (D3=1).
 - **Nada do cliente em log nem em resposta de erro:** as mensagens são fixas.
+
+**`POST /ack` (#537, ADR-08 §10, adendo do ack):** só reconhece ("visto") um alerta ou uma decisão pendente. Não resolve alerta,
+não responde pergunta, não fecha gate, não faz o host rodar nada e não escreve em `action_marks`. A mesma credencial, o mesmo
+`Origin` e o mesmo `csrf`; sem a credencial de marcação a rota não existe.
+
+- **Corpo:** os campos `alvo` (32 hex: a referência do item, `acks.py`), `desde` (o `since` que a página mostrou), `visto` (a
+  hora em que a página foi montada, ns), `voltar` (caminho deste servidor, para onde o 303 leva) e `csrf`; fora disso = 400.
+- **Só item vigente:** o servidor recalcula os alertas e as decisões pendentes e procura o alvo: sem ele, ou sem `since`, 400.
+  Com o alvo mas outra ocorrência (formulário antigo: `acks.same` entre o que a página mostrou e o de agora), 409.
+- **O servidor calcula tudo:** identidade, versão, hora e prazo (24 h). O navegador não escolhe quem marcou nem o prazo.
+- **Repetir não renova:** com um ack ainda válido para a ocorrência, nada é acrescentado e a resposta é a do ack que já vale.
+- **2xx só depois do commit**, como acima: falha = 503 e nada fica; tentar de novo não renova ack nenhum.
 """
 import logging
+import re
+import time
 from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from . import acoes as acoes_mod, etapas as etapas_mod, marks, state
+from . import acks, acoes as acoes_mod, etapas as etapas_mod, marks, state
 
 detail_log = logging.getLogger("agent_studio_detail")
 
 MAX_BODY = 4096
 FIELDS = frozenset({"rodada", "etapa", "acao", "estado", "csrf"})
 LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
+ACK_FIELDS = frozenset({"alvo", "desde", "visto", "voltar", "csrf"})
+ACK_SEEN = re.compile(r"^[0-9]{1,20}\Z")
+ACK_BACK_MAX = 1024
 
 
 def origin_ok(request):
@@ -76,8 +93,20 @@ def parse_fields(form):
     return rodada, kind, key, acao, estado, csrf
 
 
-def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers):
-    """Liga `GET/POST /marcar` e `POST /rodada/acao`. Só é chamado com a credencial de marcação configurada."""
+def parse_ack(form):
+    """O formulário do ack -> `(alvo, desde, visto em ns, voltar, csrf)`, ou `None` se algum campo falta, sobra ou foge do
+    formato."""
+    if not isinstance(form, dict) or set(form) != ACK_FIELDS or any(len(v) != 1 for v in form.values()):
+        return None
+    alvo, desde, visto, voltar, csrf = (form[k][0] for k in ("alvo", "desde", "visto", "voltar", "csrf"))
+    if not acks.TARGET.match(alvo) or not acks.SINCE.match(desde) or not ACK_SEEN.match(visto) or len(voltar) > ACK_BACK_MAX:
+        return None
+    return alvo, desde, int(visto), voltar, csrf
+
+
+def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers, ack_items=None):
+    """Liga `GET/POST /marcar`, `POST /rodada/acao` e `POST /ack`. Só é chamado com a credencial de marcação configurada.
+    `ack_items()` = os itens vigentes das faixas (`acks.alert_item`/`decision_item`); levanta se a leitura falhar."""
 
     def refuse(status, message):
         return JSONResponse({"message": message}, status_code=status, headers=headers)
@@ -163,6 +192,71 @@ def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers)
             return JSONResponse({"rodada": rodada, "etapa": etapa, "acao": action_id, "estado": estado}, headers=headers)
         back = f"/rodada?id={quote(rodada, safe='')}#{etapas_mod.anchor({'kind': kind, 'key': key})}"
         return page(request, "marcado.html", back=back, action=action_id, marked=estado)
+
+
+    def retry(message):
+        return JSONResponse({"message": message}, status_code=503, headers={**headers, "Retry-After": "5"})
+
+    @app.post("/ack")
+    async def ack(request: Request):
+        # 1. quem: só o cookie de marcação, como no `/rodada/acao`
+        if not auth.marker(request):
+            if auth.reader(request):
+                tel.warn("ack-forbidden", "recusado: credencial de leitura no ack")
+                return refuse(403, "forbidden")
+            tel.warn("ack-unauthorized", "recusado: sem credencial de marcação no ack")
+            return refuse(401, "unauthorized")
+        # 2. de onde: Origin igual ao Host
+        if not origin_ok(request):
+            tel.warn("ack-origin", "recusado: Origin do ack ausente ou diferente do Host")
+            return refuse(403, "forbidden")
+        # 3. o corpo: teto, formato e campos
+        form = await read_form(request)
+        if form == "grande":
+            tel.warn("ack-too-large", "recusado: ack com corpo acima de %d bytes", MAX_BODY)
+            return refuse(413, "corpo grande demais")
+        fields = parse_ack(form)
+        if fields is None:
+            tel.warn("ack-bad", "recusado: ack com campos fora do formato")
+            return refuse(400, "campos inválidos")
+        target, shown_since, shown_ns, back, csrf = fields
+        if not auth.csrf_ok(csrf):
+            tel.warn("ack-csrf", "recusado: campo csrf do ack errado")
+            return refuse(403, "forbidden")
+        # 4. o item existe agora, dá para reconhecer e é a ocorrência que a página mostrou
+        try:
+            items = await ack_items()
+        except Exception as e:  # noqa: BLE001 — a causa só no stderr
+            tel.warn("ack-failed", "ack: leitura dos alertas e das decisões falhou, respondi 503: %s", type(e).__name__, level=logging.ERROR)
+            detail_log.exception("ack: leitura dos itens falhou")
+            return retry("leitura falhou; tente de novo")
+        item = next((i for i in items if i["target"] == target and i["since"]), None)
+        if item is None:
+            tel.warn("ack-unknown", "recusado: ack de item que não está vigente")
+            return refuse(400, "item inexistente")
+        if shown_ns > time.time_ns() or not acks.same(item["kind"], shown_since, shown_ns, item["since"]):
+            tel.warn("ack-stale", "recusado: ack de formulário antigo (a ocorrência mudou)")
+            return refuse(409, "a ocorrência mudou; recarregue a página")
+        # 5. grava: DuckDB e SurrealDB juntos ou nenhum; 2xx só depois do commit. Ack ainda válido não é renovado
+        def write(con):
+            row = acks.last(con, target)
+            new = row is None or not acks.valid(acks.as_mark(row), item, time.time_ns())
+            if new:
+                row = acks.append(con, item)
+            if surreal is not None:
+                surreal.apply(state.ack_statements(row))
+            return row, new
+        try:
+            row, new = await run_in_threadpool(store.transact, write)
+        except Exception as e:  # noqa: BLE001 — qualquer falha na gravação é retentável
+            tel.warn("ack-failed", "ack: gravação falhou, respondi 503: %s", type(e).__name__, level=logging.ERROR)
+            detail_log.exception("ack: gravação falhou")
+            return retry("gravação falhou; tente de novo")
+        # só valores do servidor voltam na resposta
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"alvo": row["target"], "visto_em": state.iso(row["acked_unix_nano"]),
+                                 "vale_ate": state.iso(row["expires_unix_nano"]), "novo": new}, headers=headers)
+        return RedirectResponse(safe_next(back), status_code=303, headers=headers)
 
 
 def find_action(data, kind, key, action_id):

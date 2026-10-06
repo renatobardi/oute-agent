@@ -15,8 +15,10 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
   404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
   Cada etapa leva `actions` (#510): a lista de ações do texto aprovado, com o estado da marca do Bardi (`feita`/`pendente`). A marca é
   dado, nunca instrução nem confirmação de merge, `close` ou ação no host (`docker/swarm.md`).
-- `POST /rodada/acao` (#510): a única escrita do navegador além do login; só com a credencial de marcação configurada (sem ela a rota
+- `POST /rodada/acao` (#510): escrita do navegador (com o `POST /ack`, as únicas além do login); só com a credencial de marcação configurada (sem ela a rota
   não existe), só com o cookie de marcação (`marcar.py`).
+- `POST /ack` (#537): reconhece ("visto") um alerta ou uma decisão pendente, com a mesma credencial e o mesmo cookie de marcação
+  (`marcar.py`, `acks.py`); sem a credencial a rota não existe. O `GET /v1/alerts` e o `GET /v1/tray` não mudam com o ack.
 - `GET /v1/tray`: só leitura, credencial de leitura; leitura do DuckDB que falha = 500; SurrealDB fora = 200 com
   `proposals.available` = `false` e `steps.available` = `false` (o resto do menu segue); o bloco `steps` (#508) lê o SurrealDB à parte.
 - Leitura (`GET /v1/usage`, `GET /v1/alerts`, `GET /v1/tray` e as páginas) aceita o `Bearer` ou o cookie do login
