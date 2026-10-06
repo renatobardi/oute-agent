@@ -30,6 +30,7 @@ Regras do script: bash, `set -euo pipefail`, idempotente, um objetivo por pedido
    ```
 Pedido que **remove, recria ou para** recurso do host (volume, container, arquivo, serviço) lista antes, no próprio script, quem depende dele e **para sem alterar nada** se achar dependente fora do esperado; ou vem precedido de um pedido de ensaio (`--dry-run`/só leitura).
 Pedido pendente que ficou **obsoleto** (o anterior falhou, o plano mudou): avise o usuário para **recusá-lo antes** de propor o substituto, e o título do substituto diz que ele **substitui** o anterior (ex.: "substitui <id>: …").
+**Release, deploy e verificação de deploy: leia a fila antes (#650).** Antes de propor release, deploy ou verificação de deploy, leia a fila do canal (`oute-inbox`, lista os pedidos pendentes) e as rodadas abertas (`oute-swarm busy`, lista as issues com sessão aberta em outra rodada). Com pedido pendente de release ou deploy de **outra sessão**, não proponha outro: avise o Bardi (qual pedido, de qual sessão) e espere. Pedido de deploy diz no `# RESUMO` quais rodadas estão abertas e quais sessões caem com o `oute down`/`up`.
 
 Mudança **permanente** na configuração do oute-server segue o fluxo do repositório `lab` (issue → inventário → script → PR). O canal de aprovação serve para diagnóstico, ajustes pontuais e para rodar o deploy de um PR já mergeado.
 

@@ -1,0 +1,2 @@
+### Changed
+- **Release, deploy e verificação de deploy leem a fila do canal antes** (#650). O `docker/agent-notes.md` e a skill `oute-aidlc-ship-release` mandam ler `oute-inbox` e `oute-swarm busy` antes de propor; com pedido pendente de release ou deploy de outra sessão, a sessão avisa o Bardi em vez de propor outro, e o `# RESUMO` do deploy diz quais rodadas estão abertas e quais sessões caem. Precisa de release (`docker/agent-notes.md` entra na imagem).

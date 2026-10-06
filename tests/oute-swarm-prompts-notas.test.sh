@@ -59,4 +59,10 @@ check "538: notas mandam listar primeiro o que a sessão abriu" grep -qF 'liste 
 check "538: notas proíbem chamar de desta sessão o que veio de ps/pgrep" grep -qF 'Nunca chame de "desta sessão" o que veio de `ps` ou `pgrep`' "$N"
 check "538: notas pedem o comentário de merge (sessão, a pedido de quem, head)" grep -qF 'a sessão (worktree e id), "a pedido do Bardi" ou a autorização usada, e o head mergeado' "$N"
 check "538: notas declaram os limites (engano, não contorno; merge no site)" bash -c 'grep -qF "protegem contra engano, não contra quem contorna" "$1" && grep -qF "Não valem para merge feito pelo Bardi no site" "$1"' _ "$N"
+# 650. release, deploy e verificação: ler a fila do canal e as rodadas abertas antes de propor
+SR="$ROOT/addons/skills/oute-aidlc-ship-release/SKILL.md"
+check "650: notas mandam ler a fila (oute-inbox) e as rodadas (oute-swarm busy) antes de propor" bash -c 'grep -qF "Antes de propor release, deploy ou verificação de deploy, leia a fila do canal (\`oute-inbox\`" "$1" && grep -qF "as rodadas abertas (\`oute-swarm busy\`" "$1"' _ "$N"
+check "650: notas não propõem outro com pedido pendente de outra sessão e avisam o Bardi" grep -qF 'de **outra sessão**, não proponha outro: avise o Bardi' "$N"
+check "650: notas pedem no # RESUMO as rodadas abertas e as sessões que caem" grep -qF 'quais rodadas estão abertas e quais sessões caem' "$N"
+check "650: ship-release traz o passo da fila antes do pedido" bash -c 'grep -qF "oute-inbox " "$1" && grep -qF "oute-swarm busy" "$1" && grep -qF "quais rodadas estão abertas e quais sessões caem" "$1"' _ "$SR"
 check_end
