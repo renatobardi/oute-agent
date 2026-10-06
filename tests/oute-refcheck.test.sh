@@ -32,6 +32,9 @@ case "$path" in
   repos/*/*/issues/*)
     n="${path##*/}"; grep -qx "$n" "$FAKE/issues" || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
     echo "$n" ;;
+  repos/*/*/pulls/*/files)
+    n="${path%/files}"; n="${n##*/}"; [ -s "$FAKE/pr-$n.files" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    cat "$FAKE/pr-$n.files" ;;
   *) echo "gh falso: caminho $path" >&2; exit 1 ;;
 esac
 GH
@@ -107,6 +110,29 @@ run "rascunho em /tmp/claude-1/x/relatorio.md e /tmp/claude-1/x/scratchpad/nota.
 check "/tmp e scratchpad: nao-abre e saída 1" bash -c '[ "$1" = 1 ] && [ "$(grep -c "^nao-abre" <<<"$2")" = 2 ]' _ "$RCODE" "$OUT"
 run "arquivo /tmp/a/b.md:3"
 check "caminho de /tmp com :linha conta uma vez, como nao-abre" bash -c '[ "$(grep -c "^" <<<"$1")" = 2 ] && grep -q "^nao-abre" <<<"$1"' _ "$OUT"
+
+# caminho curto e hash de arquivo (#661)
+printf 'eventos/web/decisoes/rotas.py\ndocker/oute-x\n' > "$FAKE/pr-10.files"
+run "PR #10: ver rotas.py:66"
+check "caminho sem pasta com o arquivo no diff do PR citado: ok" has '^ok.arquivo:linha.rotas.py:66.eventos/web/decisoes/rotas.py'
+run "PR #20: ver rotas.py:66"
+check "caminho sem pasta, PR citado sem o arquivo no diff: quebrada" bash -c '[ "$1" = 1 ] && grep -q "^quebrada.arquivo:linha.rotas.py:66" <<<"$2"' _ "$RCODE" "$OUT"
+run "ver rotas.py:66"
+check "caminho sem pasta sem PR citado: quebrada" has '^quebrada.arquivo:linha.rotas.py:66'
+run "ver https://github.com/o/r/pull/10#issuecomment-555 e rotas.py:66"
+check "PR citado por link de comentário também vale" has '^ok.arquivo:linha.rotas.py:66'
+run "PR #10: ver docker/outro.py:66"
+check "caminho com pasta não usa o diff: quebrada" has '^quebrada.arquivo:linha.docker/outro.py:66'
+run "sha256 3100e775 do arquivo e commit $FAKESHA"
+check "hash precedido de sha256 não é conferido; commit inexistente segue quebrada" bash -c '! grep -q "3100e775" <<<"$1" && grep -q "^quebrada.sha.$2" <<<"$1"' _ "$OUT" "$FAKESHA"
+run "sha256: 3100e775…"
+check "sha256 de arquivo sozinho: nenhuma quebrada, saída 0" bash -c '[ "$1" = 0 ] && grep -q "^# 0 referências" <<<"$2"' _ "$RCODE" "$OUT"
+run "hash 3100e775 sem marca"
+check "hash sem marca de sha256 continua conferido como commit" has '^quebrada.sha.3100e775'
+touch "$FAKE/gh.down"
+run "PR #10: ver rotas.py:66"
+check "gh fora do ar na busca do diff: quebrada (não achou)" has '^quebrada.arquivo:linha.rotas.py:66'
+rm -f "${FAKE:?}/gh.down"
 
 # gh fora do ar ou sem resposta: por referência, sem travar; só o que usa gh vira nao-conferido
 touch "$FAKE/gh.down"
