@@ -217,6 +217,21 @@ agent_studio_enabled() { [[ "${OUTE_AGENT_STUDIO:-$(env_get OUTE_AGENT_STUDIO)}"
 # e sobe o resto (nunca bloqueia a subida). Junto, o pipeline do collector ao agent-studio
 # (config/otel/agent-studio.yaml, #189): pela rede docker no host com o agent-studio, pelo vhost nos outros (#190).
 # Sem a credencial de ingestão, none.yaml e o collector não muda (a fila não enche de 401).
+# Pasta do host para os dados do agent-studio (#570): OUTE_AGENT_STUDIO_DIR (DuckDB) e OUTE_SURREALDB_DIR, no .env ou no
+# ambiente. Pasta errada para a subida: o Docker criaria uma pasta vazia e o agent-studio subiria com um banco novo,
+# como se o histórico tivesse sumido. Sem a variável, o compose usa o volume docker.
+studio_data_dir() {
+  local var="$1" dir
+  dir="${!var:-$(env_get "$var" || true)}"   # sem .env, o env_get falha sob pipefail
+  [[ -n "$dir" ]] || return 0
+  [[ "$dir" == /* ]] || { echo "oute: $var=$dir precisa ser um caminho absoluto" >&2; return 1; }
+  [[ -d "$dir" ]] || { echo "oute: $var=$dir não existe. Crie a pasta e copie os dados antes de subir (o agent-studio" \
+    "não pode subir com um banco vazio no lugar do histórico)" >&2; return 1; }
+  local owner; owner="$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir")"
+  [[ "$owner" == "${CONTAINER_UID:-10001}" ]] || { echo "oute: $var=$dir tem dono $owner; o dono precisa ser" \
+    "${CONTAINER_UID:-10001} (o usuário do container)" >&2; return 1; }
+  export "$var=$dir"
+}
 agent_studio_up() {
   export OUTE_OTEL_STUDIO=none AGENT_STUDIO_URL="$STUDIO_LOCAL_URL"
   # transição (#256): sem a credencial nova, a ingestão segue com o token único de antes
@@ -240,6 +255,8 @@ agent_studio_up() {
     export AGENT_STUDIO_INGEST_TOKEN OUTE_OTEL_STUDIO=agent-studio
     return 0
   fi
+  studio_data_dir OUTE_AGENT_STUDIO_DIR
+  studio_data_dir OUTE_SURREALDB_DIR
   local v falta=""
   for v in AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_SURREAL_PASS; do [[ -n "${!v:-}" ]] || falta="$falta${falta:+ }$v"; done
   if [[ -n "$falta" ]]; then
