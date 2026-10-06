@@ -277,7 +277,10 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     coletor fora; toda chamada e a subida já reenviam sozinhas)
   oute-emit reconcile               decided de todo ~/inbox/*.out ainda não enviado (ex.: aprovado
                                     com o container fora); a subida já chama; registro em
-                                    ~/.oute/emit/decided/; o anterior ao corte é do backfill
+                                    ~/.oute/emit/decided/; o anterior ao corte é do backfill.
+                                    Também o round.closed de toda rodada com a marca `fechada`
+                                    no disco e sem o evento (#654; todo `oute-emit swarm` faz o
+                                    mesmo); registro em ~/.oute/emit/rounds-closed/
   OUTE_EMIT_DEBUG=1 oute-emit …     mostra o erro de envio (normalmente silencioso)
 
 ## Memória (ai-memory)

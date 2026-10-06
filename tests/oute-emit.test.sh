@@ -834,4 +834,83 @@ check "decisão, backfill: dois eventos, com oute.backfill=true" [ "$(n '(.name 
 check "decisão, backfill: mesmo oute.event.id do ao vivo" [ -n "$LIVE_IDS" -a "$(ids "$RCV_DIR" '.name | startswith("oute.swarm.round.a")')" == "$LIVE_IDS" ]
 rcv_stop
 
+# ---------------------------------------------------------------- 17. rodada fechada no disco sem o evento (#654)
+# a marca `fechada` gravada fora do `oute-swarm close` (pelo canal de aprovação, ou vazia) não passa pelo slog: o
+# `oute-emit reconcile` (subida) e todo `oute-emit swarm` emitem o round.closed que falta, uma vez só. Marca em
+# ~/.oute/emit/rounds-closed/<rodada>: POST aceito ou guardado no spool. Anterior ao corte = backfill.
+KH="$TMP/fech"; KW="$KH/.oute/swarm"; KM="$KH/.oute/emit/rounds-closed"; KS="$KH/.oute/emit/spool"; mkdir -p "$KH/.oute/emit"
+echo 2026-10-01T00:00:00Z > "$KH/.oute/emit/since"
+# rodada <id> <hora da abertura> [linha extra do log]: pasta com meta e log
+rodada() {
+  local id="$1" started="$2" extra="${3:-}"
+  mkdir -p "$KW/$id"
+  printf 'repo=/workspace/oute-agent\nmax=3\nlabel=\nstarted=%s\nagent=claude\n' "$started" > "$KW/$id/meta"
+  printf '%s abertura %s\n%s' "$started" "$id" "${extra:+$extra$'\n'}" > "$KW/$id/log"
+  return 0
+}
+# fech <id>: quantos round.closed da rodada chegaram; hora <id>: a hora do fato deles
+fech() {
+  local id="$1"
+  n ".name == \"oute.swarm.round.closed\" and .attrs[\"oute.swarm.round\"] == \"$id\""
+  return $?
+}
+hora() {
+  local id="$1"
+  ev ".name == \"oute.swarm.round.closed\" and .attrs[\"oute.swarm.round\"] == \"$id\"" | jq -r '.time | tonumber / 1e9 | todate'
+  return $?
+}
+rodada r-canal 2026-10-02T10:00:00Z '2026-10-03T02:58:15Z rodada fechada (pelo canal de aprovação)'
+echo 2026-10-03T02:58:15Z > "$KW/r-canal/fechada"
+rodada r-so-marca 2026-10-02T11:00:00Z; echo 2026-10-02T12:00:00Z > "$KW/r-so-marca/fechada"
+rodada r-vazia 2026-10-02T11:30:00Z; : > "$KW/r-vazia/fechada"; touch -d 2026-10-04T09:00:00Z "$KW/r-vazia/fechada"
+rodada r-aberta 2026-10-02T13:00:00Z
+rodada r-velha 2026-09-30T09:00:00Z; echo 2026-09-30T10:00:00Z > "$KW/r-velha/fechada"
+rodada r-ruim 2026-10-02T14:00:00Z 'ontem rodada fechada'; echo 2026-10-02T15:00:00Z > "$KW/r-ruim/fechada"
+rcv_start "$TMP/r17a"
+HOME="$KH" oute-emit reconcile
+check "fechada no disco: a linha do canal vira round.closed, na hora da linha" [ "$(fech r-canal)" -eq 1 -a "$(hora r-canal)" == "2026-10-03T02:58:15Z" ]
+check "fechada no disco: sem linha no log, a hora é a do conteúdo da marca" [ "$(fech r-so-marca)" -eq 1 -a "$(hora r-so-marca)" == "2026-10-02T12:00:00Z" ]
+check "fechada no disco: marca vazia, a hora é a de alteração do arquivo" [ "$(fech r-vazia)" -eq 1 -a "$(hora r-vazia)" == "2026-10-04T09:00:00Z" ]
+check "fechada no disco: rodada sem a marca não emite nem marca" [ "$(fech r-aberta)" -eq 0 -a ! -e "$KM/r-aberta" ]
+check "fechada no disco: anterior ao corte fica com o backfill, sem marca" [ "$(fech r-velha)" -eq 0 -a ! -e "$KM/r-velha" ]
+check "fechada no disco: linha com hora inválida é pulada, as outras saem" [ "$(fech r-ruim)" -eq 0 -a ! -e "$KM/r-ruim" -a "$(n '.name == "oute.swarm.round.closed"')" -eq 3 ]
+check "fechada no disco: as três enviadas ficam marcadas" [ -e "$KM/r-canal" -a -e "$KM/r-so-marca" -a -e "$KM/r-vazia" ]
+ID_REC="$(ev '.attrs["oute.swarm.round"] == "r-so-marca"' | jq -r '.attrs["oute.event.id"]')"
+rcv_stop
+rcv_start "$TMP/r17b"
+HOME="$KH" oute-emit reconcile
+check "fechada no disco: reconcile repetido não reemite" [ "$(posts)" -eq 0 ]
+# o fechamento ao vivo (a linha do slog) marca a rodada, e leva o mesmo id que a reconciliação daria
+LH="$TMP/fech-vivo"; mkdir -p "$LH/.oute/swarm/r-so-marca" "$LH/.oute/emit"; echo 2026-10-01T00:00:00Z > "$LH/.oute/emit/since"
+cp "$KW/r-so-marca/meta" "$LH/.oute/swarm/r-so-marca/"; echo 2026-10-02T12:00:00Z > "$LH/.oute/swarm/r-so-marca/fechada"
+echo '2026-10-02T12:00:00Z rodada fechada' > "$LH/.oute/swarm/r-so-marca/log"
+HOME="$LH" oute-emit swarm r-so-marca '2026-10-02T12:00:00Z rodada fechada'
+check "fechada ao vivo: um evento só, marcado, com o id da reconciliação" [ "$(fech r-so-marca)" -eq 1 -a -e "$LH/.oute/emit/rounds-closed/r-so-marca" -a -n "$ID_REC" \
+                                                             -a "$(ev true | jq -r '.attrs["oute.event.id"]')" == "$ID_REC" ]
+# todo `oute-emit swarm` reconcilia: o evento de outra rodada leva junto o fechamento que faltava
+rodada r-tarde 2026-10-05T08:00:00Z; echo 2026-10-05T09:00:00Z > "$KW/r-tarde/fechada"
+P='2026-10-05T09:30:00Z pergunta abrir a #1?'; echo "$P" >> "$KW/r-aberta/log"
+HOME="$KH" oute-emit swarm r-aberta "$P"
+check "oute-emit swarm: o evento da linha e o fechamento pendente de outra rodada" [ "$(n '.name == "oute.swarm.round.asked"')" -eq 1 -a "$(fech r-tarde)" -eq 1 -a -e "$KM/r-tarde" ]
+rcv_stop
+# não conta como enviado: sem endpoint e spool cheio; coletor fora = spool, e marca
+rodada r-fora 2026-10-05T10:00:00Z; echo 2026-10-05T11:00:00Z > "$KW/r-fora/fechada"
+HOME="$KH" OTEL_EXPORTER_OTLP_ENDPOINT= oute-emit reconcile
+check "fechada no disco, sem endpoint: não marca"       [ ! -e "$KM/r-fora" ]
+HOME="$KH" OUTE_EMIT_SPOOL_MAX=100 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit reconcile
+check "fechada no disco, spool cheio: descarta e não marca" [ ! -e "$KM/r-fora" -a -z "$(ls "$KS/"*.json 2>/dev/null)" ]
+HOME="$KH" OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" oute-emit reconcile
+check "fechada no disco, coletor fora: vai para o spool e marca" [ -e "$KM/r-fora" -a "$(events "$KS" | jq -c 'select(.name == "oute.swarm.round.closed" and .attrs["oute.swarm.round"] == "r-fora")' | grep -c .)" -eq 1 ]
+rcv_start "$TMP/r17c"
+HOME="$KH" oute-emit flush
+check "fechada no disco: o spool chega depois, uma vez" [ "$(fech r-fora)" -eq 1 -a "$(n true)" -eq 1 ]
+rcv_stop
+# sem corte (since): não reconcilia (não sabe o que é do backfill), nem pelo `oute-emit swarm`
+SH="$TMP/fech-nosince"; mkdir -p "$SH/.oute/swarm"; cp -R "$KW/r-canal" "$KW/r-aberta" "$SH/.oute/swarm/"
+rcv_start "$TMP/r17d"
+HOME="$SH" oute-emit reconcile
+HOME="$SH" oute-emit swarm r-aberta "$P"
+check "fechada no disco, sem corte: só o evento da linha, nada marcado" [ "$(n true)" -eq 1 -a "$(fech r-canal)" -eq 0 -a ! -e "$SH/.oute/emit/rounds-closed" ]
+rcv_stop
+
 check_end
