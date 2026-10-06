@@ -15,7 +15,20 @@ TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 stub_stop() { [[ -z "${STUB_PID:-}" ]] || { kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null; STUB_PID=""; }; }
-trap 'studio_stop; surreal_stop; stub_stop; rm -rf "$TMP"' EXIT
+# replay_logs <rc>: com falha (rc ≠ 0), o fim do stderr de cada agent-studio (sem as linhas INFO) e do log do SurrealDB
+# vai à saída, antes de os serviços pararem (#589: a execução que falha diz a causa; sem isso sobra só a lista dos
+# casos). As credenciais ali são as do teste, sorteadas.
+replay_logs() {
+  local rc="$1" f
+  [[ "$rc" -ne 0 ]] || return 0
+  for f in "$TMP"/s/stderr "$TMP"/s[2-4]/stderr "$TMP/sdb/log" "$TMP/big.err" "$TMP/corte.err"; do
+    [[ -s "$f" ]] || continue
+    echo "# --- ${f#"$TMP"/} (fim, sem INFO)"
+    grep -v ' INFO ' "$f" | uniq | tail -n 30 | sed 's/^/# /'
+  done
+  return 0
+}
+trap 'replay_logs "$?"; studio_stop; surreal_stop; stub_stop; rm -rf "$TMP"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
 surreal_bin
@@ -301,7 +314,9 @@ open(sys.argv[1] + ".port", "w").write(str(srv.server_address[1]))
 srv.serve_forever()
 PY
 STUB_PID=$!
-for _ in $(seq 1 50); do [[ -s "$TMP/stub.port" ]] && break; sleep 0.1; done
+# a porta chega quando o servidor falso já escuta; espera pelo prazo de subida dos outros serviços (tests/lib/parallel.sh),
+# e sem ela o teste para aqui (#589: antes eram 5 s fixos e, estourados, o teste seguia com a porta vazia)
+spawn_wait "$STUB_PID" test -s "$TMP/stub.port" || die "o servidor falso da ingestão não subiu"
 SP="$(cat "$TMP/stub.port")"
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import gzip, json, sys
