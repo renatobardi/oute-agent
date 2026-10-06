@@ -42,7 +42,11 @@ case " $* " in
   *" --show-bin-path "*) echo "$F_SWIFT_BIN"; exit 0 ;;
 esac
 [[ "${FAKE_SWIFT_RC:-0}" == 0 ]] || { echo "error: falha de compilação (falsa)" >&2; exit "$FAKE_SWIFT_RC"; }
-mkdir -p "$F_SWIFT_BIN"; printf '#!/bin/sh\nexit 0\n' > "$F_SWIFT_BIN/OuteTray"; chmod +x "$F_SWIFT_BIN/OuteTray"
+# o binário falso: com `--write-icon <arquivo>` grava o ícone (ou falha com FAKE_ICON_RC), como o de verdade (#563)
+mkdir -p "$F_SWIFT_BIN"
+printf '%s\n' '#!/bin/sh' 'echo "OuteTray $*" >> "$F_CALLS"' \
+  'if [ "$1" = --write-icon ]; then [ "${FAKE_ICON_RC:-0}" = 0 ] || exit "$FAKE_ICON_RC"; printf icns > "$2"; fi' 'exit 0' > "$F_SWIFT_BIN/OuteTray"
+chmod +x "$F_SWIFT_BIN/OuteTray"
 SH
 for tool in launchctl codesign; do
   printf '#!/usr/bin/env bash\necho "%s $*" >> "$F_CALLS"\nexit 0\n' "$tool" > "$BIN/$tool"
@@ -77,7 +81,11 @@ run_tray install
 check "install: rc 0" [ "$RC" -eq 0 ]
 check "install: o .app tem o binário compilado, executável" [ -x "$APP/Contents/MacOS/OuteTray" ]
 check "install: sem ícone no Dock (LSUIElement)" file_has "$APP/Contents/Info.plist" '<key>LSUIElement</key><true/>'
-check "install: identificador do pacote" file_has "$APP/Contents/Info.plist" '<key>CFBundleIdentifier</key><string>pro.oute.tray</string>'
+check "install: o binário grava o ícone do app (#563)" file_has "$F_CALLS" "OuteTray --write-icon $APP/Contents/Resources/AppIcon.icns"
+check "install: o .app tem o ícone" [ -s "$APP/Contents/Resources/AppIcon.icns" ]
+check "install: o Info.plist aponta para o ícone" file_has "$APP/Contents/Info.plist" '<key>CFBundleIconFile</key><string>AppIcon.icns</string>'
+check "install: identificador do pacote (novo na #563; o rótulo do LaunchAgent segue pro.oute.tray)" file_has "$APP/Contents/Info.plist" '<key>CFBundleIdentifier</key><string>pro.oute.outetray</string>'
+check "install: rótulo do LaunchAgent" file_has "$PLIST" '<key>Label</key><string>pro.oute.tray</string>'
 check "install: LaunchAgent aponta para o binário do .app" file_has "$PLIST" "<string>$APP/Contents/MacOS/OuteTray</string>"
 check "install: LaunchAgent abre no login" file_has "$PLIST" '<key>RunAtLoad</key><true/>'
 check "install: LaunchAgent carregado na sessão do usuário" file_has "$F_CALLS" "launchctl bootstrap gui/$(id -u) $PLIST"
@@ -95,6 +103,22 @@ check "install de novo: tray-hosts editado não é sobrescrito" bash -c '[ "$(ca
 check "install de novo: para o tray antes de carregar" bash -c '[ "$(grep -n "^launchctl bootout gui/" "$1" | head -1 | cut -d: -f1)" -lt "$(grep -n "^launchctl bootstrap " "$1" | head -1 | cut -d: -f1)" ]' _ "$F_CALLS"
 check "install de novo: um LaunchAgent só" bash -c '[ "$(ls "$1" | wc -l)" -eq 1 ]' _ "$H/Library/LaunchAgents"
 check "install de novo: endereço do agent-studio no ambiente do app, escapado" file_has "$PLIST" '<key>OUTE_AGENT_STUDIO_URL</key><string>https://studio.exemplo.ts.net/?a=1&amp;b=&lt;2&gt;</string>'
+
+# ícone que não grava: o tray instala igual, com o aviso e sem o ícone no Info.plist (#563)
+FAKE_ICON_RC=1 run_tray install
+check "install sem ícone: rc 0" [ "$RC" -eq 0 ]
+check "install sem ícone: avisa" has 'aviso: o ícone do tray não foi gravado'
+check "install sem ícone: o Info.plist não aponta para ícone" bash -c '! grep -q CFBundleIconFile "$1"' _ "$APP/Contents/Info.plist"
+check "install sem ícone: nenhum arquivo de ícone fica" [ ! -e "$APP/Contents/Resources/AppIcon.icns" ]
+check "install sem ícone: o tray é carregado" file_has "$F_CALLS" "launchctl bootstrap gui/$(id -u) $PLIST"
+run_tray install
+
+# a sakura do tray é a do agent-studio: o mesmo caminho da pétala e do estame nos dois (#563)
+SPRITE="$ROOT/docker/agent-studio/agent_studio/static/lucide.svg"; SAKURA="$ROOT/tray/Sources/TrayCore/Sakura.swift"
+for nome in petalPath stamenPath; do
+  caminho="$(sed -n "s/^ *public static let $nome = \"\(.*\)\"\$/\1/p" "$SAKURA")"
+  check "sakura: $nome do tray existe no sprite do agent-studio" bash -c '[ -n "$1" ] && grep -qF -- "d=\"$1\"" "$2"' _ "$caminho" "$SPRITE"
+done
 
 # compilação que falha: nada é trocado nem carregado
 : > "$F_CALLS"; cp "$PLIST" "$TMP/plist.antes"

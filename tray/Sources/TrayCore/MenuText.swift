@@ -13,6 +13,14 @@ public enum MenuText {
         return join([machine.host, state, last])
     }
 
+    /// A linha de resumo das máquinas (#611): o detalhe de cada uma fica no submenu.
+    public static func machinesSummary(_ machines: [TraySnapshot.Machine]) -> String {
+        guard !machines.isEmpty else { return "Máquinas: nenhuma" }
+        let active = machines.filter { $0.state == "active" }.count
+        if active == machines.count { return "Máquinas: \(active) \(active == 1 ? "ativa" : "ativas")" }
+        return "Máquinas: \(active) de \(machines.count) \(machines.count == 1 ? "ativa" : "ativas")"
+    }
+
     public static func proposalsHeader(_ proposals: TraySnapshot.Proposals) -> String {
         guard proposals.available else { return "Pedidos pendentes: ? (estado indisponível)" }
         return "Pedidos pendentes: \(proposals.total ?? proposals.pending.count)"
@@ -63,6 +71,22 @@ public enum MenuText {
     public static func alert(_ alert: TraySnapshot.Alert) -> String {
         let title = alert.title ?? alert.type ?? "alerta"
         return join([alert.text.map { "\(title): \($0)" } ?? title, alert.host])
+    }
+
+    /// Quantos alertas o menu principal mostra (#611); o resto vai para o submenu.
+    public static let alertLimit = 3
+
+    public static func alertsHeader(_ alerts: [TraySnapshot.Alert]) -> String {
+        "Alertas: \(alerts.count)"
+    }
+
+    /// Os primeiros `alertLimit` alertas, na ordem da API, e os que sobram.
+    public static func alertParts(_ alerts: [TraySnapshot.Alert]) -> (shown: [TraySnapshot.Alert], hidden: [TraySnapshot.Alert]) {
+        (Array(alerts.prefix(alertLimit)), Array(alerts.dropFirst(alertLimit)))
+    }
+
+    public static func moreAlerts(_ count: Int) -> String {
+        "mais \(count) \(count == 1 ? "alerta" : "alertas")…"
     }
 
     /// "US$ 5,54", com o estimado marcado e as chamadas sem preço à vista (elas ficam fora do total).

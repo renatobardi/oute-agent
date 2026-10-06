@@ -10,7 +10,6 @@ public enum MenuSymbol: CaseIterable {
         case gate
     }
 
-    case bar
     case notice
     case machines
     case proposals
@@ -31,7 +30,6 @@ public enum MenuSymbol: CaseIterable {
 
     public var systemName: String {
         switch self {
-        case .bar: return "tray.full"
         case .notice, .errors, .alerts: return "exclamationmark.triangle"
         case .machines: return "desktopcomputer"
         case .proposals: return "tray"
