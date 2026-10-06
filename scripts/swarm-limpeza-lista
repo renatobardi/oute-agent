@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# swarm-limpeza-lista — a lista da limpeza única das rodadas e dos handoffs antigos (#654). SÓ LISTA.
+#
+#   scripts/swarm-limpeza-lista [--repo <repo principal>]…
+#
+# Roda no container (é onde ficam ~/.oute/swarm, as worktrees e o ai-memory). Não grava, não marca rodada como
+# fechada e não cancela handoff: só lê as pastas, o `git worktree list` e o `ai-memory handoffs … --json`. Nunca chama
+# `ai-memory handoffs --expire-all`. Marcar e cancelar é outro passo, com a aprovação do Bardi.
+#
+# 1. Rodadas sem a marca `fechada` em ~/.oute/swarm (pasta com `meta`). Uma linha por rodada:
+#      rodada id=<id> nome=<nome|-> aberta=<hora|-> sessoes=<n> abertas=<n> dispatcher=<existe|ausente|?> ultimo=<hora|-> estado=<…>
+#    abertas = sessões do `spawned` que não estão no `closed`; dispatcher = a worktree do dispatcher (`<repo>-<id>` ou o
+#    branch `sessao/<id>`) no `git worktree list` do repo da rodada; ultimo = a hora da última linha do log.
+#    estado: `viva` (há sessão aberta ou a worktree do dispatcher existe), `candidata` (nenhuma das duas) ou `incerta`
+#    (o repo da rodada não foi lido: não entra na limpeza).
+# 2. Handoffs abertos do ai-memory, por worktree, de cada repo (os das rodadas, o da pasta atual e os de --repo), no
+#    escopo do `.ai-memory.toml` do repo ou `default/<nome do repo>`. Uma linha por handoff:
+#      handoff id=<id> workspace=<W> project=<P> cwd=<pasta|-> worktree=<existe|ausente|sem-cwd> idade_dias=<n|-> estado=<…>
+#    estado: `mantem` (a pasta do `cwd` existe), `candidato` (não existe) ou `incerto` (handoff sem `cwd`).
+# Linha `aviso: …` = uma fonte não foi lida; o que depende dela não foi listado.
+#
+# Código de saída: 0 lista completa; 3 lista com aviso; 2 uso inválido.
+# Ambiente: OUTE_HANDOFFS_TIMEOUT (segundos, padrão 20) e OUTE_HANDOFFS_LIMIT (padrão 500).
+set -uo pipefail
+
+STATE_ROOT="${HOME}/.oute/swarm"
+LIMIT="${OUTE_HANDOFFS_LIMIT:-500}"
+WARN=0
+REPOS=()
+
+die() {
+  local msg="$1"
+  printf 'swarm-limpeza-lista: %s\n' "$msg" >&2
+  exit 2
+}
+
+warn() {
+  local msg="$1"
+  printf 'aviso: %s\n' "$msg"
+  WARN=1
+  return 0
+}
+
+# meta_get <pasta da rodada> <chave>: o valor da última linha `chave=valor` do meta (vazio sem ela)
+meta_get() {
+  local dir="$1" key="$2"
+  sed -n "s/^$key=//p" "$dir/meta" 2>/dev/null | tail -n1
+  return 0
+}
+
+# main_root <pasta>: o repo principal da pasta (a raiz do checkout que guarda o .git), ou falha fora de um repo
+main_root() {
+  local dir="$1" common
+  common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  dirname "$common"
+  return 0
+}
+
+# add_repo <repo principal>: entra na lista dos repos, sem repetir
+add_repo() {
+  local repo="$1" r
+  for r in ${REPOS[@]+"${REPOS[@]}"}; do
+    [[ "$r" != "$repo" ]] || return 0
+  done
+  REPOS+=("$repo")
+  return 0
+}
+
+# dispatcher_state <repo principal> <id da rodada>: existe | ausente | ? (repo ilegível)
+dispatcher_state() {
+  local repo="$1" id="$2" list
+  [[ -n "$repo" ]] || { echo "?"; return 0; }
+  list="$(git -C "$repo" worktree list --porcelain 2>/dev/null)" || { echo "?"; return 0; }
+  if grep -qxF "branch refs/heads/sessao/$id" <<<"$list" \
+     || sed -n 's/^worktree //p' <<<"$list" | sed 's|.*/||' | grep -qxF "$(basename "$repo")-$id"; then
+    echo existe
+  else
+    echo ausente
+  fi
+  return 0
+}
+
+# open_sessions <pasta da rodada>: quantas sessões do spawned não estão no closed
+open_sessions() {
+  local dir="$1" slug n=0
+  while read -r slug _; do
+    [[ -n "$slug" ]] || continue
+    grep -qsxF -- "$slug" "$dir/closed" || n=$((n + 1))
+  done < <(cat "$dir/spawned" 2>/dev/null)
+  echo "$n"
+  return 0
+}
+
+list_rounds() {
+  local dir id repo name started total open disp last state alive=0 cand=0 unsure=0 count=0
+  echo "## Rodadas sem a marca \`fechada\` ($STATE_ROOT)"
+  for dir in "$STATE_ROOT"/*/; do
+    dir="${dir%/}"
+    [[ -f "$dir/meta" && ! -f "$dir/fechada" ]] || continue
+    id="$(basename "$dir")"
+    repo="$(meta_get "$dir" repo)"; name="$(meta_get "$dir" name)"; started="$(meta_get "$dir" started)"
+    total="$(grep -c . "$dir/spawned" 2>/dev/null || true)"
+    open="$(open_sessions "$dir")"
+    disp="$(dispatcher_state "$repo" "$id")"
+    last="$(tail -n1 "$dir/log" 2>/dev/null | cut -d' ' -f1)"
+    [[ "$disp" == "?" ]] || add_repo "$repo"
+    if (( open > 0 )) || [[ "$disp" == existe ]]; then state=viva; alive=$((alive + 1))
+    elif [[ "$disp" == "?" ]]; then state=incerta; unsure=$((unsure + 1))
+    else state=candidata; cand=$((cand + 1)); fi
+    count=$((count + 1))
+    printf 'rodada id=%s nome=%s aberta=%s sessoes=%s abertas=%s dispatcher=%s ultimo=%s estado=%s\n' \
+      "$id" "${name:--}" "${started:--}" "${total:-0}" "$open" "$disp" "${last:--}" "$state"
+  done
+  (( unsure == 0 )) || warn "$unsure rodada(s) com o repo ilegível (dispatcher=?); ficam fora da limpeza"
+  echo "resumo rodadas: $count sem a marca; $alive viva(s), $cand candidata(s), $unsure incerta(s)"
+  return 0
+}
+
+# list_handoffs <repo principal>: os handoffs abertos do escopo do repo, com a pasta de cada um conferida
+list_handoffs() {
+  local repo="$1" toml="$1/.ai-memory.toml" ws="" proj="" out now n id cwd created wt age state keep=0 cand=0 unsure=0
+  if [[ -f "$toml" ]]; then
+    ws="$(sed -n 's/^[[:space:]]*workspace[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
+    proj="$(sed -n 's/^[[:space:]]*project[[:space:]]*=[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$toml" | head -n1)"
+  fi
+  [[ -n "$ws" ]] || ws=default
+  [[ -n "$proj" ]] || proj="$(basename "$repo")"
+  echo "## Handoffs abertos do ai-memory ($ws/$proj)"
+  if ! out="$(timeout "${OUTE_HANDOFFS_TIMEOUT:-20}" ai-memory handoffs --workspace "$ws" --project "$proj" --limit "$LIMIT" --json 2>/dev/null </dev/null)" \
+     || ! out="$(jq -r '.[] | select((.id | type) == "string" and (.id | test("^[A-Za-z0-9._-]+$")))
+                        | [.id, (if (.cwd | type) == "string" and .cwd != "" then .cwd else "-" end),
+                           (if (.created_at_ms | type) == "number" then (.created_at_ms / 1000 | floor) else "-" end)] | @tsv' <<<"$out" 2>/dev/null)"; then
+    warn "não consegui listar os handoffs do ai-memory ($ws/$proj); nada listado"
+    return 0
+  fi
+  now="$(date +%s)"; n=0
+  while IFS=$'\t' read -r id cwd created; do
+    [[ -n "$id" ]] || continue
+    n=$((n + 1))
+    age=-; [[ "$created" == - ]] || age=$(( (now - created) / 86400 ))
+    if [[ "$cwd" == - ]]; then wt=sem-cwd; state=incerto; unsure=$((unsure + 1))
+    elif [[ -d "$cwd" ]]; then wt=existe; state=mantem; keep=$((keep + 1))
+    else wt=ausente; state=candidato; cand=$((cand + 1)); fi
+    printf 'handoff id=%s workspace=%s project=%s cwd=%s worktree=%s idade_dias=%s estado=%s\n' "$id" "$ws" "$proj" "$cwd" "$wt" "$age" "$state"
+  done <<<"$out"
+  (( n < LIMIT )) || warn "a lista de $ws/$proj chegou ao limite de $LIMIT handoffs; pode haver mais"
+  echo "resumo handoffs $ws/$proj: $n aberto(s); $keep de worktree que existe, $cand candidato(s), $unsure incerto(s)"
+  return 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) [[ $# -ge 2 ]] || die "--repo pede o caminho do repo principal"
+            EXTRA="$(main_root "$2")" || die "não é um repo git: $2"
+            add_repo "$EXTRA"; shift 2 ;;
+    -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "opção desconhecida: $1 (uso: swarm-limpeza-lista [--repo <repo principal>]…)" ;;
+  esac
+done
+[[ "$LIMIT" =~ ^[1-9][0-9]*$ ]] || die "OUTE_HANDOFFS_LIMIT inválido: $LIMIT"
+
+echo "# Lista da limpeza (#654) · host $(hostname 2>/dev/null || echo '?') · $(date -u +%FT%TZ) · só leitura"
+if [[ -d "$STATE_ROOT" ]]; then list_rounds
+else echo "## Rodadas sem a marca \`fechada\` ($STATE_ROOT)"; warn "pasta das rodadas ausente: $STATE_ROOT"; fi
+HERE="$(main_root "$PWD" || true)"
+[[ -z "$HERE" ]] || add_repo "$HERE"
+if ! command -v ai-memory >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  echo "## Handoffs abertos do ai-memory"
+  warn "ai-memory ou jq ausente; handoffs não listados"
+elif (( ${#REPOS[@]} == 0 )); then
+  echo "## Handoffs abertos do ai-memory"
+  warn "nenhum repo identificado (rode numa worktree ou passe --repo); handoffs não listados"
+else
+  for REPO in "${REPOS[@]}"; do list_handoffs "$REPO"; done
+fi
+echo "só lista: nada foi marcado como fechado e nenhum handoff foi cancelado"
+(( ! WARN )) || exit 3
+exit 0
