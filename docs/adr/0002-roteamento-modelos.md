@@ -111,11 +111,12 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
    |---|---|---|
    | `claude-opus-5-5` | `glm-5.3` | `gpt-6-astra` |
    | `claude-sonnet-5-5` | `glm-5.3` | `gpt-6.1-sol` |
-   | `claude-haiku-4-5-20251001` | `glm-5.3-flash` | `gpt-6-luna` |
+
+   Pressupõe a #615 (Sonnet em `ops`, `ctx`, `learn`, `kaizen` e `docs`): **nenhuma linha usa Haiku**, então `glm-5.3-flash` e `gpt-6-luna` também ficam fora da tabela. Se o Haiku voltar a alguma linha, o par dele é `glm-5.3-flash` ↔ `gpt-6-luna`.
 
 3. **Dois grupos de fase, cada um com sua cadeia de provedores.** A cadeia é a ordem em que a sessão tenta os provedores: o primeiro é o padrão, os seguintes são a reserva.
-   - **Raciocínio, cadeia `anthropic` → `zai` → `openai`:** `strat` `intent` `arch` `spec` (Opus), `design` `plan` `qa` `iter` (Sonnet), `learn` (Haiku), a exceção `spike` (Sonnet) e o dispatcher (fase `plan` fixa).
-   - **Execução, cadeia `zai` → `anthropic` → `openai`:** `build` `ship` (glm-5.3, reserva Sonnet), `ops` `ctx` (glm-5.3-flash, reserva Haiku) e as exceções `kaizen` e `docs` (glm-5.3-flash, reserva Haiku).
+   - **Raciocínio, cadeia `anthropic` → `zai` → `openai`:** `strat` `intent` `arch` `spec` (Opus), `design` `plan` `qa` `iter` `learn` (Sonnet), a exceção `spike` (Sonnet) e o dispatcher (fase `plan` fixa).
+   - **Execução, cadeia `zai` → `anthropic` → `openai`:** `build` `ship` `ops` `ctx` e as exceções `kaizen` e `docs`, todas em `glm-5.3`, com reserva no Sonnet e depois no `gpt-6.1-sol`. O `glm-5.3` e não o `glm-5.3-flash`, pela mesma lógica da #615 (o modelo cheio no lugar do leve).
    - O modelo de cada provedor sai do pareamento da linha. Os modelos Claude da tabela de fase não mudam.
 4. **Reserva pela cadeia.** Os gatilhos passam a valer **por provedor**, e a sessão abre no próximo provedor da cadeia:
    - `indisponivel`: `anthropic` com `claude auth status` ≠ 0 ou `claude` ausente; `zai` sem a chave (`OUTE_ZAI_API_KEY`) ou com o endpoint fora do ar; `openai` com `codex login status` ≠ 0 ou `codex` ausente;
@@ -129,7 +130,7 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
    - (c) as cadeias acima viram o padrão da tabela. Só entra depois de medir a qualidade das fatias (a) e (b) no agent-studio e nos PRs (ajustes até a auditoria passar, a mesma medida da #409).
 
    Até a fatia (c), a tabela de fase acima (Claude padrão, Codex reserva) segue valendo para quem não pede `zai`.
-6. **Revisor das etapas:** `glm-5.3` e `glm-5.3-flash` entram como autores revisados pelo `claude-opus-5-5`. O revisor continua sempre de outro modelo e só no `claude` headless; o revisor no próprio provedor `zai` fica fora.
+6. **Revisor das etapas:** `glm-5.3` entra como autor revisado pelo `claude-opus-5-5`. O revisor continua sempre de outro modelo e só no `claude` headless; o revisor no próprio provedor `zai` fica fora.
 7. **Plano:** GLM Coding Plan **Lite** no spike e nas fatias (a) e (b); **Pro** na fatia (c), quando o `zai` vira o padrão da execução. A troca de plano é critério de `ship` da (c).
 
 **Como entra no código** (detalhe na `spec` de cada fatia):
