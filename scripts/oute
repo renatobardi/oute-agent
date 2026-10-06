@@ -1283,6 +1283,29 @@ tray_after_update() {
   "$0" tray sync || echo "aviso: o tray não foi reinstalado; rode: oute tray install" >&2
   return 0
 }
+# #649: o checkout tem que estar na branch padrão do remoto; fora dela o `git pull` falha por causa que a mensagem
+# antiga ("mudanças locais?") não dizia. Só lê (symbolic-ref, ls-remote) e para: nunca troca de branch sozinho. bash 3.2.
+update_check_branch() {
+  local dir="$1" cur def
+  cur="$(git -C "$dir" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+  def="$(git -C "$dir" symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null || true)"; def="${def#origin/}"
+  if [[ -z "$def" ]]; then   # origin/HEAD não está gravado no clone: pergunta ao remoto
+    def="$(git -C "$dir" ls-remote --symref origin HEAD 2>/dev/null | sed -n 's|^ref: refs/heads/\(.*\)[[:space:]]HEAD$|\1|p' | head -n1 || true)"
+  fi
+  [[ -n "$def" ]] || return 0   # sem branch padrão conhecida: segue e deixa o git pull falar
+  [[ "$cur" != "$def" ]] || return 0
+  if [[ -z "$cur" ]]; then
+    die "o checkout $dir está com HEAD solto (sem branch); a branch padrão é $def. Para voltar: git -C $dir checkout $def"
+  fi
+  die "o checkout $dir está na branch $cur; a branch padrão é $def. Para voltar: git -C $dir checkout $def"
+}
+# sufixo da mensagem de falha do git pull: a pergunta só quando o git status mostra mudança local
+update_pull_hint() {
+  local dir="$1"
+  if [[ -n "$(git -C "$dir" status --short 2>/dev/null)" ]]; then printf ' (mudanças locais?)'; fi
+  return 0
+}
+
 tray_cmd() {
   local sub="${1:-}"
   [[ $# == 1 && ( "$sub" == install || "$sub" == uninstall || "$sub" == sync ) ]] || { tray_usage; exit 2; }
@@ -1297,7 +1320,8 @@ case "${1:-}" in
            exec "$0" attach ;;
   install) install_link ;;
   update)  # de qualquer diretório: repo (git pull --tags) + imagem da versão nova + restart
-           git -C "$ROOT" pull --tags --ff-only || die "git pull falhou em $ROOT (mudanças locais?)"
+           update_check_branch "$ROOT"
+           git -C "$ROOT" pull --tags --ff-only || die "git pull falhou em $ROOT$(update_pull_hint "$ROOT")"
            exec "$ROOT/scripts/oute" _update2 ;;
   _update2) oute_pull && "$0" down && "$0" up && "$0" version && tray_after_update ;;   # 2ª etapa já com o script novo
   approve) approve "${@:2}" ;;
