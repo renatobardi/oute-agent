@@ -119,6 +119,20 @@ curl -sS --max-time 30 -K - "$AGENT_STUDIO_URL/v1/alerts" <<<"header = \"Authori
 
 Feito quando: `scripts/agent-pins` saiu 0, ou o que deu `DIFERENTE` está no relatório como bloqueio; `scripts/models-check` saiu 0, ou cada `FALTA` (bloqueio) e cada `desconhecido` (pendência) está no relatório; e cada alerta de preço aberto está no relatório como aviso, ou o relatório diz "preços: não conferido" com o motivo.
 
+## 6b. Fila do canal e rodadas abertas (#650)
+
+Antes de montar qualquer pedido de release, deploy ou verificação ao canal de aprovação, leia o estado:
+
+```bash
+oute-inbox          # pedidos pendentes e resultados
+oute-swarm busy     # issues com sessão aberta em outra rodada
+```
+
+- Pedido pendente de release ou deploy de **outra sessão**: não proponha outro; avise o Bardi (qual pedido, de qual sessão) e espere.
+- Pedido de deploy: o `# RESUMO` diz quais rodadas estão abertas e quais sessões caem com o `oute down`/`up`.
+
+Feito quando: a fila e as rodadas abertas estão lidas e anotadas no relatório (passo 7).
+
 ## 7. Relatório para o Bardi
 
 Uma mensagem, nesta ordem:
