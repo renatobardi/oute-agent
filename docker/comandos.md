@@ -164,7 +164,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     --deliver (dispatcher fora do Claude, aberto por `--agent codex`): digita os eventos,
                                     agrupados numa mensagem, no campo do dispatcher parado (idle/done, campo achado e
                                     vazio); ocupado, com diálogo ou com texto no campo, adia (fila em watch.queue, motivo no log)
-  oute-swarm list                   abas abertas por rodada + worktrees
+  oute-swarm list                   abas abertas por rodada (nome e id) + worktrees
+  oute-swarm busy [--repo <repo>]   issues com sessão aberta em outra rodada do repo (a triagem não as oferece; #605)
   Fim de cada sessão: `PRONTO #n: <url do PR>` ou `BLOQUEADO #n: <pergunta>`.
 
 ## CONTAINER — canal de aprovação (agente → host)

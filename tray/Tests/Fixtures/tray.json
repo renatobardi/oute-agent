@@ -30,7 +30,8 @@
         "instance": "oute-agent",
         "question": "1. aprovar a triagem  2. cortar a #387",
         "asked_at": "2026-10-03T13:50:00Z",
-        "age_seconds": 600
+        "age_seconds": 600,
+        "name": "Brave_Otter"
       }
     ]
   },
@@ -86,7 +87,8 @@
         "title": "Fechamento da rodada",
         "published_at": "2026-10-03T13:58:00Z",
         "age_seconds": 120,
-        "url": "/rodada?id=swarm-1003-1211#etapa-fechamento"
+        "url": "/rodada?id=swarm-1003-1211#etapa-fechamento",
+        "name": "Brave_Otter"
       },
       {
         "round": "swarm-1003-1211",
@@ -97,7 +99,8 @@
         "title": "Pedido de merge #12",
         "published_at": "2026-10-03T13:55:00Z",
         "age_seconds": 300,
-        "url": "/rodada?id=swarm-1003-1211#etapa-merge-12"
+        "url": "/rodada?id=swarm-1003-1211#etapa-merge-12",
+        "name": "Brave_Otter"
       },
       {
         "round": "swarm-1003-1211",
@@ -108,7 +111,8 @@
         "title": "Triagem",
         "published_at": "2026-10-03T13:20:00Z",
         "age_seconds": 2400,
-        "url": "/rodada?id=swarm-1003-1211#etapa-triagem"
+        "url": "/rodada?id=swarm-1003-1211#etapa-triagem",
+        "name": "Brave_Otter"
       }
     ]
   },

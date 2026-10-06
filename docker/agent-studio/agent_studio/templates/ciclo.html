@@ -47,7 +47,7 @@
     <tbody>
     {% for x in c.rounds %}
     <tr data-rodada="{{ x.round }}" data-etapas="{{ x.steps }}" data-review="{{ x.review or '' }}" data-state="{{ x.state or '' }}">
-      <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{{ x.round }}</a></td>
+      <td class="prim"><a href="/rodada?id={{ x.round|urlencode }}">{% if x.name %}<span data-nome-rodada>{{ x.name }}</span> (<code>{{ x.round }}</code>){% else %}{{ x.round }}{% endif %}</a></td>
       <td class="sec">{{ x.repo or "—" }}{% if x.label %} · {{ x.label }}{% endif %}</td>
       <td class="sec">{{ x.state or "—" }}</td>
       <td class="n">{{ x.steps|num }}</td>

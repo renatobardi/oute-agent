@@ -642,7 +642,9 @@ def swarm_event(rnd, line, nth=1):
             "oute.swarm.max": int(m["max"]) if m.get("max", "").isdigit() else None,
             "oute.swarm.label": m.get("label"),
             # agente das sessões da rodada (#212): só com --agent na abertura (workers= no meta)
-            "oute.swarm.round.agent": m.get("workers")}, **fact)
+            "oute.swarm.round.agent": m.get("workers"),
+            # nome amigável da rodada (#605): sorteado na abertura e gravado em name= do meta; rodada antiga não tem
+            "oute.swarm.round.name": m.get("name")}, **fact)
     if kind == "spawn":
         slug = rest.split(" ", 1)[0]
         p = spawned(rdir, slug)

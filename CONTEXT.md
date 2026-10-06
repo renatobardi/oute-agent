@@ -87,7 +87,7 @@ Host: `scripts/oute` (Mac ou oute-server). Só o host lê o Vaultwarden; o conta
 - **insight:** padrão observado num período, em mais de uma rodada ou fonte (telemetria, issues, rodadas, canal de aprovação), com evidência. Sozinho não muda nada: no gate, o Bardi o torna lição, melhoria ou o descarta.
 - **melhoria:** insight que vira issue de trabalho (não regra).
 - **ciclo:** período entre dois gates de `learn`. Abre no gate da `iter` (o Bardi decide foco e temas) e fecha no gate da `learn` seguinte (o Bardi escolhe lições e melhorias). Contém zero ou mais rodadas e sessões avulsas. Não confundir com rodada.
-- **rodada:** uma execução do swarm (`oute-swarm`), da triagem ao fechamento, com id `swarm-<data>-<hora>`.
+- **rodada:** uma execução do swarm (`oute-swarm`), da triagem ao fechamento, com id técnico `swarm-<data>-<hora>` (sufixo curto de 3 hex se a pasta já existe) e nome amigável `Adjetivo_Substantivo` sorteado na abertura (#605); o id é a chave em tudo, e o nome aparece junto dele.
 - **dispatcher:** a sessão que coordena uma rodada do swarm (`oute-swarm <repo>`): tria, espera o ok do Bardi, abre um worker por issue, acompanha e fecha a rodada. Nome antigo: "coordenadora" (até a #214); handoff de rodada antiga ainda cita "coordenadora da rodada `<id>`" e a limpeza do `swarm.md` §4.3 reconhece os dois.
 - **nível da lição:** onde a regra vale. `repo` (AGENTS.md do repo alvo), `swarm` (prompts do dispatcher/worker), `agentes` (notas globais do container), `skill` (addon `oute-*`). Se valeria num repo diferente, não é `repo`.
 - **plugin:** só no sentido nativo de cada ferramenta (plugin do Claude Code, plugin herdr). Um plugin herdr é um tipo de addon.

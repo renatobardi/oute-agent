@@ -2,9 +2,9 @@
 {% set nav = "rodadas" %}
 {% set detail = true %}
 {% set back = "/rodadas" %}
-{% set crumbs = [("Rodadas", "/rodadas"), (r.id, none)] %}
+{% set crumbs = [("Rodadas", "/rodadas"), ((r.name ~ " (" ~ r.id ~ ")") if r.name else r.id, none)] %}
 {% from "_macros.html" import badge, icon, review_badge, etapa_corpo %}
-{% block title %}Rodada {{ r.id }} · Agent Studio{% endblock %}
+{% block title %}Rodada {% if r.name %}{{ r.name }} ({{ r.id }}){% else %}{{ r.id }}{% endif %} · Agent Studio{% endblock %}
 {% block main %}
 <div class="pagina">
 {% call fragment("resumo") %}
@@ -17,7 +17,8 @@
         {% if r.record and r.record.label %}{{ badge("label " ~ r.record.label, "contorno", "tag") }}{% endif %}
         {% if r.cycle_url %}<a href="{{ r.cycle_url }}" data-ciclo>{{ badge("ciclo " ~ r.record.cycle, "contorno", "repeat") }}</a>{% endif %}
       </div>
-      {% if loading_target is none %}<h1>Rodada <code>{{ r.id }}</code></h1>{% endif %}
+      {% if loading_target is none %}<h1>Rodada {% if r.name %}{{ r.name }} (<code>{{ r.id }}</code>){% else %}<code>{{ r.id }}</code>{% endif %}</h1>{% endif %}
+      {% if r.name %}<p class="rodada-nome" data-nome-rodada>{{ r.name }} (<code>{{ r.id }}</code>)</p>{% endif %}
       <p class="nota">As etapas que o dispatcher publicou para o Bardi, conferidas por um revisor de outro modelo. Esta tela só mostra.</p>
     </div>
     <a class="botao" href="/rodadas">{{ icon("arrow-left", 14) }}Rodadas</a>
