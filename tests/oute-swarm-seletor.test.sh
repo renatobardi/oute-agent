@@ -90,6 +90,27 @@ ts_reset
 MAX=5 sw spawn 8-label "escreva a issue com os critérios de aceite"
 check "issue com label de fase: o Jev não é chamado"     [ "$(sel 8-label origin) $(ts_calls)" == "label 0" ]
 ts_stop; ts_off
+# 11f. --prefer (#621): pedido de reserva sem ser escolha explícita; com o Codex no teto, a sessão volta para a padrão
+CASE=seletor-prefer; round "$CASE"
+labels 8 aidlc:build; labels 9 aidlc:build; labels 10 aidlc:build; labels 11 aidlc:build
+. "$ROOT/tests/lib/quota-json.sh"
+qcota 10 20
+MAX=5 sw spawn 8-pf "instrução" --prefer codex
+check "--prefer codex com folga: abre no Codex, sem reserva" [ "$RC" -eq 0 -a "$(sel 8-pf agent) $(sel 8-pf origin) [$(sel 8-pf reserve)]" == "codex label []" ]
+qcota 10 99
+MAX=5 sw spawn 9-pf "instrução" --prefer codex
+check "--prefer codex no teto: volta para o Claude, reserva por cota" [ "$(sel 9-pf agent) $(sel 9-pf reserve) $(sel 9-pf reserve_from)" == "claude cota codex" ]
+check "--prefer codex no teto: spawned e oute-task com claude" bash -c '[ "$(awk "\$1 == \"9-pf\" {print \$3}" "$1")" == claude ] && grep -qF -- "oute-task -r $2 9-pf claude " "$3"' _ "$STATE/spawned" "$REPO" "$FAKE/herdr.log"
+MAX=5 sw spawn 10-pf "instrução" --prefer nada
+check "--prefer com assinatura fora da tabela: recusa, nada registrado" bash -c '[ "$1" -ne 0 ] && grep -qF "seletor recusou a sessão 10-pf" <<<"$2" && ! grep -q "^10-pf " "$3"' _ "$RC" "$ERR" "$STATE/spawned"
+MAX=5 sw spawn 10-pf "instrução" --prefer 'X;y'
+check "--prefer com formato inválido: recusa antes do seletor" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--prefer inválido: X;y" <<<"$2"' _ "$RC" "$ERR"
+MAX=5 sw spawn 10-pf "instrução" --prefer codex --agent claude
+check "--prefer com --agent: a escolha explícita vence" [ "$RC" -eq 0 -a "$(sel 10-pf agent) $(sel 10-pf origin)" == "claude manual" ]
+qcota 10 99; echo prefer=codex >> "$STATE/meta"
+MAX=5 sw spawn 11-pf "instrução"
+check "prefer= da rodada: vale no spawn sem --prefer (Codex no teto, volta ao Claude)" [ "$(sel 11-pf agent) $(sel 11-pf reserve_from)" == "claude codex" ]
+rm -f "${FAKE:?}/quota.json"
 # 11d. seletor falhando ou ausente: o spawn abre como antes (o agente pedido, sem escolha), com aviso
 CASE=seletor-falha; round "$CASE"
 BAD="$TMP/$CASE/bad"; mkdir -p "$BAD"; printf '#!/usr/bin/env bash\necho estourou >&2; exit 1\n' > "$BAD/oute-select"; chmod +x "$BAD/oute-select"

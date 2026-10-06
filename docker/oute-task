@@ -4,6 +4,8 @@
 #   oute-task <slug> [claude|codex|shell] [args…]      cria/reabre a worktree da tarefa e abre o agente nela
 #   oute-task -r <repo> <slug> [agente]                  idem, para um repo de /workspace (fora dele)
 #   oute-task --agent claude|codex --model <id> <slug>   escolha explícita do agente e/ou do modelo (antes do slug)
+#   oute-task --prefer <assinatura> <slug>              pedido (não escolha explícita) de abrir numa reserva; com ela cheia,
+#                                                        a sessão volta para a padrão (#621). --agent/--model/--phase vencem
 #   oute-task list                                       worktrees de tarefa abertas (todos os spaces)
 #   oute-task clean [--yes] [--space <nome> | --all] [--force-in-use]
 #                                                        remove as já mergeadas/vazias (ou detached contidas na base);
@@ -228,6 +230,7 @@ select_model() {
   elif command -v oute-select >/dev/null 2>&1; then
     [[ -z "$3" ]] || args+=(--agent "$3")
     [[ -z "$4" ]] || args+=(--model "$4")
+    [[ -z "${7:-}" ]] || args+=(--prefer "$7")
     if [[ -n "$5" ]]; then args+=(--phase "$5"); else args+=(--task "$2"); fi
     if [[ -n "${6:-}" && -z "$5" ]]; then js="$(printf '%s' "$6" | oute-select --json --repo "$1" --text-file - ${args[@]+"${args[@]}"})" || rc=$?
     else js="$(oute-select --json --repo "$1" ${args[@]+"${args[@]}"} </dev/null)" || rc=$?; fi
@@ -421,7 +424,7 @@ cmd_open() {
     [[ "$pos" != codex ]] || xagent=codex
     amodel="$(args_model "$agent" "$@")"
     [[ -z "$O_MODEL" || -z "$amodel" || "$amodel" == "$O_MODEL" ]] || die "--model $O_MODEL e o modelo $amodel dos argumentos do agente não andam juntos"
-    select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE" "$(task_text "$@")"
+    select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE" "$(task_text "$@")" "$O_PREFER"
     agent="${S_AGENT:-$agent}"
     [[ -n "$amodel" ]] || model_args "$agent" "$S_MODEL" "$S_EFFORT"
   fi
@@ -457,9 +460,9 @@ cmd_open() {
   esac
 }
 
-O_AGENT=""; O_MODEL=""; O_PHASE=""
+O_AGENT=""; O_MODEL=""; O_PHASE=""; O_PREFER=""
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
@@ -473,11 +476,12 @@ case "${1:-}" in
          --agent) O_AGENT="${2:-}"; [[ "$O_AGENT" != pi ]] || die "Pi saiu do stack (#217), use claude ou codex"
                   [[ "$O_AGENT" == claude || "$O_AGENT" == codex ]] || die "--agent inválido: ${O_AGENT:-(vazio)} (claude|codex)" ;;
          --model) O_MODEL="${2:-}"; [[ -n "$O_MODEL" ]] || die "--model sem valor" ;;
+         --prefer) O_PREFER="${2:-}"; [[ "$O_PREFER" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "--prefer inválido: ${O_PREFER:-(vazio)} (nome de assinatura da tabela)" ;;
          --phase) O_PHASE="${2:-}"; [[ -n "$O_PHASE" ]] || die "--phase sem valor" ;;
-         *) die "opção desconhecida: $1 (uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] <slug> [agente] [args…])" ;;
+         *) die "opção desconhecida: $1 (uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] <slug> [agente] [args…])" ;;
        esac
        shift 2
      done
-     [[ $# -ge 1 ]] || die "uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] <slug> [agente] [args…]"
+     [[ $# -ge 1 ]] || die "uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] <slug> [agente] [args…]"
      cmd_open "$r" "$@" ;;
 esac

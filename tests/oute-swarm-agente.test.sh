@@ -41,6 +41,13 @@ sw spawn 8-bar "instrução"
 check "sem --agent: spawn usa claude"                    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 8-bar)" == claude ]
 check "sem --agent: oute-task com claude"                ran 8-bar claude
 rcv_stop
+# 10b2. abertura com --prefer (#621): meta com prefer=, sem workers=; formato inválido recusa sem rodada
+CASE=agente-prefer; round "$CASE"
+opn --max 2 --prefer codex
+nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
+check "--prefer: código 0, meta com prefer=codex e sem workers=" [ "$RC" -eq 0 -a -n "$nr" -a "$(grep -cx 'prefer=codex' "$M")" -eq 1 -a -z "$(grep '^workers' "$M")" ]
+opn --max 2 --prefer 'X;y'
+check "--prefer inválido: recusado com a mensagem" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--prefer inválido: X;y" <<<"$2"' _ "$RC" "$ERR"
 # 10c. --agent inválido: erro claro, sem rodada nem oute-task
 CASE=agente-invalido; round "$CASE"
 opn --agent foo

@@ -20,6 +20,7 @@
         {% if s.swarm_round %}{{ badge("rodada " ~ s.swarm_round ~ ((" · worker " ~ st.worker) if st and st.worker else ""), "contorno", "repeat") }}{% else %}{{ badge("avulsa", "contorno") }}{% endif %}
         {% if st and st.issue is not none %}{{ badge("issue #" ~ st.issue, "contorno", "circle-dot") }}{% endif %}
         {% if phase %}{{ badge("aidlc:" ~ phase, "contorno", "tag") }}{% endif %}
+        {% if reserve %}{{ badge("reserva: " ~ reserve.from ~ " → " ~ reserve.to, "contorno", "tag") }}{% endif %}
       </div>
     </div>
     <a class="botao" href="{{ com_custo("/sessoes") }}">{{ icon("arrow-left", 14) }}Sessões</a>
@@ -76,6 +77,7 @@
   {% if st.removed_at %}<dt>Removida em ({{ tzl() }})</dt><dd>{{ st.removed_at|when }}</dd>{% endif %}
   {% if st.agent %}<dt>Aberta com</dt><dd>{{ st.agent }}</dd>{% endif %}
   {% endif %}
+  {% if reserve %}<dt>Reserva</dt><dd>abriu em {{ reserve.to }} no lugar de {{ reserve.from }} ({{ reserve.reason }})</dd>{% endif %}
   <dt>Rodada</dt>
   <dd>{% if s.swarm_round %}{{ s.swarm_round }}{% if s.round and s.round.label %} · {{ s.round.label }}{% endif %}{% if s.round and s.round.state %} · {{ s.round.state }}{% endif %}{% if st and st.worker %} · worker {{ st.worker }}{% endif %}{% if st and st.issue is not none %} · issue #{{ st.issue }}{% endif %}{% else %}sessão avulsa{% endif %}</dd>
   <dt>Host</dt><dd>{{ s.host or "—" }}{% if s.instance %} ({{ s.instance }}){% endif %}</dd>

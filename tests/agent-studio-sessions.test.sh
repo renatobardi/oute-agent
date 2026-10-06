@@ -97,7 +97,9 @@ task1 = {"oute.task.id": S1, "oute.task.repo": "oute-agent", "oute.task.slug": "
          "oute.task.phase": "build", "oute.task.origin": "label", "oute.task.model": "claude-sonnet-5-5"}
 task2 = {"oute.task.id": S2, "oute.task.repo": "lab", "oute.task.slug": "ajuste", "oute.task.agent": "codex",
          # sessão avulsa sem label: a fase veio do Jev, com a confiança (ADR-02, #257)
-         "oute.task.phase": "ops", "oute.task.origin": "jev", "oute.task.confidence": 0.87}
+         "oute.task.phase": "ops", "oute.task.origin": "jev", "oute.task.confidence": 0.87,
+         # abriu no Codex porque o Claude estava no teto de cota (#598, #621)
+         "oute.task.reserve": "cota", "oute.task.reserve_from": "claude"}
 logs = {"resourceLogs": [
   rl(oute, [
     ev(D1 - 3 * 86400, "oute.swarm.round.opened", "ev-r1", {"oute.swarm.round": RND, "oute.swarm.repo": "oute-agent",
@@ -254,6 +256,9 @@ check "sessão sem a fase no evento: sem Badge aidlc" bash -c '! grep -q "aidlc:
 check "sessão: 4 StatTiles (conversas, chamadas, custo, p95), fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/s1.html"
 S2H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
 check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
+check "sessão com reserva: o resumo diz de qual assinatura para qual, e por quê (#621)" jqe '.text | test("Reserva abriu em codex no lugar de claude \\(cota\\)")' <<<"$S2H"
+check "sessão com reserva: Badge no cabeçalho"         bash -c 'grep -qE "badge contorno\">.*reserva: claude → codex</span>" <<<"$1"' _ "$S2P"
+check "sessão sem reserva: nem linha nem Badge"        bash -c '! grep -q "reserva:" "$1" && ! grep -q "<dt>Reserva</dt>" "$1"' _ "$TMP/s1.html"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"
 S4H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
 check "sessão sem conversa: aviso, com o evento de abertura" bash -c 'grep -q "Esta sessão não tem conversas" <<<"$1" && grep -q "oute.task.opened" <<<"$1"' _ "$S4H"

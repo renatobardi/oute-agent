@@ -5,11 +5,14 @@
 #              [--agent claude|codex]               --agent: agente do dispatcher e das sessões da rodada (sem ele: claude no
 #                                                   dispatcher e o seletor nas sessões). Com codex, o watch roda numa aba própria
 #                                                   e digita os eventos no campo do dispatcher parado (#213)
+#              [--prefer <assinatura>]              --prefer: as sessões pedem essa reserva sem ser escolha explícita; com ela
+#                                                   cheia, voltam para a padrão (#621). --agent e --model vencem
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
 #              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --agent: sobrepõe o da
 #              [--model <id>] [--repo <repo>]       rodada. --model: modelo da sessão (sem ele: o da fase da issue,
 #              [--kaizen]                           pelo oute-select). --repo: outro repo (padrão: o da rodada);
 #                                                   --kaizen: sessão kaizen, fora do --max
+#              [--prefer <assinatura>]              --prefer: o pedido só desta sessão (sem ele, o da rodada)
 #   oute-swarm tell <n>-<slug> "<mensagem>"         repassa uma decisão/instrução do Bardi à sessão parada (digita,
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #              [--wait [--timeout <s>]]             --wait: espera a sessão parar (relê a cada 5 s, OUTE_SWARM_TELL_POLL) e
@@ -103,6 +106,13 @@ check_agent() {
     pi) die "Pi saiu do stack (#217), use claude ou codex${2:+ ($2)}" ;;
     *) die "agente inválido: $1${2:+ ($2)}; use claude ou codex" ;;
   esac
+}
+
+# assinatura pedida sem ser escolha explícita (--prefer, #621): só o formato; o nome na tabela, o oute-select confere
+check_prefer() {
+  local name="$1"
+  [[ "$name" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "--prefer inválido: $name (nome de assinatura da tabela)"
+  return 0
 }
 
 resolve_repo() {
@@ -223,14 +233,15 @@ herdr_space() {
 }
 
 cmd_start() {
-  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex]"
-  local repo max=3 label="" workers="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
+  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>]"
+  local repo max=3 label="" workers="" prefer="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max) max="${2:?}"; shift 2 ;;
       --label) label="${2:?}"; shift 2 ;;
       --agent) workers="${2:?}"; shift 2 ;;
+      --prefer) prefer="${2:?}"; check_prefer "$prefer"; shift 2 ;;
       *) die "opção desconhecida: $1" ;;
     esac
   done
@@ -252,7 +263,7 @@ cmd_start() {
   # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
   # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (só fora do Claude)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=%s\n%s%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" "$dagent" \
-    "${workers:+workers=$workers$'\n'}" "$([[ "$dagent" == claude ]] || printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
+    "${workers:+workers=$workers$'\n'}${prefer:+prefer=$prefer$'\n'}" "$([[ "$dagent" == claude ]] || printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
   [[ -z "$space" ]] || meta_add "$STATE_ROOT/$id" "space=$space"
   set_round_name_locked "$id"
   rname="$(meta_get "$STATE_ROOT/$id" name)"; rlabel="$(round_label "$STATE_ROOT/$id")"
@@ -297,11 +308,12 @@ cmd_start() {
 
 cmd_spawn() {
   local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
-  local busy bslug brid model="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
+  local busy bslug brid model="" prefer="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; shift 2 ;;
       --model) model="${2:?}"; shift 2 ;;
+      --prefer) prefer="${2:?}"; check_prefer "$prefer"; shift 2 ;;
       --force) force=1; shift ;;
       --repo) repo="${2:?}"; shift 2 ;;
       --kaizen) kaizen=1; shift ;;
@@ -326,6 +338,11 @@ cmd_spawn() {
   if [[ -z "$agent" && "$round" != avulso ]]; then
     agent="$(sed -n 's/^workers=//p' "$STATE_ROOT/$round/meta" 2>/dev/null | head -1)"
     [[ -z "$agent" ]] || check_agent "$agent" "workers= do meta da rodada $round"
+  fi
+  # --prefer da rodada (prefer= do meta, #621): vale só sem escolha explícita (--agent do spawn ou workers= da rodada, --model)
+  if [[ -z "$prefer" && "$round" != avulso ]]; then
+    prefer="$(sed -n 's/^prefer=//p' "$STATE_ROOT/$round/meta" 2>/dev/null | head -1)"
+    [[ -z "$prefer" ]] || check_prefer "$prefer"
   fi
   if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
   else main="${rrepo:-$(main_root "$PWD" || true)}"; [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher)"; fi
@@ -356,6 +373,7 @@ cmd_spawn() {
   if command -v oute-select >/dev/null 2>&1; then
     [[ -z "$agent" ]] || sargs+=(--agent "$agent")
     [[ -z "$model" ]] || sargs+=(--model "$model")
+    [[ -n "$agent" || -n "$model" || -z "$prefer" ]] || sargs+=(--prefer "$prefer")
     sel="$(printf '%s' "$instr" | oute-select --json --repo "$main" --issue "$n" --text-file - ${sargs[@]+"${sargs[@]}"})" || src=$?
     (( src != 2 )) || die "seletor recusou a sessão $slug (acima)"
     IFS='|' read -r s_agent s_model s_effort s_phase s_origin s_reserve < <(jq -r '[.agent, .model, .effort, .phase, .origin, .reserve] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
@@ -1456,7 +1474,7 @@ cmd_busy() {
 }
 
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;

@@ -189,6 +189,21 @@ def _phase(raw):
     return phase if isinstance(phase, str) and phase else None
 
 
+def _reserve(raw):
+    """A reserva do `oute.task.opened` (#598, #621): de qual assinatura para qual a sessão abriu e por quê
+    (`oute.task.reserve_from`, `oute.task.agent`, `oute.task.reserve`); `None` se o evento não traz reserva."""
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    if not isinstance(value, dict):
+        return None
+    origin, target, reason = (value.get(k) for k in ("oute.task.reserve_from", "oute.task.agent", "oute.task.reserve"))
+    if not all(isinstance(x, str) and x for x in (origin, target, reason)):
+        return None
+    return {"from": origin, "to": target, "reason": reason}
+
+
 def detail(con, session_id, prices, event_limit=EVENT_LIMIT, effective=False):
     """Uma sessão com todas as conversas e os eventos dela (logs com o `oute.task.id` e sem conversa: `oute.task.*`
     e o que mais levar a identidade da sessão); `None` se o DuckDB não tem fato nenhum dela."""
@@ -202,11 +217,13 @@ def detail(con, session_id, prices, event_limit=EVENT_LIMIT, effective=False):
         [session_id, event_limit + 1]))
     truncated = len(events) > event_limit
     events = events[:event_limit]
-    phase = None
+    phase, reserve = None, None
     for e in events:
         phase = phase or _phase(e["attributes"])
+        if reserve is None and e["event_name"] == "oute.task.opened":
+            reserve = _reserve(e["attributes"])
         e["attributes"] = _pretty(e["attributes"])
-    return {"session": sessions[0], "events": events, "events_truncated": truncated, "phase": phase}
+    return {"session": sessions[0], "events": events, "events_truncated": truncated, "phase": phase, "reserve": reserve}
 
 
 def with_state(surreal, sessions):
