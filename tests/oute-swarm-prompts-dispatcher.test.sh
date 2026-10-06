@@ -176,7 +176,7 @@ check "fechamento: seções Decisão, Ações e Detalhe (#507)" grep -qF 'exatam
 check "fechamento: markdown restrito, sem HTML nem tabela (#507)" grep -qF 'sem HTML e sem tabela' "$D"
 check "fechamento: nunca saída de host nem segredo, bucket não apaga (#507)" grep -qF 'O texto nunca leva saída de host, de comando ou de tela, e nunca segredo.' "$D"
 check "fechamento: CUIDADO com o que não se desfaz (#507)" grep -qF 'Um segredo ou uma saída de host publicados não se desfazem.' "$D"
-check "fechamento: fontes só do GitHub, para o revisor (#507)" grep -qF 'só o que veio do GitHub, e passe com `--fontes <arquivo>`' "$D"
+check "fechamento: fontes do GitHub mais o relatório e os trechos citados, para o revisor (#507, #587)" grep -qF 'só o que veio do GitHub, mais duas coisas que o texto cite' "$D"
 check "fechamento: step review com o modelo do autor, em segundo plano (#507)" grep -qF '`oute-swarm step review fechamento --writer <o id do seu modelo> --fontes <arquivo>`' "$D"
 check "fechamento: códigos 0, 4 e 3 do review (#507)"   grep -qF 'Código 4 = reprovado: o comando lista os achados' "$D"
 check "fechamento: 2 reprovações e depois publica (#507)" grep -qF 'Depois da 2ª reprovação o `review` recusa: vá ao passo 5.' "$D"
@@ -229,4 +229,14 @@ check "510: a ação com pedido não tem marca (vale o estado do pedido)" grep -
 check "484: §3: a autorização permanente de merge não cobre PR de prompt sem a regressão" grep -qF '**Ressalva (#484):** ela não cobre PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` sem a saída da regressão dos agentes (`oute-regression`) no corpo, nem com a regressão recusada por cota' "$D"
 check "484: §3: esse merge segue pedido PR a PR" grep -qF 'esse merge segue pedido PR a PR, com a escolha do Bardi' "$D"
 check "484: skill de auditoria: a exceção da autorização permanente não cobre decisão do Bardi" grep -qF 'a ação `decisão do Bardi` do eixo Standards, PR de prompt sem a regressão dos agentes, não é coberta, #484' "$A"
+# 587. cota da reserva antes de abrir, SHA da base no merge, fontes do revisor
+check "587: §2: com reserve cota, confere o oute-quota do agente da reserva antes do spawn" grep -qF 'Antes do `spawn` dessa issue, confira a cota do agente da reserva: `oute-quota --json --agent <agente da reserva>`' "$D"
+check "587: §2: janela de 5h acima de 80% pergunta ao Bardi antes de abrir, com opções numeradas" grep -qF 'Com a janela de 5h **acima de 80%**, não abra: pergunte ao Bardi, com opções numeradas, antes e não depois' "$D"
+check "587: §2: cota unknown não bloqueia, só avisa" grep -qF 'Cota `unknown` ou leitura que falhou não bloqueia: abra e avise o Bardi' "$D"
+check "587: §3: o exemplo guarda o SHA da base ensaiada e para quando a base atual difere" bash -c 'grep -qF "base_ensaiada=" "$1" && grep -qF "if [ \"\$base_atual\" != \"\$base_ensaiada\" ]; then" "$1" && grep -qF "exit 1; fi" "$1"' _ "$D"
+check "587: §3: a impressão do SHA não substitui a comparação" grep -qF 'a impressão do SHA não substitui a comparação' "$D"
+check "587: §3: o merge só roda depois da comparação" bash -c 'c=$(grep -n "if \[ \"\$base_atual\"" "$1" | head -n1 | cut -d: -f1); m=$(grep -n "gh pr merge <n> --squash --match-head-commit" "$1" | head -n1 | cut -d: -f1); [ -n "$c" ] && [ -n "$m" ] && [ "$c" -lt "$m" ]' _ "$D"
+check "587: §4.3 passo 3: fontes incluem o comentário de relatório publicado, com o número" grep -qF 'o texto do comentário de relatório que você acabou de publicar, com o número do comentário' "$D"
+check "587: §4.3 passo 3: fontes incluem os trechos de prompt ou regra citados" grep -qF 'os trechos do prompt (`docker/swarm.md`, `docker/swarm-worker.md`) ou da regra do repo (`AGENTS.md`, `docs/pt-controlado.md`) que o texto cita' "$D"
+check "587: §4.3 passo 3: não diz mais só o que veio do GitHub" bash -c '! grep -qF "só o que veio do GitHub, e passe" "$1"' _ "$D"
 check_end
