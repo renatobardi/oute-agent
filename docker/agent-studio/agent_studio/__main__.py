@@ -8,6 +8,7 @@ import uvicorn
 from . import config as config_mod, price_sources, prices as prices_mod
 from . import app as app_mod
 from .app import create_app
+from . import store as store_mod
 from .store import Store
 from .surreal import Surreal
 from . import telemetry
@@ -64,7 +65,12 @@ def main():
                           ns=os.environ.get("AGENT_STUDIO_SURREAL_NS", "oute"),
                           db=os.environ.get("AGENT_STUDIO_SURREAL_DB", "studio"))
     db = os.environ.get("AGENT_STUDIO_DB", "/data/agent-studio/agent-studio.duckdb")
-    store = Store(db)
+    # memória, threads e checkpoint do DuckDB (#570): padrões no store.py; AGENT_STUDIO_DUCKDB_* troca
+    try:
+        store = Store(db, settings=store_mod.settings_from_env(os.environ))
+    except ValueError as e:
+        print(f"agent-studio: {e}; não subo", file=sys.stderr)
+        return 1
     # quanto vale o resultado do tray e dos alertas (#570); 0 = sempre refaz (o padrão, e o dos testes)
     store.read_ttl = float(os.environ.get("AGENT_STUDIO_READ_TTL_S", "0"))
     tel = telemetry.setup()
