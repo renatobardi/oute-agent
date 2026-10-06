@@ -21,9 +21,12 @@ TASK="$ROOT/docker/oute-task"
 # ---------------------------------------------------------------- fakes e ambiente
 # O dublê grava o ambiente: nenhuma credencial real pode chegar aos agentes falsos.
 export OUTE_TASK_TEST_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+TEST_OCI_KEY_PEM="fake-oci-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+TEST_GCP_SA_JSON="{\"type\":\"service_account\",\"private_key\":\"fake-gcp-$(python3 -c 'import secrets; print(secrets.token_hex(16))')\"}"
+export OCI_KEY_PEM="$TEST_OCI_KEY_PEM" GCP_SA_JSON="$TEST_GCP_SA_JSON"
 for task_env_key in $(compgen -e); do
   case "$task_env_key" in
-    *TOKEN*|*SECRET*|*PASSWORD*|*API_KEY*|OCI_S3_*|AWS_ACCESS_KEY_ID|AGENT_STUDIO_*) unset "$task_env_key" ;;
+    *TOKEN*|*SECRET*|*PASSWORD*|*API_KEY*|OCI_S3_*|OCI_KEY_PEM|GCP_SA_JSON|AWS_ACCESS_KEY_ID|AGENT_STUDIO_*) unset "$task_env_key" ;;
   esac
 done
 
@@ -112,7 +115,7 @@ check "abrir: exec do agente (saída e código dele)"    [ "$RC" -eq 7 -a "$OUT"
 check "abrir: stderr só com a linha da worktree"       [ "$ERR" == "worktree $SP/proj-s1 · branch sessao/s1 (de origin/main)" ]
 check "abrir: agente na worktree, com o prompt"        [ "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(cat "$FAKE/claude.args")" == "${MS/ /$'\n'}"$'\n'"faça x" ]
 check "dublê do agente: credenciais ficam fora do ambiente gravado" bash -c \
-  '! grep -qE "^([^=]*(TOKEN|SECRET|PASSWORD|API_KEY)[^=]*|OCI_S3_[^=]*|AWS_ACCESS_KEY_ID|AGENT_STUDIO_[^=]*)=" "$1"' _ "$FAKE/claude.env"
+  '! grep -qE "^([^=]*(TOKEN|SECRET|PASSWORD|API_KEY)[^=]*|OCI_S3_[^=]*|OCI_KEY_PEM|GCP_SA_JSON|AWS_ACCESS_KEY_ID|AGENT_STUDIO_[^=]*)=" "$1" && ! grep -qF "$2" "$1" && ! grep -qF "$3" "$1"' _ "$FAKE/claude.env" "$TEST_OCI_KEY_PEM" "$TEST_GCP_SA_JSON"
 id="$(mark "$SP/proj-s1" id)"
 check "abrir: id <repo>-<slug>-<AAAAMMDDhhmmss> no git-dir da worktree" grep -qE '^proj-s1-[0-9]{14}$' <<<"$id"
 e="$(task_ev '.name == "oute.task.opened"')"

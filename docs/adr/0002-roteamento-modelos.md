@@ -73,7 +73,7 @@ Gate de `spec` do Bardi (opção 1, delegado à sessão de upstream, ciclo #233)
 ### Adendo 2026-10-05 — Sonnet no lugar do Haiku automático (#615)
 Decisão do Bardi por segurança: `ops`, `ctx`, `learn`, `kaizen` e `docs` passam a usar `claude-sonnet-5-5`. O seletor mantém a escolha explícita de Haiku por `--model claude-haiku-4-5-20251001`.
 
-A linha de base da #484 teve duas rodadas, com três repetições por tarefa e modelo. O Haiku falhou em `checkout` e `segredo` nas três repetições de cada rodada. Em `memory`, passou em zero repetições na primeira e em uma na segunda. O Sonnet passou nas três tarefas, nas três repetições de cada rodada. Fontes: [rodada 1](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5997065952) e [rodada 2](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5998479095).
+Os comentários da #484 relatam duas rodadas, com três repetições por tarefa e modelo, e descrevem falhas do Haiku em `checkout`, `memory` e `segredo` e aprovação do Sonnet. Esses números e resultados históricos não têm registros reproduzíveis versionados neste repositório e ficam **não verificados** nesta decisão. Fontes do relato: [rodada 1](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5997065952) e [rodada 2](https://github.com/renatobardi/oute-agent/issues/484#issuecomment-5998479095). A regressão local deste PR verifica somente os graders falsos e não revalida essas rodadas históricas.
 
 A reserva dessas fases e exceções permanece `gpt-6-luna`, esforço `medium`. A #615 manda registrar o modelo pequeno no PR e não trocá-lo sem evidência.
 
