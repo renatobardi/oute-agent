@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Testes do `oute-quota` (#346): leitura da cota das assinaturas Claude e Codex, só GET por https, sem escrever nem
+# Testes do `oute-quota` (#346, #676): leitura da cota das assinaturas Claude, Codex e zai, só GET por https, sem escrever nem
 # renovar credencial. Endpoints falsos com TLS de teste (tests/lib/fake-quota.py, certificado gerado na hora pelo openssl);
 # um `curl` no PATH só registra o argv e chama o de verdade. Tokens sentinela gerados na hora, nunca reais.
 # Datas com horas de folga do que o comando confere (nunca no limite). Só comportamento externo.
@@ -35,15 +35,17 @@ CURL
 chmod +x "$TMP/bin/curl"
 export HOME="$H" XDG_CACHE_HOME="$TMP/cache" CLAUDE_CONFIG_DIR="$CL" CODEX_HOME="$CX" \
   OUTE_QUOTA_CLAUDE_URL="$BASE/claude/api/oauth/usage" OUTE_QUOTA_CODEX_URL="$BASE/codex/backend-api/wham/usage" \
+  OUTE_QUOTA_ZAI_URL="$BASE/zai/api/monitor/usage/quota/limit" \
   SSL_CERT_FILE="$SD/cert.pem" CURL_CA_BUNDLE="$SD/cert.pem" PATH="$TMP/bin:$PATH"
-unset OUTE_QUOTA_MAX_PCT OUTE_QUOTA_TIMEOUT
+unset OUTE_QUOTA_MAX_PCT OUTE_QUOTA_TIMEOUT OUTE_ZAI_API_KEY
 CTOK="ctok$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
 XTOK_RAW="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
 ACCT="acct-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+ZKEY="$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n').zk$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 CACHE="$XDG_CACHE_HOME/oute-quota"
 
 now=$(date +%s)
-R5C=$((now + 7200)); R7C=$((now + 172800)); R5X=$((now + 10800)); R7X=$((now + 400000))
+R5C=$((now + 7200)); R7C=$((now + 172800)); R5X=$((now + 10800)); R7X=$((now + 400000)); R5Z=$((now + 9000)); R7Z=$((now + 300000))
 iso() { date -u -d "@$1" +%FT%TZ; }
 loc() { TZ="$2" date -d "@$1" +%Y-%m-%dT%H:%M:%S%:z; }   # hora do reset no fuso $2, com o deslocamento (#415)
 
@@ -64,10 +66,19 @@ bodies() { # o que os endpoints devolvem quando ok
     "$(date -u -d "@$R5C" +%FT%T)" "$(date -u -d "@$R7C" +%FT%T)" > "$SD/claude.body"
   printf '{"rate_limit":{"primary_window":{"used_percent":7,"reset_at":%s},"secondary_window":{"used_percent":21.5,"reset_at":%s}}}' \
     "$R5X" "$R7X" > "$SD/codex.body"
+  zai_body "$R5Z" "$R7Z"
+}
+zai_body() { # reset da janela de 5h e da de 7d, em epoch s ("" = sem nextResetTime); ruído de outros limites incluído
+  local reset5="$1" reset7="$2"
+  jq -n --arg a "$reset5" --arg b "$reset7" '{code:200, success:true, data:{level:"lite", limits:[
+      {type:"TIME_LIMIT", unit:5, number:1, percentage:3},
+      ({type:"TOKENS_LIMIT", unit:3, number:5, percentage:12.5} + (if $a == "" then {} else {nextResetTime: (($a|tonumber) * 1000 + 321)} end)),
+      ({type:"TOKENS_LIMIT", unit:6, number:1, percentage:27} + (if $b == "" then {} else {nextResetTime: (($b|tonumber) * 1000 + 654)} end))]}}' > "$SD/zai.body"
+  return $?
 }
 mode() { printf '%s' "$2" > "$SD/$1.mode"; }
 reset_world() { # estado de partida de cada caso: credenciais vigentes, endpoints ok, sem cache, sem pedidos
-  rm -rf "${CACHE:?}" "${SD:?}/claude.mode" "${SD:?}/codex.mode" "${SD:?}/requests.jsonl" "${SD:?}/retry-after" "${SD:?}/hang" "${TMP:?}/argv.log"
+  rm -rf "${CACHE:?}" "${SD:?}/claude.mode" "${SD:?}/codex.mode" "${SD:?}/zai.mode" "${SD:?}/requests.jsonl" "${SD:?}/retry-after" "${SD:?}/hang" "${TMP:?}/argv.log"
   claude_cred 14400; codex_cred 14400; bodies
 }
 write_cache() { # agente idade_s resets_at_s
@@ -81,7 +92,8 @@ oj() { jq -e "$1" <<<"$OUT" >/dev/null 2>&1; }
 rc_and_oj() { [[ "$RC" -eq "$1" ]] && oj "$2"; }
 cred_state() { stat -c '%y' "$CL/.credentials.json" "$CX/auth.json" 2>/dev/null; sha256sum "$CL/.credentials.json" "$CX/auth.json" 2>/dev/null; }
 tree_hash() { (cd "$H" && find . -type f -not -path './.cache/*' | sort | xargs sha256sum 2>/dev/null); }
-no_secret() { ! grep -qF -e "$CTOK" -e "$XJWT" -e "$XTOK_RAW" -e "$ACCT" "$@"; }
+no_secret() { ! grep -qF -e "$CTOK" -e "$XJWT" -e "$XTOK_RAW" -e "$ACCT" -e "$ZKEY" "$@"; }
+zreqs() { reqs_of zai; return $?; }
 
 # ============ 200 nos dois ============
 reset_world; BEFORE="$(cred_state)"; TREE="$(tree_hash)"
@@ -232,12 +244,108 @@ reset_world; write_cache claude 600 $R5C
 OUTE_QUOTA_CLAUDE_URL="https://127.0.0.1:1/x" run --json --agent claude
 check "rede fora com cache de 10 min: cache stale" oj '.agents.claude.status == "ok" and .agents.claude.stale == true'
 
+# ============ zai (#676) ============
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"
+run --json --agent zai
+check "zai: saída 0" bash -c '[ "$1" = 0 ]' _ "$RC"
+check "zai: 5h 12.5% e 7d 27% com o reset em UTC (nextResetTime em ms, sem a fração de segundo)" oj ".agents.zai | .status == \"ok\" and .reason == null and .stale == false and .age_s == 0 and (.windows|keys) == [\"5h\",\"7d\"] and .windows[\"5h\"].used_pct == 12.5 and .windows[\"5h\"].resets_at == \"$(iso $R5Z)\" and .windows[\"7d\"].used_pct == 27 and .windows[\"7d\"].resets_at == \"$(iso $R7Z)\""
+check "zai: resets_in_s coerente" oj '.agents.zai.windows["5h"].resets_in_s | . > 8000 and . <= 9000'
+check "zai: um único pedido, GET" bash -c '[ "$(jq -s "map(select(.agent == \"zai\" and .method == \"GET\")) | length" "$1")" = 1 ] && [ "$(jq -s length "$1")" = 1 ]' _ "$SD/requests.jsonl"
+check "zai: Authorization é a chave, sem Bearer" bash -c 'jq -e --arg k "$1" "select(.agent == \"zai\") | .auth == \$k" "$2" >/dev/null' _ "$ZKEY" "$SD/requests.jsonl"
+check "zai: chave fora do argv do curl, que usa -K -" bash -c '! grep -qF "$1" "$2" && grep -q -e "-K -" "$2"' _ "$ZKEY" "$TMP/argv.log"
+printf '%s\n%s\n' "$OUT" "$ERR" > "$TMP/saida.txt"
+check "zai: chave fora da saída e do erro" no_secret "$TMP/saida.txt"
+check "zai: cache só com % e hora do reset, sem a chave" bash -c 'jq -e ".windows[\"5h\"].used_pct == 12.5 and (.windows[\"5h\"]|keys) == [\"resets_at_s\",\"used_pct\"] and (keys == [\"read_at\",\"windows\"])" "$1/zai.json" >/dev/null && ! grep -qF "$2" "$1"/*.json' _ "$CACHE" "$ZKEY"
+run --json --agent zai; N1="$(zreqs)"
+check "zai cache curto: segunda chamada não vai à rede" test "$N1" = 1
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; zai_body "" "$R7Z"
+run --json --agent zai
+check "zai: janela de 5h sem nextResetTime sai ok, sem hora de reset (null)" oj '.agents.zai | .status == "ok" and .windows["5h"].used_pct == 12.5 and .windows["5h"].resets_at == null and .windows["5h"].resets_in_s == null and .windows["7d"].resets_at != null'
+run --json --agent zai
+check "zai: cache com janela sem reset vale (sem nova chamada, mesmos valores)" bash -c '[ "$1" = 1 ] && jq -e ".agents.zai.status == \"ok\" and .agents.zai.windows[\"5h\"].resets_at == null and .agents.zai.stale == false" <<<"$2" >/dev/null' _ "$(zreqs)" "$OUT"
+run --agent zai
+check "zai: tabela com - no lugar da hora de reset" has "^zai  *5h  *12.5%  *-  *\$"
+check "zai: tabela com a hora do reset da janela de 7d" has "^zai  *7d  *27%  *[0-9][0-9]*-"
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; zai_body "" ""
+run --json --agent zai
+check "zai: as duas janelas sem nextResetTime também são ok" oj '.agents.zai.status == "ok" and .agents.zai.windows["7d"].resets_at == null'
+
+# sem chave
+reset_world; unset OUTE_ZAI_API_KEY
+run --json --agent zai
+check "zai sem OUTE_ZAI_API_KEY: unknown sem-credencial" oj '.agents.zai.status == "unknown" and .agents.zai.reason == "sem-credencial" and .agents.zai.windows == {}'
+check "zai sem chave: saída 1 e nenhuma chamada de rede" bash -c '[ "$1" = 1 ] && [ "$2" = 0 ]' _ "$RC" "$(reqs)"
+OUTE_ZAI_API_KEY="" run --json --agent zai
+check "zai com chave vazia: sem-credencial, sem rede" bash -c 'jq -e ".agents.zai.reason == \"sem-credencial\"" <<<"$1" >/dev/null && [ "$2" = 0 ]' _ "$OUT" "$(reqs)"
+OUTE_ZAI_API_KEY='chave com espaco"; x' run --json --agent zai
+check "zai com chave de formato inválido: unknown formato, sem rede" bash -c 'jq -e ".agents.zai.reason == \"formato\"" <<<"$1" >/dev/null && [ "$2" = 0 ]' _ "$OUT" "$(reqs)"
+
+# três agentes em paralelo
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"
+run --json
+check "sem --agent: claude, codex e zai no --json, os três ok" oj '(.agents|keys) == ["claude","codex","zai"] and ([.agents[].status] | unique) == ["ok"]'
+check "sem --agent: claude e codex com os mesmos valores de sempre" oj ".agents.claude.windows[\"5h\"].used_pct == 15 and .agents.claude.windows[\"7d\"].resets_at == \"$(iso $R7C)\" and .agents.codex.windows[\"5h\"].used_pct == 7 and .agents.codex.windows[\"7d\"].used_pct == 21.5"
+check "sem --agent: um pedido por agente" bash -c '[ "$(jq -s length "$1")" = 3 ]' _ "$SD/requests.jsonl"
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode claude hang; mode codex hang; mode zai hang; printf 4 > "$SD/hang"
+T0=$SECONDS; OUTE_QUOTA_TIMEOUT=1 run --json; T1=$((SECONDS - T0))
+check "três agentes sem resposta: timeout nos três, em paralelo (≤ 3 s com teto de 1 s)" bash -c 'jq -e ".agents.zai.reason == \"timeout\" and .agents.claude.reason == \"timeout\"" <<<"$1" >/dev/null && [ "$2" -le 3 ]' _ "$OUT" "$T1"
+reset_world; unset OUTE_ZAI_API_KEY
+run --json
+check "sem a chave da zai: claude e codex ok, zai unknown, saída 0" rc_and_oj 0 '.agents.claude.status == "ok" and .agents.codex.status == "ok" and .agents.zai.reason == "sem-credencial"'
+
+# HTTP, formato, cache velho
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai 5xx
+run --json --agent zai
+check "zai HTTP 503: unknown http-503, saída 1" rc_and_oj 1 '.agents.zai.reason == "http-503"'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai formato
+run --json --agent zai
+check "zai formato inesperado: unknown formato" oj '.agents.zai.reason == "formato"'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai lixo
+run --json --agent zai
+check "zai corpo que não é JSON: unknown formato" oj '.agents.zai.reason == "formato"'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; printf '{"data":{"limits":[{"unit":3,"number":5,"percentage":10}]}}' > "$SD/zai.body"
+run --json --agent zai
+check "zai sem a janela de 7 dias: unknown formato" oj '.agents.zai.reason == "formato"'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; write_cache zai 600 $R5Z; mode zai 429
+run --json --agent zai
+check "zai: cache velho (10 min) + 429: stale true, valores do cache" oj '.agents.zai.status == "ok" and .agents.zai.stale == true and .agents.zai.windows["5h"].used_pct == 41'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; write_cache zai 7200 $R5Z; mode zai 429
+run --json --agent zai
+check "zai: cache de 2 h + 429: unknown http-429" oj '.agents.zai.status == "unknown" and .agents.zai.reason == "http-429"'
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; write_cache zai 600 $R5Z; mode zai 5xx
+run --json --agent zai
+check "zai: cache velho + HTTP 503: unknown (o cache só cobre 429, rede e timeout)" oj '.agents.zai.reason == "http-503"'
+
+# comando de disponibilidade
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"
+run --available zai
+check "--available zai com chave e endpoint ok: saída 0, sem nenhuma saída" bash -c '[ "$1" = 0 ] && [ -z "$2$3" ]' _ "$RC" "$OUT" "$ERR"
+check "--available zai: um GET com a chave sem Bearer" bash -c '[ "$(jq -s length "$1")" = 1 ] && jq -e --arg k "$2" "select(.method == \"GET\" and .auth == \$k)" "$1" >/dev/null' _ "$SD/requests.jsonl" "$ZKEY"
+write_cache zai 10 $R5Z; mode zai 5xx
+run --available zai
+check "--available zai ignora o cache: endpoint com erro dá saída 1 e sem texto" bash -c '[ "$1" != 0 ] && [ -z "$2$3" ]' _ "$RC" "$OUT" "$ERR"
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai formato
+run --available zai
+check "--available zai com resposta inválida: saída ≠ 0" test "$RC" -ne 0
+reset_world; unset OUTE_ZAI_API_KEY
+run --available zai
+check "--available zai sem a chave: saída ≠ 0, sem rede e sem texto" bash -c '[ "$1" != 0 ] && [ "$2" = 0 ] && [ -z "$3$4" ]' _ "$RC" "$(reqs)" "$OUT" "$ERR"
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; mode zai hang; printf 8 > "$SD/hang"
+T0=$SECONDS; run --available zai; T1=$((SECONDS - T0))
+check "--available zai sem resposta em 5 s (o teto padrão): saída ≠ 0 em ≤ 7 s" bash -c '[ "$1" != 0 ] && [ "$2" -le 7 ] && [ -z "$3$4" ]' _ "$RC" "$T1" "$OUT" "$ERR"
+reset_world; OUTE_ZAI_API_KEY="$ZKEY" OUTE_QUOTA_ZAI_URL="https://127.0.0.1:1/x" run --available zai
+check "--available zai com a rede fora: saída ≠ 0" test "$RC" -ne 0
+run --available;        check "--available sem valor: saída 2" test "$RC" -eq 2
+run --available outro;  check "--available de agente desconhecido: saída 2" test "$RC" -eq 2
+OUTE_QUOTA_ZAI_URL="$NOTLS" run --json
+check "endereço da zai sem TLS recusado: saída 2" test "$RC" -eq 2
+
 # ============ só leitura ============
 reset_world
 for m in 429 5xx lixo formato; do mode claude $m; mode codex $m; "$QUOTA" --json >/dev/null 2>&1; done
 rm -rf "${CACHE:?}"; claude_cred -7200; "$QUOTA" --json >/dev/null 2>&1
 check "só GET: nenhum pedido de outro método nesses cenários" bash -c '! jq -e "select(.method != \"GET\")" "$1" >/dev/null 2>&1' _ "$SD/requests.jsonl"
-reset_world; BEFORE="$(cred_state)"
+reset_world; export OUTE_ZAI_API_KEY="$ZKEY"; BEFORE="$(cred_state)"
 bash -x "$QUOTA" --json >"$TMP/xt.out" 2>&1
 check "bash -x não vaza token" no_secret "$TMP/xt.out"
 check "bash -x: credenciais intactas" test "$BEFORE" = "$(cred_state)"

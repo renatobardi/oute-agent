@@ -209,13 +209,20 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
     cp <png> . && git add <png> && git commit -m "chore(shots): <issue>" && git push -u origin shots/<issue>
     comentário do PR: ![desktop light](https://github.com/<dono>/<repo>/blob/<sha do commit>/<png>?raw=true)
 
-## CONTAINER — cota das assinaturas (oute-quota, #346)
-  oute-quota [--json] [--agent claude|codex]   janelas 5h e 7d de cada agente: % usada e hora do reset (UTC), ou
-                                    `unknown` com o motivo (sem-credencial, token-expirado, rede, timeout, http-<código>,
-                                    formato); --json no contrato do spike #55 (read_at, max_pct, reset_grace_s, agents)
-  Só leitura: só GET por https (api.anthropic.com e chatgpt.com), token pelo stdin do curl, nunca escreve nem renova a
-  credencial do agente (token expirado = unknown até o próprio claude/codex renovar). Cache de 120 s em
-  ~/.cache/oute-quota (só % e reset); com 429, rede ou timeout devolve o cache de até 30 min com stale:true.
+## CONTAINER — cota das assinaturas (oute-quota, #346, #676)
+  oute-quota [--json] [--agent claude|codex|zai]   janelas 5h e 7d de cada agente (sem --agent, os três em paralelo): %
+                                    usada e hora do reset (UTC), ou `unknown` com o motivo (sem-credencial, token-expirado,
+                                    rede, timeout, http-<código>, formato); --json no contrato do spike #55 (read_at, max_pct,
+                                    reset_grace_s, agents). A janela que a zai manda sem hora de reset (5h ainda sem uso) sai
+                                    com resets_at e resets_in_s null, e não como erro.
+  oute-quota --available <claude|codex|zai>   a assinatura está disponível? Sem saída: 0 = credencial presente e endpoint
+                                    respondeu (leitura nova, sem cache, até 5 s); 1 = sem credencial, sem resposta ou resposta
+                                    inválida; 2 = uso. Nunca imprime a chave nem o texto do servidor (o seletor da zai usa).
+  A zai lê `GET https://api.z.ai/api/monitor/usage/quota/limit` com a chave `OUTE_ZAI_API_KEY` do ambiente (sem `Bearer`);
+  sem a chave, `unknown`/`sem-credencial` e nenhuma chamada de rede.
+  Só leitura: só GET por https (api.anthropic.com, chatgpt.com e api.z.ai), token e chave pelo stdin do curl, nunca escreve
+  nem renova a credencial do agente (token expirado = unknown até o próprio claude/codex renovar). Cache de 120 s em
+  ~/.cache/oute-quota (só % e reset, nunca a chave); com 429, rede ou timeout devolve o cache de até 30 min com stale:true.
   Saída: 0 leitura feita (mesmo com unknown), 1 todos os agentes lidos ficaram unknown, 2 uso. A fonte da reserva
   por cota do ADR-02 (#258).
 

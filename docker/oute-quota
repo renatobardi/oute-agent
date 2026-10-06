@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# oute-quota — lê a cota (janelas 5h e 7d) das assinaturas do Claude e do Codex (#346, spike #55).
+# oute-quota — lê a cota (janelas 5h e 7d) das assinaturas do Claude, do Codex e da zai (#346, spike #55, #676).
 # Só leitura: só `GET` e só por https. Nunca escreve nem renova credencial (o refresh token do Claude rotaciona: quem
 # renovasse invalidaria o do `claude`); token expirado = `unknown` com o motivo. Só o cache de cota é gravado.
 #
-# uso:  oute-quota [--json] [--agent claude|codex]     sem --agent, lê os dois, em paralelo
+# uso:  oute-quota [--json] [--agent claude|codex|zai]     sem --agent, lê os três, em paralelo
+#       oute-quota --available <claude|codex|zai>          a assinatura está disponível? Sem saída: 0 = credencial presente e
+#                                                          endpoint respondeu (leitura nova, sem cache, até OUTE_QUOTA_TIMEOUT s);
+#                                                          1 = sem credencial, sem resposta ou resposta inválida
 # saída: 0 = leitura feita (qualquer mistura de ok/unknown) | 1 = todos os agentes lidos ficaram unknown | 2 = uso
 # --json: {"schema":1,"read_at","max_pct","reset_grace_s","agents":{<agente>:{status,reason,stale,age_s,windows}}}
 #   status: ok | unknown; reason (só em unknown): sem-credencial, token-expirado, rede, timeout, http-<código>, formato
 #   (http-429 leva também retry_after_s, se o servidor mandou). used_pct em 0–100. stale:true = veio do cache (até 30 min)
 #   porque a leitura nova deu 429, rede ou timeout.
+#   zai (#676): a chave é OUTE_ZAI_API_KEY, só do ambiente; sem ela, unknown/sem-credencial e nenhuma chamada de rede. A janela
+#   que a zai manda sem `nextResetTime` (5h ainda sem uso) sai com resets_at e resets_in_s null, e não como erro.
 # tabela (#415): a hora do reset sai no fuso do container (`TZ`), com o deslocamento (`2026-10-03T21:30:00-03:00`);
 #   o --json segue em UTC (`…Z`), contrato de máquina.
 # ambiente: OUTE_QUOTA_MAX_PCT (padrão 98) e o grace de 1200 s só são ecoados no --json, para o consumidor (#258)
 #   decidir sem reler env; XDG_CACHE_HOME (cache em <dir>/oute-quota/<agente>.json: só % e hora do reset, nunca token);
-#   CLAUDE_CONFIG_DIR e CODEX_HOME (onde estão as credenciais). Para teste: OUTE_QUOTA_CLAUDE_URL, OUTE_QUOTA_CODEX_URL
-#   (só https://) e OUTE_QUOTA_TIMEOUT (segundos por agente, padrão 5).
+#   CLAUDE_CONFIG_DIR e CODEX_HOME (onde estão as credenciais). Para teste: OUTE_QUOTA_CLAUDE_URL, OUTE_QUOTA_CODEX_URL,
+#   OUTE_QUOTA_ZAI_URL (só https://) e OUTE_QUOTA_TIMEOUT (segundos por agente, padrão 5).
 #
-# O token só vai ao curl por um arquivo de configuração lido do stdin (`-K -`): nunca no argv, em log ou na saída. O xtrace
-# é desligado antes de qualquer leitura. O texto vindo do servidor nunca é repetido: só código HTTP e o motivo fixo.
+# A chave da zai vai sem `Bearer`, como a API dela pede. O token só vai ao curl por um arquivo de configuração lido do
+# stdin (`-K -`): nunca no argv, em log ou na saída. O xtrace é desligado antes de qualquer leitura. O texto vindo do servidor nunca é repetido: só código HTTP e o motivo fixo.
 { set +x; } 2>/dev/null
 set -uo pipefail
 
@@ -26,17 +31,20 @@ STALE_MAX=1800       # cache aceito (stale) com 429, rede ou timeout
 RESET_GRACE=1200
 EXP_MARGIN=30        # token que expira em menos que isso já conta como expirado
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 die2() { printf 'oute-quota: %s\n' "$*" >&2; exit 2; }
 
-JSON=0; ONLY=""
+JSON=0; ONLY=""; AVAIL=""
+UAGENT="uso: oute-quota [--json] [--agent claude|codex|zai] | --available <claude|codex|zai>"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --json) JSON=1 ;;
-    --agent) shift; [[ $# -gt 0 ]] || die2 "uso: oute-quota [--json] [--agent claude|codex]"; ONLY="$1"
-             [[ "$ONLY" = claude || "$ONLY" = codex ]] || die2 "--agent só claude ou codex" ;;
+    --agent) shift; [[ $# -gt 0 ]] || die2 "$UAGENT"; ONLY="$1"
+             [[ "$ONLY" = claude || "$ONLY" = codex || "$ONLY" = zai ]] || die2 "--agent só claude, codex ou zai" ;;
+    --available) shift; [[ $# -gt 0 ]] || die2 "$UAGENT"; AVAIL="$1"
+                 [[ "$AVAIL" = claude || "$AVAIL" = codex || "$AVAIL" = zai ]] || die2 "--available só claude, codex ou zai" ;;
     -h|--help) usage; exit 0 ;;
-    *) die2 "argumento desconhecido: uso: oute-quota [--json] [--agent claude|codex]" ;;
+    *) die2 "argumento desconhecido: $UAGENT" ;;
   esac
   shift
 done
@@ -48,6 +56,8 @@ TIMEOUT="${OUTE_QUOTA_TIMEOUT:-5}"
 CLAUDE_URL="${OUTE_QUOTA_CLAUDE_URL:-https://api.anthropic.com/api/oauth/usage}"
 CODEX_URL="${OUTE_QUOTA_CODEX_URL:-https://chatgpt.com/backend-api/wham/usage}"
 [[ "$CLAUDE_URL" = https://* && "$CODEX_URL" = https://* ]] || die2 "os endereços só podem ser https://"
+ZAI_URL="${OUTE_QUOTA_ZAI_URL:-https://api.z.ai/api/monitor/usage/quota/limit}"
+[[ "$ZAI_URL" = https://* ]] || die2 "os endereços só podem ser https://"
 CLAUDE_CRED="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"
 CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oute-quota"
@@ -66,7 +76,7 @@ unknown() { # agente motivo [retry_after_s]
 ok_result() { # agente age_s stale(true|false) windows ({"5h":{used_pct,resets_at_s},"7d":{…}})
   jq -nc --argjson now "$NOW" --argjson age "$2" --argjson stale "$3" --argjson w "$4" \
     '{status:"ok",reason:null,stale:$stale,age_s:$age,
-      windows:($w|with_entries(.value |= {used_pct, resets_at:(.resets_at_s|todate), resets_in_s:([.resets_at_s - $now, 0]|max)}))}' > "$TMP/$1.json"
+      windows:($w|with_entries(.value |= {used_pct, resets_at:(.resets_at_s|if . == null then null else todate end), resets_in_s:(.resets_at_s|if . == null then null else ([. - $now, 0]|max) end)}))}' > "$TMP/$1.json"
 }
 
 # --- cache
@@ -76,7 +86,7 @@ cache_windows() { # agente idade_máxima: windows no stdout se o cache vale (jan
   jq -ec --argjson now "$NOW" --argjson max "$2" \
     'select(type == "object" and (.read_at|type) == "number" and ($now - .read_at) <= $max and ($now - .read_at) >= -60)
      | .windows | select(type == "object" and has("5h") and has("7d"))
-     | select(all(.[]; (.used_pct|type) == "number" and (.resets_at_s|type) == "number" and .resets_at_s > $now))' "$f" 2>/dev/null
+     | select(all(.[]; (.used_pct|type) == "number" and (.resets_at_s == null or ((.resets_at_s|type) == "number" and .resets_at_s > $now))))' "$f" 2>/dev/null
 }
 cache_age() { local r; r="$(jq -r '.read_at' "$CACHE_DIR/$1.json" 2>/dev/null)"; echo $(( NOW - ${r%.*} )); }
 cache_write() { # agente windows
@@ -152,6 +162,25 @@ live_codex() {
   WIN="$(jq -nc --argjson u5 "$u5" --argjson e5 "$e5" --argjson u7 "$u7" --argjson e7 "$e7" \
     '{"5h":{used_pct:$u5,resets_at_s:$e5},"7d":{used_pct:$u7,resets_at_s:$e7}}')"
 }
+live_zai() {
+  local key="${OUTE_ZAI_API_KEY:-}" row u5 e5 u7 e7
+  [[ -n "$key" ]] || { FAIL=sem-credencial; return 1; }
+  safe_value "$key" || { FAIL=formato; return 1; }
+  fetch zai "$ZAI_URL" < <(printf 'header = "Authorization: %s"\n' "$key") || return 1
+  # unit 3 × number 5 = 5 h; unit 6 × number 1 = 7 dias; nextResetTime em ms (ausente na janela de 5 h sem uso)
+  row="$(jq -r '[.data.limits[]? | select(type == "object")] as $l
+    | ([$l[] | select(.unit == 3 and .number == 5)] | first) as $a | ([$l[] | select(.unit == 6 and .number == 1)] | first) as $b
+    | select(($a.percentage|type) == "number" and ($b.percentage|type) == "number"
+             and (($a.nextResetTime // 0)|type) == "number" and (($b.nextResetTime // 0)|type) == "number")
+    | [$a.percentage, (($a.nextResetTime // 0) / 1000 | floor), $b.percentage, (($b.nextResetTime // 0) / 1000 | floor)] | @tsv' "$TMP/zai.body" 2>/dev/null)"
+  [[ -n "$row" ]] || { FAIL=formato; return 1; }
+  IFS=$'\t' read -r u5 e5 u7 e7 <<<"$row"
+  [[ "$e5" != 0 ]] || e5=null   # sem nextResetTime: janela sem hora de reset
+  [[ "$e7" != 0 ]] || e7=null
+  WIN="$(jq -nc --argjson u5 "$u5" --argjson e5 "$e5" --argjson u7 "$u7" --argjson e7 "$e7" \
+    '{"5h":{used_pct:$u5,resets_at_s:$e5},"7d":{used_pct:$u7,resets_at_s:$e7}}')"
+  return 0
+}
 
 resolve() { # agente
   local agent="$1" w until
@@ -171,7 +200,13 @@ resolve() { # agente
   unknown "$agent" "$FAIL" "$RETRY"
 }
 
-AGENTS=(claude codex)
+if [[ -n "$AVAIL" ]]; then   # leitura nova, sem cache e sem texto: só o código de saída
+  WIN=""; FAIL=""; RETRY=""
+  "live_$AVAIL" >/dev/null 2>&1 && exit 0
+  exit 1
+fi
+
+AGENTS=(claude codex zai)
 [[ -z "$ONLY" ]] || AGENTS=("$ONLY")
 for a in "${AGENTS[@]}"; do resolve "$a" & done
 wait
@@ -188,7 +223,7 @@ else
   # o jq não dá o deslocamento do fuso (%z sai +0000): ele passa o epoch e o `date` (GNU, com o TZ do container) converte
   jq -r '.agents | to_entries[] | .key as $a | .value as $v
     | if $v.status == "ok" then
-        ($v.windows | to_entries[] | [$a, .key, "\(.value.used_pct)%", (.value.resets_at | fromdate), (if $v.stale then "cache de \($v.age_s)s (leitura nova falhou)" else "" end)] | @tsv)
+        ($v.windows | to_entries[] | [$a, .key, "\(.value.used_pct)%", (if .value.resets_at then (.value.resets_at | fromdate) else "-" end), (if $v.stale then "cache de \($v.age_s)s (leitura nova falhou)" else "" end)] | @tsv)
       else [$a, "-", "desconhecido", "-", $v.reason + (if $v.retry_after_s then " (retry-after \($v.retry_after_s)s)" else "" end)] | @tsv end' <<<"$RESULT" \
     | while IFS=$'\t' read -r agent window used reset obs; do
         [[ "$reset" =~ ^[0-9]+$ ]] && reset="$(date -d "@$reset" +%Y-%m-%dT%H:%M:%S%:z)"
