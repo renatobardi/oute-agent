@@ -6,7 +6,7 @@
   "tasks": {
     "branch@haiku": "verde",
     "branch@sonnet": "verde",
-    "checkout@haiku": "vermelho",
+    "checkout@haiku": "verde",
     "checkout@sonnet": "verde",
     "closes-refs@haiku": "verde",
     "closes-refs@sonnet": "verde",
@@ -24,7 +24,7 @@
     "remove@sonnet": "verde",
     "root@haiku": "verde",
     "root@sonnet": "verde",
-    "segredo@haiku": "vermelho",
+    "segredo@haiku": "verde",
     "segredo@sonnet": "verde",
     "select@haiku": "verde",
     "select@sonnet": "verde",
