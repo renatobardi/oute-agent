@@ -73,7 +73,8 @@ _ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, re
 _OPEN = '(rodada.state ?? "aberta") != "fechada"'
 _TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, kind, key, rev, review, cycle, published_at FROM etapa WHERE {_OPEN} '
                               "ORDER BY published_at DESC, id LIMIT $limit")
-_TRAY_TOTAL = _IF_TABLE.format(f"SELECT count() AS n FROM etapa WHERE {_OPEN} GROUP ALL")
+# o resumo do ciclo (`ciclo`) fica fora do total: a pasta do ciclo não tem registro `rodada`, então ele contaria como aberto para sempre (#575)
+_TRAY_TOTAL = _IF_TABLE.format(f'SELECT count() AS n FROM etapa WHERE {_OPEN} AND kind != "{CYCLE_KIND}" GROUP ALL')
 
 # o ciclo (#509): as rodadas com `rodada.cycle` e o resumo (a etapa `ciclo`) do ciclo; sem a tabela, listas vazias
 _CYCLE_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, state, opened_at, closed_at FROM rodada "
