@@ -19,7 +19,7 @@ propose() {
   F="$H/outbox/$ID.sh"
   return 0
 }
-hdr() { sed -n "s/^# $1: //p;/^\$/q" "$F" | head -1; }
+hdr() { local campo="$1"; sed -n "s/^# $campo: //p;/^\$/q" "$F" | head -1; return 0; }
 
 # 1. worktree com marca do oute-task: o slug vai no cabeçalho
 printf 'id=abc\nrepo=oute-agent\nslug=455-canal-sessao\nround=swarm-x\n' > "$TMP/wt/.git/oute-task"
