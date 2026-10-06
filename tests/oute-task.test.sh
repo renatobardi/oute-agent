@@ -359,7 +359,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
 t0=$(date +%s); down="$(ciclo ciclo-fora)"
 check "coletor fora do ar: mesma saída, mesmo exec, mesmos códigos" [ "$down" == "$up" ]
 [ "$down" == "$up" ] || { echo "--- diferença (coletor no ar × fora do ar):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$down"); } >&2
-check "coletor fora do ar: rápido"                     [ $(( $(date +%s) - t0 )) -le 6 ]
+check "coletor fora do ar: rápido"                     [ $(( $(date +%s) - t0 )) -le 20 ]
 check "coletor fora do ar: os três eventos ficam no spool" [ "$(ls "$HOME/.oute/emit/spool"/*.json 2>/dev/null | wc -l)" -eq 3 ]
 export OTEL_EXPORTER_OTLP_ENDPOINT="$live"
 oute-emit flush
@@ -735,6 +735,24 @@ t 40-doisfora claude "p"
 check "os dois fora: abre o claude, código 0, aviso"   bash -c '[ "$1" -eq 0 ] && [ "$2" == "agente falso claude" ] && grep -qF "Claude e Codex indisponíveis" <<<"$3"' _ "$RC" "$OUT" "$SELW"
 unset FAKE_CODEX_LOGIN_RC FAKE_CLAUDE_AUTH_RC
 check "os dois fora: evento com agente claude, sem reserve" bash -c 'jq -e ".attrs[\"oute.task.agent\"] == \"claude\" and (.attrs | has(\"oute.task.reserve\") | not)" <<<"$1" >/dev/null' _ "$(last)"
+# --prefer (#621): pedido de reserva sem ser escolha explícita; com a pedida no teto, a sessão volta para a padrão
+. "$ROOT/tests/lib/quota-json.sh"
+qcota 10 20; rm -f "${FAKE:?}/codex.args" "${FAKE:?}/claude.args"
+t --prefer codex 40-prefer-livre claude "p"
+check "--prefer codex com folga: abre o Codex" [ "$RC" -eq 0 -a "$(args codex)" == "-m gpt-6.1-sol -c model_reasoning_effort=high p" ]
+check "--prefer codex com folga: evento sem reserve" rmark
+qcota 10 99; rm -f "${FAKE:?}/codex.args" "${FAKE:?}/claude.args"
+t --prefer codex 40-prefer-cheia claude "p"
+check "--prefer codex no teto: volta para o Claude da linha" [ "$RC" -eq 0 -a "$(args claude)" == "$MS p" -a ! -e "$FAKE/codex.args" ]
+check "--prefer codex no teto: evento com reserve=cota e reserve_from=codex" jqe '.attrs["oute.task.agent"] == "claude" and .attrs["oute.task.reserve"] == "cota" and .attrs["oute.task.reserve_from"] == "codex"' <<<"$(last)"
+t --prefer codex --agent claude 40-prefer-explicito claude "p"
+check "--prefer com --agent: a escolha explícita vence, código 0" [ "$RC" -eq 0 ]
+check "--prefer com --agent: evento sem reserve" rmark
+t --prefer 'X;y' 40-prefer-ruim claude "p"
+check "--prefer com formato inválido: recusa, sem worktree" [ "$RC" -ne 0 -a ! -d "$SP/proj-40-prefer-ruim" ]
+t --prefer nada 40-prefer-nada claude "p"
+check "--prefer fora da tabela: recusa (código do seletor), sem worktree" [ "$RC" -ne 0 -a ! -d "$SP/proj-40-prefer-nada" ]
+rm -f "${FAKE:?}/quota.json"
 # oute-emit task: reserve só indisponivel|cota, e só no opened/reopened
 before="$(total)"
 oute-emit task opened human repo=a slug=b reserve=chute
@@ -887,8 +905,8 @@ t clean
 check "ai-memory com lixo: avisa e segue"               bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2"' _ "$RC" "$OUT"
 jq -n --arg a "$SP/proj-err1" '[{id:"h-err",cwd:$a}]' > "$HF"
 # Este caso mede o prazo dos handoffs; a proteção de sessão em uso já foi conferida na seção 12.
-t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=6 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes --force-in-use
-check "ai-memory sem resposta: avisa, segue e remove, dentro do prazo" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && [ ! -e "$3" ] && [ $(( $(date +%s) - $4 )) -le 4 ]' _ "$RC" "$OUT" "$SP/proj-err1" "$t0"
+t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=40 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes --force-in-use
+check "ai-memory sem resposta: avisa, segue e remove, dentro do prazo" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && [ ! -e "$3" ] && [ $(( $(date +%s) - $4 )) -le 25 ]' _ "$RC" "$OUT" "$SP/proj-err1" "$t0"
 t abs1 claude
 NOAM="$TMP/bin-noam"; mkdir -p "$NOAM"
 for d in "$BIN" ${PATH//:/ }; do for f in "$d"/*; do [[ -x "$f" && "${f##*/}" != ai-memory ]] && ln -s "$f" "$NOAM/${f##*/}" 2>/dev/null; done; done

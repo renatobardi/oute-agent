@@ -74,8 +74,7 @@ _ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, re
 _OPEN = '(rodada.state ?? "aberta") != "fechada"'
 _TRAY_ROWS = _IF_TABLE.format(f'SELECT record::id(rodada) AS round, rodada.name AS name, kind, key, rev, review, cycle, published_at FROM etapa WHERE {_OPEN} '
                               "ORDER BY published_at DESC, id LIMIT $limit")
-# o resumo do ciclo (`ciclo`) fica fora do total: a pasta do ciclo não tem registro `rodada`, então ele contaria como aberto para sempre (#575)
-_TRAY_TOTAL = _IF_TABLE.format(f'SELECT count() AS n FROM etapa WHERE {_OPEN} AND kind != "{CYCLE_KIND}" GROUP ALL')
+_TRAY_TOTAL = _IF_TABLE.format(f"SELECT count() AS n FROM etapa WHERE {_OPEN} GROUP ALL")
 
 # o ciclo (#509): as rodadas com `rodada.cycle` e o resumo (a etapa `ciclo`) do ciclo; sem a tabela, listas vazias
 _CYCLE_ROUNDS = ("IF (INFO FOR DB).tables.rodada THEN (SELECT record::id(id) AS id, repo, label, name, state, opened_at, closed_at FROM rodada "
@@ -180,11 +179,7 @@ def with_state(rows, states):
         rec = (states or {}).get(r["round"]) or {}
         r["repo"], r["label"] = r["repo"] or rec.get("repo"), r["label"] or rec.get("label")
         r["name"] = valid_name(r.get("name") or rec.get("name"))
-        r["status"] = rec.get("state")
-        if r["opened_ns"]:
-            r["status"] = "aberta"
-        if r["closed_ns"]:
-            r["status"] = "fechada"
+        r["status"] = "fechada" if r["closed_ns"] else "aberta" if r["opened_ns"] else rec.get("state")
         r["start_ns"] = r["opened_ns"] or r["first_ns"]
         r["prs"] = r["prs"] if r["steps"] else None
         r["cycle"] = rec.get("cycle") if cycle_url(rec.get("cycle")) else None

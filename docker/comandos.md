@@ -83,6 +83,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     (<space> = label do space do herdr em nome de pasta; fora do herdr: _sem-space)
   oute-task -r <repo> <slug> …      idem, de fora do repo
   oute-task --agent claude|codex --model <id> <slug> …
+  oute-task --prefer <assinatura> <slug> …   pede uma reserva sem ser escolha explícita (#621): com ela no teto, volta para a padrão
                                     escolha explícita do agente e/ou do modelo (antes do slug)
   Modelo da sessão (ADR-02): sai da issue do slug (<n>-…), pela tabela config/select/models.toml:
   --agent/--model (ou `codex` depois do slug) > label spike/kaizen/docs (kaizen não vale com aidlc de código, #409) > label aidlc:<fase> > Jev > Sonnet.
@@ -127,7 +128,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       `watch <rodada>` que digita os eventos no campo dele (`watch --deliver`); com claude nada muda (ferramenta Monitor).
       O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
       Merge só quando você pedir.
-  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen]
+  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen] [--prefer <assinatura>]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --agent: sobrepõe o agente da rodada (sem ele: o da rodada; spawn avulso: claude)
       --model: modelo da sessão (sem ele: o da fase da issue, pelo oute-select)

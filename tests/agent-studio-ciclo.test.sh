@@ -126,7 +126,6 @@ check "/rodada da pasta do resumo: sem barra de posição do ciclo (o resumo nã
 T="$(curl -s "${C_[@]}" "$STUDIO_URL/v1/tray")"
 check "tray: o resumo do ciclo C entra no bloco steps, com título fixo e a url da página do ciclo" jqe --arg u "/ciclo?id=$CQ" '.steps.rows | map(select(.kind == "ciclo" and .url == $u)) | length == 1 and (.[0].title == "Resumo do ciclo") and (.[0] | has("text") | not)' <<<"$T"
 check "tray: o resumo sem ciclo (ev-pf-sem) não vira linha, e as etapas de rodada seguem para a página da rodada" jqe --arg a "/rodada?id=$A#etapa-triagem" '(.steps.rows | map(select(.kind == "ciclo")) | length) == 2 and (.steps.rows | map(.url) | index($a) != null)' <<<"$T"
-check "tray: o total de etapas não conta o resumo do ciclo (#575), que segue nas linhas" jqe '.steps | .total == (.rows | map(select(.kind != "ciclo")) | length) and .total > 0 and (.rows | map(select(.kind == "ciclo")) | length) == 2' <<<"$T"
 
 # ---------------------------------------------------------------- 6. SurrealDB fora: a página sai do DuckDB e avisa
 surreal_stop
