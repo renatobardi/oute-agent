@@ -62,6 +62,9 @@ def text(alert):
         n, ago = len(ev["sessions"]), f"último evento há {dur(int(v * 1e9))}"
         if alert["type"] == alerts_mod.ROUND_OLD:
             return f"rodada {ev['round']} aberta e sem fechamento; {ago}"
+        if not n and ev.get("kind") == "unclosed":  # #654: as sessões fecharam e a rodada ficou sem fechamento
+            return (f"rodada {ev['round']} com as sessões fechadas e sem fechamento (oute-swarm close --all --yes); "
+                    f"{ago} (limite {dur(int(limit * 1e9))})")
         if not n:
             return f"rodada {ev['round']} sem sessão aberta, triagem sem resposta; {ago} (limite {dur(int(limit * 1e9))})"
         return (f"rodada {ev['round']} com {n} {'sessão aberta' if n == 1 else 'sessões abertas'} "

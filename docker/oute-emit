@@ -25,7 +25,9 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
                                      Único verbo que não é best-effort: repassa entrada, saída e o código de saída do comando
                                      (127 se não existe; 2 no uso inválido, sem rodar nada)
   oute-emit flush                    só reenvia o spool (o entrypoint chama na subida)
-  oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida)
+  oute-emit reconcile                decided de todo inbox/*.out ainda não enviado (o entrypoint chama na subida) e
+                                     round.closed de toda rodada com a marca `fechada` no disco e sem o evento enviado
+                                     (#654; também a cada `oute-emit swarm`)
 
 Lê ele mesmo os artefatos locais (o chamador só diz "aconteceu algo com X"); a sessão do oute-task é a exceção: o
 oute-task passa os campos, porque no removed a worktree (e a marca dela) já não existe. OTLP/HTTP JSON em
@@ -69,6 +71,7 @@ SPOOL = os.path.join(EMIT, "spool")
 SPOOL_BAD = os.path.join(EMIT, "spool.bad")
 DROPPED = os.path.join(EMIT, "spool.dropped")
 DECIDED = os.path.join(EMIT, "decided")
+ROUNDS_CLOSED = os.path.join(EMIT, "rounds-closed")  # uma marca por rodada com o round.closed enviado (#654)
 SPOOL_MAX = int(os.environ.get("OUTE_EMIT_SPOOL_MAX") or 50 * 2**20)  # a variável só existe para os testes
 SPOOL_BATCH = 2**20
 TIMEOUT = 2.0
@@ -689,6 +692,70 @@ def swarm_event(rnd, line, nth=1):
     raise Skip(f"tipo de linha desconhecido: {kind}")
 
 
+def mark_round_closed(events):
+    """registra as rodadas cujo round.closed foi enviado (arquivo vazio por rodada, como o `decided/` do canal)"""
+    for _, rec in events:
+        if rec["eventName"] != "oute.swarm.round.closed":
+            continue
+        rnd = next(a["value"]["stringValue"] for a in rec["attributes"] if a["key"] == "oute.swarm.round")
+        os.makedirs(ROUNDS_CLOSED, exist_ok=True)
+        open(os.path.join(ROUNDS_CLOSED, rnd), "a").close()
+
+
+def round_closed_event(rnd):
+    """o round.closed de uma rodada com a marca `fechada` no disco (#654), ou None sem a marca. Com a linha `rodada
+    fechada` no log, é ela (a última) pelo mesmo parser do ao vivo: mesmo id, e a repetição deduplica. Sem a linha (marca
+    gravada fora do `oute-swarm close`), a hora é a do conteúdo da marca ou, com a marca vazia ou ilegível, a de
+    alteração do arquivo"""
+    rdir = os.path.join(SWARM, rnd)
+    mark = os.path.join(rdir, "fechada")
+    if not os.path.isfile(mark):
+        return None
+    log = (read_text(os.path.join(rdir, "log")) or "").splitlines()
+    lines = [ln for ln in log if re.match(r"^\S+ rodada fechada", ln)]
+    if lines:
+        return swarm_event(rnd, lines[-1], lines.count(lines[-1]))
+    ts = (read_text(mark) or "").strip()
+    if not TS_RE.match(ts):
+        ts = datetime.fromtimestamp(os.path.getmtime(mark), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return swarm_event(rnd, f"{ts} rodada fechada")
+
+
+def reconcile_rounds(cut, deadline, drained):
+    """round.closed de toda rodada fechada no disco, sem marca em rounds-closed/ e com o fechamento a partir do corte
+    (o anterior é do backfill). Cobre a marca `fechada` gravada sem o `oute-swarm close` e o evento que não saiu.
+    Enviado ou no spool = marcado; sem endpoint ou spool cheio = fica para a próxima chamada. -> drained"""
+    try:
+        rounds = sorted(d for d in os.listdir(SWARM) if ROUND_RE.match(d))
+    except OSError:
+        return drained
+    events = []
+    for rnd in rounds:
+        if os.path.exists(os.path.join(ROUNDS_CLOSED, rnd)):
+            continue
+        try:
+            ev = round_closed_event(rnd)
+        except (Skip, OSError, ValueError) as e:
+            debug(f"reconcile: rodada {rnd}: {e}")
+            continue
+        if ev and int(ev[1]["timeUnixNano"]) >= cut:
+            events.append(ev)
+    for i in range(0, len(events), BACKFILL_CHUNK):
+        chunk = events[i:i + BACKFILL_CHUNK]
+        r = send(chunk, deadline, drained)
+        if r in ("ok", "spool"):
+            mark_round_closed(chunk)
+        drained = drained and r in ("ok", "bad")  # coletor falhou: o resto vai direto ao spool
+    debug(f"reconcile: {len(events)} round.closed pendente(s)")
+    return drained
+
+
+def emit_cut():
+    """o corte do host (~/.oute/emit/since) em ns, ou None sem ele"""
+    since = (read_text(os.path.join(EMIT, "since")) or "").strip()
+    return ns(since) if TS_RE.match(since) else None
+
+
 def cmd_swarm(rnd, line):
     """a linha acabou de entrar no log (o slog grava antes de chamar): é a última ocorrência dela até aqui"""
     if not ROUND_RE.match(rnd):
@@ -891,11 +958,11 @@ def cmd_reconcile(deadline, drained):
     """na subida: decided de todo .out sem marca em decided/ e com a decisão a partir do corte (o anterior é do
     backfill). Decisão feita com oute approve enquanto o container estava fora chega assim ao bucket; o host segue
     sem spool. Mesmo leitor do ao vivo (para na primeira linha em branco) e mesmo id: repetição deduplica"""
-    since = (read_text(os.path.join(EMIT, "since")) or "").strip()
-    if not TS_RE.match(since):
+    cut = emit_cut()
+    if cut is None:
         debug("reconcile: sem corte (~/.oute/emit/since); nada a fazer")
         return
-    cut = ns(since)
+    drained = reconcile_rounds(cut, deadline, drained)
     try:
         outs = sorted(f[:-4] for f in os.listdir(INBOX) if f.endswith(".out"))
     except OSError:
@@ -1206,7 +1273,13 @@ def main(argv):
     elif verb == "reconcile":
         cmd_reconcile(deadline, drained)
     elif verb == "swarm":
-        send(cmd_swarm(argv[1], argv[2]), deadline, drained)
+        events = cmd_swarm(argv[1], argv[2])
+        r = send(events, deadline, drained)
+        if r in ("ok", "spool"):
+            mark_round_closed(events)  # a reconciliação não repete
+        cut = emit_cut()
+        if cut is not None:  # #654: rodada fechada no disco sem o evento (marca gravada fora do `oute-swarm close`)
+            reconcile_rounds(cut, deadline, drained and r in ("ok", "bad"))
     elif verb == "task":
         send(cmd_task(argv[1], argv[2], argv[3:]), deadline, drained)
     elif verb == "regression":
