@@ -326,7 +326,11 @@ check "falha: uma linha para o check que falhou"         [ "$(ci_events)" == "[c
 # 455. [canal]: o `# sessao:` do cabeçalho do pedido marca (da rodada) ou (alheio); sem o campo, sem marca
 CASE=canal; round "$CASE"
 cat > "$FAKE/on-sleep-1" <<'SH'
-ped() { printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: claude\n# criado: 2026-06-01T00:00:00Z\n%s\necho x\n' "$2" "$3" > "$OUTE_OUTBOX/$1.sh"; }
+ped() {
+  local id="$1" titulo="$2" extra="$3"
+  printf '# oute-propose\n# titulo: %s\n# como: user\n# agente: claude\n# criado: 2026-06-01T00:00:00Z\n%s\necho x\n' "$titulo" "$extra" > "$OUTE_OUTBOX/$id.sh"
+  return 0
+}
 ped a-rodada  "ajuste do deploy"        "# sessao: 7-foo"
 ped b-alheio  "ajuste do deploy"        "# sessao: 99-outra-rodada"
 ped c-antigo  "ajuste #7 sem o campo"   ""
