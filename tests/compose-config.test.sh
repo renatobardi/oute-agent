@@ -58,6 +58,22 @@ check "collector: OUTE_OTELCOL_MEM troca o teto"         jqe '.services."otel-co
 OUT="$(compose_config "agent-studio" 2>"$TMP/cfg.err")" || OUT=""
 check "agent-studio: exporta as próprias métricas a cada 5 min" jqe '.services."agent-studio".environment.OTEL_METRIC_EXPORT_INTERVAL == "300000"' <<<"$OUT"
 
+# ---- 2e. limites de todos os containers (#570): nenhum serviço sobe sem teto de memória e de CPU. O oute-agent era o
+# único que podia comer os 4 cores e os 15 GB livres do oute-server (sem swap): um vazamento numa sessão derrubava os vizinhos.
+OUT="$(compose_config "" COMPOSE_PROFILES=agent-studio,llm-proxy 2>"$TMP/cfg.err")" || OUT=""
+check "limites: todo serviço tem mem_limit e cpus"       jqe '[.services | to_entries[] | select(.key != "volume-init") | select((.value.mem_limit // 0) == 0 or (.value.cpus // 0) == 0) | .key] == []' <<<"$OUT"
+lim() { jq -e --arg s "$1" --arg m "$2" --argjson c "$3" '.services[$s] | (.mem_limit | tostring) == $m and .cpus == $c' >/dev/null; }
+check "limites: oute-agent 10g e 3 cpus"                 lim agent 10737418240 3 <<<"$OUT"
+check "limites: agent-studio 6g e 2 cpus"                lim agent-studio 6442450944 2 <<<"$OUT"
+check "limites: surrealdb 2g e 1 cpu"                    lim surrealdb 2147483648 1 <<<"$OUT"
+check "limites: collector 768m e 1 cpu"                  lim otel-collector 805306368 1 <<<"$OUT"
+check "limites: ai-memory 512m e 1 cpu"                  lim ai-memory 536870912 1 <<<"$OUT"
+check "limites: llm-proxy 128m e 0,5 cpu"                lim llm-proxy 134217728 0.5 <<<"$OUT"
+check "oute-agent: /dev/shm de 2g"                       jqe '.services.agent.shm_size == "2147483648"' <<<"$OUT"
+check "oute-agent: no máximo 4096 processos"             jqe '.services.agent.pids_limit == 4096' <<<"$OUT"
+OUT="$(compose_config "" OUTE_AGENT_MEM=8g OUTE_AGENT_CPUS=2 2>"$TMP/cfg.err")" || OUT=""
+check "limites: OUTE_AGENT_MEM e OUTE_AGENT_CPUS trocam o teto" jqe '.services.agent | (.mem_limit | tostring) == "8589934592" and .cpus == 2' <<<"$OUT"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"
