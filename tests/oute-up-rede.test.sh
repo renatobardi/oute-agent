@@ -58,8 +58,9 @@ oute() {
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste OUTE_UP_RETRY_WAIT=7 \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/none.pub" \
     "$@" "$TMP/repo/scripts/oute" up 2>&1)"; RC=$?
+  return 0
 }
-ups() { grep -c ' up -d' "$F_LOG" || true; }
+ups() { grep -c ' up -d' "$F_LOG" || true; return 0; }
 
 check "sintaxe (bash -n)" bash -n "$ROOT/scripts/oute"
 
