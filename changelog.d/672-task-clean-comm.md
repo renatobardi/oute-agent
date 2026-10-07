@@ -1,2 +1,0 @@
-### Fixed
-- **`oute-task clean` não escreve em stderr quando um processo morre durante a varredura do `/proc`** (#672). A leitura do `/proc/<pid>/comm` saiu para a função `proc_comm`, que descarta também o erro do bash ao abrir o arquivo; antes, o `2>/dev/null` valia só para o `tr`, e a linha `No such file or directory` saía no stderr do `clean`. **Precisa de release** (o `docker/oute-task` vai na imagem).
