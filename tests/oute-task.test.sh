@@ -128,7 +128,7 @@ check "opened: sessão avulsa (sem oute.swarm.*) e sem legacy" jqe '(.attrs | ha
 check "opened: sem terminal e sem marcador = unknown"  jqe '.attrs["oute.agent"] == "unknown" and .res["oute.agent"] == "unknown"' <<<"$e"
 check "opened: origem, service.name=oute, id do evento" jqe '.res["host.name"] == "oute-mac" and .res["oute.instance"] == "oute-agent"
                                                          and .res["service.name"] == "oute" and (.attrs["oute.event.id"] | length) == 32' <<<"$e"
-check "marca: origem preservada + oute.task.*"         [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "marca: origem preservada + oute.task.*"         [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" ]
 check "abrir: o agente passa pelo shim sem nova worktree" [ "$(aenv claude OUTE_NO_WORKTREE)" == 1 ]
 
 t s1 codex
@@ -138,16 +138,16 @@ check "reabrir: um oute.task.reopened"                [ "$(grep -c . <<<"$e")" -
 check "reabrir: reopened com o mesmo id"               jqe --arg id "$id" '.attrs["oute.task.id"] == $id' <<<"$e"
 check "reopened: agente da sessão codex, base, sem legacy" jqe '.attrs["oute.task.agent"] == "codex" and .attrs["oute.task.base"] == "main" and (.attrs | has("oute.task.legacy") | not)' <<<"$e"
 check "reabrir: id não muda na worktree"               [ "$(mark "$SP/proj-s1" id)" == "$id" ]
-check "marca no Codex: a mesma"                        [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "marca no Codex: a mesma"                        [ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=codex" ]
 
 # marca de outra sessão no ambiente de quem chamou: a chave não se repete, vale a nova; o evento leva só a origem
 OTEL_RESOURCE_ATTRIBUTES="$ORIGIN,oute.task.id=velho,oute.swarm.round=velha, oute.task.slug=x" t s1 claude
-check "marca: chave que já existia não duplica"        [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "marca: chave que já existia não duplica"        [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" ]
 check "evento: resource sem a marca de quem chamou"    jqe --arg id "$id" '.attrs["oute.task.id"] == $id and (.attrs | has("oute.swarm.round") | not)
                                                          and (.res | has("oute.task.id") or has("oute.swarm.round") or has("oute.task.slug") | not)
                                                          and .res["host.name"] == "oute-mac"' <<<"$(last)"
 ( unset OTEL_RESOURCE_ATTRIBUTES; t s1 claude )
-check "marca: sem origem no ambiente, só oute.task.*"  [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "marca: sem origem no ambiente, só oute.task.*"  [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" ]
 t s1 shell </dev/null >/dev/null 2>&1
 check "shell: oute.task.agent=shell"                   jqe '.name == "oute.task.reopened" and .attrs["oute.task.agent"] == "shell"' <<<"$(last)"
 
@@ -159,7 +159,7 @@ e="$(last)"
 check "worker: opened com a rodada e a sessão"         jqe --arg id "$wid" '.name == "oute.task.opened" and .attrs["oute.task.id"] == $id
                                                          and .attrs["oute.swarm.round"] == "swarm-0101-0000" and .attrs["oute.swarm.session"] == "7-foo"' <<<"$e"
 check "worker: quem chamou = agente do dispatcher (meta)" jqe '.attrs["oute.agent"] == "codex" and .res["oute.agent"] == "codex"' <<<"$e"
-WMARK="$ORIGIN,oute.task.id=$wid,oute.task.repo=proj,oute.task.slug=7-foo,oute.swarm.round=swarm-0101-0000,oute.swarm.session=7-foo"
+WMARK="$ORIGIN,oute.task.id=$wid,oute.task.repo=proj,oute.task.slug=7-foo,oute.swarm.round=swarm-0101-0000,oute.swarm.session=7-foo,oute.subscription=claude"
 check "worker: marca com oute.task.* e oute.swarm.*"   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" ]
 check "worker: sugestão de prompt continua desligada"  [ "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false -a -f "$(gitdir "$SP/proj-7-foo")/oute-swarm-worker" ]
 t 7-foo claude
@@ -170,7 +170,7 @@ OUTE_SWARM_ID=swarm-0202-0000 OUTE_SWARM_MAX=3 OUTE_SWARM_REPO="$WS/proj" t swar
 cid="$(mark "$SP/proj-swarm-0202-0000" id)"
 check "dispatcher: rodada sem sessão; chamou = claude (rodada sem meta)" jqe '.name == "oute.task.opened" and .attrs["oute.swarm.round"] == "swarm-0202-0000"
                                                          and (.attrs | has("oute.swarm.session") | not) and .attrs["oute.agent"] == "claude"' <<<"$(last)"
-check "dispatcher: marca com a rodada"               [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$cid,oute.task.repo=proj,oute.task.slug=swarm-0202-0000,oute.swarm.round=swarm-0202-0000" ]
+check "dispatcher: marca com a rodada"               [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$cid,oute.task.repo=proj,oute.task.slug=swarm-0202-0000,oute.swarm.round=swarm-0202-0000,oute.subscription=claude" ]
 OUTE_SWARM_WORKER=1 t 8-sem-rodada claude
 check "worker de spawn fora de rodada: sessão avulsa"  jqe '.name == "oute.task.opened" and (.attrs | has("oute.swarm.round") or has("oute.swarm.session") | not) and .attrs["oute.agent"] == "claude"' <<<"$(last)"
 
@@ -200,7 +200,7 @@ t old claude
 oid="$(mark "$SP/proj-old" id)"
 check "sem id: a reabertura grava um id novo"          grep -qE '^proj-old-[0-9]{14}$' <<<"$oid"
 check "sem id: reopened com legacy=true e o id novo"   jqe --arg id "$oid" '.name == "oute.task.reopened" and .attrs["oute.task.id"] == $id and .attrs["oute.task.legacy"] == true' <<<"$(last)"
-check "sem id: a conversa já sai marcada"              [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$oid,oute.task.repo=proj,oute.task.slug=old" ]
+check "sem id: a conversa já sai marcada"              [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$oid,oute.task.repo=proj,oute.task.slug=old,oute.subscription=claude" ]
 t old claude
 check "sem id: na reabertura seguinte, mesmo id e sem legacy" jqe --arg id "$oid" '.attrs["oute.task.id"] == $id and (.attrs | has("oute.task.legacy") | not)' <<<"$(last)"
 t nogravo claude; t fixa claude; fid="$(mark "$SP/proj-fixa" id)"
@@ -233,13 +233,13 @@ printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-7-foo" > "$HOME/.claude/projects
 printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-s1" > "$HOME/.codex/sessions/2026/rollout-2026-conv-cx.jsonl"
 shim claude "$WS/proj" --resume conv-s1
 check "restore: claude --resume entra na worktree"     [ "$RC" -eq 0 -a "$(cat "$FAKE/claude.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" ]
-check "restore: a mesma marca do oute-task"            [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "restore: a mesma marca do oute-task"            [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" ]
 shim claude "$WS/proj" --resume conv-w
 check "restore de worker: marca com oute.swarm.*"      [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$WMARK" -a "$(aenv claude CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)" == false ]
 shim codex "$WS/proj" resume conv-cx
-check "restore do Codex: codex resume <id> marcado"    [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" ]
+check "restore do Codex: codex resume <id> marcado"    [ "$(cat "$FAKE/codex.pwd")" == "$(cd "$SP/proj-s1" && pwd -P)" -a "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" ]
 shim claude "$SP/proj-s1" -p "oi"
-check "agente aberto direto na worktree (-p): marcado" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '-p\noi')" ]
+check "agente aberto direto na worktree (-p): marcado" [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$id,oute.task.repo=proj,oute.task.slug=s1,oute.subscription=claude" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '-p\noi')" ]
 t semid claude; task_gitdir="$(gitdir "$SP/proj-semid")"; rm -f "${task_gitdir:?}/oute-task"; before=$((before + 1))
 printf '{"type":"user","cwd":"%s"}\n' "$SP/proj-semid" > "$HOME/.claude/projects/p/conv-semid.jsonl"
 shim claude "$WS/proj" --resume conv-semid
@@ -369,7 +369,7 @@ noemit="$(PATH="$NOEMIT:/usr/bin:/bin"; ciclo ciclo-sem)"
 check "sem oute-emit: mesma saída, mesmo exec, mesmos códigos" [ "$noemit" == "$up" ]
 [ "$noemit" == "$up" ] || { echo "--- diferença (coletor no ar × sem oute-emit):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$noemit"); } >&2
 check "sem oute-emit: nada emitido"                    [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-sem"' | grep -c .)" -eq 0 ]
-check "sem oute-emit: a marca nas conversas não depende dele" grep -qE "^$ORIGIN,oute.task.id=proj-ciclo-sem-[0-9]{14},oute.task.repo=proj,oute.task.slug=ciclo-sem$" <<<"$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
+check "sem oute-emit: a marca nas conversas não depende dele" grep -qE "^$ORIGIN,oute.task.id=proj-ciclo-sem-[0-9]{14},oute.task.repo=proj,oute.task.slug=ciclo-sem,oute.subscription=codex$" <<<"$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
 
 # ---------------------------------------------------------------- 8. oute-emit task: uso inválido não emite nem falha
 before="$(total)"
@@ -484,7 +484,7 @@ check "fase: opened com fase, origem label, agente e modelo, sem esforço" bash 
 check "fase: atributos da escolha"                     sel_ev build label claude claude-sonnet-5-5 ""
 check "fase: opened continua com o oute.task.id"       jqe --arg id "$(mark "$SP/proj-40-build" id)" '.attrs["oute.task.id"] == $id' <<<"$(last)"
 check "fase: marca guarda agente e modelo"             [ "$(smark "$SP/proj-40-build")" == "claude|claude-sonnet-5-5|" ]
-check "fase: a marca das conversas não muda"           [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$(mark "$SP/proj-40-build" id),oute.task.repo=proj,oute.task.slug=40-build" ]
+check "fase: a marca das conversas não muda"           [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$(mark "$SP/proj-40-build" id),oute.task.repo=proj,oute.task.slug=40-build,oute.subscription=claude" ]
 t 41-spec
 check "fase spec, sem agente posicional: Opus"         [ "$(args claude)" == "--model claude-opus-5-5" ]
 check "fase spec: origem label (o padrão claude não é escolha)" sel_ev spec label claude claude-opus-5-5 ""
@@ -951,7 +951,7 @@ else
   MPATH="$SHIMS:$AMEM:$PATH"
   t mr0 claude
   W="$SP/proj-mr0"; mid="$(mark "$W" id)"
-  MARK="$ORIGIN,oute.task.id=$mid,oute.task.repo=proj,oute.task.slug=mr0"
+  MARK="$ORIGIN,oute.task.id=$mid,oute.task.repo=proj,oute.task.slug=mr0,oute.subscription=claude"
   : > "$FAKE_AI_MEMORY_LOG"
 
   # desligado (vazio, 0, ausente): nenhuma chamada ao ai-memory; argumentos e ambiente como hoje
@@ -988,7 +988,7 @@ else
   no_run "codex mcp (subcomando)" "$W" "$SHIMS/codex mcp list" codex
   no_run "já sob run (AI_MEMORY_RUN_ID)" "$W" "AI_MEMORY_RUN_ID=outro $SHIMS/claude oi" claude
   touch "${gw:?}/oute-swarm-worker"; no_run "worker do swarm" "$W" "$SHIMS/claude oi" claude; rm -f "${gw:?}/oute-swarm-worker"
-  amreset; OUTE_MEMORY_RUN=1 PATH="$MPATH" OUT="$(cd "$W" && "$SHIMS/claude" oi 2>&1 </dev/null)"
+  amreset; OUT="$(cd "$W" && OUTE_MEMORY_RUN=1 PATH="$MPATH" "$SHIMS/claude" oi 2>&1 </dev/null)"   # só atribuição vazaria o PATH para o resto do arquivo (#678)
   check "run ligado, sem terminal: passa direto" [ -z "$(amlog)" -a -f "$FAKE/claude.args" ]
   no_run "fora de repo"        "$TMP" "$SHIMS/claude oi" claude
 
@@ -1003,5 +1003,107 @@ else
   amreset; PTY_IN=$'mr2\n' PATH="$MPATH" pty "$WS/proj" "$SHIMS/claude 'faça y'"
   check "checkout principal, desligado: sem ai-memory, mesma worktree e modelo" [ -z "$(amlog)" -a -d "$SP/proj-mr2" -a "$(sed -n 1p "$FAKE/claude.args")" == --model ]
 fi
+
+# ---------------------------------------------------------------- 13. assinatura zai (#678, ADR-02 e ADR-01)
+# a sessão da zai é o `claude` com as variáveis da Z.ai só no processo que abre, --settings negando o Read de imagem, a
+# assinatura na marca, na conversa e no evento; a chave (gerada na hora) nunca aparece em argv, tela, marca nem evento
+rcv_stop; rcv_start "$TMP/r13"
+ZKEY="zai-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+ZTABLE="$ROOT/config/select/models.toml"   # a tabela de verdade: build abre na zai (cadeia zai → claude → codex)
+ZSET='{"permissions":{"deny":["Read(**/*.png)","Read(**/*.jpg)","Read(**/*.jpeg)","Read(**/*.gif)","Read(**/*.webp)","Read(**/*.bmp)"]}}'
+ZURL="https://api.z.ai/api/anthropic"
+tz() { OUTE_ZAI_API_KEY="$ZKEY" OUTE_SELECT_TABLE="$ZTABLE" t "$@"; }          # com a chave, tabela de verdade
+tn() { OUTE_SELECT_TABLE="$ZTABLE" t "$@"; }                                     # sem a chave
+zvars() {   # <agente>: as sete variáveis da zai que o agente recebeu, uma por linha (nome=valor)
+  local agent="$1"
+  grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|API_TIMEOUT_MS|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)=' "$FAKE/$agent.env" | sort
+  return 0
+}
+ZWANT="$(printf '%s\n' "ANTHROPIC_AUTH_TOKEN=$ZKEY" "ANTHROPIC_BASE_URL=$ZURL" "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.3" "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3" \
+  "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.3" "API_TIMEOUT_MS=3000000" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" | sort)"
+mkdir -p "$HOME/.claude"; printf '{"permissions":{"defaultMode":"bypassPermissions"}}\n' > "$HOME/.claude/settings.json"
+SET_SUM="$(cksum < "$HOME/.claude/settings.json")"
+labels 60 aidlc:build; labels 61 aidlc:spec; labels 62 aidlc:build
+
+# 13a. issue aidlc:build, sem opção: abre na zai
+rm -f "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*
+FAKE_RC=3 tz 60-zai claude "faça a 60"
+check "zai: build abre o claude com --model glm-5.3, --settings e o prompt" [ "$RC" -eq 3 -a "$(cat "$FAKE/claude.args")" == "$(printf -- '--model\nglm-5.3\n--settings\n%s\nfaça a 60' "$ZSET")" ]
+check "zai: as sete variáveis no ambiente do processo"  [ "$(zvars claude)" == "$ZWANT" ]
+check "zai: sem aviso e sem a chave na tela"            bash -c '[ -z "$1" ] && ! grep -qF "$2" <<<"$3"' _ "$SELW" "$ZKEY" "$OUT$ERR"
+check "zai: o ~/.claude/settings.json fica igual, byte a byte" [ "$(cksum < "$HOME/.claude/settings.json")" == "$SET_SUM" ]
+check "zai: a chave não vai em argv"                    bash -c '! grep -qF "$1" "$2"' _ "$ZKEY" "$FAKE/claude.args"
+check "zai: marca com agente claude, modelo glm-5.3 e assinatura zai" [ "$(mark "$SP/proj-60-zai" agent)|$(mark "$SP/proj-60-zai" model)|$(mark "$SP/proj-60-zai" subscription)" == "claude|glm-5.3|zai" ]
+check "zai: a chave não está na marca nem em arquivo do git-dir" bash -c '! grep -rqF "$1" "$2"' _ "$ZKEY" "$(gitdir "$SP/proj-60-zai")"
+zid="$(mark "$SP/proj-60-zai" id)"
+check "zai: a conversa sai com oute.subscription=zai"   [ "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$zid,oute.task.repo=proj,oute.task.slug=60-zai,oute.subscription=zai" ]
+check "zai: opened com assinatura zai e agente claude, sem reserva" jqe '.name == "oute.task.opened" and .attrs["oute.task.subscription"] == "zai" and .attrs["oute.task.agent"] == "claude"
+                                                         and .attrs["oute.task.model"] == "glm-5.3" and (.attrs | has("oute.task.reserve") or has("oute.task.reserve_from") | not)' <<<"$(last)"
+
+# 13b. uma sessão claude ao lado: nenhuma das variáveis, nem as que vieram do ambiente de quem chamou
+rm -f "${FAKE:?}"/claude.*
+tz 61-spec claude "faça a 61"
+check "claude: o spec abre sem as variáveis da zai e sem --settings" [ -z "$(zvars claude)" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '--model\nclaude-opus-5-5\nfaça a 61')" ]
+rm -f "${FAKE:?}"/claude.*
+ANTHROPIC_BASE_URL=$ZURL ANTHROPIC_AUTH_TOKEN=$ZKEY API_TIMEOUT_MS=3000000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.3 tz 61-spec claude "faça a 61"
+check "claude aberto de dentro de uma sessão zai: não herda as variáveis" [ -z "$(zvars claude)" ]
+check "claude: a marca guarda a assinatura claude"      [ "$(mark "$SP/proj-61-spec" subscription)" == claude ]
+check "claude: opened com assinatura claude"            jqe '.attrs["oute.task.subscription"] == "claude" and .attrs["oute.task.agent"] == "claude"' <<<"$(last)"
+check "claude: o ~/.claude/settings.json segue igual"   [ "$(cksum < "$HOME/.claude/settings.json")" == "$SET_SUM" ]
+
+# 13c. --subscription: escolha explícita, repassada ao oute-select
+rm -f "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*
+tz --subscription zai 70-sem-label claude "p"
+check "--subscription zai: abre na zai mesmo sem label"  [ "$RC" -eq 0 -a "$(sed -n 1,2p "$FAKE/claude.args" | tr '\n' ' ')" == "--model glm-5.3 " -a "$(zvars claude)" == "$ZWANT" ]
+rm -f "${FAKE:?}"/claude.*
+tz --subscription claude 62-claude claude "p"
+check "--subscription claude numa issue build: abre no claude, sem as variáveis" [ -z "$(zvars claude)" -a "$(mark "$SP/proj-62-claude" subscription)" == claude ]
+rm -f "${FAKE:?}"/codex.*
+tz --subscription codex 62-codex claude "p"
+check "--subscription codex: abre o codex, assinatura codex, sem as variáveis" [ "$RC" -eq 0 -a -f "$FAKE/codex.args" -a -z "$(zvars codex)" -a "$(mark "$SP/proj-62-codex" subscription)" == codex ]
+check "--subscription codex: a conversa sai com oute.subscription=codex" bash -c 'grep -q ",oute.subscription=codex$" <<<"$1"' _ "$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
+tz --subscription zai --agent codex 62-conflito
+check "--subscription zai com --agent codex: recusa e não abre" [ "$RC" -ne 0 -a ! -d "$SP/proj-62-conflito" ]
+t --subscription 'Z!' 62-x
+check "--subscription inválido: recusa com o motivo"    bash -c '[ "$1" -eq 1 ] && grep -qF -- "--subscription inválido" <<<"$2"' _ "$RC" "$ERR"
+
+# 13d. sem a chave: a zai explícita não abre, e a worktree não é criada
+rm -f "${FAKE:?}"/claude.*
+tn --subscription zai 71-sem-chave claude "p"
+check "zai sem OUTE_ZAI_API_KEY: recusa, sem worktree e sem agente" bash -c '[ "$1" -eq 1 ] && grep -qF "OUTE_ZAI_API_KEY" <<<"$2" && [ ! -d "$3" ] && [ ! -f "$4" ]' _ "$RC" "$ERR" "$SP/proj-71-sem-chave" "$FAKE/claude.args"
+
+# 13e. zai indisponível: a issue build cai no claude (reserva), com a origem no evento
+rm -f "${FAKE:?}"/claude.*
+FAKE_AVAIL_RC_ZAI=1 tz 62-reserva claude "p"
+check "zai indisponível: abre no claude, sem variáveis nem --settings" [ -z "$(zvars claude)" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '--model\nclaude-sonnet-5-5\np')" ]
+check "zai indisponível: opened com reserve indisponivel, reserve_from zai e assinatura claude" jqe '.attrs["oute.task.reserve"] == "indisponivel" and .attrs["oute.task.reserve_from"] == "zai"
+                                                         and .attrs["oute.task.subscription"] == "claude" and .attrs["oute.task.agent"] == "claude"' <<<"$(last)"
+
+# 13f. restore (shim): reabre com as mesmas variáveis e a mesma regra
+rm -f "${FAKE:?}"/claude.*
+OUTE_ZAI_API_KEY="$ZKEY" shim claude "$SP/proj-60-zai" --resume conv-z
+check "restore zai: --model glm-5.3 e o --settings da marca" [ "$(cat "$FAKE/claude.args")" == "$(printf -- '--resume\nconv-z\n--model\nglm-5.3\n--settings\n%s' "$ZSET")" ]
+check "restore zai: as sete variáveis e a marca zai"   [ "$(zvars claude)" == "$ZWANT" -a "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)" == "$ORIGIN,oute.task.id=$zid,oute.task.repo=proj,oute.task.slug=60-zai,oute.subscription=zai" ]
+check "restore zai: a chave não vai em argv nem na tela" bash -c '! grep -qF "$1" "$2" && ! grep -qF "$1" <<<"$3"' _ "$ZKEY" "$FAKE/claude.args" "$OUT$ERR"
+rm -f "${FAKE:?}"/claude.*
+OUTE_ZAI_API_KEY="$ZKEY" shim claude "$SP/proj-60-zai" -c --model glm-5.3
+check "restore zai com --model na linha: só o --settings é posto" [ "$(cat "$FAKE/claude.args")" == "$(printf -- '-c\n--model\nglm-5.3\n--settings\n%s' "$ZSET")" -a "$(zvars claude)" == "$ZWANT" ]
+rm -f "${FAKE:?}"/claude.*
+shim claude "$SP/proj-60-zai" --resume conv-z
+check "restore zai sem a chave: avisa, sem as variáveis e sem --settings" bash -c 'grep -qF "OUTE_ZAI_API_KEY" <<<"$1" && [ -z "$2" ] && ! grep -qx -- "--settings" "$3"' _ "$ERR" "$(zvars claude)" "$FAKE/claude.args"
+rm -f "${FAKE:?}"/claude.*
+OUTE_ZAI_API_KEY="$ZKEY" shim claude "$SP/proj-61-spec" --resume conv-c
+check "restore claude: sem variáveis da zai e sem --settings" bash -c '[ -z "$1" ] && ! grep -qx -- "--settings" "$2" && grep -q ",oute.subscription=claude$" <<<"$3"' _ "$(zvars claude)" "$FAKE/claude.args" "$(aenv claude OTEL_RESOURCE_ATTRIBUTES)"
+check "restore: o ~/.claude/settings.json segue igual"  [ "$(cksum < "$HOME/.claude/settings.json")" == "$SET_SUM" ]
+
+# 13g. marca anterior à #678 (sem subscription): a conversa leva a assinatura do agente
+printf 'id=proj-velha-20260101000000\nrepo=proj\nslug=velha\nagent=codex\nmodel=gpt-6.1-sol\n' > "$(gitdir "$SP/proj-62-codex")/oute-task"
+check "marca sem subscription: --mark usa a do agente"  bash -c 'grep -q ",oute.subscription=codex$" <<<"$1"' _ "$(cd "$SP/proj-62-codex" && "$TASK" --mark)"
+
+# 13h. a chave não aparece em nenhum evento recebido
+check "a chave não aparece em nenhum evento"            bash -c '! grep -qF "$1" <<<"$2"' _ "$ZKEY" "$(ev true)"
+before="$(n true)"; oute-emit task opened human repo=a slug=b "subscription=Z!"
+check "oute-emit task: assinatura inválida não emite"   [ "$(n true)" -eq "$before" ]
+rcv_stop
 
 check_end

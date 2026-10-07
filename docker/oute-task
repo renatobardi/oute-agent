@@ -6,6 +6,8 @@
 #   oute-task --agent claude|codex --model <id> <slug>   escolha explícita do agente e/ou do modelo (antes do slug)
 #   oute-task --prefer <assinatura> <slug>              pedido (não escolha explícita) de abrir numa reserva; com ela cheia,
 #                                                        a sessão volta para a padrão (#621). --agent/--model/--phase vencem
+#   oute-task --subscription <assinatura> <slug>        escolha explícita da assinatura (#678), repassada ao oute-select: `zai` é o
+#                                                        claude na API da Z.ai (modelo glm-*, sem leitura de imagem); não volta para a padrão
 #   oute-task list                                       worktrees de tarefa abertas (todos os spaces)
 #   oute-task clean [--yes] [--space <nome> | --all] [--force-in-use]
 #                                                        remove as já mergeadas/vazias (ou detached contidas na base);
@@ -27,11 +29,17 @@
 # Jev (#257): sem label de fase e com texto da tarefa (o prompt: último argumento do agente, com mais de uma palavra),
 # o oute-select pede a fase ao Jev; sem texto (sessão aberta na mão), Sonnet sem chamar o Jev.
 #
+# Assinatura `zai` (#678, ADR-02 e ADR-01, adendos de 2026-10-05 e 2026-10-06): a sessão é do `claude`, com as variáveis da Z.ai só
+# no ambiente do processo que abre (nunca no ~/.claude/settings.json: uma sessão `claude` ao lado não as tem) e com `--settings`
+# negando o `Read` de imagem. A chave vem de OUTE_ZAI_API_KEY, só do ambiente: nunca em argv, aviso, marca nem evento.
+#
 # Sessão no bucket (ADR-04, "Sessões (#128)"): abrir, reabrir e remover (clean --yes) emitem oute.task.opened/reopened/
 # removed pelo oute-emit, e a conversa do agente sai marcada com a sessão no OTEL_RESOURCE_ATTRIBUTES. Nada disso muda
 # saída, exec ou código de saída, nem com o coletor fora ou sem oute-emit.
 #   oute-task --mark [dir]   (o shim usa) imprime o OTEL_RESOURCE_ATTRIBUTES com a marca da sessão da worktree; sem id, nada
 #   oute-task --model-args <agente> [dir]   (o shim usa) argumentos de modelo da marca, um por linha, se o agente é o dela
+#   oute-task --settings-args <agente> [dir]  (o shim usa) o `--settings` da marca zai, um por linha, se o agente é o dela
+#   oute-task --zai-env [dir]               (o shim usa) NOME=valor das variáveis da zai que não são a chave, se a marca é zai
 set -euo pipefail
 WT_ROOT="${OUTE_WORKTREES:-/workspace/.worktrees}"
 WS_ROOT="${OUTE_WORKSPACE:-/workspace}"   # a variável só existe para os testes
@@ -70,14 +78,15 @@ mark_path() { local gd; gd="$(git -C "$1" rev-parse --path-format=absolute --git
 mark_get() { [[ -f "$1" ]] || return 0; sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' || true; }
 # id de modelo na marca: como o mark_get, mais o sufixo [1m]
 mark_model() { [[ -f "$1" ]] || return 0; sed -n 's/^model=//p' "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._[]-' || true; }
-mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço>
+mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço> <assinatura>
   local f="$1"; shift
   { printf 'id=%s\nrepo=%s\nslug=%s\n' "$1" "$2" "$3"
     [[ -z "$4" ]] || printf 'round=%s\n' "$4"
     [[ -z "$5" ]] || printf 'session=%s\n' "$5"
     [[ -z "$6" ]] || printf 'agent=%s\n' "$6"
     [[ -z "$7" ]] || printf 'model=%s\n' "$7"
-    [[ -z "$8" ]] || printf 'effort=%s\n' "$8"; } 2>/dev/null > "$f"
+    [[ -z "$8" ]] || printf 'effort=%s\n' "$8"
+    [[ -z "${9:-}" ]] || printf 'subscription=%s\n' "$9"; } 2>/dev/null > "$f"
 }
 # OTEL_RESOURCE_ATTRIBUTES de agora sem oute.task.*/oute.swarm.* (fica a origem) + os pares dados (par sem valor não
 # entra): chave que já existia não se repete, vale a nova
@@ -86,18 +95,18 @@ otel_attrs() {
   IFS=, read -r -a parts <<<"${OTEL_RESOURCE_ATTRIBUTES:-}" || true
   for part in ${parts[@]+"${parts[@]}"}; do
     k="${part%%=*}"; k="${k//[[:space:]]/}"
-    case "$k" in ""|oute.task.*|oute.swarm.*) continue ;; esac
+    case "$k" in ""|oute.task.*|oute.swarm.*|oute.subscription) continue ;; esac
     out+="${out:+,}$part"
   done
   for part in "$@"; do [[ "$part" == *= ]] || out+="${out:+,}$part"; done
   printf '%s' "$out"
 }
-# marca nas conversas: <id> <repo> <slug> <rodada> <sessão do swarm>. Sem id não marca (e tira a de outra sessão, se
-# veio no ambiente de quem chamou)
+# marca nas conversas: <id> <repo> <slug> <rodada> <sessão do swarm> <assinatura>. Sem id não marca (e tira a de outra
+# sessão, se veio no ambiente de quem chamou). `oute.subscription` (#678) = claude, zai ou codex
 mark_env() {
   local v
   if [[ -n "$1" ]]; then
-    v="$(otel_attrs "oute.task.id=$1" "oute.task.repo=$2" "oute.task.slug=$3" "oute.swarm.round=$4" "oute.swarm.session=$5")"
+    v="$(otel_attrs "oute.task.id=$1" "oute.task.repo=$2" "oute.task.slug=$3" "oute.swarm.round=$4" "oute.swarm.session=$5" "oute.subscription=${6:-}")"
   else v="$(otel_attrs)"; fi
   [[ -z "$v" && -z "${OTEL_RESOURCE_ATTRIBUTES+x}" ]] || export OTEL_RESOURCE_ATTRIBUTES="$v"
 }
@@ -150,41 +159,77 @@ removed() {   # <base> <merged|empty|detached>, depois do task_of
 # Escolha do seletor (S_*, do select_model): vai no evento e, para claude/codex, na marca; o `shell` não mexe nela
 session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
   local ev="$1" wt="$2" rname slug="$4" agent="$5" base="$6" mf="" id="" mid round eround mround="" sess msess="" legacy=""
-  local ma="" mm="" me="" wa wm we
+  local ma="" mm="" me="" ms="" wa wm we ws
   rname="$(attr "$3")"
   if mf="$(mark_path "$wt")"; then
     id="$(mark_get "$mf" id)"; mround="$(mark_get "$mf" round)"; msess="$(mark_get "$mf" session)"
-    ma="$(mark_get "$mf" agent)"; mm="$(mark_model "$mf")"; me="$(mark_get "$mf" effort)"
+    ma="$(mark_get "$mf" agent)"; mm="$(mark_model "$mf")"; me="$(mark_get "$mf" effort)"; ms="$(mark_get "$mf" subscription)"
   fi
-  if [[ "$agent" == shell ]]; then wa="$ma"; wm="$mm"; we="$me"; else wa="$agent"; wm="$S_MODEL"; we="$S_EFFORT"; fi
+  # assinatura (#678): a do seletor; sem ela (sem oute-select), a do agente. O `shell` mantém a da marca
+  if [[ "$agent" == shell ]]; then wa="$ma"; wm="$mm"; we="$me"; ws="$ms"; else wa="$agent"; wm="$S_MODEL"; we="$S_EFFORT"; ws="${S_SUB:-$agent}"; fi
   mid="$id"; round="$mround"; sess="$msess"
   eround="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}"
   if [[ "$eround" =~ ^[A-Za-z0-9._-]+$ ]]; then
     round="$eround"; sess=""
     [[ -z "${OUTE_SWARM_WORKER:-}" ]] || sess="$slug"
   fi
-  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" || "$wa" != "$ma" || "$wm" != "$mm" || "$we" != "$me" ]]; then
+  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" || "$wa" != "$ma" || "$wm" != "$mm" || "$we" != "$me" || "$ws" != "$ms" ]]; then
     # worktree sem id na reabertura = anterior à #128: ganha um agora, com legacy
     if [[ -z "$id" ]]; then id="$rname-$slug-$(date -u +%Y%m%d%H%M%S)"; [[ "$ev" == opened ]] || legacy=true; fi
-    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess" "$wa" "$wm" "$we"; then
+    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess" "$wa" "$wm" "$we" "$ws"; then
       [[ -n "$mid" ]] || { echo "aviso: não consegui gravar o id da sessão em ${mf:-$wt}; a sessão segue sem id" >&2; id=""; legacy=""; }
     fi
   fi
   emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy" \
-    "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF" "reserve=$S_RESERVE" "reserve_from=$S_RESERVE_FROM"
+    "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF" "reserve=$S_RESERVE" "reserve_from=$S_RESERVE_FROM" \
+    "subscription=$ws"
   quota_snapshot || true
-  mark_env "$id" "$rname" "$slug" "$round" "$sess"
+  mark_env "$id" "$rname" "$slug" "$round" "$sess" "$ws"
 }
 cmd_mark() {
-  local f id
+  local f id sub
   f="$(mark_path "${1:-$PWD}")" || return 0
   id="$(mark_get "$f" id)"; [[ -n "$id" ]] || return 0
+  sub="$(mark_get "$f" subscription)"; [[ -n "$sub" ]] || sub="$(mark_get "$f" agent)"   # marca anterior à #678: a assinatura é a do agente
   otel_attrs "oute.task.id=$id" "oute.task.repo=$(mark_get "$f" repo)" "oute.task.slug=$(mark_get "$f" slug)" \
-    "oute.swarm.round=$(mark_get "$f" round)" "oute.swarm.session=$(mark_get "$f" session)"
+    "oute.swarm.round=$(mark_get "$f" round)" "oute.swarm.session=$(mark_get "$f" session)" "oute.subscription=$sub"
 }
 
 # ---------------------------------------------------------------- modelo da sessão (ADR-02, #219)
-S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""; S_RESERVE_FROM=""; MARGS=(); SEL_FILE=""
+S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""; S_RESERVE_FROM=""; S_SUB=""; MARGS=(); SARGS=(); SEL_FILE=""
+# zai (#678): o Read de imagem negado por --settings (a Z.ai sobe a imagem a um CDN de terceiro, ADR-01); só o Read, outro caminho fica fora
+ZAI_SETTINGS='{"permissions":{"deny":["Read(**/*.png)","Read(**/*.jpg)","Read(**/*.jpeg)","Read(**/*.gif)","Read(**/*.webp)","Read(**/*.bmp)"]}}'
+ZAI_BASE_URL="${OUTE_ZAI_BASE_URL:-https://api.z.ai/api/anthropic}"   # a variável só existe para os testes
+ZAI_MODEL=glm-5.3
+# as variáveis da zai que não são a chave, NOME=valor por linha. O modelo é o da marca (o id que o seletor deu), senão o padrão
+zai_vars() {   # [modelo]
+  local m="${1:-$ZAI_MODEL}"
+  printf '%s\n' "ANTHROPIC_BASE_URL=$ZAI_BASE_URL" "ANTHROPIC_DEFAULT_OPUS_MODEL=$m" "ANTHROPIC_DEFAULT_SONNET_MODEL=$m" \
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL=$m" "API_TIMEOUT_MS=3000000" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+  return 0
+}
+# no ambiente deste processo (que vira o do agente pelo exec): as da zai com a chave de OUTE_ZAI_API_KEY (só o ambiente, nunca
+# argv), ou, em sessão que não é da zai, nenhuma delas (podem ter vindo da sessão zai que chamou o oute-task)
+zai_apply() {   # <assinatura> <modelo>
+  local sub="$1" model="$2" l
+  if [[ "$sub" == zai ]]; then
+    while IFS= read -r l; do export "$l"; done < <(zai_vars "$model")
+    export ANTHROPIC_AUTH_TOKEN="$OUTE_ZAI_API_KEY"
+    unset ANTHROPIC_API_KEY   # a chave do Claude nunca vai à API da Z.ai
+  else
+    unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL \
+      ANTHROPIC_DEFAULT_HAIKU_MODEL API_TIMEOUT_MS CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  fi
+  return 0
+}
+# argumentos de configuração da assinatura, em SARGS: <agente> <assinatura>; hoje só a zai (o claude)
+sub_args() {
+  local agent="$1" sub="$2"
+  SARGS=()
+  [[ "$agent" == claude && "$sub" == zai ]] || return 0
+  SARGS=(--settings "$ZAI_SETTINGS")
+  return 0
+}
 # argumentos de modelo do agente, em MARGS: <agente> <modelo> <esforço>; sem modelo, nenhum
 model_args() {
   MARGS=()
@@ -224,19 +269,20 @@ task_text() {
 # abertura: sem oute-select, nada muda; com ele falhando ou devolvendo algo inválido, aviso e o modelo padrão do
 # agente. Só argumento inválido (código 2 do oute-select, que já disse o motivo) sai com erro.
 select_model() {
-  local js="" rc=0 args=() a m e p o c r
-  S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""; S_RESERVE_FROM=""
+  local js="" rc=0 args=() a m e p o c r rf sb
+  S_PHASE=""; S_ORIGIN=""; S_MODEL=""; S_EFFORT=""; S_AGENT=""; S_CONF=""; S_RESERVE=""; S_RESERVE_FROM=""; S_SUB=""
   if [[ -n "$SEL_FILE" && -r "$SEL_FILE" ]]; then js="$(cat "$SEL_FILE" 2>/dev/null || true)"
   elif command -v oute-select >/dev/null 2>&1; then
     [[ -z "$3" ]] || args+=(--agent "$3")
     [[ -z "$4" ]] || args+=(--model "$4")
     [[ -z "${7:-}" ]] || args+=(--prefer "$7")
+    [[ -z "${8:-}" ]] || args+=(--subscription "$8")
     if [[ -n "$5" ]]; then args+=(--phase "$5"); else args+=(--task "$2"); fi
     if [[ -n "${6:-}" && -z "$5" ]]; then js="$(printf '%s' "$6" | oute-select --json --repo "$1" --text-file - ${args[@]+"${args[@]}"})" || rc=$?
     else js="$(oute-select --json --repo "$1" ${args[@]+"${args[@]}"} </dev/null)" || rc=$?; fi
     (( rc != 2 )) || exit 1
   else return 0; fi
-  IFS='|' read -r a m e p o c r rf < <(jq -r '[.agent, .model, .effort, .phase, .origin, .confidence, .reserve, .reserve_from] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || true
+  IFS='|' read -r a m e p o c r rf sb < <(jq -r '[.agent, .model, .effort, .phase, .origin, .confidence, .reserve, .reserve_from, .subscription] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || true
   if (( rc != 0 )) || [[ ! "${a:-}" =~ ^(claude|codex)$ ]]; then
     echo "aviso: o seletor de modelo não respondeu; a sessão abre com o modelo padrão do agente" >&2; return 0
   fi
@@ -248,6 +294,10 @@ select_model() {
   [[ ! "${c:-}" =~ ^(0(\.[0-9]+)?|1(\.0+)?)$ ]] || S_CONF="$c"
   [[ ! "${r:-}" =~ ^(indisponivel|cota)$ ]] || S_RESERVE="$r"
   [[ -z "$S_RESERVE" || ! "${rf:-}" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || S_RESERVE_FROM="$rf"
+  # assinatura (#678): só a zai vale com o agente claude; sem o campo (seletor anterior), a assinatura é a do agente
+  [[ ! "${sb:-}" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || S_SUB="$sb"
+  [[ "$S_SUB" != zai || "$S_AGENT" == claude ]] || S_SUB="$S_AGENT"
+  return 0
 }
 cmd_model_args() {   # <agente> [dir]
   local f
@@ -255,6 +305,19 @@ cmd_model_args() {   # <agente> [dir]
   [[ -n "${1:-}" && "$(mark_get "$f" agent)" == "$1" ]] || return 0
   model_args "$1" "$(mark_model "$f")" "$(mark_get "$f" effort)"
   [[ ${#MARGS[@]} -eq 0 ]] || printf '%s\n' "${MARGS[@]}"
+}
+cmd_settings_args() {   # <agente> [dir]: só o --settings da marca (o shim, quando a linha de comando já traz --model)
+  local f agent="${1:-}" dir="${2:-$PWD}"
+  f="$(mark_path "$dir")" || return 0
+  [[ -n "$agent" && "$(mark_get "$f" agent)" == "$agent" ]] || return 0
+  sub_args "$agent" "$(mark_get "$f" subscription)"
+  [[ ${#SARGS[@]} -eq 0 ]] || printf '%s\n' "${SARGS[@]}"
+}
+cmd_zai_env() {   # [dir]: NOME=valor das variáveis da zai (sem a chave) se a marca é de uma sessão zai do claude; senão, nada
+  local f dir="${1:-$PWD}"
+  f="$(mark_path "$dir")" || return 0
+  [[ "$(mark_get "$f" subscription)" == zai && "$(mark_get "$f" agent)" == claude ]] || return 0
+  zai_vars "$(mark_model "$f")"
 }
 
 cmd_list() {
@@ -431,9 +494,14 @@ cmd_open() {
     [[ "$pos" != codex ]] || xagent=codex
     amodel="$(args_model "$agent" "$@")"
     [[ -z "$O_MODEL" || -z "$amodel" || "$amodel" == "$O_MODEL" ]] || die "--model $O_MODEL e o modelo $amodel dos argumentos do agente não andam juntos"
-    select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE" "$(task_text "$@")" "$O_PREFER"
+    select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE" "$(task_text "$@")" "$O_PREFER" "$O_SUB"
     agent="${S_AGENT:-$agent}"
     [[ -n "$amodel" ]] || model_args "$agent" "$S_MODEL" "$S_EFFORT"
+    # sessão zai (#678): o modelo glm-* (se o --model dos argumentos não o trouxe) e o --settings; sem a chave, não abre
+    sub_args "$agent" "$S_SUB"
+    if [[ "$agent" == claude && "$S_SUB" == zai && -z "${OUTE_ZAI_API_KEY:-}" ]]; then
+      die "a assinatura zai precisa de OUTE_ZAI_API_KEY no ambiente (pasta oute-agent do vault); sessão não aberta"
+    fi
   fi
   sp="$(current_space)"; wt="$WT_ROOT/$sp/$name-$slug"; br="sessao/$slug"
   # formato antigo (antes da #277): a worktree que já existe direto em $WT_ROOT continua sendo a da tarefa
@@ -462,18 +530,21 @@ cmd_open() {
         export CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="${CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION:-false}"
         touch "$(git rev-parse --path-format=absolute --git-dir)/oute-swarm-worker" 2>/dev/null || true
       fi
-      OUTE_NO_WORKTREE=1 exec "$agent" ${MARGS[@]+"${MARGS[@]}"} "$@" ;;   # passa pelo shim, que deixa seguir
+      zai_apply "$([[ "$agent" == claude ]] && echo "$S_SUB" || true)" "$S_MODEL"
+      OUTE_NO_WORKTREE=1 exec "$agent" ${MARGS[@]+"${MARGS[@]}"} ${SARGS[@]+"${SARGS[@]}"} "$@" ;;   # passa pelo shim, que deixa seguir
     shell) exec bash -i ;;
   esac
 }
 
-O_AGENT=""; O_MODEL=""; O_PHASE=""; O_PREFER=""
+O_AGENT=""; O_MODEL=""; O_PHASE=""; O_PREFER=""; O_SUB=""
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
   clean) shift; cmd_clean "$@" ;;
   --mark) cmd_mark "${2:-}" 2>/dev/null || true ;;
   --model-args) cmd_model_args "${2:-}" "${3:-}" 2>/dev/null || true ;;
+  --settings-args) cmd_settings_args "${2:-}" "${3:-}" 2>/dev/null || true ;;
+  --zai-env) cmd_zai_env "${2:-}" 2>/dev/null || true ;;
   *) r="$PWD"
      # opções da abertura, antes do slug; --phase (fase fixa, sem ler a issue) é o que o oute-swarm usa no dispatcher
      while [[ "${1:-}" == -* ]]; do
@@ -484,11 +555,12 @@ case "${1:-}" in
                   [[ "$O_AGENT" == claude || "$O_AGENT" == codex ]] || die "--agent inválido: ${O_AGENT:-(vazio)} (claude|codex)" ;;
          --model) O_MODEL="${2:-}"; [[ -n "$O_MODEL" ]] || die "--model sem valor" ;;
          --prefer) O_PREFER="${2:-}"; [[ "$O_PREFER" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "--prefer inválido: ${O_PREFER:-(vazio)} (nome de assinatura da tabela)" ;;
+         --subscription) O_SUB="${2:-}"; [[ "$O_SUB" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "--subscription inválido: ${O_SUB:-(vazio)} (nome de assinatura da tabela)" ;;
          --phase) O_PHASE="${2:-}"; [[ -n "$O_PHASE" ]] || die "--phase sem valor" ;;
-         *) die "opção desconhecida: $1 (uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] <slug> [agente] [args…])" ;;
+         *) die "opção desconhecida: $1 (uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] [--subscription <assinatura>] <slug> [agente] [args…])" ;;
        esac
        shift 2
      done
-     [[ $# -ge 1 ]] || die "uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] <slug> [agente] [args…]"
+     [[ $# -ge 1 ]] || die "uso: oute-task [-r <repo>] [--agent claude|codex] [--model <id>] [--prefer <assinatura>] [--subscription <assinatura>] <slug> [agente] [args…]"
      cmd_open "$r" "$@" ;;
 esac

@@ -48,6 +48,14 @@ nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
 check "--prefer: código 0, meta com prefer=codex e sem workers=" [ "$RC" -eq 0 -a -n "$nr" -a "$(grep -cx 'prefer=codex' "$M")" -eq 1 -a -z "$(grep '^workers' "$M")" ]
 opn --max 2 --prefer 'X;y'
 check "--prefer inválido: recusado com a mensagem" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--prefer inválido: X;y" <<<"$2"' _ "$RC" "$ERR"
+# 10b3. abertura com --subscription (#678): meta com subscription=; o dispatcher segue no claude; formato inválido recusa sem rodada
+CASE=agente-subscription; round "$CASE"
+opn --max 2 --subscription zai
+nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
+check "--subscription: código 0, meta com subscription=zai" [ "$RC" -eq 0 -a -n "$nr" -a "$(grep -cx 'subscription=zai' "$M")" -eq 1 ]
+check "--subscription: o dispatcher abre no claude, fase plan, sem a assinatura" bash -c 'grep -qx -- "--phase" "$1" && grep -qx -- "plan" "$1" && ! grep -qF -- "--subscription" "$1"' _ "$FAKE/oute-task.args"
+opn --max 2 --subscription 'X;y'
+check "--subscription inválido: recusado com a mensagem" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--subscription inválido: X;y" <<<"$2"' _ "$RC" "$ERR"
 # 10c. --agent inválido: erro claro, sem rodada nem oute-task
 CASE=agente-invalido; round "$CASE"
 opn --agent foo
