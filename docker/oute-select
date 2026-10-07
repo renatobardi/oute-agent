@@ -7,23 +7,32 @@
   --issue <n>      issue da sessão; --task <n>-<slug> tira o número do slug (slug sem número = sessão sem issue)
   --repo <dir>     checkout em que o `gh` lê a issue (padrão: o diretório atual)
   --phase <fase>   fase fixa, sem ler a issue (o dispatcher do swarm abre em `plan`)
-  --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase
-  --prefer <nome>  pedido (não escolha explícita) de abrir numa assinatura que não é a padrão: vale a mesma regra de cota,
-                   e a sessão pode voltar para a padrão (#598). Sem a opção, o ponto de partida é a padrão
+  --agent/--model  escolha explícita (origem `manual`); o que faltar vem da linha da fase. `--agent` é o agente (programa):
+                   `claude` ou `codex`, com a assinatura de mesmo nome
+  --subscription <nome>
+                   escolha explícita da assinatura (#677; `zai` é a assinatura do agente `claude` na API da Z.ai): não troca,
+                   e avisa e abre nela se está indisponível ou no teto. Com `--agent`, os dois têm que combinar
+  --prefer <nome>  pedido (não escolha explícita) de abrir numa assinatura que não é a padrão da linha: vale a mesma regra de
+                   cota, e a sessão pode voltar para a padrão (#598). Sem a opção, o ponto de partida é a padrão da linha
   --text-file <f>  texto da tarefa (`-` = stdin), para o Jev classificar a fase quando nenhum label a dá
-  --json           {"phase","origin","agent","model","effort","reason","confidence","reserve"} (+ "reserve_from" só
-                   quando houve reserva: a assinatura de onde a sessão saiu); sem ele, uma linha para ler
+  --json           {"phase","origin","subscription","agent","model","effort","reason","confidence","reserve"} (+ "reserve_from"
+                   só quando houve reserva: a assinatura de onde a sessão saiu); sem ele, uma linha para ler
 
 Precedência: --agent/--model > exceção por label (`spike`, `kaizen`, `docs`) > label `aidlc:<fase>` > Jev > padrão (Sonnet).
 A exceção `kaizen` não vale com label de fase que mexe em código (`unless_phases` da tabela: build, qa, design, plan,
 ship, iter; #409): vale a fase. `spike` e `docs` não têm essa ressalva.
 Origem: `manual`, `label`, `jev` ou `padrao`. `effort` só existe no Codex. Campo sem valor sai como "".
 
-Assinaturas (#598, ADR-02): a tabela lista as assinaturas (`[[subscription]]`: `name`, `default` em uma só, `status` = o comando
-que diz se o agente está logado, `effort`, `prefixes`); as outras são reservas. Cada linha de fase tem uma coluna por
-assinatura. Acrescentar uma é cadastro na tabela (e a leitura da cota dela no `oute-quota`), não código aqui. O campo
-`[select] reserve_mode` escolhe a reserva: `mais-livre` (a de mais cota livre; cota livre = 100 − a janela mais cheia) ou
-`ordem` (a primeira da tabela abaixo do teto).
+Assinaturas (#598, ADR-02): a tabela lista as assinaturas (`[[subscription]]`: `name`, `agent` = o programa da sessão, sem ele
+vale o `name`, `default` em uma só, `status` = o comando que diz se a assinatura está disponível, `effort`, `prefixes`); as
+outras são reservas. Assinatura × agente (#677): `zai` e `claude` são duas assinaturas do mesmo agente (`claude`); o JSON traz
+`subscription` e `agent`, a cota e a disponibilidade são da assinatura, e o modelo é a coluna dela na linha. Cada linha de
+fase tem uma coluna por assinatura. Acrescentar uma é cadastro na tabela (e a leitura da cota dela no `oute-quota`), não
+código aqui. O campo `[select] reserve_mode` escolhe a reserva: `mais-livre` (a de mais cota livre; cota livre = 100 − a
+janela mais cheia) ou `ordem` (a primeira da tabela abaixo do teto).
+Cadeia por linha (#677): a linha (ou exceção) com `chain = [...]` tem a cadeia dela: a primeira é a padrão da linha (o
+`reserve_from`), a reserva anda na ordem da cadeia (modo `ordem`) e só entram as assinaturas dela. Linha sem `chain` segue a
+padrão da tabela e o `reserve_mode`. `--phase` e as exceções por label também usam a cadeia da linha.
 
 Reserva (#258, #355, #598): sem escolha explícita, a sessão parte da padrão (ou da de `--prefer`). Ela fica nela se está
 disponível (o `status` sai 0; sem resposta em 5 s só avisa) e com toda janela abaixo de `max_pct` (98, #558). Senão abre
@@ -62,14 +71,15 @@ SUB_NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 RESERVE_MODES = ("mais-livre", "ordem")
 # tabela ausente ou inválida: as duas assinaturas de antes da #598, para a reserva (#258) seguir valendo sem modelo
 FALLBACK_SUBS = [
-    {"name": "claude", "default": True, "status": ["claude", "auth", "status"], "effort": False, "prefixes": ()},
-    {"name": "codex", "default": False, "status": ["codex", "login", "status"], "effort": True,
+    {"name": "claude", "agent": "claude", "default": True, "status": ["claude", "auth", "status"], "effort": False,
+     "prefixes": ()},
+    {"name": "codex", "agent": "codex", "default": False, "status": ["codex", "login", "status"], "effort": True,
      "prefixes": ("gpt-", "codex")},
 ]
 MODEL_RE = re.compile(r"[A-Za-z0-9._-]+(\[1m\])?")
 PHASE_RE = re.compile(r"[a-z]+")
 USAGE = "uso: oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] " \
-        "[--agent <assinatura>] [--prefer <assinatura>] [--model <id>] [--text-file <arquivo>|-]"
+        "[--agent <agente>] [--subscription <assinatura>] [--prefer <assinatura>] [--model <id>] [--text-file <arquivo>|-]"
 
 # Jev direto na TypeSafe (ADR-02, #257). A URL só muda nos testes (TypeSafe falsa, com TLS) e só vale com https://
 # (#313): sem TLS, o texto da tarefa e a chave iriam em claro.
@@ -121,6 +131,13 @@ def line_ok(d, names):
                                        for k in (*names, "effort"))
 
 
+def chain_ok(d, names):
+    """`chain` da linha (#677), se há: lista não vazia de assinaturas da tabela, sem repetir"""
+    ch = d.get("chain")
+    return ch is None or (isinstance(ch, list) and bool(ch) and len(set(ch)) == len(ch)
+                          and all(isinstance(x, str) and x in names for x in ch))
+
+
 def load_subscriptions(t):
     """([assinatura], modo das reservas) de `[[subscription]]` e `[select]`; ValueError se inválidos"""
     raw = t.get("subscription")
@@ -137,7 +154,10 @@ def load_subscriptions(t):
             raise ValueError(f"[[subscription]] {r['name']} com prefixes inválido")
         if not isinstance(r.get("default", False), bool) or not isinstance(r.get("effort", False), bool):
             raise ValueError(f"[[subscription]] {r['name']} com default ou effort que não é booleano")
-        subs.append({"name": r["name"], "default": r.get("default", False), "status": st,
+        agent = r.get("agent", r["name"])
+        if not isinstance(agent, str) or not SUB_NAME_RE.fullmatch(agent):
+            raise ValueError(f"[[subscription]] {r['name']} com agent inválido")
+        subs.append({"name": r["name"], "agent": agent, "default": r.get("default", False), "status": st,
                      "effort": r.get("effort", False), "prefixes": tuple(pre)})
     names = [x["name"] for x in subs]
     if len(set(names)) != len(names):
@@ -160,18 +180,18 @@ def load_table():
         subs, mode = load_subscriptions(t)
         names = [x["name"] for x in subs]
         default, phases, exceptions = t["default"], {}, []
-        if not line_ok(default, names):
-            raise ValueError(f"[default] sem {', '.join(names)} ou effort")
+        if not line_ok(default, names) or not chain_ok(default, names):
+            raise ValueError(f"[default] sem {', '.join(names)} ou effort, ou com chain inválida")
         for ln in t.get("line", []):
-            if not line_ok(ln, names) or not isinstance(ln.get("phases"), list):
-                raise ValueError(f"[[line]] sem phases, {', '.join(names)} ou effort")
+            if not line_ok(ln, names) or not isinstance(ln.get("phases"), list) or not chain_ok(ln, names):
+                raise ValueError(f"[[line]] sem phases, {', '.join(names)} ou effort, ou com chain inválida")
             for p in ln["phases"]:
                 if not isinstance(p, str) or not PHASE_RE.fullmatch(p):
                     raise ValueError(f"fase inválida: {p!r}")
                 phases[p] = ln
         for ex in t.get("exception", []):
-            if not line_ok(ex, names) or not isinstance(ex.get("label"), str) or not ex["label"]:
-                raise ValueError(f"[[exception]] sem label, {', '.join(names)} ou effort")
+            if not line_ok(ex, names) or not isinstance(ex.get("label"), str) or not ex["label"] or not chain_ok(ex, names):
+                raise ValueError(f"[[exception]] sem label, {', '.join(names)} ou effort, ou com chain inválida")
             skip = ex.get("unless_phases", [])
             if not isinstance(skip, list) or not all(isinstance(p, str) and PHASE_RE.fullmatch(p) for p in skip):
                 raise ValueError("[[exception]] com unless_phases inválido")
@@ -464,9 +484,14 @@ def availability(sub):
     return agent_state(sub["status"]) if sub["status"] else "ok"
 
 
-def decide(subs, mode, start):
+def decide(subs, mode, start, chain=None):
     """(assinatura onde abrir, reserve, de) pela regra da #598; só sem escolha explícita. Avisos em stderr, nunca bloqueia.
-    reserve = "indisponivel" | "cota" | "" ; de = a assinatura de partida quando houve troca, senão "" """
+    reserve = "indisponivel" | "cota" | "" ; de = a assinatura de partida quando houve troca, senão "" .
+    `chain` (#677): a cadeia da linha, se tem e a de partida está nela; vale a ordem dela, a primeira é a padrão da linha
+    (`reserve_from`) e o modo é `ordem`, e só as assinaturas dela entram"""
+    if chain and start in chain:
+        known = {x["name"]: x for x in subs}
+        subs, mode = [dict(known[n], default=(i == 0)) for i, n in enumerate(chain)], "ordem"
     by_name = {x["name"]: x for x in subs}
     sub = by_name[start]
     state, reason, q, read = availability(sub), "", None, False
@@ -532,8 +557,20 @@ def decide(subs, mode, start):
     return pn, reason, start
 
 
+def warn_quota_explicit(name):
+    """--subscription (#677) é escolha explícita: não troca, mas avisa se a cota dela está no teto (leitura que falha = sem aviso)"""
+    q = quota_read()
+    if q is None:
+        return
+    st, wins = quota_windows(q, name)
+    over = quota_over(wins, num(q.get("max_pct"), QUOTA_MAX_PCT)) if st == "ok" else {}
+    if over:
+        warn(f"cota do {label(name)} esgotada ({wins_text(over)}), mas a escolha foi explícita (--subscription); abrindo no {label(name)}")
+
+
 def main(argv):
-    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "model": "", "prefer": "", "text-file": ""}
+    opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "subscription": "", "model": "", "prefer": "",
+           "text-file": ""}
     it = iter(argv)
     for a in it:
         if a in ("-h", "--help"):
@@ -542,7 +579,8 @@ def main(argv):
         if a == "--json":
             opt["json"] = True
             continue
-        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--prefer", "--model", "--text-file"):
+        if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--subscription", "--prefer", "--model",
+                     "--text-file"):
             die(f"opção desconhecida: {a}\n{USAGE}")
         v = next(it, None)
         if v is None:
@@ -559,11 +597,16 @@ def main(argv):
     agent, model = opt["agent"], opt["model"]
     default, phases, exceptions, subs, mode = load_table()
     names = [x["name"] for x in subs]
+    agents = list(dict.fromkeys(x["agent"] for x in subs))
     if agent == "pi":
         die("Pi saiu do stack (#217), use claude ou codex")
-    for flag, what in (("agent", "agente"), ("prefer", "assinatura")):
+    if agent and agent not in agents:
+        die(f"agente inválido: {agent}; use {' ou '.join(agents)}")
+    for flag in ("subscription", "prefer"):
         if opt[flag] and opt[flag] not in names:
-            die(f"{what} inválido: {opt[flag]}; use {' ou '.join(names)}")
+            die(f"assinatura inválida: {opt[flag]}; use {' ou '.join(names)}")
+    if agent and opt["subscription"] and next(x for x in subs if x["name"] == opt["subscription"])["agent"] != agent:
+        die(f"--agent {agent} e --subscription {opt['subscription']} não combinam")
     if model and not MODEL_RE.fullmatch(model):
         die(f"modelo inválido: {model}")
 
@@ -584,40 +627,54 @@ def main(argv):
                 ln, phase, origin, reason, warning, confidence = by_jev(text, phases, reason)
     if ln is None:
         ln = default
-    if agent or model:
+    explicit_sub = opt["subscription"]
+    if agent or model or explicit_sub:
         origin = "manual"
-        reason = " ".join(x for x in (agent and f"--agent {agent}", model and f"--model {model}") if x) + f" ({reason})"
+        given = (agent and f"--agent {agent}", explicit_sub and f"--subscription {explicit_sub}", model and f"--model {model}")
+        reason = " ".join(x for x in given if x) + f" ({reason})"
     default_sub = next(x for x in subs if x["default"])["name"]
-    if not agent:
-        agent = guess_agent(model, default, phases, exceptions, subs) if model else (opt["prefer"] or default_sub)
-    # reserva (#258, #355, #598): sem escolha explícita (--agent, --model, --phase), a regra de cota e de disponibilidade;
-    # com ela, só avisa (e só da padrão indisponível)
+    chain = ln.get("chain") if ln else None
+    line_default = chain[0] if chain else default_sub
+    if explicit_sub:
+        sub_name = explicit_sub
+    elif agent:   # --agent é o agente: a assinatura de mesmo nome, senão a primeira desse agente
+        sub_name = next((x["name"] for x in subs if x["name"] == agent), next(x["name"] for x in subs if x["agent"] == agent))
+    elif model:
+        sub_name = guess_agent(model, default, phases, exceptions, subs)
+    else:
+        sub_name = opt["prefer"] or line_default
+    # reserva (#258, #355, #598, #677): sem escolha explícita (--agent, --subscription, --model, --phase), a regra de cota e
+    # de disponibilidade, pela cadeia da linha; com ela, só avisa (da padrão indisponível, ou da escolhida em --subscription)
     reserve, reserve_from = "", ""
-    explicit = bool(opt["agent"] or model or opt["phase"])
+    explicit = bool(agent or explicit_sub or model or opt["phase"])
     if not explicit:
-        agent, reserve, reserve_from = decide(subs, mode, agent)
-    elif agent == default_sub:
-        sub = next(x for x in subs if x["name"] == agent)
+        sub_name, reserve, reserve_from = decide(subs, mode, sub_name, chain)
+    elif sub_name in (default_sub, line_default) or explicit_sub:
+        sub = next(x for x in subs if x["name"] == sub_name)
         cs = availability(sub)
         if cs == "slow":
-            warn(f"o `{cmd_text(sub)}` não respondeu em {auth_timeout():g} s; abrindo no {label(agent)}")
+            warn(f"o `{cmd_text(sub)}` não respondeu em {auth_timeout():g} s; abrindo no {label(sub_name)}")
         elif cs == "down":
-            warn(f"o {label(agent)} está indisponível (`{cmd_text(sub)}` falhou), mas a escolha foi explícita "
-                 "(--agent, --model ou --phase); abrindo no " + label(agent))
+            warn(f"o {label(sub_name)} está indisponível (`{cmd_text(sub)}` falhou), mas a escolha foi explícita "
+                 "(--agent, --subscription, --model ou --phase); abrindo no " + label(sub_name))
+        if explicit_sub and cs != "down":
+            warn_quota_explicit(sub_name)
     # o aviso só interessa quando o padrão escolheu o modelo; sem tabela, o aviso dela já saiu
     if warning and not model and default:
-        warn(f"{warning}; abrindo no padrão ({ln[agent]})" if ln is default else warning)
+        warn(f"{warning}; abrindo no padrão ({ln[sub_name]})" if ln is default else warning)
+    chosen = next(x for x in subs if x["name"] == sub_name)
     if not model and ln:
-        model = ln[agent]
-    effort = ln["effort"] if ln and next(x for x in subs if x["name"] == agent)["effort"] else ""
-    out = {"phase": phase, "origin": origin, "agent": agent, "model": model, "effort": effort, "reason": reason,
-           "confidence": "" if confidence is None else round(confidence, 4), "reserve": reserve}
+        model = ln[sub_name]
+    effort = ln["effort"] if ln and chosen["effort"] else ""
+    out = {"phase": phase, "origin": origin, "subscription": sub_name, "agent": chosen["agent"], "model": model,
+           "effort": effort, "reason": reason, "confidence": "" if confidence is None else round(confidence, 4),
+           "reserve": reserve}
     if reserve:
         out["reserve_from"] = reserve_from
     if opt["json"]:
         print(json.dumps(out, ensure_ascii=False))
     else:
-        print(f"fase {phase or '-'} · origem {origin} · agente {agent} · modelo {model or '-'}"
+        print(f"fase {phase or '-'} · origem {origin} · assinatura {sub_name} · agente {chosen['agent']} · modelo {model or '-'}"
               f"{' · esforço ' + effort if effort else ''}"
               f"{' · confiança ' + fmt_conf(confidence) if confidence is not None else ''}"
               f"{' · reserva ' + reserve + ' (de ' + reserve_from + ')' if reserve else ''} · motivo: {reason}")

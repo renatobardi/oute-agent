@@ -117,6 +117,16 @@ claude_bin "$TMP/claude-real" "$OPUS" "$SONNET" "$HAIKU"
 good_cache
 export PATH="$BIN:$PATH" FAKE CODEX_HOME="$TMP/codex" OUTE_MODELS_CLAUDE_BIN="$TMP/claude-real"
 export OUTE_AGENTS_FALLBACK="$EMPTY"
+# a API da Z.ai (#677): o fake-quota.py com TLS (rota /zai/api/anthropic/v1/models); a chave de verdade nunca vai ao teste
+unset OUTE_ZAI_API_KEY OUTE_MODELS_ZAI_URL
+SD="$TMP/srv"; mkdir -p "$SD"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 \
+  -keyout "$SD/key.pem" -out "$SD/cert.pem" >/dev/null 2>&1 || die "o openssl não gerou o certificado"
+python3 "$ROOT/tests/lib/fake-quota.py" "$SD" & SRV_PID=$!
+trap 'kill "${SRV_PID:-}" 2>/dev/null; rm -rf "${TMP:?}"' EXIT
+for _ in $(seq 1 50); do [[ -s "$SD/port" ]] && break; sleep 0.1; done
+[[ -s "$SD/port" ]] || die "o servidor falso não subiu"
+scheme=https; ZAI_URL="$scheme://127.0.0.1:$(cat "$SD/port")/zai/api/anthropic/v1/models"
 
 # mc <args…>: models-check com as fontes de exemplo; stdout em $OUT, stderr em $ERR, código em $RC
 mc() { OUT="$("$MC" "$@" 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(<"$TMP/err")"; }
@@ -330,6 +340,118 @@ check "assinatura repetida: código 2"                   bash -c '[ "$1" -eq 2 ]
 table -e '/^\[\[subscription\]\]/,/^reserve_mode/d'; mc --table "$TMP/table.toml"
 check "sem [[subscription]]: código 2"                  bash -c '[ "$1" -eq 2 ] && grep -qF "sem [[subscription]]" <<<"$2"' _ "$RC" "$ERR"
 check "tabela do repo: uma padrão só e toda assinatura com linha por fase" bash -c '! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA (uma assinatura|modelo da assinatura)" && "$2" --table "$1" 2>/dev/null | grep -qxF "ok uma assinatura padrão só (claude) (tabela)"' _ "$TABLE" "$MC"
+
+# ---------------------------------------------------------------- 9. zai e chain por linha (#677)
+ZT="$TMP/zai.toml"
+cat > "$ZT" <<'TOML'
+[[subscription]]
+name = "claude"
+default = true
+
+[[subscription]]
+name = "zai"
+agent = "claude"
+prefixes = ["glm-"]
+
+[[subscription]]
+name = "codex"
+
+[select]
+reserve_mode = "mais-livre"
+
+[default]
+claude = "claude-sonnet-5-5"
+zai = "glm-5.3"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+[[line]]
+phases = ["strat", "intent", "spec", "arch", "design", "plan", "qa", "iter", "learn"]
+chain = ["claude", "zai", "codex"]
+claude = "claude-opus-5-5"
+zai = "glm-5.3"
+codex = "gpt-6-astra"
+effort = "high"
+
+[[line]]
+phases = ["build", "ship", "ops", "ctx"]
+chain = ["zai", "claude", "codex"]
+claude = "claude-sonnet-5-5"
+zai = "glm-5.3"
+codex = "gpt-6.1-sol"
+effort = "high"
+
+[[exception]]
+label = "kaizen"
+chain = ["zai", "claude", "codex"]
+claude = "claude-sonnet-5-5"
+zai = "glm-5.3"
+codex = "gpt-6-luna"
+effort = "medium"
+
+[[reviewer]]
+writers = ["claude-sonnet-5-5", "gpt-6.1-sol", "glm-5.3"]
+agent = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+
+[[reviewer]]
+writers = ["claude-opus-5-5", "gpt-6-astra"]
+agent = "claude"
+model = "claude-sonnet-5-5"
+effort = "high"
+TOML
+zt() { local args=("$@"); sed "${args[@]}" "$ZT" > "$TMP/zai-x.toml"; return $?; }
+# sem a chave: o id da zai fica desconhecido (código 3), nunca FALTA, e nenhuma chamada à API
+rm -f "${SD:?}/requests.jsonl"
+OUTE_MODELS_ZAI_URL="$ZAI_URL" mc --table "$ZT"
+check "zai sem chave: id desconhecido, código 3, nenhum FALTA" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido glm-5.3 (zai)" <<<"$2" && ! grep -q "^FALTA" <<<"$2"' _ "$RC" "$OUT"
+check "zai sem chave: avisa e não chama a API"          bash -c 'grep -qF "sem OUTE_ZAI_API_KEY" <<<"$1" && [ ! -e "$2/requests.jsonl" ]' _ "$ERR" "$SD"
+check "zai: o resto da tabela confere (claude e codex ok)" has_line "ok claude-opus-5-5 (claude)"
+check "chain: assinatura da tabela, sem repetir e com coluna" bash -c 'grep -qxF "ok assinatura zai da chain de [[line]] 2 é da tabela (tabela)" <<<"$1" && grep -qxF "ok chain de [[line]] 2 sem assinatura repetida (tabela)" <<<"$1" && grep -qxF "ok modelo da assinatura codex da chain de [[exception]] 1 (tabela)" <<<"$1"' _ "$OUT"
+check "revisor: glm-5.3 tem revisor (dispatcher, fase plan)" has_line "ok revisor do autor glm-5.3 (dispatcher, fase plan) (tabela)"
+check "revisor: glm-5.3 é autor da tabela e de outro modelo que o revisor" bash -c 'grep -qxF "ok autor glm-5.3 do revisor 1 é um modelo da tabela (tabela)" <<<"$1" && grep -qxF "ok revisor claude-opus-5-5 é de outro modelo que o autor glm-5.3 (tabela)" <<<"$1"' _ "$OUT"
+# com a chave: confere o id na API; a chave vai só no cabeçalho
+printf '%s' '{"data":[{"id":"glm-5.3","type":"model"},{"id":"glm-4.6","type":"model"}]}' > "$SD/zai-models.body"
+CHAVE="chave-$RANDOM-$RANDOM"
+OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="$ZAI_URL" SSL_CERT_FILE="$SD/cert.pem" mc --table "$ZT"
+check "zai com chave: id na API, ok, código 0"          bash -c '[ "$1" -eq 0 ] && grep -qxF "ok glm-5.3 (zai)" <<<"$2" && [ -z "$3" ]' _ "$RC" "$OUT" "$ERR"
+check "zai com chave: um GET em /v1/models com Bearer"  bash -c '[ "$(jq -s "length" "$1/requests.jsonl")" -eq 1 ] && jq -s -e --arg a "Bearer $2" ".[0].method == \"GET\" and .[0].auth == \$a and .[0].path == \"/zai/api/anthropic/v1/models\"" "$1/requests.jsonl" >/dev/null' _ "$SD" "$CHAVE"
+check "zai com chave: a chave não aparece na saída"      bash -c '! grep -qF "$1" <<<"$2$3"' _ "$CHAVE" "$OUT" "$ERR"
+zt 's/zai = "glm-5.3"/zai = "glm-9.9"/'
+OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="$ZAI_URL" SSL_CERT_FILE="$SD/cert.pem" mc --table "$TMP/zai-x.toml"
+check "zai com chave: id fora da API é FALTA, código 1"  bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA glm-9.9 (zai)" <<<"$2"' _ "$RC" "$OUT"
+for modo in 5xx lixo formato 429; do
+  printf '%s' "$modo" > "$SD/zai-models.mode"
+  OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="$ZAI_URL" SSL_CERT_FILE="$SD/cert.pem" mc --table "$ZT"
+  check "zai com a API em modo $modo: desconhecido, código 3, nunca FALTA" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido glm-5.3 (zai)" <<<"$2" && ! grep -q "^FALTA" <<<"$2" && ! grep -qF "$3" <<<"$4"' _ "$RC" "$OUT" "$CHAVE" "$ERR"
+done
+rm -f "${SD:?}/zai-models.mode"
+OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="https://127.0.0.1:1/x" SSL_CERT_FILE="$SD/cert.pem" mc --table "$ZT"
+check "zai com a API fora do ar: desconhecido, código 3" bash -c '[ "$1" -eq 3 ] && grep -qxF "desconhecido glm-5.3 (zai)" <<<"$2"' _ "$RC" "$OUT"
+insegura="ht""tp://127.0.0.1:1/x"
+OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="$insegura" mc --table "$ZT"
+check "zai: endereço sem https é recusado (código 2), sem chamada" bash -c '[ "$1" -eq 2 ] && grep -qF "só pode ser https" <<<"$2"' _ "$RC" "$ERR"
+# chain
+zt '0,/^chain = \["claude", "zai", "codex"\]/s//chain = ["claude", "claude", "codex"]/'; mc --table "$TMP/zai-x.toml"
+check "chain com assinatura repetida: FALTA, código 1"   bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA chain de [[line]] 1 sem assinatura repetida (tabela)" <<<"$2"' _ "$RC" "$OUT"
+zt '0,/^chain = \["claude", "zai", "codex"\]/s//chain = ["claude", "nada", "codex"]/'; mc --table "$TMP/zai-x.toml"
+check "chain com nome fora da tabela: FALTA, código 1"   bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA assinatura nada da chain de [[line]] 1 é da tabela (tabela)" <<<"$2"' _ "$RC" "$OUT"
+python3 - "$ZT" "$TMP/zai-x.toml" <<'PY'
+import re
+import sys
+t = open(sys.argv[1]).read()
+open(sys.argv[2], "w").write(re.sub(r'(\[\[line\]\]\nphases = \["build".*?)zai = "glm-5.3"\n', r"\1", t, count=1, flags=re.S))
+PY
+mc --table "$TMP/zai-x.toml"
+check "chain com assinatura sem coluna na linha: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA modelo da assinatura zai da chain de [[line]] 2 (tabela)" <<<"$2"' _ "$RC" "$OUT"
+for ruim in '[]' '"zai"' '[1]'; do
+  zt "0,/^chain = .*/s//chain = $ruim/"; mc --table "$TMP/zai-x.toml"
+  check "chain $ruim: fora do formato, código 2, sem stdout" bash -c '[ "$1" -eq 2 ] && grep -qF "chain fora do formato" <<<"$2" && [ -z "$3" ]' _ "$RC" "$ERR" "$OUT"
+done
+zt 's/"gpt-6.1-sol", "glm-5.3"\]/"gpt-6.1-sol"]/'; mc --table "$TMP/zai-x.toml"
+check "glm-5.3 sem revisor: FALTA, código 1"            bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA revisor do autor glm-5.3 (dispatcher, fase plan) (tabela)" <<<"$2"' _ "$RC" "$OUT"
+check "tabela do repo: toda chain confere (sem FALTA em chain)" bash -c '! "$2" --table "$1" 2>/dev/null | grep -E "^FALTA .*chain"' _ "$TABLE" "$MC"
 
 # ---------------------------------------------------------------- 8. nenhuma chamada a modelo
 check "nenhum claude, codex ou shim foi executado"      [ ! -e "$FAKE/called" ]

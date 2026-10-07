@@ -80,8 +80,9 @@ unset CLAUDECODE CODEX_THREAD_ID OUTE_SWARM_ID OUTE_SWARM_ROUND OUTE_SWARM_WORKE
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT OUTE_MEMORY_RUN AI_MEMORY_RUN_ID FAKE_AI_MEMORY_LOG FAKE_AI_MEMORY_HANDOFFS FAKE_AI_MEMORY_RC FAKE_AI_MEMORY_SLEEP OUTE_HANDOFFS_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 10k sobe a falsa
 . "$ROOT/tests/lib/typesafe.sh"; ts_off
+# OUTE_SELECT_TABLE: a tabela de antes da `zai` (#677); o oute-task só prova o que faz com a escolha, e a sessão `zai` entra em ticket próprio
 export PATH="$BIN:$PATH" HOME="$TMP/home" FAKE OUTE_WORKTREES="$WT" OUTE_WORKSPACE="$WS" OTEL_RESOURCE_ATTRIBUTES="$ORIGIN" \
-       TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" \
+       TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml" \
        GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t GIT_CONFIG_NOSYSTEM=1
 
 # checkout principal em $WS/proj, com remote bare local e origin/HEAD em main

@@ -147,7 +147,7 @@ else
   warn "sem oute-quota no PATH: cota não conferida; sigo"
 fi
 
-# --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build`; Codex da fase `ops`, só com --codex
+# --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build` na assinatura claude (`--agent claude`: a `zai` é a padrão do `build`, #677); Codex da fase `ops`, só com --codex
 declare -A MODEL_ID; ALIASES=()
 for pair in haiku:ops sonnet:build; do
   al="${pair%%:*}"
@@ -158,7 +158,7 @@ for pair in haiku:ops sonnet:build; do
   if [[ "$al" = haiku ]]; then
     id="$(oute-select --json --phase "${pair#*:}" --model claude-haiku-4-5-20251001 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   else
-    id="$(oute-select --json --phase "${pair#*:}" 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+    id="$(oute-select --json --phase "${pair#*:}" --agent claude 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   fi
   [[ -n "$id" ]] || die2 "o oute-select não deu o modelo da fase ${pair#*:} (tabela ausente?)"
   MODEL_ID[$al]="$id"; ALIASES+=("$al")

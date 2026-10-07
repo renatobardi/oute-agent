@@ -97,10 +97,15 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   indisponível ou com janela >= 98%, a sessão abre na reserva de mais cota livre (`reserve_mode = "mais-livre"`) ou na
   primeira da ordem da tabela abaixo do teto (`"ordem"`); todas no teto: a de mais cota livre, com aviso. O evento leva
   oute.task.reserve (cota|indisponivel) e oute.task.reserve_from (a assinatura de onde saiu).
-  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--prefer A] [--model <id>]
+  oute-select [--json] [--repo <dir>] [--issue <n> | --task <slug>] [--phase <fase>] [--agent A] [--subscription S] [--prefer S] [--model <id>]
               [--text-file <arquivo>|-]
-                                    diz fase, origem (manual/label/jev/padrao), agente, modelo, esforço, motivo e
+                                    diz fase, origem (manual/label/jev/padrao), assinatura, agente, modelo, esforço, motivo e
                                     confiança do Jev e reserva (reserve), sem abrir sessão; --text-file: o texto da tarefa para o Jev
+                                    Assinatura × agente (#677): a `zai` é uma assinatura do agente `claude` (GLM na API da Z.ai).
+                                    --agent é o programa (claude|codex); --subscription é escolha explícita da assinatura (avisa
+                                    se indisponível ou no teto, e abre nela); --prefer pede uma, com a regra de cota.
+                                    Cadeia por linha (`chain` da tabela): execução (build, ship, ops, ctx, kaizen, docs) zai →
+                                    claude → codex; raciocínio (strat…spec, design, plan, qa, iter, learn, spike) claude → zai → codex.
   oute-task list                    worktrees de tarefa abertas (todos os spaces)
   oute-task clean [--yes]           remove as mergeadas/vazias só do space atual e avança (ff) o checkout principal; pula as em uso (#374; --force-in-use só a pedido do Bardi)
                                     dos repos com worktree nele (sem --yes: só mostra)

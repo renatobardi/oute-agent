@@ -95,7 +95,8 @@ cp "$ROOT/tests/lib/fake-oute-quota.sh" "$BIN/oute-quota"
 export OUTE_NAMES_PY="$TMP/sem-names.py"
 # carga do container (#623): sem o /proc/loadavg de quem roda o teste (o aviso do spawn dependeria da carga da máquina); o tema `carga` aponta para o arquivo dele
 export OUTE_SWARM_LOADAVG="$TMP/sem-loadavg"
-export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
+# a tabela de antes da `zai` (#677): estes testes provam o que o oute-swarm faz com a escolha do seletor, não o conteúdo da tabela do repo (a sessão `zai` entra em ticket próprio)
+export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa
 . "$ROOT/tests/lib/typesafe.sh"; ts_off
