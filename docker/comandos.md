@@ -84,6 +84,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-task -r <repo> <slug> …      idem, de fora do repo
   oute-task --agent claude|codex --model <id> <slug> …
   oute-task --prefer <assinatura> <slug> …   pede uma reserva sem ser escolha explícita (#621): com ela no teto, volta para a padrão
+  oute-task --subscription <assinatura> <slug> …   escolhe a assinatura (#678): `zai` = o claude na API da Z.ai (glm-5.3, só `OUTE_ZAI_API_KEY` do ambiente),
+                                    com o Read de imagem negado (--settings); o restore reabre igual. Sem opção, o build abre na zai
                                     escolha explícita do agente e/ou do modelo (antes do slug)
   Modelo da sessão (ADR-02): sai da issue do slug (<n>-…), pela tabela config/select/models.toml:
   --agent/--model (ou `codex` depois do slug) > label spike/kaizen/docs (kaizen não vale com aidlc de código, #409) > label aidlc:<fase> > Jev > Sonnet.
@@ -132,12 +134,14 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       claude e o seletor escolhe cada sessão). Com `--agent codex` o dispatcher abre no Codex e o watch roda numa aba
       `watch <rodada>` que digita os eventos no campo dele (`watch --deliver`); com claude nada muda (ferramenta Monitor).
       O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
+      --subscription <assinatura> (#678): as sessões abrem nessa assinatura (`zai` = claude na Z.ai, sem leitura de imagem); o dispatcher segue no claude.
       Merge só quando você pedir.
-  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen] [--prefer <assinatura>]
+  oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen] [--prefer <assinatura>] [--subscription <assinatura>]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
       --agent: sobrepõe o agente da rodada (sem ele: o da rodada; spawn avulso: claude)
       --model: modelo da sessão (sem ele: o da fase da issue, pelo oute-select)
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
+      --subscription: a assinatura só desta sessão (#678; vence a da rodada e vale como escolha explícita)
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (o dispatcher usa quando você decide).
                                     Só com a sessão parada (idle/done/blocked); confere o campo antes do Enter

@@ -111,6 +111,27 @@ qcota 10 99; echo prefer=codex >> "$STATE/meta"
 MAX=5 sw spawn 11-pf "instrução"
 check "prefer= da rodada: vale no spawn sem --prefer (Codex no teto, volta ao Claude)" [ "$(sel 11-pf agent) $(sel 11-pf reserve_from)" == "claude codex" ]
 rm -f "${FAKE:?}/quota.json"
+# 11g. --subscription (#678): escolha explícita da assinatura; a zai é o claude na API da Z.ai. Sem opção, o build abre na zai
+CASE=seletor-subscription; round "$CASE"   # a tabela real: a da zai (os outros casos do arquivo usam a de antes dela)
+labels 8 aidlc:build; labels 9 aidlc:build; labels 10 aidlc:build; labels 11 aidlc:build; labels 12 aidlc:plan; labels 13 aidlc:build
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=5 sw spawn 8-sz "instrução"
+check "sem opção: o worker de build abre na zai (claude, glm-5.3)" [ "$RC" -eq 0 -a "$(sel 8-sz subscription) $(sel 8-sz agent) $(sel 8-sz model)" == "zai claude glm-5.3" ]
+check "sem opção: o spawned guarda a assinatura (8º campo)" [ "$(awk '$1 == "8-sz" {print $8}' "$STATE/spawned")" == zai ]
+check "sem opção: a saída diz a assinatura"                grep -qF " · assinatura zai" <<<"$OUT"
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=5 sw spawn 9-sz "instrução" --subscription claude
+check "--subscription claude: o claude vence a padrão do build" [ "$RC" -eq 0 -a "$(sel 9-sz subscription) $(sel 9-sz agent) $(sel 9-sz origin)" == "claude claude manual" ]
+check "--subscription claude: o 8º campo do spawned é claude" [ "$(awk '$1 == "9-sz" {print $8}' "$STATE/spawned")" == claude ]
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=5 sw spawn 10-sz "instrução" --subscription nada
+check "--subscription fora da tabela: recusa, nada registrado" bash -c '[ "$1" -ne 0 ] && grep -qF "seletor recusou a sessão 10-sz" <<<"$2" && ! grep -q "^10-sz " "$3"' _ "$RC" "$ERR" "$STATE/spawned"
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=5 sw spawn 10-sz "instrução" --subscription 'X;y'
+check "--subscription com formato inválido: recusa antes do seletor" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--subscription inválido: X;y" <<<"$2"' _ "$RC" "$ERR"
+echo subscription=claude >> "$STATE/meta"
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=9 sw spawn 11-sz "instrução"
+check "subscription= da rodada: vale no spawn sem opção"   [ "$(sel 11-sz subscription)" == claude ]
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=9 sw spawn 12-sz "instrução" --subscription zai
+check "--subscription do spawn vence a da rodada"          [ "$RC" -eq 0 -a "$(sel 12-sz subscription) $(sel 12-sz agent)" == "zai claude" ]
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" MAX=9 sw spawn 13-sz "instrução" --agent codex
+check "--agent do spawn: a assinatura da rodada não vale"  [ "$RC" -eq 0 -a "$(sel 13-sz agent) $(sel 13-sz subscription)" == "codex codex" ]
 # 11d. seletor falhando ou ausente: o spawn abre como antes (o agente pedido, sem escolha), com aviso
 CASE=seletor-falha; round "$CASE"
 BAD="$TMP/$CASE/bad"; mkdir -p "$BAD"; printf '#!/usr/bin/env bash\necho estourou >&2; exit 1\n' > "$BAD/oute-select"; chmod +x "$BAD/oute-select"

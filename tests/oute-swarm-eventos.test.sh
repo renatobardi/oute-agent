@@ -34,6 +34,12 @@ check "spawn: sessão, issue, agente da sessão, repo"     jq -e '.attrs["oute.s
                                                               and .attrs["oute.swarm.session.agent"] == "codex" and .attrs["oute.swarm.repo"] == "repo" and .attrs["oute.swarm.kaizen"] == false' <<<"$e" >/dev/null
 check "spawn: oute.agent = dispatcher, origem"         jq -e '.attrs["oute.agent"] == "claude" and .res["host.name"] == "oute-mac" and .res["service.name"] == "oute"' <<<"$e" >/dev/null
 check "spawn: corpo = prompt da sessão"                  jq -e '.body | startswith("faça a issue 8\n\n")' <<<"$e" >/dev/null
+# a assinatura da sessão (#678): a zai (tabela real) leva `oute.swarm.session.subscription`; a sessão do --agent codex acima, o codex
+labels 9 aidlc:build
+OUTE_SELECT_TABLE="$ROOT/config/select/models.toml" sw spawn 9-zai "faça a issue 9"
+e9="$(ev '.name == "oute.swarm.session.spawned" and .attrs["oute.swarm.session"] == "9-zai"')"
+check "spawn zai: evento com a assinatura zai e o agente claude" jq -e '.attrs["oute.swarm.session.subscription"] == "zai" and .attrs["oute.swarm.session.agent"] == "claude"' <<<"$e9" >/dev/null
+check "spawn com --agent codex: assinatura codex no evento" jq -e '.attrs["oute.swarm.session.subscription"] == "codex"' <<<"$e" >/dev/null
 FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
 echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
 echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"

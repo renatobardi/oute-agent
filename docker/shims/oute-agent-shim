@@ -132,6 +132,31 @@ model_env() {
 MODEL_ARGS=()
 model_env "$@"
 [[ ${#MODEL_ARGS[@]} -eq 0 ]] || set -- "$@" "${MODEL_ARGS[@]}"
+# Sessão zai (#678): quem retoma uma conversa do claude cuja marca é da assinatura zai reabre com as variáveis da Z.ai só no
+# ambiente deste processo e com o --settings que nega o Read de imagem (o modelo vem do model_env acima, que lê a marca;
+# com --model na linha de comando, vale o dela). A chave vem de OUTE_ZAI_API_KEY, só do ambiente (nunca em argv); sem ela, avisa e
+# retoma sem elas (o claude recusa o modelo glm-*, o que o aviso explica). A conversa de outra assinatura não passa por aqui
+zai_resume() {
+  local x resume=0 l extra=() vars=()
+  [[ "$a" == claude ]] && command -v oute-task >/dev/null 2>&1 || return 0
+  for x in "$@"; do case "$x" in -r|--resume|--resume=*|-c|--continue) resume=1 ;; esac; done
+  (( resume )) || return 0
+  mapfile -t vars < <(oute-task --zai-env "$PWD" 2>/dev/null)
+  [[ ${#vars[@]} -gt 0 ]] || return 0
+  if [[ -z "${OUTE_ZAI_API_KEY:-}" ]]; then
+    echo "oute: a sessão é da assinatura zai, mas OUTE_ZAI_API_KEY não está no ambiente; retomando sem as variáveis da Z.ai." >&2
+    return 0
+  fi
+  for l in "${vars[@]}"; do export "$l"; done
+  export ANTHROPIC_AUTH_TOKEN="$OUTE_ZAI_API_KEY"
+  unset ANTHROPIC_API_KEY
+  mapfile -t extra < <(oute-task --settings-args claude "$PWD" 2>/dev/null)
+  [[ ${#extra[@]} -eq 0 ]] || ZAI_ARGS=("${extra[@]}")
+  return 0
+}
+ZAI_ARGS=()
+zai_resume "$@"
+[[ ${#ZAI_ARGS[@]} -eq 0 ]] || set -- "$@" "${ZAI_ARGS[@]}"
 
 # Sessão nova e interativa: terminal, sem headless/ajuda/versão/resume/continue e sem subcomando.
 fresh_interactive() {
