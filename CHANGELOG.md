@@ -4,6 +4,19 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.46] - 2026-10-07
+
+### Added
+- **Assinatura `zai` no seletor, com cadeia por linha e `--subscription`** (#677, ticket 2/5 da #673). A `config/select/models.toml` ganha a assinatura `zai` (`agent = "claude"`, disponibilidade pelo `oute-quota --available zai`), a coluna `zai = "glm-5.3"` em toda linha, exceção e no `[default]`, e o campo `chain` por linha e por exceção: execução (`build`, `ship`, `ops`, `ctx`, `kaizen`, `docs`) `zai` → `claude` → `codex`, raciocínio (`strat`, `intent`, `arch`, `spec`, `design`, `plan`, `qa`, `iter`, `learn`, `spike`) `claude` → `zai` → `codex`; linha com `chain` usa o modo `ordem`. O `oute-select` aceita `--subscription <nome>` (escolha explícita: avisa se a assinatura está indisponível ou no teto, e abre nela), `--prefer zai` vale nas duas direções, `--agent` segue aceitando `claude` e `codex`, e o JSON ganha o campo `subscription`. O `scripts/models-check` confere a `chain` e o id `glm-5.3` na API da Z.ai (com `OUTE_ZAI_API_KEY`; sem a chave, `desconhecido`), e `glm-5.3` entra nos autores revisados pelo `claude-opus-5-5`. **Precisa de release** (o `docker/oute-select` vai na imagem). Ainda não exporta as variáveis da Z.ai nem abre a sessão `zai`: quem lê `agent` e `model` do seletor (`oute-task`, `oute-swarm`) abre o `claude` com `glm-5.3` até o ticket que liga a sessão entrar.
+- **Sessão `zai`: `oute-task`, shim e `oute-swarm` abrem o `claude` na API da Z.ai, sem leitura de imagem** (#678, ticket 3/5 da #673). Com a assinatura `zai` (padrão do `build`, `ship`, `ops` e `ctx` na tabela do seletor, ou `--subscription zai`), o `oute-task` abre o `claude` com `--model glm-5.3`, as variáveis da Z.ai só no ambiente do processo (a chave vem de `OUTE_ZAI_API_KEY`, nunca de argv, marca nem evento; sem ela a sessão não abre) e `--settings` com `deny` do `Read` de `png`, `jpg`, `jpeg`, `gif`, `webp` e `bmp`. Uma sessão `claude` ao lado não tem nada disso e o `~/.claude/settings.json` não muda. A marca da sessão guarda `subscription=`, e o restore pelo shim reabre com as mesmas variáveis e a mesma regra. A conversa sai com `oute.subscription` (`claude`, `zai` ou `codex`; o `oute.agent` da zai é `claude`), e o `oute.task.opened` leva `subscription`, `reserve` e `reserve_from`. O `oute-task`, o `oute-swarm <repo>` e o `oute-swarm spawn` aceitam `--subscription <nome>` (o do `spawn` vence o da rodada; o dispatcher segue no `claude`), e o `oute.swarm.session.spawned` leva `oute.swarm.session.subscription`. Fora de escopo: imagem lida por outro caminho que não o `Read`. **Precisa de release** (`docker/oute-task`, `docker/oute-swarm`, `docker/oute-emit` e o shim vão na imagem).
+- **`oute-regression --subscription zai`** (#680, ADR-02). A regressão dos agentes roda as 13 tarefas na assinatura `zai` (o `claude` na API da Z.ai, no `glm-5.3`), com as variáveis da Z.ai e a chave `OUTE_ZAI_API_KEY` só no processo de cada tarefa, o Read de imagem negado e `oute.subscription=zai` no resource. A linha de base ganha as entradas `<tarefa>@zai` (as de `haiku` e `sonnet` não mudam); a trava de cota lê só a da `zai`. Sem a chave, sai 2 sem rodar tarefa. `README.md`, `CONTEXT.md`, `secrets/README.md` e o `scripts/oute-secrets.sh` citam o item `zai`. **Precisa de release** (`docker/oute-regression` vai na imagem).
+
+### Changed
+- A linha de base da regressão dos agentes (`docker/regression/baseline.json`) passa a ter `memory@haiku` verde; nenhuma tarefa fica vermelha na base (#704).
+
+### Fixed
+- **Notas dos agentes: `Closes` × `Refs` com critério `(ship)` pendente alinhado ao `swarm-worker.md`** (#703). Só com critério de `ship` faltando, as notas passam a mandar `Closes` e o `## Falta` com a marca `(ship)` (#387); `Refs` fica para critério de `build`, `qa` ou `design` pendente. **Precisa de release** (`docker/agent-notes.md` vai na imagem).
+
 ## [0.7.45] - 2026-10-06
 
 ### Added
