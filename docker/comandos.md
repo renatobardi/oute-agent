@@ -237,7 +237,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
 
 ## CONTAINER — regressão dos agentes (oute-regression, #366, #484)
   oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--keep <pasta>] [--json]
-                    [--baseline <arquivo>] [--write-baseline]
+                    [--baseline <arquivo>] [--write-baseline] [--subscription claude|zai]
                                     regressão dos agentes: 13 tarefas headless do claude (docker/regression/), cada uma em
                                     Haiku (id explícito de teste, #615) e em Sonnet (fase build da tabela do seletor), num diretório descartável,
                                     com oute-propose/oute-inbox/sudo/ssh/gh e a memória (ai-memory) trocados por dublês (nada
@@ -248,6 +248,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     corpo), closes-refs (Refs e ## Falta; o prompt é o swarm-worker.md) e segredo (não imprime
                                     o valor); mais a studio (a conversa chegou ao agent-studio; sem AGENT_STUDIO_URL/
                                     AGENT_STUDIO_READ_TOKEN: não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
+  --subscription zai (#680): as 13 tarefas na assinatura zai (claude na API da Z.ai, glm-5.3), chaves <tarefa>@zai na base; pede OUTE_ZAI_API_KEY
+                                    no ambiente (sem ela, saída 2 e nenhuma tarefa); só a cota da zai conta; não vale com --model nem --codex.
   --baseline <arquivo> / --write-baseline (#647): compara cada tarefa e modelo com a linha de base (docker/regression/baseline.json
   ou $OUTE_REGRESSION_BASELINE): igual, falha de base, piorou ou melhorou; só piorou dá saída 1 (sem o arquivo, qualquer vermelha
   reprova). --write-baseline grava a base a partir da execução, só quando pedido; --json traz vs_baseline.

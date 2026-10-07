@@ -10,6 +10,7 @@
 #        item "aws"         (Note, fields AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 #        item "github"      (Note, field GH_TOKEN)
 #        item "sonar"       (Note, fields SONAR_TOKEN, OUTE_SONAR_ORG: o oute-sonar, só leitura, #226)
+#        item "zai"         (Note, field OUTE_ZAI_API_KEY: a assinatura zai, o claude na API da Z.ai; só o ambiente do processo da sessão zai e do oute-regression --subscription zai, #680)
 #
 # uso:  eval "$(oute-secrets export)"       # sai com 4 se a pasta não existe no vault
 #       oute-secrets get GH_TOKEN

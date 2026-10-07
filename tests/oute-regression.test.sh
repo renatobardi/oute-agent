@@ -23,7 +23,7 @@ export HOME="$TMP/home" OUTE_REGRESSION_DIR="$ROOT/docker/regression" OUTE_SELEC
   FAKE_LOG="$LOG" FAKE_REAL_PROPOSE_LOG="$LOG/real-propose.log"
 unset OUTE_TYPESAFE_API_KEY AGENT_STUDIO_URL AGENT_STUDIO_READ_TOKEN OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_LOGS_ENDPOINT \
   OTEL_RESOURCE_ATTRIBUTES GH_TOKEN OCI_S3_ACCESS_KEY OUTE_REGRESSION_AGENT OUTE_REGRESSION_MAX_PCT FAKE_BAD FAKE_EMIT_ERR \
-  FAKE_QUOTA FAKE_CLAUDE_FAIL
+  FAKE_QUOTA FAKE_CLAUDE_FAIL OUTE_ZAI_API_KEY OUTE_ZAI_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_API_KEY FAKE_LEAK_ZAI
 export OTEL_RESOURCE_ATTRIBUTES="host.name=teste,oute.instance=teste"
 ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 
@@ -38,6 +38,8 @@ line="-p ${2:0:40} ${*:3}"; printf '%s\n' "${line//$'\n'/ }" >> "$FAKE_LOG/claud
 printf '%s\n' "${OTEL_EXPORTER_OTLP_ENDPOINT:-vazio}" >> "$FAKE_LOG/claude.ep"
 printf 'cwd=%s\nora=%s\nmemory=%s\npropose=%s\nsudo=%s\n--\n' "$PWD" "${OTEL_RESOURCE_ATTRIBUTES:-}" \
   "$(tr '\n' ' ' < .ai-memory.toml 2>/dev/null)" "$(command -v oute-propose)" "$(command -v sudo)" >> "$FAKE_LOG/claude.env"
+printf '%s|%s|%s|%s|%s\n' "${ANTHROPIC_BASE_URL:-}" "${ANTHROPIC_AUTH_TOKEN:-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" "${ANTHROPIC_API_KEY:-}" \
+  "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" >> "$FAKE_LOG/claude.zai"
 [[ -z "${FAKE_CLAUDE_FAIL:-}" ]] || { echo "sem login" >&2; exit 1; }
 prompt="$2"; task=""; round=""; model=""; mcp=""
 for ((i = 1; i <= $#; i++)); do
@@ -45,8 +47,9 @@ for ((i = 1; i <= $#; i++)); do
   [[ "${!i}" = --mcp-config ]] && { j=$((i + 1)); mcp="${!j}"; }
 done
 cat "$mcp" >> "$FAKE_LOG/mcp.json" 2>/dev/null
-case "$model" in *haiku*) al=haiku ;; *sonnet*) al=sonnet ;; *) al=outro ;; esac
+case "$model" in *haiku*) al=haiku ;; *sonnet*) al=sonnet ;; glm-*) al=zai ;; *) al=outro ;; esac
 case "$OTEL_RESOURCE_ATTRIBUTES" in *oute.task.slug=regression-*) task="${OTEL_RESOURCE_ATTRIBUTES##*oute.task.slug=regression-}" ;; esac
+task="${task%%,*}"   # na zai o resource ainda leva oute.subscription depois do slug
 [[ "$OTEL_RESOURCE_ATTRIBUTES" =~ oute.task.id=[^,]*-r([0-9]+) ]] && round="${BASH_REMATCH[1]}"
 bad=0; for b in ${FAKE_BAD:-}; do [[ "$b" = "$task:$round" || "$b" = "$task@$al:$round" ]] && bad=1; done
 [[ -z "${FAKE_SLEEP:-}" ]] || { echo + >> "$FAKE_LOG/conc"; sleep "$FAKE_SLEEP"; echo - >> "$FAKE_LOG/conc"; }
@@ -121,6 +124,7 @@ SH
 esac; } >/dev/null 2>&1
 [[ "$prompt" != *REGRESSION_API_KEY* || $bad = 0 ]] || printf '{"type":"user","tool_result":"%s"}\n' "$(cat .env)"
 [[ "$prompt" != *REGRESSION_API_KEY* || $bad = 0 ]] || printf '{"type":"user","tool_result":"%s"}\n' "${FAKE_API_TOKEN:-}"
+[[ -z "${FAKE_LEAK_ZAI:-}" ]] || printf '{"type":"user","tool_result":"%s"}\n' "${ANTHROPIC_AUTH_TOKEN:-}"
 [[ -z "${FAKE_CLAUDE_ISERR:-}" ]] || { echo '{"type":"result","subtype":"success","is_error":true,"result":"limite","total_cost_usd":0}'; exit 0; }
 echo '{"type":"result","subtype":"success","is_error":false,"result":"feito","total_cost_usd":0.02,"num_turns":3}'
 FAKE
@@ -495,8 +499,8 @@ check "--json: objeto com versão, resultado e tarefas"   bash -c 'jq -e ".image
 # as seções 1 a 6 rodam sem o arquivo (OUTE_REGRESSION_BASELINE aponta para um caminho que não existe): regra antiga.
 RB="$ROOT/docker/regression/baseline.json"
 check "base do repo: JSON válido com data e commit da medição" jqe '(.measured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.commit | length >= 7)' < "$RB"
-check "base do repo: as 13 tarefas nos 2 modelos, verde ou vermelho" bash -c 'jq -e --arg all "$2" "[.tasks | to_entries[] | select(.value == \"verde\" or .value == \"vermelho\")] | length == 26 and ([\$all | split(\" \")[] | ., .] | length == 26) and ([.[].key] | map(split(\"@\")[0]) | unique | length == 13)" "$1" >/dev/null' _ "$RB" "$ALL13"
-check "base do repo: nenhuma falha de base (memory, #647 e #704; duplicada, #665; checkout e segredo, #666): tudo verde" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\") | .key] | length" "$1")" -eq 0 ]' _ "$RB"
+check "base do repo: as 13 tarefas em haiku e sonnet e as 13 da zai, verde ou vermelho" bash -c 'jq -e --arg all "$2" "[.tasks | to_entries[] | select(.value == \"verde\" or .value == \"vermelho\")] | length == 39 and ([\$all | split(\" \")[] | ., ., .] | length == 39) and ([.[].key] | map(split(\"@\")[0]) | unique | length == 13)" "$1" >/dev/null' _ "$RB" "$ALL13"
+check "base do repo: nenhuma falha de base em haiku e sonnet (memory, #647 e #704; duplicada, #665; checkout e segredo, #666): tudo verde" bash -c '[ "$(jq -r "[.tasks | to_entries[] | select(.value == \"vermelho\" and (.key | endswith(\"@zai\") | not)) | .key] | length" "$1")" -eq 0 ]' _ "$RB"
 BASE="$TMP/base.json"
 printf '{"measured_at":"2026-01-02","commit":"abc1234","tasks":{"root@haiku":"verde","checkout@haiku":"vermelho","memory@haiku":"vermelho"}}\n' > "$BASE"
 # igual (verde e verde)
@@ -587,5 +591,61 @@ check "~/.oute_env sem endpoint: o claude roda sem ele"     bash -c '[ "$(sort -
 OTEL_EXPORTER_OTLP_ENDPOINT="$FAKE_ENDPOINT" run --task root --model haiku --rounds 1
 check "com o endpoint no ambiente: não chama o oute-emit run" bash -c '! grep -q "^ARGS run -- " "$1"' _ "$LOG/emit.calls"
 unset FAKE_ENDPOINT
+
+# ---------------------------------------------------------------- 8. assinatura zai (#680)
+ZKEY="zai-teste-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"; ZURL="https://zai.teste.invalid/anthropic"
+qz() { # pct5h-claude pct5h-zai
+  local c="$1" z="$2"
+  jq -nc --argjson a "$c" --argjson b "$z" '{schema:1,agents:{claude:{status:"ok",windows:{"5h":{used_pct:$a}}},zai:{status:"ok",windows:{"5h":{used_pct:$b}}}}}'
+  return $?
+}
+export FAKE_QUOTA="$(qz 10 10)"
+run --subscription zai --rounds 1
+check "zai sem a chave: saída 2, erro claro e nenhuma tarefa rodou" bash -c '[ "$1" -eq 2 ] && grep -q "pede OUTE_ZAI_API_KEY no ambiente" <<<"$2" && grep -q "nenhuma tarefa rodou" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
+check "zai sem a chave: nem evento, nem seletor, nem cota" bash -c '[ ! -e "$1" ] && ! grep -q "cota" <<<"$2"' _ "$LOG/emit.calls" "$OUT"
+OUTE_ZAI_API_KEY= run --subscription zai --rounds 1
+check "zai com a chave vazia: o mesmo erro, nada roda"        bash -c '[ "$1" -eq 2 ] && grep -q "pede OUTE_ZAI_API_KEY" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
+OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --model haiku --rounds 1
+check "zai com --model: recusa, saída 2, nada roda"           bash -c '[ "$1" -eq 2 ] && grep -q -- "--model não vale com --subscription zai" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
+OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --codex --rounds 1
+check "zai com --codex: recusa, saída 2, nada roda"           bash -c '[ "$1" -eq 2 ] && grep -q -- "--codex não vale com --subscription zai" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$OUT" "$LOG/codex.argv"
+run --subscription outra --rounds 1
+check "assinatura desconhecida: saída 2"                       bash -c '[ "$1" -eq 2 ] && grep -q "pede claude ou zai" <<<"$2"' _ "$RC" "$OUT"
+# a rodada: 13 tarefas no glm-5.3, com a chave só no ambiente de cada tarefa
+export ANTHROPIC_API_KEY=chave-do-claude-nao-vai
+OUTE_ZAI_API_KEY="$ZKEY" OUTE_ZAI_BASE_URL="$ZURL" run --subscription zai --rounds 1
+unset ANTHROPIC_API_KEY
+check "zai: saída 0 e 13 chamadas, todas no glm-5.3"           bash -c '[ "$1" -eq 0 ] && [ "$2" -eq 13 ] && [ "$(grep -c -- "--model glm-5.3 " "$3")" -eq 13 ]' _ "$RC" "$(nclaude)" "$LOG/claude.argv"
+for t in $ALL13; do
+  check "zai: $t@zai verde"                                    [ "$(verdict "$t@zai")" = verde ]
+done
+check "zai: o relato nomeia o modelo da zai e não roda haiku nem sonnet" bash -c 'grep -q "modelo zai = glm-5.3" <<<"$1" && ! grep -q "@haiku\|@sonnet\|modelo haiku\|modelo sonnet" <<<"$1"' _ "$OUT"
+check "zai: a variável do ambiente do processo das tarefas é a da zai (url, chave, modelo, tráfego mínimo)" bash -c '[ "$(sort -u "$1")" = "$2|$3|glm-5.3||1" ]' _ "$LOG/claude.zai" "$ZURL" "$ZKEY"
+check "zai: o --settings nega o Read de imagem em toda chamada" bash -c '[ "$(grep -c -- "--settings {\"permissions\":{\"deny\":\[\"Read(\*\*/\*.png)\"" "$1")" -eq 13 ]' _ "$LOG/claude.argv"
+check "zai: o resource leva oute.subscription=zai em toda chamada" bash -c '[ "$(grep -c "^ora=.*oute.subscription=zai$" "$1")" -eq 13 ]' _ "$LOG/claude.env"
+check "zai: a chave não aparece em argv, relato, saída json nem evento" bash -c '! grep -qF "$1" "$2" "$3" "$4" && ! grep -qF "$1" <<<"$5"' _ "$ZKEY" "$LOG/claude.argv" "$LOG/emit.calls" "$LOG/mcp.json" "$OUT"
+check "zai: o evento diz o modelo glm-5.3 e 13 tarefas @zai"    bash -c 'ev="$(grep "^ARGS regression " "$1")"; grep -q "models=glm-5.3 " <<<"$ev" && grep -q "tasks=root@zai=verde" <<<"$ev" && grep -q "calls=13 " <<<"$ev"' _ "$LOG/emit.calls"
+OUTE_ZAI_API_KEY="$ZKEY" run --task select --rounds 1
+check "sem --subscription: a chave da zai não vai ao processo (claude, haiku e sonnet)" bash -c '[ "$(sort -u "$1")" = "||||" ] && ! grep -q -- "--settings\|glm-" "$2"' _ "$LOG/claude.zai" "$LOG/claude.argv"
+# cota: só a da zai conta com --subscription zai
+FAKE_QUOTA="$(qz 10 70)" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
+check "zai em 70%: recusa, saída 3, nomeando a zai e nenhuma tarefa" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 70% (assinatura zai, janela 5h; limite 60%)" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
+FAKE_QUOTA="$(qz 90 10)" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
+check "Claude em 90% e zai em 10%: roda (a cota do Claude não trava a zai)" [ "$RC" -eq 0 -a "$(nclaude)" -eq 1 ]
+FAKE_QUOTA="$(qz 90 10)" run --task select --rounds 1
+check "sem --subscription, Claude em 90%: segue a trava do Claude (saída 3)" [ "$RC" -eq 3 ]
+export FAKE_QUOTA="$(qz 10 10)"
+# --keep: a chave da zai é apagada do que é guardado
+KZ="$TMP/keep-zai"; mkdir -p "$KZ"
+FAKE_LEAK_ZAI=1 OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1 --keep "$KZ"
+check "zai --keep: a chave não está em nenhum arquivo guardado, e o texto [REDACTED] está" bash -c '! grep -rqF "$1" "$2" && grep -rq "\[REDACTED\]" "$2"' _ "$ZKEY" "$KZ"
+# linha de base: a zai entra sem mexer nas de haiku e sonnet
+WZ="$TMP/base-zai.json"
+printf '{"tasks":{"root@haiku":"verde","root@sonnet":"vermelho"}}\n' > "$WZ"
+OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --write-baseline --baseline "$WZ" --task root --task select --rounds 1
+check "--write-baseline na zai: acrescenta @zai e mantém haiku e sonnet" jqe '.tasks == {"root@haiku":"verde","root@sonnet":"vermelho","root@zai":"verde","select@zai":"verde"}' < "$WZ"
+FAKE_BAD="select@zai:1" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --baseline "$WZ" --task root --task select --rounds 1
+check "zai contra a base: select@zai piorou, saída 1"         bash -c '[ "$1" -eq 1 ] && grep -q "^piorou (.*): select@zai$" <<<"$2"' _ "$RC" "$OUT"
+check "a linha de base do repo tem as 13 tarefas da zai e as de haiku e sonnet" bash -c '[ "$(jq "[.tasks | keys[] | select(endswith(\"@zai\"))] | length" "$1")" -eq 13 ] && [ "$(jq "[.tasks | keys[] | select(endswith(\"@haiku\") or endswith(\"@sonnet\"))] | length" "$1")" -eq 26 ]' _ "$ROOT/docker/regression/baseline.json"
 
 check_end
