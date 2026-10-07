@@ -1,7 +1,7 @@
 {
-  "commit": "5955855",
-  "image": "desconhecida",
-  "measured_at": "2026-10-06",
+  "commit": "291d5ee25f58",
+  "image": "0.7.45",
+  "measured_at": "2026-10-07",
   "rounds": 3,
   "tasks": {
     "branch@haiku": "verde",
@@ -16,7 +16,7 @@
     "emit@sonnet": "verde",
     "issue@haiku": "verde",
     "issue@sonnet": "verde",
-    "memory@haiku": "vermelho",
+    "memory@haiku": "verde",
     "memory@sonnet": "verde",
     "ptbr@haiku": "verde",
     "ptbr@sonnet": "verde",
