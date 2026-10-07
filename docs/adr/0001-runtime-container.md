@@ -1,6 +1,6 @@
 # ADR-01 — Runtime container do Oute Agent
 
-Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02) · agentes no home sem `curl | sh` (#199/#200, 2026-09-30) · assinatura `zai` (GLM): segredo novo e saída de código (#629, 2026-10-05, ADR-02)
+Status: aceito · 2026-09-22 · adendos: sandbox 2026-09-24 · yolo + acesso ao host 2026-09-25 · segredos sem acesso ao cofre (0.7.0) · host via `oute-ops` (0.7.1 + lab#178) · uid próprio 10001 (0.7.3, lab#181) · canal de aprovação `oute approve` (0.7.6) · 2026-09-25 · sessão do cofre não fica no host (#21, decisão 2026-09-26, implementada no PR #43, sem release ainda) · Pi fora do stack (#217, 2026-09-30, ADR-02) · agentes no home sem `curl | sh` (#199/#200, 2026-09-30) · assinatura `zai` (GLM): segredo novo e saída de código (#629, 2026-10-05, ADR-02) · sessão `zai`: imagem lida vai a um CDN de terceiro, leitura desligada (#629, 2026-10-06)
 
 ## Contexto
 Um único container Docker que roda em (a) LXC no VPC Oracle Cloud (ARM) e (b) MacBook (Apple Silicon), servindo de "casa" para agentes de código operados via terminal.
@@ -164,6 +164,12 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
   - Os dados são do projeto pessoal do Bardi; BACEN e LGPD não se aplicam a eles. O uso do oute-agent com código da empresa é outro tema (#630) e não herda esta decisão.
 - **Nenhum segredo no contexto da sessão:** isso já valia com a Anthropic, e a assinatura nova aumenta o alcance de um vazamento. Uma regra escrita para o agente (não imprimir o ambiente nem arquivo de credencial numa sessão) e a checagem na `oute-aidlc-qa-pr-audit` ficam como **proposta para a `spec` da fatia (a)**; não foram decididas neste gate.
 - **Resíduo aceito:** um agente em yolo no container pode ler o próprio ambiente, e com isso a chave da Z.ai e os demais valores do `agent_env`, e mandá-los à assinatura da vez. O que limita é a regra acima e o escopo de cada credencial, não o isolamento. A política de retenção e de treino da Z.ai para o plano de código não foi auditada (fica no spike da #629).
+
+## Adendo 2026-10-06 — sessão `zai`: imagem lida vai a um CDN de terceiro (#629)
+- **O que o spike mostrou** ([resultado](https://github.com/renatobardi/oute-agent/issues/629#issuecomment-6015525631)): quando a sessão `zai` lê uma imagem com o `Read`, a Z.ai sobe o arquivo para um CDN (`maas-log-prod.cn-wlcb.ufileos.com`) e devolve ao modelo só uma URL assinada. O modelo não vê a imagem.
+- **Por que importa:** o adendo de 2026-10-05 tratou a saída como igual à que vai à Anthropic. Aqui o arquivo fica guardado num terceiro, atrás de um link. Quem tem o link abre o arquivo até o link expirar. A retenção no CDN não foi auditada.
+- **Decisão do Bardi (2026-10-06):** a sessão `zai` não lê imagem (ADR-02, adendo de 2026-10-06). Com a leitura desligada, o upload não acontece. O mecanismo fica para a `spec`.
+- **Resíduo aceito:** o que o spike subiu (um PNG de teste, sem dado do projeto) continua no CDN até expirar.
 
 ## LXD
 Container LXC precisa `security.nesting=true` e `security.syscalls.intercept.mknod=true` para Docker dentro. (Hoje o oute-agent roda direto no Docker do host oute-server — exceção registrada no lab.)
