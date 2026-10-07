@@ -1012,8 +1012,8 @@ ZKEY="zai-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
 ZTABLE="$ROOT/config/select/models.toml"   # a tabela de verdade: build abre na zai (cadeia zai → claude → codex)
 ZSET='{"permissions":{"deny":["Read(**/*.png)","Read(**/*.jpg)","Read(**/*.jpeg)","Read(**/*.gif)","Read(**/*.webp)","Read(**/*.bmp)"]}}'
 ZURL="https://api.z.ai/api/anthropic"
-tz() { OUTE_ZAI_API_KEY="$ZKEY" OUTE_SELECT_TABLE="$ZTABLE" t "$@"; }          # com a chave, tabela de verdade
-tn() { OUTE_SELECT_TABLE="$ZTABLE" t "$@"; }                                     # sem a chave
+tz() { OUTE_ZAI_API_KEY="$ZKEY" OUTE_SELECT_TABLE="$ZTABLE" t "$@"; return $?; }          # com a chave, tabela de verdade
+tn() { OUTE_SELECT_TABLE="$ZTABLE" t "$@"; return $?; }                                     # sem a chave
 zvars() {   # <agente>: as sete variáveis da zai que o agente recebeu, uma por linha (nome=valor)
   local agent="$1"
   grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|API_TIMEOUT_MS|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)=' "$FAKE/$agent.env" | sort
