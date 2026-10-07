@@ -5,11 +5,17 @@
 # `swarm-worker.md`: a regra do `swarm-worker.md` obriga a rodar antes de abrir o PR). Nunca em CI; só você chama, no container.
 #
 # uso:  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
-#                       [--baseline <arquivo>] [--write-baseline]
+#                       [--baseline <arquivo>] [--write-baseline] [--subscription claude|zai]
 #   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
 #                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
 #                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
 #   --model <m>  só o modelo <m> (haiku = id explícito de teste; sonnet = fase build da tabela do seletor); repetível. Sem a flag, os dois.
+#   --subscription <s>  a assinatura que roda as tarefas (#680, ADR-02): `claude` (o padrão: haiku e sonnet) ou `zai` (o claude
+#                na API da Z.ai, no glm-5.3 que o `oute-select --subscription zai` dá para a fase build; a chave vem de
+#                OUTE_ZAI_API_KEY, só do ambiente). Na `zai` as chaves da linha de base são `<tarefa>@zai`; `--model` e `--codex`
+#                não valem; a cota conferida é a da zai (plano Lite: 2.000 créditos na janela de 5h). Sem a chave, sai 2 sem rodar tarefa.
+#                As variáveis da Z.ai (e a chave, como ANTHROPIC_AUTH_TOKEN) só existem no processo de cada tarefa, nunca em argv,
+#                relato, --keep ou evento; o Read de imagem fica negado por --settings, como na sessão zai do oute-task (#678).
 #   --keep <pasta>  guarda as transcrições e os registros dos dublês de cada chamada em <pasta>/<run>/<tarefa>-<agente>-<modelo>-r<N>/
 #                (transcript.jsonl, err, res.json, status, reason, e o que os dublês gravaram: ssh.log, gh.log, propose.log…).
 #                Antes de gravar, apaga dos arquivos o valor de segredo: variável de ambiente com TOKEN, SECRET, PASSWORD ou
@@ -56,7 +62,7 @@ EXIT_QUOTA=3
 warn() { printf 'oute-regression: aviso: %s\n' "$*" >&2; }
 
 ORIG_ARGS=("$@")
-ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""; BASELINE_ARG=""; WRITE_BASE=0
+ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""; BASELINE_ARG=""; WRITE_BASE=0; SUB=claude
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rounds) shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]?$ ]] || die2 "--rounds pede um inteiro de 1 a 99"; ROUNDS="$1" ;;
@@ -67,11 +73,22 @@ while [[ $# -gt 0 ]]; do
     --json) JSON=1 ;;
     --baseline) shift; [[ $# -gt 0 && -n "$1" ]] || die2 "--baseline pede um arquivo"; BASELINE_ARG="$1" ;;
     --write-baseline) WRITE_BASE=1 ;;
+    --subscription) shift; [[ $# -gt 0 && "$1" =~ ^(claude|zai)$ ]] || die2 "--subscription pede claude ou zai"; SUB="$1" ;;
     -h|--help) usage; exit 0 ;;
     *) die2 "argumento desconhecido: $1 (oute-regression --help)" ;;
   esac
   shift
 done
+
+# zai (#680): a chave só do ambiente; sem ela nada roda (antes de qualquer outra coisa: nem cota, nem seletor, nem tarefa)
+if [[ $SUB = zai ]]; then
+  [[ -n "${OUTE_ZAI_API_KEY:-}" ]] || die2 "--subscription zai pede OUTE_ZAI_API_KEY no ambiente (pasta oute-agent do vault); nenhuma tarefa rodou"
+  [[ $CODEX = 0 ]] || die2 "--codex não vale com --subscription zai"
+  [[ ${#ONLY_MODEL[@]} -eq 0 ]] || die2 "--model não vale com --subscription zai (o modelo é o da zai na fase build)"
+fi
+# o ambiente da sessão zai (as mesmas variáveis e o mesmo --settings do oute-task, #678); OUTE_ZAI_BASE_URL só existe para os testes
+ZAI_BASE_URL="${OUTE_ZAI_BASE_URL:-https://api.z.ai/api/anthropic}"
+ZAI_SETTINGS='{"permissions":{"deny":["Read(**/*.png)","Read(**/*.jpg)","Read(**/*.jpeg)","Read(**/*.gif)","Read(**/*.webp)","Read(**/*.bmp)"]}}'
 
 # o shell do Bash tool do Claude Code não herda as OTEL_* (#250): o `claude -p` das tarefas não exportaria nada e a conversa
 # não chegaria ao bucket nem ao agent-studio (#608). Sem o endpoint no ambiente, a suíte se reexecuta sob `oute-emit run`,
@@ -130,6 +147,7 @@ RUN_STUDIO=0; selected "$STUDIO_TASK" && RUN_STUDIO=1
 # assinaturas que a execução usa (#598): as tarefas rodam no Claude e, com --codex, também no Codex; a cota de outra assinatura
 # (de outra rodada, por exemplo) não trava a suíte.
 USED_SUBS='["claude"]'; [[ $CODEX = 0 ]] || USED_SUBS='["claude","codex"]'
+[[ $SUB != zai ]] || USED_SUBS='["zai"]'   # só a cota da zai conta: as tarefas não tocam a do Claude (#680)
 if command -v oute-quota >/dev/null; then
   q="$(oute-quota --json 2>/dev/null)" || q=""
   pct=""; qagent=""; qwin=""
@@ -149,13 +167,16 @@ fi
 
 # --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build` na assinatura claude (`--agent claude`: a `zai` é a padrão do `build`, #677); Codex da fase `ops`, só com --codex
 declare -A MODEL_ID; ALIASES=()
-for pair in haiku:ops sonnet:build; do
+PAIRS="haiku:ops sonnet:build"; [[ $SUB != zai ]] || PAIRS="zai:build"
+for pair in $PAIRS; do
   al="${pair%%:*}"
   if [[ ${#ONLY_MODEL[@]} -gt 0 ]]; then
     want=0; for m in "${ONLY_MODEL[@]}"; do [[ "$m" = "$al" ]] && want=1; done
     (( want )) || continue
   fi
-  if [[ "$al" = haiku ]]; then
+  if [[ "$al" = zai ]]; then
+    id="$(oute-select --json --phase "${pair#*:}" --subscription zai 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  elif [[ "$al" = haiku ]]; then
     id="$(oute-select --json --phase "${pair#*:}" --model claude-haiku-4-5-20251001 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   else
     id="$(oute-select --json --phase "${pair#*:}" --agent claude 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
@@ -270,12 +291,21 @@ attempt() {
     echo "$TASK_ID" > "$att/id"
     prompt="$(task_prompt)"
     ora="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG"
+    [[ $alias != zai ]] || ora+=",oute.subscription=zai"   # a conversa chega ao agent-studio com a assinatura (#678, #679)
     cd "$AGENT_CWD" || exit 1
+    zai_args=()
+    if [[ $alias = zai ]]; then   # só neste subshell (o processo desta tarefa): as variáveis da Z.ai e a chave, que nunca vai a argv
+      export ANTHROPIC_BASE_URL="$ZAI_BASE_URL" ANTHROPIC_DEFAULT_OPUS_MODEL="${MODEL_ID[zai]}" ANTHROPIC_DEFAULT_SONNET_MODEL="${MODEL_ID[zai]}" \
+        ANTHROPIC_DEFAULT_HAIKU_MODEL="${MODEL_ID[zai]}" API_TIMEOUT_MS=3000000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+        ANTHROPIC_AUTH_TOKEN="$OUTE_ZAI_API_KEY"
+      unset ANTHROPIC_API_KEY
+      zai_args=(--settings "$ZAI_SETTINGS")
+    fi
     export PATH="$att/bin:$PATH" OTEL_RESOURCE_ATTRIBUTES="$ora"
     t0="$(date +%s)"
     if [[ $agent = claude ]]; then
       timeout "$TIMEOUT" claude -p "$prompt" --model "${MODEL_ID[$alias]}" --max-turns "${TASK_MAX_TURNS:-8}" \
-        --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose \
+        --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose ${zai_args[@]+"${zai_args[@]}"} \
         > "$att/out" 2> "$att/err" < /dev/null
       jq -c 'select(type == "object" and .type == "result")' "$att/out" 2>/dev/null | tail -n1 > "$att/res"
       echo $(( $(date +%s) - t0 )) > "$att/secs"
