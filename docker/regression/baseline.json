@@ -1,5 +1,5 @@
 {
-  "commit": "a2a4b871c1af",
+  "commit": "cbe10c012413",
   "image": "0.7.45",
   "measured_at": "2026-10-07",
   "rounds": 3,
@@ -21,7 +21,7 @@
     "emit@zai": "verde",
     "issue@haiku": "verde",
     "issue@sonnet": "verde",
-    "issue@zai": "vermelho",
+    "issue@zai": "verde",
     "memory@haiku": "verde",
     "memory@sonnet": "verde",
     "memory@zai": "vermelho",
