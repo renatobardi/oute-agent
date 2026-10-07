@@ -4,7 +4,8 @@
 
   fake-quota.py <dir>      sobe em 127.0.0.1, numa porta livre gravada em <dir>/port (com TLS: <dir>/cert.pem e key.pem)
 
-Rotas: /claude/api/oauth/usage, /codex/backend-api/wham/usage e /zai/api/monitor/usage/quota/limit. A cada pedido lê de <dir>:
+Rotas: /claude/api/oauth/usage, /codex/backend-api/wham/usage, /zai/api/monitor/usage/quota/limit e (#677, o `GET /v1/models` que o
+`scripts/models-check` lê; o agente é `zai-models`) /zai/api/anthropic/v1/models. A cada pedido lê de <dir>:
   <agente>.mode   o que responder: `ok` (padrão; corpo de <dir>/<agente>.body), `429` (com retry-after de
                   <dir>/retry-after, padrão 294), `5xx` (503), `lixo` (200 que não é JSON), `formato` (200 JSON sem as janelas)
                   e `hang` (dorme <dir>/hang segundos, padrão 3)
@@ -19,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DIR = sys.argv[1]
 ROUTES = {"/claude/api/oauth/usage": "claude", "/codex/backend-api/wham/usage": "codex",
-          "/zai/api/monitor/usage/quota/limit": "zai"}
+          "/zai/api/monitor/usage/quota/limit": "zai", "/zai/api/anthropic/v1/models": "zai-models"}
 
 
 def conf(name, default):

@@ -12,7 +12,7 @@ TMP="$(mktemp -d)"; trap 'ts_stop; kill "${CLARO_PID:-}" 2>/dev/null; rm -rf "${
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/typesafe.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null && command -v openssl >/dev/null || die "precisa de jq, python3 e openssl"
-SEL="$ROOT/docker/oute-select"; TABLE="$ROOT/config/select/models.toml"
+SEL="$ROOT/docker/oute-select"; TABLE="$ROOT/tests/lib/select-table-sem-zai.toml"; REPO_TABLE="$ROOT/config/select/models.toml"
 [[ -x "$SEL" ]] || die "oute-select ausente ou sem +x: $SEL"
 
 BIN="$TMP/bin"; NOGH="$TMP/nogh"; FAKE="$TMP/fake"; mkdir -p "$BIN" "$NOGH" "$FAKE" "$TMP/repo"
@@ -47,7 +47,7 @@ SONNET=claude-sonnet-5-5; OPUS=claude-opus-5-5; HAIKU=claude-haiku-4-5-20251001
 labels 10 aidlc:build agentes ready
 sel --issue 10
 check "label: aidlc:build abre no Sonnet, origem label" is build label claude "$SONNET" ""
-check "label: os oito campos, e só eles"                jqe 'keys == ["agent", "confidence", "effort", "model", "origin", "phase", "reason", "reserve"]' <<<"$OUT"
+check "label: os nove campos, e só eles"                jqe 'keys == ["agent", "confidence", "effort", "model", "origin", "phase", "reason", "reserve", "subscription"]' <<<"$OUT"
 check "label: sem confiança (o Jev não foi chamado)"    jqe '.confidence == ""' <<<"$OUT"
 check "label: motivo diz o label e a issue"             jqe '.reason == "label aidlc:build da issue #10"' <<<"$OUT"
 check "label: sem aviso"                                [ -z "$ERR" ]
@@ -216,8 +216,12 @@ check "opção sem valor: código 2"                       [ "$RC" -eq 2 ]
 
 # ---------------------------------------------------------------- 9. saída para ler e ajuda
 OUT="$("$SEL" --repo "$TMP/repo" --issue 10 --agent codex 2>/dev/null)"
-check "sem --json: uma linha para ler"                  [ "$OUT" == "fase build · origem manual · agente codex · modelo gpt-6.1-sol · esforço high · motivo: --agent codex (label aidlc:build da issue #10)" ]
+check "sem --json: uma linha para ler"                  [ "$OUT" == "fase build · origem manual · assinatura codex · agente codex · modelo gpt-6.1-sol · esforço high · motivo: --agent codex (label aidlc:build da issue #10)" ]
 check "--help: uso, código 0"                           bash -c '"$1" --help | grep -q "^oute-select — seletor de modelo"' _ "$SEL"
+check "--help: --subscription, a cadeia por linha e a diferença de agente" bash -c '"$1" --help | grep -qF -e "--subscription <nome>" && "$1" --help | grep -qF "chain" && "$1" --help | grep -qF "ssinatura × agente"' _ "$SEL"
+# a tabela do repo (com a zai e a chain) é válida para o seletor: sem aviso de tabela inválida, e o campo subscription sai
+OUTE_SELECT_TABLE="$REPO_TABLE" sel --phase build
+check "tabela do repo: válida (sem aviso) e com subscription" bash -c '[ -z "$1" ] && jq -e ".subscription == \"zai\" and .agent == \"claude\"" <<<"$2" >/dev/null' _ "$ERR" "$OUT"
 
 # ---------------------------------------------------------------- 10. tabela no agent: mount só leitura e imagem
 check "compose: config/select montado só leitura no agent" grep -qxF '      - ./config/select:/opt/oute/select:ro' "$ROOT/docker/compose.yaml"
@@ -267,7 +271,7 @@ check "jev: o texto do stdin chegou inteiro"            jqe --arg t "$TXT" '.bod
 jsel "$(printf 'x%.0s' $(seq 1 20000)) fim"
 check "jev: texto longo vai cortado"                    jqe '.body.state | length == 16000' <<<"$(ts_last)"
 OUT="$("$SEL" --repo "$TMP/repo" --text-file "$TMP/texto" 2>/dev/null)"
-check "jev: saída para ler com a confiança"             grep -qF 'fase arch · origem jev · agente claude · modelo claude-opus-5-5 · confiança 0,91 · motivo: Jev: fase arch' <<<"$OUT"
+check "jev: saída para ler com a confiança"             grep -qF 'fase arch · origem jev · assinatura claude · agente claude · modelo claude-opus-5-5 · confiança 0,91 · motivo: Jev: fase arch' <<<"$OUT"
 
 # 11b. confiança baixa: Sonnet, origem padrao, com a confiança registrada
 ts_set ok arch 0.59

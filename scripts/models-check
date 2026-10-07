@@ -12,7 +12,13 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
     autor e o autor do dispatcher (fase plan) com revisor.
   - Assinaturas (#598): `[[subscription]]` com nomes únicos e `[select] reserve_mode` = `mais-livre` ou `ordem` (senão, código 2);
     uma assinatura padrão só e uma coluna de modelo dessa assinatura em toda linha (senão, FALTA). Só `claude` e `codex`
-    têm conferência dos ids; o id de outra assinatura sai `desconhecido`, com aviso (entra com a conferência dela).
+    têm conferência dos ids, e a `zai` (#677, abaixo); o id de outra assinatura sai `desconhecido`, com aviso.
+  - `chain` (#677, a cadeia da linha, em `[default]`, `[[line]]` e `[[exception]]`): lista de nomes de `[[subscription]]`, sem repetir
+    (nome fora da tabela ou repetido = FALTA; lista vazia ou que não é de texto = código 2), e toda assinatura da cadeia com
+    coluna de modelo na linha.
+  - Zai (#677): com $OUTE_ZAI_API_KEY, o id da coluna `zai` tem que estar em `GET https://api.z.ai/api/anthropic/v1/models`
+    ($OUTE_MODELS_ZAI_URL troca o endereço, só https://); a chave vai só no cabeçalho. Sem a chave, ou com a API fora do ar,
+    `desconhecido` (código 3), nunca FALTA.
   - Estrutura: toda fase do ADR-07 e a faixa `ctx` têm linha, só elas são chave, toda fase de `unless_phases` de uma
     exceção é do ADR-07 (#409), e toda exceção usa um label que existe no repo (`gh label list`; sem resposta do `gh` = `desconhecido`).
 
@@ -28,6 +34,8 @@ import re
 import subprocess
 import sys
 import tomllib
+import urllib.error
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 PHASES = ("strat", "intent", "spec", "arch", "design", "plan", "build", "qa", "ship", "ops", "learn", "iter", "ctx")
@@ -93,6 +101,10 @@ def load_table(path):
     for i, ln in enumerate(lines, 1):
         if not isinstance(ln.get("phases"), list) or not all(isinstance(p, str) for p in ln["phases"]):
             die(f"[[line]] {i} sem phases ({path})")
+    for name, row in rows:
+        ch = row.get("chain")
+        if ch is not None and (not isinstance(ch, list) or not ch or not all(isinstance(x, str) and x for x in ch)):
+            die(f"{name} com chain fora do formato (lista de nomes de assinatura) ({path})")
     for i, ex in enumerate(exceptions, 1):
         if not isinstance(ex.get("label"), str) or not ex["label"]:
             die(f"[[exception]] {i} sem label ({path})")
@@ -228,6 +240,52 @@ def check_subscriptions(rows, subs):
             report("ok" if have else "FALTA", f"modelo da assinatura {x['name']} em {rname}", "tabela")
 
 
+def check_chains(rows, subs):
+    """#677: a cadeia de cada linha só tem nomes da tabela, sem repetir, e cada um com coluna de modelo na linha"""
+    names = [x["name"] for x in subs]
+    for rname, row in rows:
+        ch = row.get("chain")
+        if ch is None:
+            continue
+        for n in dict.fromkeys(ch):
+            report("ok" if n in names else "FALTA", f"assinatura {n} da chain de {rname} é da tabela", "tabela")
+            have = isinstance(row.get(n), str) and bool(row[n])
+            report("ok" if have else "FALTA", f"modelo da assinatura {n} da chain de {rname}", "tabela")
+        report("ok" if len(set(ch)) == len(ch) else "FALTA", f"chain de {rname} sem assinatura repetida", "tabela")
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):   # redirecionamento levaria o Authorization a outro host
+        return None
+
+
+def zai_models(key):
+    """{ids} de GET /v1/models da Z.ai; None (com aviso, sem a chave nem o corpo) em qualquer falha"""
+    url = os.environ.get("OUTE_MODELS_ZAI_URL", "https://api.z.ai/api/anthropic/v1/models")
+    if not url.startswith("https://"):
+        die("OUTE_MODELS_ZAI_URL só pode ser https://")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+    try:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=10) as r:
+            data = json.loads(r.read(1 << 20))["data"]
+        return {m["id"] for m in data if isinstance(m, dict) and isinstance(m.get("id"), str)}
+    except urllib.error.HTTPError as e:
+        warn(f"a API da Z.ai respondeu HTTP {e.code}; ids da zai não conferidos")
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        warn(f"a API da Z.ai não respondeu com a lista de modelos ({type(e).__name__}); ids da zai não conferidos")
+    return None
+
+
+def check_zai(models):
+    key = os.environ.get("OUTE_ZAI_API_KEY", "").strip()
+    if not key:
+        warn("sem OUTE_ZAI_API_KEY: ids da zai não conferidos na API da Z.ai")
+    ids = zai_models(key) if key else None
+    for m in models:
+        report("desconhecido" if ids is None else "ok" if m in ids else "FALTA", m, "zai")
+    return 0
+
+
 def check_structure(lines, exceptions):
     keys = [p for ln in lines for p in ln["phases"]]
     for p in PHASES:
@@ -265,8 +323,11 @@ def main(argv):
     if "codex" in names:
         check_codex(list(dict.fromkeys((r["codex"], r["effort"]) for _, r in rows
                                        if isinstance(r.get("codex"), str) and r["codex"])))
+    if "zai" in names:
+        check_zai(column(rows, "zai"))
+    check_chains(rows, subs)
     for name in names:
-        if name not in ("claude", "codex"):
+        if name not in ("claude", "codex", "zai"):
             warn(f"assinatura {name}: sem conferência dos ids (só claude e codex têm); fica `desconhecido`")
             for m in column(rows, name):
                 report("desconhecido", m, name)

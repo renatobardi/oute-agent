@@ -1,3 +1,5 @@
+# CÓPIA CONGELADA da tabela de antes da assinatura zai (#677, `git show 9968e4d:config/select/models.toml`): duas assinaturas, sem `chain`.
+# Os testes do `oute-select` a usam para provar que tabela sem `zai` e sem `chain` dá a saída de antes (com `subscription` a mais). Não acompanha a tabela do repo.
 # Tabela de fase do seletor de modelo (ADR-02, #219): fase do AI-DLC → modelo Claude e modelo/esforço do Codex.
 # Lida pelo `oute-select` a cada abertura de sessão (`oute-task`, `oute-swarm spawn`); montada só leitura no `agent`
 # em /opt/oute/select. Mudança entra com `git pull` + `oute down/up`, sem release.
@@ -11,18 +13,10 @@
 # tem uma coluna por assinatura (`name`), conferida pelo `scripts/models-check`. `status` é o comando que sai 0 quando o
 # agente está logado; `effort = true` = a assinatura usa o esforço da linha (hoje só o Codex); `prefixes` = começos de id de
 # modelo que identificam a assinatura num `--model` fora da tabela. A cota de cada uma vem do `oute-quota --json`.
-# `agent` (#677) = o programa que a sessão roda; sem ele vale o `name`. A `zai` é o próprio `claude` falando com a API
-# compatível da Z.ai (ADR-02, adendo de 2026-10-05): `--agent claude` e `--subscription zai` são coisas diferentes.
 [[subscription]]
 name = "claude"
 default = true
 status = ["claude", "auth", "status"]
-
-[[subscription]]
-name = "zai"
-agent = "claude"
-status = ["oute-quota", "--available", "zai"]
-prefixes = ["glm-"]
 
 [[subscription]]
 name = "codex"
@@ -32,68 +26,38 @@ prefixes = ["gpt-", "codex"]
 
 # Como escolher a reserva quando a padrão está indisponível ou no teto de cota (98%, #558): `mais-livre` = a reserva com mais
 # cota livre (100 − a janela mais cheia dela); `ordem` = a primeira reserva abaixo do teto, na ordem das [[subscription]].
-# Linha com `chain` (#677) = a cadeia dela, na ordem: a primeira é a padrão da linha (o `reserve_from`) e vale o modo `ordem`,
-# só com as assinaturas da cadeia. Raciocínio: claude → zai → codex. Execução: zai → claude → codex (ADR-02, 2026-10-06).
-# Linha sem `chain` segue a padrão da tabela e o `reserve_mode` acima.
 [select]
 reserve_mode = "mais-livre"
 
 # Nada decidiu (sem issue, issue sem label de fase, `gh` fora do ar): Sonnet, com aviso.
 [default]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6.1-sol"
 effort = "high"
 
 # Uma linha por grupo de fases. Só fases do ADR-07 (e a faixa `ctx`) são chave.
-# Raciocínio:
 [[line]]
 phases = ["strat", "intent", "arch", "spec"]
-chain = ["claude", "zai", "codex"]
 claude = "claude-opus-5-5"
-zai = "glm-5.3"
 codex = "gpt-6-astra"
 effort = "high"
 
 [[line]]
-phases = ["design", "plan", "qa", "iter"]
-chain = ["claude", "zai", "codex"]
+phases = ["build", "qa", "design", "plan", "ship", "iter"]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6.1-sol"
 effort = "high"
 
 [[line]]
-phases = ["learn"]
-chain = ["claude", "zai", "codex"]
+phases = ["ops", "ctx", "learn"]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
-codex = "gpt-6-luna"
-effort = "medium"
-
-# Execução:
-[[line]]
-phases = ["build", "ship"]
-chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
-codex = "gpt-6.1-sol"
-effort = "high"
-
-[[line]]
-phases = ["ops", "ctx"]
-chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
 
 # Exceções por label de tipo, antes da fase, na ordem em que aparecem aqui (precedência).
 [[exception]]
 label = "spike"
-chain = ["claude", "zai", "codex"]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6.1-sol"
 effort = "high"
 
@@ -101,17 +65,13 @@ effort = "high"
 [[exception]]
 label = "kaizen"
 unless_phases = ["build", "qa", "design", "plan", "ship", "iter"]
-chain = ["zai", "claude", "codex"]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
 
 [[exception]]
 label = "docs"
-chain = ["zai", "claude", "codex"]
 claude = "claude-sonnet-5-5"
-zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
 
@@ -120,9 +80,9 @@ effort = "medium"
 # o autor (o `models-check` recusa linha com o autor na própria lista) e roda em modo headless, por `claude -p`: só
 # `agent = "claude"` vale (o `models-check` recusa "codex", que herdaria o ~/.codex sem isolamento conferido; o `effort`
 # fica na linha por forma e não é usado). Autor sem linha aqui, ou linha com agente que não é o claude, = etapa `sem-revisor`.
-# Quem escreve em Sonnet (ou em `glm-5.3`, da `zai`, #677) é revisado por Opus, e o inverso (recomendação do autor da proposta da #489).
+# Quem escreve em Sonnet é revisado por Opus, e o inverso (recomendação do autor da proposta da #489).
 [[reviewer]]
-writers = ["claude-sonnet-5-5", "gpt-6.1-sol", "glm-5.3"]
+writers = ["claude-sonnet-5-5", "gpt-6.1-sol"]
 agent = "claude"
 model = "claude-opus-5-5"
 effort = "high"
