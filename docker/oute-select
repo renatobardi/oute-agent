@@ -15,6 +15,10 @@
   --prefer <nome>  pedido (não escolha explícita) de abrir numa assinatura que não é a padrão da linha: vale a mesma regra de
                    cota, e a sessão pode voltar para a padrão (#598). Sem a opção, o ponto de partida é a padrão da linha
   --text-file <f>  texto da tarefa (`-` = stdin), para o Jev classificar a fase quando nenhum label a dá
+  --weekly-guard <assinatura>
+                   (#742) imprime uma linha de JSON com a trava semanal da assinatura frente à janela de 7 dias:
+                   {"subscription","status","guard_pct","used_pct","resets_in_s","resets_at"}; `status` = none (sem
+                   `weekly_guard_pct`), ok, over (no valor ou acima) ou unknown (cota não lida). Sempre sai 0; não escolhe nada
   --json           {"phase","origin","subscription","agent","model","effort","reason","confidence","reserve"} (+ "reserve_from"
                    só quando houve reserva: a assinatura de onde a sessão saiu); sem ele, uma linha para ler
 
@@ -38,7 +42,8 @@ Reserva (#258, #355, #598): sem escolha explícita, a sessão parte da padrão (
 disponível (o `status` sai 0; sem resposta em 5 s só avisa) e com toda janela abaixo de `max_pct` (98, #558). Senão abre
 em outra, pela ordem: a padrão (se a de partida era reserva), depois as reservas disponíveis abaixo do teto, pelo modo
 (`reserve` = `cota` ou `indisponivel`, `reserve_from` = a de partida); depois as de cota desconhecida (por último, com
-aviso de que a cota não foi lida); com todas no teto, a de mais cota livre, com aviso. Nunca recusa. Exceção da janela de 5 h
+aviso de que a cota não foi lida); com todas no teto, a de mais cota livre, com aviso. Nunca recusa (a trava semanal, #742, não é
+daqui: o JSON do seletor não muda: o estado da trava sai em `--weekly-guard`, e quem recusa é o `oute-swarm spawn`). Exceção da janela de 5 h
 (só na assinatura de partida): só ela passou do corte, abaixo de 100%, e reseta em menos de `reset_grace_s` (20 min) -> só aviso.
 Cota da assinatura de partida `unknown` ou leitura que falha -> só aviso, abre nela. Com escolha explícita (--agent, --model,
 --phase) a sessão não troca: só avisa que a padrão está indisponível, e a cota nem é lida.
@@ -157,8 +162,11 @@ def load_subscriptions(t):
         agent = r.get("agent", r["name"])
         if not isinstance(agent, str) or not SUB_NAME_RE.fullmatch(agent):
             raise ValueError(f"[[subscription]] {r['name']} com agent inválido")
+        guard = r.get("weekly_guard_pct")
+        if guard is not None and (isinstance(guard, bool) or not isinstance(guard, (int, float)) or not 1 <= guard <= 100):
+            raise ValueError(f"[[subscription]] {r['name']} com weekly_guard_pct fora de 1 a 100")
         subs.append({"name": r["name"], "agent": agent, "default": r.get("default", False), "status": st,
-                     "effort": r.get("effort", False), "prefixes": tuple(pre)})
+                     "effort": r.get("effort", False), "prefixes": tuple(pre), "weekly_guard_pct": guard})
     names = [x["name"] for x in subs]
     if len(set(names)) != len(names):
         raise ValueError("[[subscription]] com nome repetido")
@@ -568,6 +576,29 @@ def warn_quota_explicit(name):
         warn(f"cota do {label(name)} esgotada ({wins_text(over)}), mas a escolha foi explícita (--subscription); abrindo no {label(name)}")
 
 
+def weekly_guard(name):
+    """trava semanal (#742): JSON de uma linha com o estado da janela de 7 dias da assinatura `name` frente ao
+    `weekly_guard_pct` dela. `status`: `none` (assinatura sem trava), `ok` (abaixo), `over` (no valor ou acima) ou `unknown`
+    (cota não lida). Não recusa nada: quem recusa é o `oute-swarm spawn`; o `oute-task` só avisa. Sempre sai 0."""
+    _, _, _, subs, _ = load_table()
+    sub = next((x for x in subs if x["name"] == name), None)
+    guard = sub.get("weekly_guard_pct") if sub else None
+    out = {"subscription": name, "guard_pct": guard, "used_pct": None, "resets_in_s": None, "resets_at": None}
+    if guard is None:
+        out["status"] = "none"
+    else:
+        q = quota_read()
+        st, wins = quota_windows(q, name) if q else ("unknown", {})
+        w = wins.get("7d") if st == "ok" else None
+        if w is None:
+            out["status"] = "unknown"
+        else:
+            used = int(w[0]) if w[0].is_integer() else round(w[0], 1)
+            out.update(used_pct=used, resets_in_s=None if w[1] is None else int(w[1]), resets_at=w[2], status="over" if w[0] >= guard else "ok")
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def main(argv):
     opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "subscription": "", "model": "", "prefer": "",
            "text-file": ""}
@@ -579,6 +610,11 @@ def main(argv):
         if a == "--json":
             opt["json"] = True
             continue
+        if a == "--weekly-guard":
+            name = next(it, None)
+            if name is None or not SUB_NAME_RE.fullmatch(name):
+                die(f"--weekly-guard sem assinatura válida\n{USAGE}")
+            return weekly_guard(name)
         if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--subscription", "--prefer", "--model",
                      "--text-file"):
             die(f"opção desconhecida: {a}\n{USAGE}")
