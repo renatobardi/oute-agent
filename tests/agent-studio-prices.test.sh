@@ -186,6 +186,9 @@ check("decide: duas fontes concordam em valor novo = trocado", st_ == P.CHANGED 
 check("decide: duas fontes concordam no vigente = igual", P.decide(cur, False, {D[0]: dict(P4), D[1]: dict(P4)}) == (P.EQUAL, {}, None))
 st_, info, new = P.decide(cur, True, {D[0]: {**P4, "input": 5.0}, D[1]: {**P4, "input": 5.0}})
 check("decide: modelo fixo nunca troca (fixo_difere, com os dois valores)", st_ == P.FIXED_DIFFERS and new is None and info["fixed"]["input"] == 4.0 and info["sources"]["input"] == 5.0)
+st_, info, new = P.decide(cur, True, {D[0]: dict(P4), D[1]: {**P4, "input": 5.0}})
+check("decide: modelo fixo com fontes que divergem entre si = diverge com a marca da trava, sem preço novo (#733)",
+      st_ == P.DIVERGE and new is None and set(info["fields"]) == {"input"} and info.get("fixed") is True)
 check("decide: fonte fora do ar = fonte_fora, preço fica", P.decide(cur, False, {D[0]: dict(P4), D[1]: "http"})[::2] == (P.SOURCE_DOWN, None))
 check("decide: uma fonte sem o modelo = sem_fonte, preço fica", P.decide(cur, False, {D[0]: dict(P4), D[1]: None})[::2] == (P.NO_SOURCE, None))
 check("decide: modelo sem preço e fontes concordam = novo", P.decide(None, False, {D[0]: dict(P4), D[1]: dict(P4)})[0] == P.NEW)
@@ -361,6 +364,15 @@ check("conferência seguinte, tudo igual: nenhuma linha nova e nenhuma troca", o
 check("a divergência some quando as fontes passam a concordar (opus: igual)", "price_sources_diverge" not in types2 and cfg.prices.lookup("claude-opus-5-5").input == 4.0)
 check("o alerta de preço fixo some quando as fontes concordam com o fixo", "price_fixed_differs" not in types2)
 check("o sem preço segue enquanto o modelo segue sem preço (sem_fonte)", "price_model_unpriced" in types2)
+
+# o fixo com as fontes divergindo entre si (#733): a divergência não importa para um preço travado (sem alerta)
+serve({**ALL, **SONNET_FIXO}, ALL, OR_IDS)
+P.check(st, cfg, Rec(), now_ns=T2 + 2 * HOUR, urls=URLS, fetcher=fast, select_path=sel_path)
+row = st.read(lambda con: P._rows(con, "SELECT status, detail FROM price_checks WHERE checked_unix_nano = ? AND model = 'claude-sonnet-5'", [T2 + 2 * HOUR])[0])
+check("fixo com fontes divergentes: a conferência registra diverge com a marca da trava (#733)",
+      row["status"] == P.DIVERGE and json.loads(row["detail"]).get("fixed") is True)
+check("fixo com fontes divergentes: sem price_sources_diverge e o preço travado fica (#733)",
+      "price_sources_diverge" not in {a["type"] for a in alerts_at(T2 + 3 * HOUR)} and cfg.prices.lookup("claude-sonnet-5").input == 3.0)
 
 # nunca apaga nem reescreve
 now_hist = st.read(P.history_rows)
