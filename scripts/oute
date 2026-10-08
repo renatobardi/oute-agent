@@ -63,7 +63,8 @@ SERVICES_FOLDER="${OUTE_VAULT_SERVICES_FOLDER:-oute-services}"
 # OPENROUTER_MEMORY_API_KEY (#459) é a chave do proxy do LLM do ai-memory: só ele a recebe.
 # AGENT_STUDIO_MARK_TOKEN (#510) é a credencial de marcação das ações da página da rodada: só o agent-studio a recebe (o `agent`
 # tem a de leitura e alcança o studio pela rede docker; se a marcação aceitasse a leitura, aceitaria o agente).
-SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN OPENROUTER_MEMORY_API_KEY AGENT_STUDIO_MARK_TOKEN"
+# AGENT_STUDIO_JEV_KEY (#749) é a chave da TypeSafe com que o agent-studio chama o Jev (fase da conversa): só ele a recebe.
+SERVICE_SECRET_NAMES="AGENT_STUDIO_SURREAL_PASS AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN OPENROUTER_MEMORY_API_KEY AGENT_STUDIO_MARK_TOKEN AGENT_STUDIO_JEV_KEY"
 
 # fallback de quem precisa de um segredo e não o tem no ambiente: só o agent.env, nunca o vault
 load_agent_env() {
