@@ -1104,6 +1104,20 @@ check "marca sem subscription: --mark usa a do agente"  bash -c 'grep -q ",oute.
 check "a chave não aparece em nenhum evento"            bash -c '! grep -qF "$1" <<<"$2"' _ "$ZKEY" "$(ev true)"
 before="$(n true)"; oute-emit task opened human repo=a slug=b "subscription=Z!"
 check "oute-emit task: assinatura inválida não emite"   [ "$(n true)" -eq "$before" ]
+# 14. trava semanal (#742): sessão aberta à mão só avisa em stderr, nunca recusa; sessão do swarm não repete o aviso
+labels 63 aidlc:spec; labels 64 aidlc:spec; labels 65 aidlc:spec
+jq -n '{schema: 1, max_pct: 98, agents: {claude: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: 90, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
+rm -f "${FAKE:?}"/claude.*
+FAKE_RC=3 tn 63-trava claude "faça a 63"
+check "trava semanal: 7d=90 (trava 85): abre mesmo assim, com o aviso em stderr" bash -c '[ "$1" -eq 3 ] && [ -s "$2" ] && grep -qF "aviso: trava semanal: a assinatura claude está em 90% da janela de 7 dias (trava em 85%)" <<<"$3"' _ "$RC" "$FAKE/claude.args" "$ERR"
+rm -f "${FAKE:?}"/claude.*
+FAKE_RC=3 OUTE_SWARM_WORKER=1 tn 64-trava claude "faça a 64"
+check "trava semanal: sessão do swarm (OUTE_SWARM_WORKER): sem o aviso repetido" bash -c '[ "$1" -eq 3 ] && ! grep -qF "trava semanal" <<<"$2"' _ "$RC" "$ERR"
+jq -n '{schema: 1, max_pct: 98, agents: {claude: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: 40, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
+FAKE_RC=3 tn 65-trava claude "faça a 65"
+check "trava semanal: 7d=40: sem aviso" bash -c '[ "$1" -eq 3 ] && ! grep -qF "trava semanal" <<<"$2"' _ "$RC" "$ERR"
+rm -f "${FAKE:?}/quota.json"
+
 rcv_stop
 
 check_end
