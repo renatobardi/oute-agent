@@ -325,13 +325,53 @@ try:
 except jev.JevError as e:
     hung = "sem resposta" in str(e)
 check("jev: sem resposta -> para no teto de tempo (0,5 s aqui; 3 s no código)", hung and _t.monotonic() - t0 < 2.5 and jev.TIMEOUT_S == 3.0)
+# ---- filtro de segredo colado no primeiro pedido (antes da TypeSafe): os valores são montados na hora, de partes
+RND = "".join(__import__("random").choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(40))
+SAMPLES = {
+    "chave-privada": "-----BEGIN " + "RSA PRIVATE" + " KEY-----\nabc",
+    "chave-api": "use sk" + "-" + RND + " aqui",
+    "token-github": "ghp" + "_" + RND,
+    "chave-aws": "AKIA" + RND[:16].upper(),
+    "token-slack": "xoxb" + "-" + RND[:20],
+    "chave-google": "AIza" + RND[:35],
+    "jwt": "eyJ" + RND[:12] + ".eyJ" + RND[:12] + "." + RND[:12],
+    "bearer": "curl -H 'Authorization: Bearer " + RND + "'",
+    "url-com-senha": "clone " + "ht" + "tps://" + "bob:" + RND[:10] + "@host.example/r.git",
+    "atribuicao": "DB_PASSWORD=" + RND[:12],
+}
+got_kinds = {k: jev.secret_kind(v) for k, v in SAMPLES.items()}
+check("segredo: cada padrão devolve o seu tipo", got_kinds == {k: k for k in SAMPLES})
+check("segredo: texto comum (com a palavra token e senha em prosa) não bate", all(jev.secret_kind(x) is None for x in (
+    "escreva um adr sobre o cache", "o token expira em breve, revise a senha do fluxo", "https://github.com/o/r/issues/7", "api_key = x")))
+n_sec = nreq()
+try:
+    jev.classify("preciso disso " + SAMPLES["chave-api"], URL, KEY)
+    raised = None
+except jev.JevSecret as e:
+    raised = e
+check("segredo: classify recusa, diz só o tipo e não faz chamada", raised is not None and raised.kind == "chave-api" and RND not in str(raised) and nreq() == n_sec)
+c = StudioDB(tmp, "c")
+c.span(ts(f"{D}10:00:00"), 1, name="claude_code.tool", conv="j-segredo", attrs={"tool_name": "Edit", "file_path": "/x.py"})
+c.log(ts(f"{D}10:00:00"), "user_prompt", {"prompt": "rode com " + SAMPLES["token-github"]}, conv="j-segredo")
+sc = c.flush()
+sc.classify_pending(force=True)
+tel_s, bo_s = Tel(), {}
+fake("ok", "spec", "0.9")
+res_s = jev.call_pending(sc, LATER, URL, KEY, tel_s, backoff=bo_s)
+check("segredo: a rotina não chama o Jev, conta 'segredo' e a conversa fica no passo da ação",
+      res_s == {} and nreq() == n_sec and tel_s.calls == ["segredo"] and phase.phase_of(sc.con, "j-segredo")[1:] == ("acao", "baixa")
+      and sc.con.execute("SELECT count(*) FROM phase_jev").fetchone()[0] == 0)
+check("segredo: o aviso diz o tipo e não leva o trecho", tel_s.warns and "token-github" in " ".join(tel_s.warns) and RND not in " ".join(tel_s.warns))
+jev.call_pending(sc, LATER + 10**15, URL, KEY, tel_s, backoff=bo_s)
+check("segredo: não é perguntado de novo (o texto não muda)", tel_s.calls == ["segredo"] and nreq() == n_sec)
+sc.close()
 fake("ok")
 sb.close()
 sys.stdout.flush()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E "^(ok   |FAIL )" "$TMP/py.out")" = 70
+check "o Python rodou todos os casos" test "$(grep -c -E "^(ok   |FAIL )" "$TMP/py.out")" = 76
 
 # ---------------------------------------------------------------- 2. o serviço: /fases, POST /fase, o Jev pela rotina em segundo plano
 SRV="$TMP/srv"; mkdir -p "$SRV"   # 2026-10-07: depois do corte da #617 e já parado, para a rotina do Jev (conversa parada há 10 min)

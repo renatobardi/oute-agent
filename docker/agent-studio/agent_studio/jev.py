@@ -10,6 +10,9 @@ conversa avulsa. Regras:
 - **A chave** (`AGENT_STUDIO_JEV_KEY`, a `OUTE_TYPESAFE_API_KEY` do vault) só existe no cabeçalho: nunca em log, aviso ou evento.
   Sem chave, não há chamada.
 - **Só o texto e as fases saem** (`TEXT_MAX` caracteres). O texto nunca vai a log; o erro diz só o tipo.
+- **Segredo colado no pedido não sai** (`secret_kind`): se o texto bater com padrão de chave, token, senha, chave privada ou
+  endereço com usuário e senha, a chamada não é feita e só o **tipo** do padrão é registrado (nunca o trecho). A conversa fica
+  no passo da ação e não é perguntada de novo (o texto não muda).
 - **Consumo** (ADR-08 §11): cada chamada vai ao `tel.jev` (contador e duração por resultado), que sai pelo coletor como o resto
   da telemetria do agent-studio.
 """
@@ -45,8 +48,40 @@ HINTS = {
 }
 
 
+# padrões de segredo colado no pedido: só classes simples e repetições limitadas (sem quantificador aninhado)
+SECRET_PATTERNS = (
+    ("chave-privada", re.compile(r"-----BEGIN [A-Z ]{0,24}PRIVATE KEY-----")),
+    ("chave-api", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),
+    ("token-github", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})")),
+    ("chave-aws", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
+    ("token-slack", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    ("chave-google", re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
+    ("bearer", re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}", re.IGNORECASE)),
+    ("url-com-senha", re.compile(r"\b[a-z][a-z0-9+.-]{1,15}://[^\s/:@]{1,64}:[^\s/@]{1,64}@")),
+    ("atribuicao", re.compile(r"\b[\w.-]{0,32}(?:api[_-]?key|secret|token|passw(?:or)?d|senha)[\w.-]{0,16}\s{0,3}[:=]\s{0,3}[\"']?[^\s\"']{8,}",
+                              re.IGNORECASE)),
+)
+
+
+def secret_kind(text):
+    """O tipo do primeiro padrão de segredo que o texto contém (`chave-api`, `token-github`, `senha`…), ou `None`. Nunca devolve o trecho."""
+    for kind, pattern in SECRET_PATTERNS:
+        if pattern.search(text):
+            return kind
+    return None
+
+
 class JevError(Exception):
     """Falha da chamada; a mensagem é fixa (nunca texto de resposta, de pedido ou a chave)."""
+
+
+class JevSecret(JevError):
+    """O texto parece ter segredo: não saiu. `kind` = o tipo do padrão; nunca o trecho."""
+
+    def __init__(self, kind):
+        super().__init__(f"texto com segredo ({kind}); não enviado")
+        self.kind = kind
 
 
 def usable(url, key):
@@ -58,6 +93,9 @@ def classify(text, url, key, timeout=TIMEOUT_S):
     """`(fase, confiança)` do Jev para o texto; `JevError` em qualquer falha. Vai só o texto (cortado) e as fases."""
     if not usable(url, key):
         raise JevError("sem chave ou endereço sem https")
+    kind = secret_kind(text)
+    if kind:
+        raise JevSecret(kind)
     body = {"state": text[:TEXT_MAX], "model": MODEL,
             "questions": {"fase": {"type": "choice", "instructions": INSTRUCTIONS,
                                    "criteria": {p: HINTS[p] for p in phase_mod.PHASES}}}}
@@ -109,6 +147,11 @@ def call_pending(store, now_ns, url, key, tel, limit=20, backoff=None, clock=tim
         start = time.monotonic()
         try:
             phase, conf = classify(text, url, key)
+        except JevSecret as e:
+            tel.jev("segredo", 0.0)
+            backoff[conv] = float("inf")   # o texto não muda: não é perguntado de novo
+            tel.warn("jev-secret", "jev: o primeiro pedido tem segredo (%s); não enviado", e.kind)
+            continue
         except JevError as e:
             tel.jev("erro", time.monotonic() - start)
             backoff[conv] = clock() + RETRY_S

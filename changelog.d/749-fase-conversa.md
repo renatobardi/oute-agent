@@ -3,3 +3,4 @@
 
 ### Changed
 - **Uso, Dashboard e `GET /v1/usage` (`by_phase`) só trazem fases do ADR-07** (#749): acabam as linhas `desconhecida` e `interativa`. Fato sem conversa (o LLM do ai-memory) conta em `ops`.
+- **Segredo colado no primeiro pedido não vai ao Jev** (#749, ADR-08): o texto que bate com padrão de chave, token, senha, chave privada ou endereço com usuário e senha não é enviado à TypeSafe; só o tipo do padrão é registrado, e a conversa fica na classificação por ação.
