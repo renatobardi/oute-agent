@@ -55,6 +55,7 @@ oute() {
   OUT="$(env -u OCI_S3_ACCESS_KEY -u OCI_S3_SECRET_KEY -u OCI_S3_ENDPOINT -u OCI_S3_REGION -u GH_TOKEN \
     -u AGENT_STUDIO_INGEST_TOKEN -u AGENT_STUDIO_READ_TOKEN -u AGENT_STUDIO_SURREAL_PASS -u AGENT_STUDIO_MARK_TOKEN \
     -u OUTE_AGENT_STUDIO -u COMPOSE_PROFILES -u BW_SESSION -u OUTE_UP_RETRIES \
+    -u OUTE_NET_SUBNET -u OUTE_NET_SUBNET_STUDIO -u OUTE_NET_SUBNET_MEMORIA -u OUTE_NET_SUBNET_LLM -u OUTE_NET_SUBNET_SAIDA \
     PATH="$BIN:$PATH" HOME="$TMP/home" OUTE_HOME="$TMP/oute" OUTE_HOST=teste OUTE_UP_RETRY_WAIT=7 \
     OUTE_SSH_HOST=127.0.0.1 OUTE_SSH_PORT="$(cat "$TMP/port")" OUTE_SSH_AUTHORIZED_KEYS="$TMP/home/.ssh/none.pub" \
     "$@" "$TMP/repo/scripts/oute" up 2>&1)"; RC=$?
@@ -86,5 +87,23 @@ check "outro erro: sem espera"                  test ! -s "$F_SLEEP"
 
 oute env F_FAILS=1 OUTE_UP_RETRIES=1
 check "OUTE_UP_RETRIES=1: uma subida e rc != 0" bash -c '[ "$1" = 1 ] && [ "$2" -ne 0 ]' _ "$(ups)" "$RC"
+
+# ---- #707: subnet de rede interna cruzando a da rede oute (ou outra interna) falha ANTES do compose up
+oute env F_FAILS=0 OUTE_NET_SUBNET=172.16.0.0/16
+check "subnet cruzando a oute: nenhuma subida do compose"   test "$(ups)" = 0
+check "subnet cruzando a oute: rc != 0"                     [ "$RC" -ne 0 ]
+check "subnet cruzando a oute: avisa qual rede cruza"       has 'cruza a da rede oute'
+
+oute env F_FAILS=0 OUTE_NET_SUBNET_LLM=172.16.1.0/24
+check "redes internas cruzando: nenhuma subida"             test "$(ups)" = 0
+check "redes internas cruzando: rc != 0"                    [ "$RC" -ne 0 ]
+check "redes internas cruzando: avisa as duas redes"        has 'cruza a da rede llm'
+
+# override pelo .env do checkout (o mesmo arquivo que o compose interpola): sem cruzar, sobe
+printf 'OUTE_NET_SUBNET_SAIDA=10.200.0.0/24\n' > "$TMP/repo/.env"
+oute env F_FAILS=0
+check "override de subnet pelo .env: sobe"                  test "$(ups)" = 1
+check "override de subnet pelo .env: rc 0"                  [ "$RC" -eq 0 ]
+rm -f "${TMP:?}/repo/.env"
 
 check_end

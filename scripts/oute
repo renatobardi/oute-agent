@@ -818,6 +818,60 @@ validate_agent_ip_not_in_range() {
   return 0
 }
 
+# cidrs_overlap <cidr1> <cidr2>: diz se duas subnets a.b.c.d/p se cruzam (#707). Bash puro (3.2 do Mac): o bash
+# trabalha com inteiros de 64 bits, então o IP (32 bits) cabe.
+cidrs_overlap() {
+  local a="$1" b="$2"
+  local an="${a%/*}" ap="${a#*/}" bn="${b%/*}" bp="${b#*/}" asize bsize aint bint
+  asize="$(ip_block_size "$ap")" || return 1
+  bsize="$(ip_block_size "$bp")" || return 1
+  aint="$(ip_to_int "$an")" || return 1
+  bint="$(ip_to_int "$bn")" || return 1
+  # cruzam quando uma começa antes de a outra acabar (vale nas duas direções)
+  if [[ $aint -le $(( bint + bsize - 1 )) && $bint -le $(( aint + asize - 1 )) ]]; then return 0; fi
+  return 1
+}
+
+# net_subnet <var> <padrão>: subnet de uma rede: variável exportada, depois o .env, depois o padrão do compose —
+# a mesma ordem e o mesmo alcance que o docker compose usa na interpolação (#707)
+net_subnet() {
+  local var="$1" def="$2" val
+  val="$(printenv "$var" 2>/dev/null || true)"
+  [[ -n "$val" ]] || val="$(env_get "$var" || true)"
+  [[ -n "$val" ]] || val="$def"
+  printf '%s\n' "$val"
+  return 0
+}
+
+# ensure_net_subnets <subnet-da-rede-oute> (#707): as redes studio/memoria/llm/saida têm subnet fixa no compose, fora
+# do pool padrão do Docker. Aqui confere que nenhuma cruza a rede oute nem uma à outra: subnet cruzada faria o
+# compose up falhar com o erro do Docker, que não diz nem qual rede conflita. Os padrões repetem o docker/compose.yaml.
+ensure_net_subnets() {
+  local subnet="$1" a b rede var def rede2 var2 def2 sa sb
+  set -- "studio:OUTE_NET_SUBNET_STUDIO:172.16.0.0/24" \
+         "memoria:OUTE_NET_SUBNET_MEMORIA:172.16.1.0/24" \
+         "llm:OUTE_NET_SUBNET_LLM:172.16.2.0/24" \
+         "saida:OUTE_NET_SUBNET_SAIDA:172.16.3.0/24"
+  for a in "$@"; do
+    IFS=: read -r rede var def <<<"$a"
+    sa="$(net_subnet "$var" "$def")" || return 1
+    if cidrs_overlap "$sa" "$subnet"; then
+      echo "oute: a subnet da rede $rede ($sa) cruza a da rede oute ($subnet, OUTE_NET_SUBNET); ajuste uma das duas" >&2
+      return 1
+    fi
+    for b in "$@"; do
+      [[ "$b" != "$a" ]] || continue
+      IFS=: read -r rede2 var2 def2 <<<"$b"
+      sb="$(net_subnet "$var2" "$def2")" || return 1
+      if cidrs_overlap "$sa" "$sb"; then
+        echo "oute: a subnet da rede $rede ($sa) cruza a da rede $rede2 ($sb); ajuste $var ou $var2" >&2
+        return 1
+      fi
+    done
+  done
+  return 0
+}
+
 # compose_up_retry: #518. O `compose up` pode falhar ao recriar a rede com "failed to allocate gateway: Address already in use"
 # (a ponte antiga ainda ocupa a sub-rede logo depois do down). Só esse erro repete, com espera curta
 # (OUTE_UP_RETRIES tentativas no total, padrão 3; OUTE_UP_RETRY_WAIT segundos, padrão 5); outro erro, ou o fim das tentativas, falha como antes.
@@ -855,6 +909,8 @@ ensure_net_ip_range() {
   if [[ -n "$agent_ip" ]]; then
     validate_agent_ip_not_in_range "$range" "$agent_ip" || return 1
   fi
+  # #707: as subnets fixas das outras redes não cruzam a da oute nem entre si
+  ensure_net_subnets "$subnet" || return 1
 }
 
 # mountpoint(1) não existe no macOS

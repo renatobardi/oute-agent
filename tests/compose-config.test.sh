@@ -74,6 +74,54 @@ check "oute-agent: no máximo 4096 processos"             jqe '.services.agent.p
 OUT="$(compose_config "" OUTE_AGENT_MEM=8g OUTE_AGENT_CPUS=2 2>"$TMP/cfg.err")" || OUT=""
 check "limites: OUTE_AGENT_MEM e OUTE_AGENT_CPUS trocam o teto" jqe '.services.agent | (.mem_limit | tostring) == "8589934592" and .cpus == 2' <<<"$OUT"
 
+# ---- 2f. subnets fixas das redes (#707): sem subnet, o alocador do Docker pega a primeira faixa livre do pool padrão
+# e podia dar a uma rede do projeto a 172.19.0.0/16 da rede oute (derrubou o deploy da 0.7.45). O teste confere
+# cruzamento de verdade (CIDR → intervalo em jq), não só igualdade. NETDEFS: a.b.c.d/p → {lo, hi} em inteiro.
+NETDEFS='def toint: split(".") | (.[0] | tonumber) * 16777216 + (.[1] | tonumber) * 65536 + (.[2] | tonumber) * 256 + (.[3] | tonumber);
+def p2: if . <= 0 then 1 else 2 * (. - 1 | p2) end;
+def cidr: split("/") as $s | ($s[0] | toint) as $lo | {lo: $lo, hi: ($lo + ((32 - ($s[1] | tonumber)) | p2) - 1)};
+def crosses($o): cidr as $a | ($o | cidr) as $b | $a.lo <= $b.hi and $b.lo <= $a.hi;'
+
+# subnets_ok <rótulo>: confere, no $OUT corrente, as três garantias da #707 — rede fora da oute sem subnet (alocação
+# automática), subnet cruzando a 172.19.0.0/16 e subnet cruzando outra rede do compose
+subnets_ok() {
+  local rotulo="$1"
+  check "subnets ($rotulo): toda rede fora a oute tem subnet fixa" \
+    jqe '[.networks | to_entries[] | select(.key != "oute") | select((.value.ipam.config[0].subnet // "") == "")] == []' <<<"$OUT"
+  check "subnets ($rotulo): nenhuma rede fora a oute cruza a 172.19.0.0/16" \
+    jqe "$NETDEFS"' [.networks | to_entries[] | select(.key != "oute") | (.value.ipam.config[0].subnet // "") | crosses("172.19.0.0/16")] | any | not' <<<"$OUT"
+  check "subnets ($rotulo): nenhuma subnet cruza outra rede" \
+    jqe "$NETDEFS"' [.networks | to_entries[] | {n: .key, s: (.value.ipam.config[0].subnet // "")}] as $N
+      | [$N[] as $a | $N[] as $b | select($a.n < $b.n) | ($a.s | crosses($b.s))] | any | not' <<<"$OUT"
+  return 0
+}
+
+for pr in "" "agent-studio"; do
+  OUT="$(compose_config "$pr" 2>"$TMP/cfg.err")" || OUT=""
+  subnets_ok "profile '${pr:-nenhum}'"
+done
+OUT="$(compose_config "" COMPOSE_PROFILES=agent-studio,llm-proxy 2>"$TMP/cfg.err")" || OUT=""
+subnets_ok "profiles agent-studio e llm-proxy"
+# valores exatos: 172.16.x é privado e fica fora do pool padrão do Docker (que aloca /16s de 172.17.0.0/12 a 172.31),
+# então rede de outro projeto não disputa a faixa; /24 chega para os 2-3 containers de cada rede
+check "subnets: studio 172.16.0.0/24"               jqe '.networks.studio.ipam.config[0].subnet == "172.16.0.0/24"' <<<"$OUT"
+check "subnets: memoria 172.16.1.0/24"              jqe '.networks.memoria.ipam.config[0].subnet == "172.16.1.0/24"' <<<"$OUT"
+check "subnets: llm 172.16.2.0/24"                  jqe '.networks.llm.ipam.config[0].subnet == "172.16.2.0/24"' <<<"$OUT"
+check "subnets: saida 172.16.3.0/24"                jqe '.networks.saida.ipam.config[0].subnet == "172.16.3.0/24"' <<<"$OUT"
+check "subnets: a rede oute segue 172.19.0.0/16"    jqe '.networks.oute.ipam.config[0].subnet == "172.19.0.0/16"' <<<"$OUT"
+
+# ---- 2g. OUTE_NET_SUBNET diferente do padrão (#230 + #707): a rede oute muda, as outras seguem fixas e nada se cruza
+OUT="$(compose_config "agent-studio" OUTE_NET_SUBNET=10.200.0.0/16 OUTE_NET_GATEWAY=10.200.0.1 OUTE_NET_IP_RANGE=10.200.128.0/17 2>"$TMP/cfg.err")" || OUT=""
+check "subnets: OUTE_NET_SUBNET troca a subnet da rede oute" \
+  jqe '.networks.oute.ipam.config[0].subnet == "10.200.0.0/16"' <<<"$OUT"
+check "subnets: OUTE_NET_IP_RANGE acompanha a subnet nova" \
+  jqe '.networks.oute.ipam.config[0].ip_range == "10.200.128.0/17"' <<<"$OUT"
+check "subnets: com OUTE_NET_SUBNET próprio, a memoria segue 172.16.1.0/24" \
+  jqe '.networks.memoria.ipam.config[0].subnet == "172.16.1.0/24"' <<<"$OUT"
+check "subnets: com OUTE_NET_SUBNET próprio, a rede oute não cruza as fixas" \
+  jqe "$NETDEFS"' [.networks | to_entries[] | select(.key != "oute") | (.value.ipam.config[0].subnet // "") | crosses("10.200.0.0/16")] | any | not' <<<"$OUT"
+subnets_ok "com OUTE_NET_SUBNET próprio"
+
 # ---- 3. caso negativo: compose inválido
 echo "services:" > "$TMP/broken.yaml"
 echo "  agent:" >> "$TMP/broken.yaml"
