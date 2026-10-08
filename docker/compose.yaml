@@ -369,16 +369,35 @@ networks:
   studio:
     driver: bridge
     internal: true
+    # #707: subnet fixa. Sem ela o Docker aloca a primeira faixa livre do pool padrão (172.17.0.0/12, em /16s) e pode
+    # dar a esta rede a 172.19.0.0/16 da rede oute — foi o que derrubou o deploy da 0.7.45. Em 172.16.0.0/24 fica fora
+    # do pool (o alocador entrega a partir de 172.17; no oute-server, 5 redes alocadas e 172.16 livre) e não cruza a
+    # lxdbr0 (10.173.117.0/24), a tailscale0 (100.64.0.0/10) nem a rede do host (10.0.1.0/24).
+    ipam:
+      config:
+        - subnet: ${OUTE_NET_SUBNET_STUDIO:-172.16.0.0/24}
   # #564: agent e ai-memory. internal = sem rota para fora do compose: o ai-memory fica sem saída à internet, e o agent
   # continua saindo pela rede oute.
   memoria:
     driver: bridge
     internal: true
+    # #707: subnet fixa, pelo mesmo motivo da studio (fora do pool padrão, sem cruzar as outras redes do compose)
+    ipam:
+      config:
+        - subnet: ${OUTE_NET_SUBNET_MEMORIA:-172.16.1.0/24}
   # #459, #564: rede do llm-proxy com o ai-memory e o collector. internal: o ai-memory está nela e não pode ter saída.
   # O agent não está nela, então não alcança o proxy nem a chave da memória.
   llm:
     driver: bridge
     internal: true
+    # #707: subnet fixa, pelo mesmo motivo da studio (fora do pool padrão, sem cruzar as outras redes do compose)
+    ipam:
+      config:
+        - subnet: ${OUTE_NET_SUBNET_LLM:-172.16.2.0/24}
   # #564: a saída do llm-proxy ao OpenRouter. Só ele está nela (nem o ai-memory, nem o agent).
   saida:
     driver: bridge
+    # #707: subnet fixa, pelo mesmo motivo da studio (fora do pool padrão, sem cruzar as outras redes do compose)
+    ipam:
+      config:
+        - subnet: ${OUTE_NET_SUBNET_SAIDA:-172.16.3.0/24}
