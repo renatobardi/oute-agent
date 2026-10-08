@@ -43,6 +43,13 @@
 # um dublê (servidor MCP `ai-memory` próprio, `--strict-mcp-config`): nada chega ao canal de aprovação, ao host, ao
 # GitHub nem à memória de ninguém. O grader é bash e lê efeitos (arquivos, o que os dublês gravaram, a transcrição);
 # nenhum LLM julga.
+# Notas (#712): a tarefa lê as notas de `docker/agent-notes.md` do checkout de onde a suíte é chamada (a raiz do
+# repositório git do diretório atual), e não as que a imagem instalou no CLAUDE.md do usuário; fora de um checkout, as
+# notas ao lado das tarefas (na imagem, as da imagem), e o relato diz qual arquivo valeu (linha `notas:`). A suíte monta
+# uma cópia do CLAUDE.md do usuário com o bloco gerenciado trocado pelas notas escolhidas (o resto do arquivo fica igual),
+# grava a cópia na pasta acima do diretório de cada chamada (o claude lê o CLAUDE.md das pastas acima) e tira da conversa
+# o CLAUDE.md do usuário pelo `claudeMdExcludes` do `--settings`. Nada é escrito na pasta de configuração de quem roda
+# (`~/.claude` ou $CLAUDE_CONFIG_DIR). O Codex (`--codex`) não tem a troca: lê as notas instaladas em ~/.codex/AGENTS.md.
 # Cota: com `oute-quota` no PATH e qualquer janela >= 60% (OUTE_REGRESSION_MAX_PCT), a suíte não começa (saída 3, com
 # a janela e o limite na mensagem); cota desconhecida ou comando ausente = aviso e segue.
 # Fim: um evento oute.regression.run pelo `oute-emit` (versão da imagem, versões dos CLIs, modelos, rodadas,
@@ -101,6 +108,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="${OUTE_REGRESSION_DIR:-}"
 [[ -n "$DIR" ]] || for d in /usr/local/lib/oute/regression "$HERE/regression"; do [[ -d "$d" ]] && { DIR="$d"; break; }; done
 [[ -d "$DIR" ]] || die2 "sem a pasta das tarefas (regression/)"
+# --- notas (#712): as do checkout de onde a suíte é chamada; fora de um checkout, as que estão ao lado das tarefas
+NOTES_SRC=""; NOTES_FROM=""
+NOTES_TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || NOTES_TOP=""
+if [[ -n "$NOTES_TOP" && -f "$NOTES_TOP/docker/agent-notes.md" ]]; then
+  NOTES_SRC="$NOTES_TOP/docker/agent-notes.md"; NOTES_FROM=checkout
+elif [[ -f "$DIR/../agent-notes.md" ]]; then
+  NOTES_SRC="$(cd "$DIR/.." && pwd)/agent-notes.md"; NOTES_FROM=tarefas
+else
+  die2 "sem as notas dos agentes: rode de dentro de um checkout do oute-agent (docker/agent-notes.md) ou com agent-notes.md ao lado da pasta das tarefas"
+fi
+USER_NOTES="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
 TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-180}"
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_TIMEOUT tem de ser inteiro > 0"
 STUDIO_WAIT="${OUTE_REGRESSION_STUDIO_WAIT:-60}"; STUDIO_STEP="${OUTE_REGRESSION_STUDIO_STEP:-5}"
@@ -120,7 +138,7 @@ elif [[ -n "$BASELINE_ARG" && $WRITE_BASE = 0 ]]; then
 fi
 MAX_PCT="${OUTE_REGRESSION_MAX_PCT:-60}"
 [[ "$MAX_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]] || die2 "OUTE_REGRESSION_MAX_PCT tem de ser um número"
-for c in jq timeout claude oute-select; do command -v "$c" >/dev/null || die2 "precisa de $c no PATH"; done
+for c in jq timeout python3 claude oute-select; do command -v "$c" >/dev/null || die2 "precisa de $c no PATH"; done
 [[ $CODEX = 0 ]] || command -v codex >/dev/null || die2 "--codex pede o codex no PATH"
 
 # --- tarefas: nome e se vão ao Codex, lidos de cada arquivo (em subshell: o arquivo define funções)
@@ -196,6 +214,26 @@ TMP="$(mktemp -d)" || die2 "sem diretório temporário"
 trap 'rm -rf "${TMP:?}"' EXIT
 RUN_ID="regression-$(date -u +%Y%m%d-%H%M%S)-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
 REAL_EMIT="$(command -v oute-emit || true)"
+
+# --- notas (#712): o CLAUDE.md que cada chamada lê = o do usuário com o bloco gerenciado trocado pelas notas escolhidas
+# (o mesmo bloco que o entrypoint grava); o arquivo do usuário só é lido. O `claudeMdExcludes` tira o do usuário da conversa
+build_notes() { # origem das notas, CLAUDE.md do usuário, destino
+  local src="$1" user="$2" out="$3"
+  python3 - "$user" "$src" > "$out" <<'PY'
+import pathlib, re, sys
+user, src = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).read_text().strip()
+begin, end = "<!-- oute:managed:ops-handoff -->", "<!-- /oute:managed:ops-handoff -->"
+block = f"{begin}\n{src}\n{end}\n"
+text = user.read_text() if user.is_file() else ""
+pat = re.compile(re.escape(begin) + r".*?" + re.escape(end) + r"\n?", re.S)
+sys.stdout.write(pat.sub(lambda _: block, text) if pat.search(text) else (text.rstrip() + "\n\n" if text.strip() else "") + block)
+PY
+  return $?
+}
+build_notes "$NOTES_SRC" "$USER_NOTES" "$TMP/notes.md" || die2 "não deu para montar as notas a partir de $NOTES_SRC"
+USER_NOTES_REAL="$(realpath "$USER_NOTES" 2>/dev/null)" || USER_NOTES_REAL="$USER_NOTES"
+NOTES_SETTINGS="$(jq -cn --arg a "$USER_NOTES" --arg b "$USER_NOTES_REAL" '{claudeMdExcludes: ([$a, $b] | unique)}')"
+ZAI_NOTES_SETTINGS="$(jq -c --argjson n "$NOTES_SETTINGS" '. + $n' <<<"$ZAI_SETTINGS")"
 
 # --- dublês: gravam o que receberam em $REC (o caminho vai escrito no próprio dublê)
 make_stubs() { # bin rec
@@ -293,19 +331,20 @@ attempt() {
     ora="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG"
     [[ $alias != zai ]] || ora+=",oute.subscription=zai"   # a conversa chega ao agent-studio com a assinatura (#678, #679)
     cd "$AGENT_CWD" || exit 1
-    zai_args=()
+    settings="$NOTES_SETTINGS"
+    [[ $agent != claude ]] || cp "$TMP/notes.md" "$att/CLAUDE.md" || exit 1   # a pasta acima do diretório da chamada (#712)
     if [[ $alias = zai ]]; then   # só neste subshell (o processo desta tarefa): as variáveis da Z.ai e a chave, que nunca vai a argv
       export ANTHROPIC_BASE_URL="$ZAI_BASE_URL" ANTHROPIC_DEFAULT_OPUS_MODEL="${MODEL_ID[zai]}" ANTHROPIC_DEFAULT_SONNET_MODEL="${MODEL_ID[zai]}" \
         ANTHROPIC_DEFAULT_HAIKU_MODEL="${MODEL_ID[zai]}" API_TIMEOUT_MS=3000000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
         ANTHROPIC_AUTH_TOKEN="$OUTE_ZAI_API_KEY"
       unset ANTHROPIC_API_KEY
-      zai_args=(--settings "$ZAI_SETTINGS")
+      settings="$ZAI_NOTES_SETTINGS"
     fi
     export PATH="$att/bin:$PATH" OTEL_RESOURCE_ATTRIBUTES="$ora"
     t0="$(date +%s)"
     if [[ $agent = claude ]]; then
       timeout "$TIMEOUT" claude -p "$prompt" --model "${MODEL_ID[$alias]}" --max-turns "${TASK_MAX_TURNS:-8}" \
-        --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose ${zai_args[@]+"${zai_args[@]}"} \
+        --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose --settings "$settings" \
         > "$att/out" 2> "$att/err" < /dev/null
       jq -c 'select(type == "object" and .type == "result")' "$att/out" 2>/dev/null | tail -n1 > "$att/res"
       echo $(( $(date +%s) - t0 )) > "$att/secs"
@@ -529,6 +568,9 @@ REPS_TEXT="0 falha em $ROUNDS repetições só permite afirmar taxa de aprovaç�
 {
   printf 'oute-regression %s · imagem %s · claude %s · %s rodada(s)\n' "$RUN_ID" "$image" "$CLAUDE_VER" "$ROUNDS"
   for al in "${ALIASES[@]}"; do printf '  modelo %s = %s\n' "$al" "${MODEL_ID[$al]}"; done
+  if [[ $NOTES_FROM = checkout ]]; then printf '  notas: %s (do checkout de onde a suíte foi chamada)\n' "$NOTES_SRC"
+  else printf '  notas: %s (ao lado das tarefas; a suíte foi chamada fora de um checkout com docker/agent-notes.md)\n' "$NOTES_SRC"; fi
+  [[ $CODEX = 0 ]] || printf '  notas no codex: as instaladas em ~/.codex/AGENTS.md (a troca só vale para o claude)\n'
   for k in "${KEYS[@]}"; do
     case "${STATE[$k]}" in piorou|melhorou|falha-de-base) sfx=" [${STATE[$k]//-/ }]" ;; *) sfx="" ;; esac
     printf '  %-24s %-15s %s%s\n' "$k" "${VERDICT[$k]}" "${DETAIL[$k]}" "$sfx"
@@ -565,10 +607,11 @@ if [[ $JSON = 1 ]]; then
   jq -n --arg run "$RUN_ID" --arg image "$image" --arg claude "$CLAUDE_VER" --arg codex "$CODEX_VER" --arg models "$model_ids" \
     --argjson rounds "$ROUNDS" --arg result "$RESULT" --argjson cost "$total_cost" --arg tasks "$tasks_csv" \
     --arg reps "$REPS_TEXT" --argjson per_model "$mj" --argjson calls "$total_calls" --argjson secs "$total_secs" \
-    --arg vs "$vs_csv" --arg bfile "$BASE_FILE" --argjson bpresent "$BASE_PRESENT" --argjson bwrite "$WRITE_BASE" \
+    --arg vs "$vs_csv" --arg nfile "$NOTES_SRC" --arg nfrom "$NOTES_FROM" --arg bfile "$BASE_FILE" --argjson bpresent "$BASE_PRESENT" --argjson bwrite "$WRITE_BASE" \
     '{run:$run, image:$image, claude:$claude, codex:$codex, models:($models | split(",")), rounds:$rounds, repetitions:$reps,
       result:$result, calls:$calls, secs:$secs, cost_usd:$cost, per_model:$per_model,
       tasks:($tasks | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries),
+      notes:{file:$nfile, from:$nfrom},
       baseline:{file:$bfile, present:($bpresent == 1), writing:($bwrite == 1)},
       vs_baseline:($vs | split(",") | map(split("=") | {key:.[0], value:.[1]}) | from_entries)}'
 fi
