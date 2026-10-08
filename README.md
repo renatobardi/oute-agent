@@ -41,7 +41,7 @@ tray/            tray do Mac (ADR-08 §10): pacote SwiftPM com o TrayCore (lógi
 
 **No host**
 - Docker + Compose + **buildx** (Ubuntu: `apt install docker-buildx`; Mac: Docker Desktop/OrbStack).
-- `jq`, `crontab`; `bw` opcional (sem ele, usa o da imagem). Se instalar nativo, **`@bitwarden/cli@2026.8.0`** — ≥ 2026.9.0 não desbloqueia no Vaultwarden 1.37.x (#7).
+- `jq`, `crontab`; `bw` opcional (sem ele, usa o da imagem). Se instalar nativo, **`@bitwarden/cli@2026.9.1`** — ≥ 2026.9.0 só desbloqueia no Vaultwarden 1.37.4 ou mais novo (#7).
 - `~/.oute/bw_client.env` com `BW_CLIENTID` / `BW_CLIENTSECRET` (`chmod 600`); `~/.ssh/id_ed25519.pub`.
 - `.env` a partir de `.env.example` (`OUTE_HOST` opcional, `OUTE_VAULT_HOST_IP`…).
 - Storage: `rclone` **do rclone.org** + FUSE (Linux: `fuse3` + `user_allow_other` em `/etc/fuse.conf`; Mac: FUSE-T ou macFUSE). Opcional: sem mount, `/data/shared` é um volume docker local.
