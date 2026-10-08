@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set nav = "fases" %}
+{% set crumbs = [("Governança", none), ("Fases", none)] %}
+{% from "_macros.html" import badge %}
+{% block title %}Fases · Agent Studio{% endblock %}
+{# as conversas de baixa confiança (#749): a fase foi chutada pelo classificador; com o cookie de marcação o Bardi troca. Tudo escapado #}
+{% block main %}
+<div class="pagina">
+<div class="pagina-topo"><h1>Fases de baixa confiança</h1></div>
+<p class="nota">O agent-studio dá uma fase do AI-DLC (ADR-07) a toda conversa. Estas ficaram sem sinal forte: a fase abaixo é a mais provável, não uma certeza. A troca vale sobre a classificação automática.</p>
+{% if changed %}<p class="aviso" role="status" data-fase-trocada="{{ changed }}">A fase da conversa <code>{{ changed }}</code> foi trocada.</p>{% endif %}
+{% if not ack.enabled %}<p class="nota" data-sem-marcacao>Troca de fase indisponível: o serviço não tem a credencial de marcação.</p>
+{% elif not ack.active %}<p class="nota" data-ack-entrar><a href="/marcar?next=/fases">Entrar para trocar a fase</a> (credencial de marcação)</p>{% endif %}
+{% if rows %}
+<div class="cartao rolagem">
+<table class="empilha" data-tabela-fases>
+  <thead><tr><th>Conversa</th><th>Agente</th><th>Repositório</th><th>Último fato ({{ tzl() }})</th><th>Fase</th><th>Origem</th>{% if ack.active %}<th>Trocar</th>{% endif %}</tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr data-conversa="{{ r.conversation }}" data-fase="{{ r.phase }}" data-origem="{{ r.origin }}">
+    <td class="prim"><a href="/conversa?id={{ r.conversation|urlencode }}"><code>{{ r.conversation }}</code></a></td>
+    <td class="sec">{{ r.agent or "—" }}</td>
+    <td class="sec">{{ r.repo or "—" }}</td>
+    <td class="hora sec">{{ r.last_ns|ts }}</td>
+    <td>{{ badge(r.phase, "contorno") }} {{ badge("baixa confiança", "gate") }}</td>
+    <td class="sec">{{ r.origin }}</td>
+    {% if ack.active %}
+    <td><form method="post" action="/fase" data-fase-form="{{ r.conversation }}">
+      <input type="hidden" name="conversa" value="{{ r.conversation }}">
+      <input type="hidden" name="csrf" value="{{ ack.csrf }}">
+      <select name="fase" aria-label="Fase da conversa {{ r.conversation }}">{% for p in phases %}<option value="{{ p }}"{% if p == r.phase %} selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+      <button type="submit" class="botao">Trocar</button>
+    </form></td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="nota" data-sem-baixa>Nenhuma conversa com fase de baixa confiança.</p>{% endif %}
+</div>
+{% endblock %}

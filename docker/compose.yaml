@@ -218,9 +218,15 @@ services:
       PYTHONPATH: /opt/agent-studio/app
       # config (#203: preços do custo estimado; #204: hosts e limites), montada só leitura logo abaixo
       AGENT_STUDIO_CONFIG: /etc/oute/agent-studio/config.toml
-      # conferência diária dos preços (#339, ADR-08): única chamada do agent-studio à internet, `GET https://` sem
+      # conferência diária dos preços (#339, ADR-08): uma das duas chamadas do agent-studio à internet (a outra é o Jev, #749), `GET https://` sem
       # credencial a models.dev e OpenRouter (duas URLs fixas no código). A tabela do seletor lista os modelos a conferir.
       AGENT_STUDIO_PRICE_CHECK: "1"
+      # fase da conversa (#749, ADR-08 "Fase da conversa"): a segunda chamada do agent-studio à internet, o Jev na TypeSafe
+      # (`POST https://`, só o texto do primeiro pedido, teto de 3 s). A chave é segredo de serviço (pasta oute-services, item
+      # agent-studio); sem ela o Jev não é chamado e a conversa fica na classificação pela ação. A leitura do Uso confere a
+      # classificação no máximo a cada 30 s
+      AGENT_STUDIO_JEV_KEY: ${AGENT_STUDIO_JEV_KEY:-}
+      AGENT_STUDIO_PHASE_TTL_S: "30"
       # o tray e os alertas valem por 5 s (#570): o tray de cada Mac, a barra de alertas de cada tela e o /v1/alerts pediam a
       # mesma conta ao mesmo tempo; uma chamada só a refaz. 0 = sempre refaz
       AGENT_STUDIO_READ_TTL_S: "5"

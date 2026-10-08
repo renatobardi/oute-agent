@@ -33,6 +33,9 @@ class Noop:
     def phase(self, phase, seconds, label=None):
         pass  # sem endpoint OTLP: não há o que medir
 
+    def jev(self, result, seconds):
+        pass  # sem endpoint OTLP: não há o que contar
+
     def warn(self, kind, msg, *args, level=logging.WARNING):
         log.log(level, msg, *args)
 
@@ -66,6 +69,11 @@ class Telemetry(Noop):
         self.c_price_failures = meter.create_counter(
             "agent_studio.prices.failures", unit="{failure}",
             description="falhas da conferência de preço, por fonte e código (#339)")
+        self.c_jev = meter.create_counter(
+            "agent_studio.jev.calls", unit="{call}",
+            description="chamadas do agent-studio ao Jev na TypeSafe (#749, ADR-02), por resultado: ok ou erro")
+        self.h_jev = meter.create_histogram(
+            "agent_studio.jev.duration", unit="s", description="duração da chamada ao Jev (#749), por resultado")
         self.h_write = meter.create_histogram(
             "agent_studio.write.duration", unit="s", description="duração da gravação (DuckDB + SurrealDB)")
         self.h_phase = meter.create_histogram(
@@ -87,6 +95,11 @@ class Telemetry(Noop):
         self.h_phase.record(seconds, {"phase": phase, **({"label": label} if label else {})})
         if seconds > self.slow and phase not in LONG_PHASES:
             self.warn("slow-" + phase, "lento: %s levou %.1f s%s", phase, seconds, f" ({label})" if label else "")
+
+    def jev(self, result, seconds):
+        """Uma chamada ao Jev (#749, ADR-08 §11): o consumo do agent-studio na TypeSafe."""
+        self.c_jev.add(1, {"result": result})
+        self.h_jev.record(seconds, {"result": result})
 
     def price_run(self, changes, failures):
         """Uma conferência de preço: `failures` = {fonte: código} (`rotina` = falha interna)."""

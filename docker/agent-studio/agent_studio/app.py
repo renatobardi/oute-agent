@@ -80,7 +80,7 @@ READY_LOCK_WAIT_S = 2.0       # quanto o /readyz espera a trava do escritor ante
 READY_MAX_WRITE_AGE_S = 900   # ingestão chegando e nada gravado há mais que isto = não pronto (as métricas chegam a cada 5 min)
 
 
-def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None,
+def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=None, read_token=None, price_job=None, mark_token=None, phase_job=None,
                ingest_slots=INGEST_SLOTS, ingest_wait=INGEST_WAIT_S,
                ready_lock_wait=READY_LOCK_WAIT_S, ready_max_write_age=READY_MAX_WRITE_AGE_S):
     """`token` = credencial de ingestão; `read_token` = a de leitura (sem ela, uma só para tudo: transição da #256);
@@ -96,9 +96,13 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
     async def lifespan(_app):
         if price_job:
             price_job.start()  # a conferência de preços (#339) em segundo plano; falha dela nunca chega aqui
+        if phase_job:
+            phase_job.start()  # a fase das conversas e o Jev (#749) em segundo plano; falha dela nunca chega aqui
         yield
         if price_job:
             price_job.stop()
+        if phase_job:
+            phase_job.stop()
         tel.shutdown()
         if on_shutdown:
             on_shutdown()

@@ -13,8 +13,9 @@ Idempotente: rodar de novo não muda o resultado.
 - Saída (stdout), cinco linhas; as três primeiras: `antes: rodadas=<n> workers=<n> sessoes=<n> pedidos=<n> conversas=<n> etapas=<n> acoes=<n>`,
   `lidas: logs=<n> spans=<n> marcas=<n>` (marcas = linhas da `action_marks`, #510) e `depois: …` (a contagem do SurrealDB antes e depois).
   Mais uma quarta linha, a do ack (#537): `vistos: marcas=<n> antes=<n> depois=<n>` (linhas da `ack_marks` lidas e os registros do
-  `ack` no SurrealDB antes e depois). E uma quinta, a dos planos (#746): `planos: linhas=<n> antes=<n> depois=<n>` (linhas da `plan_history` lidas e os registros do
-  `plano` no SurrealDB antes e depois). O stderr diz só o tipo do erro, nunca texto de linha do DuckDB nem de resposta do SurrealDB.
+  `ack` no SurrealDB antes e depois), uma quinta, a dos planos (#746): `planos: linhas=<n> antes=<n> depois=<n>` (linhas da `plan_history` lidas e os registros do
+  `plano` no SurrealDB antes e depois), e uma sexta, a da fase (#749): `fases: conversas=<n>` (a classificação refeita em memória e
+  gravada no `conversa`). O stderr diz só o tipo do erro, nunca texto de linha do DuckDB nem de resposta do SurrealDB.
 - Sai 0 se aplicou tudo; 1 se o DuckDB não abre ou o SurrealDB falha (o que já entrou fica: rodar de novo termina);
   2 se faltar a URL ou a senha do SurrealDB.
 """
@@ -24,7 +25,7 @@ import sys
 
 import duckdb
 
-from . import acks, marks, planos, state
+from . import acks, marks, phase, planos, state
 from .surreal import Surreal, SurrealError
 
 TABLES = ("rodada", "worker", "sessao", "pedido", "conversa", "etapa", "acao")
@@ -89,6 +90,18 @@ def rebuild(con, surreal, chunk=2000):
     return read["logs"], read["spans"], marked
 
 
+def rebuild_phases(con, surreal):
+    """-> conversas classificadas (#749). Refaz a classificação inteira, em memória, pelo mesmo `phase.compute` do serviço (a fonte
+    é o DuckDB: telemetria, `phase_jev` e `phase_marks`; o DuckDB aqui é só leitura) e grava a fase, a origem e a confiança no
+    `conversa`. Banco anterior à #749 (sem as tabelas): nada."""
+    if not phase.has_tables(con):
+        return 0
+    result = phase.compute(con)
+    surreal.apply([s for conv, r in result.items()
+                   for s in state.phase_statements(conv, r["phase"], r["origin"], r["confidence"])])
+    return len(result)
+
+
 def count_acks(surreal):
     """Registros do `ack` no SurrealDB (0 sem a tabela)."""
     existing = (surreal.query("INFO FOR DB")[0].get("result") or {}).get("tables") or {}
@@ -151,10 +164,12 @@ def main():
         logs, spans, marked = rebuild(con, surreal, chunk)
         acked = rebuild_acks(con, surreal, chunk)
         planned = rebuild_plans(con, surreal, chunk)
+        phased = rebuild_phases(con, surreal)
         print(f"lidas: logs={logs} spans={spans} marcas={marked}")
         print(line("depois", counts(surreal)))
         print(f"vistos: marcas={acked} antes={acks_before} depois={count_acks(surreal)}")
         print(f"planos: linhas={planned} antes={plans_before} depois={count_plans(surreal)}")
+        print(f"fases: conversas={phased}")
     except (SurrealError, duckdb.Error) as e:
         print(f"rebuild-state: falhou ({type(e).__name__}); o que já entrou fica, rode de novo", file=sys.stderr)
         return 1

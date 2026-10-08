@@ -289,13 +289,13 @@ def check(store, config, tel, now_ns=None, urls=None, fetcher=src.fetch, select_
 class Job:
     """A rotina em segundo plano: uma conferência na subida e outra a cada `interval` segundos (24 h)."""
 
-    def __init__(self, run, interval=DAY_NS // 1_000_000_000):
-        self.run, self.interval = run, interval
+    def __init__(self, run, interval=DAY_NS // 1_000_000_000, name="price-check"):
+        self.run, self.interval, self.name = run, interval, name
         self._stop = threading.Event()
         self._thread = None
 
     def start(self):
-        self._thread = threading.Thread(target=self._loop, name="price-check", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=self.name, daemon=True)
         self._thread.start()
 
     def _loop(self):

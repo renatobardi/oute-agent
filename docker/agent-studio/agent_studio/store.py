@@ -20,7 +20,7 @@ if importlib.util.find_spec("pandas") is None:
     sys.modules["pandas"] = None
 
 from . import (acks as acks_mod, alerts as alerts_mod, conversations as conv_mod, cost as cost_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, planos as planos_mod, prices as prices_mod, proposals as prop_mod,
-               repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
+               phase as phase_mod, repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
 TABLES = {
@@ -241,6 +241,10 @@ class Store:
         self.obs = lambda phase, seconds, label=None: None
         self._dash_cache = {}
         self._dash_refreshing = {}
+        # fase da conversa (#749): quanto vale a última classificação antes de a leitura do Uso refazer (0 = sempre confere; o app
+        # liga com AGENT_STUDIO_PHASE_TTL_S) e quem recebe o que foi classificado (o espelho no SurrealDB; o app liga)
+        self.phase_ttl, self._phase_at, self._phase_lock = 0.0, 0.0, threading.Lock()
+        self.phase_sink = lambda result: None
         with self.lock:
             for sql in SQL.values():
                 self.con.execute(sql["create"])
@@ -252,6 +256,7 @@ class Store:
             marks_mod.create(self.con)   # marcas das ações do Bardi (#510): só de acréscimo, escrita só pela rota
             planos_mod.create(self.con)  # cadastro de planos de assinatura (#746): só de acréscimo, escrita só pela rota e pela semente
             acks_mod.create(self.con)    # acks de alerta e de decisão pendente (#537): só de acréscimo, escrita só pela rota
+            phase_mod.create(self.con)   # fase da conversa (#749): a derivada, a resposta do Jev e a troca do Bardi
 
     def close(self):
         with self.lock:
@@ -407,9 +412,26 @@ class Store:
                 cur.close()
                 self._lap("read", t, label)
 
+    def classify_pending(self, force=False):
+        """Classifica a fase das conversas novas, com fato novo, ou com resposta do Jev ou troca do Bardi nova (#749). A leitura e o
+        cálculo rodam fora da trava do escritor; só a gravação a toma. Uma de cada vez; dentro de `phase_ttl` s da última, não refaz
+        (`force` ignora). -> `{conversa: resultado}` do que gravou."""
+        with self._phase_lock:
+            if not force and self.phase_ttl > 0 and time.monotonic() - self._phase_at < self.phase_ttl:
+                return {}
+            todo = self.read_free(phase_mod.pending, "phase")
+            result = self.read_free(lambda con: phase_mod.compute(con, todo), "phase") if todo else {}
+            if result:
+                self.transact(lambda con: phase_mod.save(con, result, time.time_ns()))
+                self.phase_sink(result)
+            self._phase_at = time.monotonic()
+            return result
+
     def usage(self, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub=None):
         """Leitura do `/v1/usage` (#203), fora da trava do escritor (#570). `repo` (#528), `paid` (#531, custo
-        pago) e `sub` (#679, assinatura) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros."""
+        pago) e `sub` (#679, assinatura) só a tela `/uso` passa; o `GET /v1/usage` não tem os parâmetros. Antes, põe em dia a fase das
+        conversas (#749): o Uso só traz fases do ADR-07."""
+        self.classify_pending()
         return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, paid, sub), "usage")
 
     def repos(self, from_ns, to_ns):
@@ -421,6 +443,7 @@ class Store:
         sob a trava, parava todas as telas e a ingestão (504 em produção, #504). Uma por vez (`_dash_lock`), com
         prazo (`DASH_DEADLINE_S`: passado, a consulta é interrompida e a tela responde 500). Janela que termina agora
         ("últimas N horas") vale por `DASH_TTL_S`; vencida, a tela recebe a última e a conta se refaz em segundo plano. O repositório (#528), o modelo (#532), o custo pago (#531) e a assinatura (#679) fazem parte da chave."""
+        self.classify_pending()  # fase das conversas em dia (#749); dentro do `phase_ttl` não refaz
         minute = 60 * 10**9
         tzk = getattr(tz, "key", str(tz))
         live = abs(time.time_ns() - to_ns) < 2 * minute

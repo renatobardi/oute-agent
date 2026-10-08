@@ -1,0 +1,6 @@
+### Added
+- **Fase do AI-DLC de toda conversa, por classificação póstuma pelo contexto** (#749, ADR-08 "Fase da conversa", adendo no ADR-02). O agent-studio dá a toda conversa uma das 12 fases do ADR-07, pelos sinais nesta ordem: abertura, label da issue, skill de fluxo usada, papel (dispatcher = `plan`, revisor = `qa`), o que a conversa fez e o Jev sobre o primeiro pedido. Guarda a origem e a confiança (`alta` ou `baixa`); o histórico passa pelo mesmo classificador e `oute studio rebuild-state` refaz a classificação (nova linha `fases:`). Tela `/fases` lista as conversas de baixa confiança e `POST /fase` (credencial de marcação) troca a fase. O agent-studio passa a chamar a TypeSafe (só `https://`, teto de 3 s, `AGENT_STUDIO_JEV_KEY` na pasta `oute-services`; sem a chave não chama). **Precisa de release** (código do agent-studio) e de `oute down/up` por causa do `docker/compose.yaml`.
+
+### Changed
+- **Uso, Dashboard e `GET /v1/usage` (`by_phase`) só trazem fases do ADR-07** (#749): acabam as linhas `desconhecida` e `interativa`. Fato sem conversa (o LLM do ai-memory) conta em `ops`.
+- **Segredo colado no primeiro pedido não vai ao Jev** (#749, ADR-08): o texto que bate com padrão de chave, token, senha, chave privada ou endereço com usuário e senha não é enviado à TypeSafe; só o tipo do padrão é registrado, e a conversa fica na classificação por ação.

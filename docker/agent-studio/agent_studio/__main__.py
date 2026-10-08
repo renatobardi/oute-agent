@@ -5,7 +5,7 @@ import sys
 
 import uvicorn
 
-from . import config as config_mod, planos as planos_mod, price_sources, prices as prices_mod
+from . import config as config_mod, jev as jev_mod, planos as planos_mod, price_sources, prices as prices_mod, state as state_mod
 from . import app as app_mod
 from .app import create_app
 from . import store as store_mod
@@ -88,8 +88,19 @@ def main():
     if os.environ.get("AGENT_STUDIO_PRICE_CHECK") == "1":
         price_job = prices_mod.Job(lambda: prices_mod.check(store, config, tel, urls=price_urls()),
                                    float(os.environ.get("AGENT_STUDIO_PRICE_INTERVAL", prices_mod.DAY_NS // 10**9)))
+    # fase da conversa (#749): a classificação póstuma. O Uso confere antes de ler (`phase_ttl`); a rotina (a cada minuto) põe em dia o
+    # que mudou e chama o Jev para a conversa parada de baixa confiança. Sem chave (AGENT_STUDIO_JEV_KEY) ou com endereço que não é
+    # https://, o Jev não é chamado e a conversa fica no passo da ação
+    store.phase_ttl = float(os.environ.get("AGENT_STUDIO_PHASE_TTL_S", "0"))
+    store.phase_sink = state_mod.phase_sink(surreal)
+    phase_job = None
+    if os.environ.get("AGENT_STUDIO_PHASE_JOB", "1") == "1":
+        phase_job = prices_mod.Job(
+            jev_mod.make_pass(store, tel, os.environ.get("AGENT_STUDIO_JEV_URL", jev_mod.DEFAULT_URL),
+                              os.environ.get("AGENT_STUDIO_JEV_KEY", ""), store.phase_sink),
+            float(os.environ.get("AGENT_STUDIO_PHASE_INTERVAL_S", "60")), name="phase-classify")
     app = create_app(store, token, surreal, tel, on_shutdown=store.close, config=config, read_token=read_token,
-                     price_job=price_job, mark_token=mark_token,
+                     price_job=price_job, mark_token=mark_token, phase_job=phase_job,
                      # vagas de ingestão e espera por elas (#570); padrões no app.py
                      ingest_slots=int(os.environ.get("AGENT_STUDIO_INGEST_SLOTS", app_mod.INGEST_SLOTS)),
                      ingest_wait=float(os.environ.get("AGENT_STUDIO_INGEST_WAIT_S", app_mod.INGEST_WAIT_S)),

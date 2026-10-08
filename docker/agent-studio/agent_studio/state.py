@@ -15,9 +15,11 @@ qualquer ordem). Ligações por record link: `worker.rodada`, `worker.sessao`, `
 `conversa.sessao`, `etapa.rodada`, `acao.rodada`, `acao.etapa`.
 """
 import base64
+import logging
 import re
 from datetime import datetime, timezone
 
+from . import phase as phase_mod
 from .cost import subscription_of
 
 # tabelas e campos são constantes deste módulo; valores vão sempre em variáveis
@@ -120,6 +122,28 @@ def plan_statements(row):
     fields = {"subscription": sub, "plan": row["plan"], "start": start, "origin": row["origin"]}
     return [(PLAN_UPSERT, {"id": [sub, start, ns], "usd": float(row["monthly_usd"]), "ns": ns, "t": iso(ns),
                            "b": {k: base64.b64encode(str(fields[k]).encode()).decode() for k in _PLAN_TEXT}})]
+
+
+def phase_statements(conversation, phase, origin, confidence):
+    """A fase da conversa (#749) -> statements do `conversa` (`phase`, `phase_origin`, `phase_confidence`). Valor fora do formato
+    (fase, origem ou confiança) não vira estado."""
+    if (not isinstance(conversation, str) or not conversation or phase not in phase_mod.PHASES
+            or origin not in phase_mod.ORIGINS or confidence not in (phase_mod.HIGH, phase_mod.LOW)):
+        return []
+    return upsert("conversa", conversation, {"phase": phase, "phase_origin": origin, "phase_confidence": confidence})
+
+
+def phase_sink(surreal):
+    """O espelho da fase no SurrealDB (#749): `store.phase_sink`. Falha nunca derruba a classificação (a verdade é o DuckDB; o
+    `rebuild-state` refaz o `conversa`): só um aviso no log, com o tipo do erro."""
+    def sink(result):
+        if surreal is None or not result:
+            return
+        try:
+            surreal.apply([s for conv, r in result.items() for s in phase_statements(conv, r["phase"], r["origin"], r["confidence"])])
+        except Exception as e:  # noqa: BLE001 — a causa só no tipo
+            logging.getLogger("agent_studio").warning("fase: o espelho no SurrealDB falhou (%s); o rebuild-state o refaz", type(e).__name__)
+    return sink
 
 
 def iso(ns):
