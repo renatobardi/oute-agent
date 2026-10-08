@@ -432,6 +432,17 @@ check "zai com a API fora do ar: desconhecido, código 3" bash -c '[ "$1" -eq 3 
 insegura="ht""tp://127.0.0.1:1/x"
 OUTE_ZAI_API_KEY="$CHAVE" OUTE_MODELS_ZAI_URL="$insegura" mc --table "$ZT"
 check "zai: endereço sem https é recusado (código 2), sem chamada" bash -c '[ "$1" -eq 2 ] && grep -qF "só pode ser https" <<<"$2"' _ "$RC" "$ERR"
+# weekly_guard_pct (#742): opcional, número de 1 a 100
+zt '0,/^name = "claude"$/s//name = "claude"\nweekly_guard_pct = 85/'; mc --table "$TMP/zai-x.toml"
+check "weekly_guard_pct = 85: ok" bash -c 'grep -qxF "ok weekly_guard_pct da assinatura claude é um número de 1 a 100 (tabela)" <<<"$1"' _ "$OUT"
+zt '0,/^name = "claude"$/s//name = "claude"\nweekly_guard_pct = 100/'; mc --table "$TMP/zai-x.toml"
+check "weekly_guard_pct = 100 (limite): ok" bash -c 'grep -qxF "ok weekly_guard_pct da assinatura claude é um número de 1 a 100 (tabela)" <<<"$1"' _ "$OUT"
+for v in 0 101 '"85"' true; do
+  zt "0,/^name = \"claude\"\$/s//name = \"claude\"\nweekly_guard_pct = $v/"; mc --table "$TMP/zai-x.toml"
+  check "weekly_guard_pct = $v: FALTA, código 1" bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA weekly_guard_pct da assinatura claude é um número de 1 a 100 (tabela)" <<<"$2"' _ "$RC" "$OUT"
+done
+zt 's/^$/&/'; mc --table "$TMP/zai-x.toml"
+check "sem weekly_guard_pct: nenhuma linha dele (nada muda)" bash -c '! grep -qF weekly_guard_pct <<<"$1"' _ "$OUT"
 # chain
 zt '0,/^chain = \["claude", "zai", "codex"\]/s//chain = ["claude", "claude", "codex"]/'; mc --table "$TMP/zai-x.toml"
 check "chain com assinatura repetida: FALTA, código 1"   bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA chain de [[line]] 1 sem assinatura repetida (tabela)" <<<"$2"' _ "$RC" "$OUT"

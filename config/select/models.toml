@@ -11,11 +11,14 @@
 # tem uma coluna por assinatura (`name`), conferida pelo `scripts/models-check`. `status` é o comando que sai 0 quando o
 # agente está logado; `effort = true` = a assinatura usa o esforço da linha (hoje só o Codex); `prefixes` = começos de id de
 # modelo que identificam a assinatura num `--model` fora da tabela. A cota de cada uma vem do `oute-quota --json`.
+# `weekly_guard_pct` (#742, opcional, número de 1 a 100) = a trava semanal: o `oute-swarm spawn` não abre sessão nessa assinatura
+# com a janela de 7 dias nesse valor ou acima (código 5; `--force` vence). O seletor continua sem recusar; a trava é do spawn.
 # `agent` (#677) = o programa que a sessão roda; sem ele vale o `name`. A `zai` é o próprio `claude` falando com a API
 # compatível da Z.ai (ADR-02, adendo de 2026-10-05): `--agent claude` e `--subscription zai` são coisas diferentes.
 [[subscription]]
 name = "claude"
 default = true
+weekly_guard_pct = 85
 status = ["claude", "auth", "status"]
 
 [[subscription]]

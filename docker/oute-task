@@ -299,6 +299,17 @@ select_model() {
   [[ "$S_SUB" != zai || "$S_AGENT" == claude ]] || S_SUB="$S_AGENT"
   return 0
 }
+# trava semanal (#742): sessão aberta à mão não é recusada, só avisa em stderr quando o `oute-swarm spawn` recusaria. Sessão do
+# swarm (OUTE_SWARM_WORKER=1) já passou pela trava no spawn (ou foi aberta com --force): sem aviso repetido. Cota não lida: sem aviso.
+weekly_guard_warn() {
+  local sub="${1:-}" js st g u
+  [[ -n "$sub" && -z "${OUTE_SWARM_WORKER:-}" ]] || return 0
+  command -v oute-select >/dev/null 2>&1 || return 0
+  js="$(oute-select --weekly-guard "$sub" 2>/dev/null </dev/null)" || return 0
+  IFS='|' read -r st g u < <(jq -r '[.status, .guard_pct, .used_pct] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || return 0
+  [[ "$st" != over ]] || echo "aviso: trava semanal: a assinatura $sub está em ${u}% da janela de 7 dias (trava em ${g}%); a sessão abre mesmo assim, mas o oute-swarm spawn recusaria" >&2
+  return 0
+}
 cmd_model_args() {   # <agente> [dir]
   local f
   f="$(mark_path "${2:-$PWD}")" || return 0
@@ -496,6 +507,7 @@ cmd_open() {
     [[ -z "$O_MODEL" || -z "$amodel" || "$amodel" == "$O_MODEL" ]] || die "--model $O_MODEL e o modelo $amodel dos argumentos do agente não andam juntos"
     select_model "$main" "$slug" "$xagent" "${xmodel:-$amodel}" "$O_PHASE" "$(task_text "$@")" "$O_PREFER" "$O_SUB"
     agent="${S_AGENT:-$agent}"
+    weekly_guard_warn "$S_SUB"
     [[ -n "$amodel" ]] || model_args "$agent" "$S_MODEL" "$S_EFFORT"
     # sessão zai (#678): o modelo glm-* (se o --model dos argumentos não o trouxe) e o --settings; sem a chave, não abre
     sub_args "$agent" "$S_SUB"

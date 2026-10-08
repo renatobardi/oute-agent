@@ -13,6 +13,7 @@ Sem nenhuma chamada a modelo: só lê arquivos locais (e os labels do repo, pelo
   - Assinaturas (#598): `[[subscription]]` com nomes únicos e `[select] reserve_mode` = `mais-livre` ou `ordem` (senão, código 2);
     uma assinatura padrão só e uma coluna de modelo dessa assinatura em toda linha (senão, FALTA). Só `claude` e `codex`
     têm conferência dos ids, e a `zai` (#677, abaixo); o id de outra assinatura sai `desconhecido`, com aviso.
+  - `weekly_guard_pct` (#742, opcional em `[[subscription]]`): a trava semanal, número de 1 a 100 (senão, FALTA).
   - `chain` (#677, a cadeia da linha, em `[default]`, `[[line]]` e `[[exception]]`): lista de nomes de `[[subscription]]`, sem repetir
     (nome fora da tabela ou repetido = FALTA; lista vazia ou que não é de texto = código 2), e toda assinatura da cadeia com
     coluna de modelo na linha.
@@ -238,6 +239,10 @@ def check_subscriptions(rows, subs):
         for rname, row in rows:
             have = isinstance(row.get(x["name"]), str) and bool(row[x["name"]])
             report("ok" if have else "FALTA", f"modelo da assinatura {x['name']} em {rname}", "tabela")
+        if "weekly_guard_pct" in x:   # #742: opcional; número de 1 a 100 (não booleano)
+            g = x["weekly_guard_pct"]
+            good = isinstance(g, (int, float)) and not isinstance(g, bool) and 1 <= g <= 100
+            report("ok" if good else "FALTA", f"weekly_guard_pct da assinatura {x['name']} é um número de 1 a 100", "tabela")
 
 
 def check_chains(rows, subs):

@@ -44,6 +44,8 @@
 # nome amigável `Adjetivo_Substantivo` (docker/agent-studio/agent_studio/names.py), sorteado na abertura entre os que nenhuma
 # rodada aberta usa e gravado em `name=` do meta. O id segue sendo a chave em tudo; rodada antiga, sem nome, só tem o id.
 # spawn recusa (código 4) issue que já tem sessão aberta em outra rodada.
+# Trava semanal (#742): spawn recusa (código 5) quando a janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela
+# (config/select/models.toml; claude = 85) ou acima, e grava a linha `guard` no log; --force vence; cota não lida só avisa.
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
@@ -62,6 +64,27 @@ slog() {
   printf '%s\n' "$2" >> "$1/log" || true
   if command -v oute-emit >/dev/null 2>&1; then oute-emit swarm "$(basename "$1")" "$2" >/dev/null 2>&1 || true; fi
 }
+# trava semanal (#742, ADR-02 adendo): a assinatura escolhida tem `weekly_guard_pct` na tabela e a janela de 7 dias dela está no valor
+# ou acima -> o spawn não abre (código 5), com a linha `guard` no log da rodada. Cota não lida = só aviso. Sem `weekly_guard_pct`
+# na assinatura, ou sem oute-select, nada acontece. O `oute-select --weekly-guard` lê a tabela e a cota; o seletor em si não recusa.
+# $1 = assinatura, $2 = slug, $3 = pasta de estado da rodada, $4 = número da issue
+weekly_guard() {
+  local sub="$1" slug="$2" sdir="$3" num="$4" js st g u rs h
+  command -v oute-select >/dev/null 2>&1 || return 0
+  js="$(oute-select --weekly-guard "$sub" 2>/dev/null)" || return 0
+  IFS='|' read -r st g u rs < <(jq -r '[.status, .guard_pct, .used_pct, .resets_in_s] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || return 0
+  case "$st" in
+    unknown) echo "oute-swarm: aviso: não li a janela de 7 dias da assinatura $sub; a trava semanal ($g%) não foi conferida e $slug abre" >&2 ;;
+    over)
+      slog "$sdir" "$(date -u +%FT%TZ) guard $slug $sub 7d=${u}% trava=${g}%"
+      h=""; [[ ! "$rs" =~ ^[0-9]+(\.[0-9]+)?$ ]] || h=" (reseta em cerca de $(awk -v s="$rs" 'BEGIN {printf "%d h", s / 3600 + 0.5}'))"
+      printf 'oute-swarm: trava semanal: a assinatura %s está em %s%% da janela de 7 dias, na trava de %s%%%s; #%s não abre (código 5). O Bardi decide: esperar o reset, subir weekly_guard_pct em config/select/models.toml ou abrir com --force\n' \
+        "$sub" "$u" "$g" "$h" "$num" >&2
+      exit 5 ;;
+  esac
+  return 0
+}
+
 # snapshot da cota das assinaturas no spawn e no close (#347): o oute-emit lê o `oute-quota --json` e emite as métricas.
 # Em segundo plano e sem saída: a leitura (até ~6 s) nunca atrasa nem derruba o comando; sem oute-quota ou oute-emit, nada
 quota_snapshot() {
@@ -416,6 +439,8 @@ cmd_spawn() {
   elif [[ -n "$model" ]]; then die "--model precisa do oute-select, que não está no PATH"
   fi
   agent="${agent:-claude}"
+  # trava semanal (#742): depois do seletor, antes de qualquer aba; --force (só o Bardi) vence; kaizen também passa pela trava
+  (( force )) || [[ -z "${s_sub:-}" ]] || weekly_guard "$s_sub" "$slug" "$state" "$n"
   pfile="$state/$slug.prompt"
   [[ -z "$sel" ]] || { sfile="$state/$slug.select"; printf '%s\n' "$sel" > "$sfile"; }
   {
