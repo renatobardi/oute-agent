@@ -4,8 +4,8 @@ FROM ubuntu:24.04
 
 ARG TARGETARCH
 ARG NODE_MAJOR=22
-# bw >= 2026.9.0 quebra com Vaultwarden 1.37.x (dani-garcia/vaultwarden#7750); liberar quando o fix sair
-ARG BW_CLI_VERSION=2026.8.0
+# bw >= 2026.9.0 pede Vaultwarden >= 1.37.4 (user-key-id, dani-garcia/vaultwarden#7693); o pin explícito fica (#7)
+ARG BW_CLI_VERSION=2026.9.1
 ARG OUTE_USER=oute
 # uid/gid próprios do container (lab#181): não coincidem com nenhum usuário do host (ubuntu=1001, oute-ops=992).
 # Fixo em todos os hosts -> a mesma imagem do ghcr serve no oute-server e no Mac (#3), sem rebuild por uid.
