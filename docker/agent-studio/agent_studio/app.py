@@ -10,6 +10,7 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, credencial de leitura; janela inválida = 400; leitura que falha = 500.
 - `GET /v1/alerts`: só leitura, credencial de leitura; `at` inválido = 400; leitura que falha = 500.
+- `GET /v1/plans` (#746): só leitura, credencial de leitura; plano de cada assinatura e histórico, ou o valor no dia (`day=`, `subscription=`); leitura que falha = 500.
 - `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
 - `GET /v1/rodada?id=`: só leitura, credencial de leitura; as etapas publicadas da rodada (#507); sem id = 400, rodada desconhecida =
   404, DuckDB que falha = 500; SurrealDB fora = 200 com `state_read` = `false` (as etapas saem do DuckDB).
@@ -39,7 +40,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import store as store_mod
-from . import (acoes as acoes_mod, auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, prices as prices_mod, state, telemetry, tray as tray_mod,
+from . import (acoes as acoes_mod, auth as auth_mod, config as config_mod, etapas as etapas_mod, otlp, planos as planos_mod, prices as prices_mod, state, telemetry, tray as tray_mod,
                tz as tz_mod, web)
 
 log = logging.getLogger("agent_studio")
@@ -329,6 +330,30 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
             detail.exception("consulta de preços falhou")
             return JSONResponse({"message": "consulta falhou"}, status_code=500)
         return JSONResponse({**result, "config": {"errors": config.errors}})
+
+    # ------------------------------------------------ planos de assinatura (#746)
+    @app.get("/v1/plans")
+    async def v1_plans(request: Request):
+        """Plano de cada assinatura: vigente hoje e histórico. Com `day=AAAA-MM-DD` e `subscription=`: o valor do plano naquele dia
+        (`plan: null` e `label: "sem plano"` quando não havia). Só leitura, credencial de leitura."""
+        if not auth.reader(request):
+            tel.warn("unauthorized", "recusado: token ausente ou errado (plans)")
+            return JSONResponse({"message": "unauthorized"}, status_code=401)
+        q = request.query_params
+        today = datetime.now(config.tz).date().isoformat()
+        day = planos_mod.parse_day(q["day"]) if "day" in q else today
+        if day is None or set(q) - {"day", "subscription"} or ("subscription" in q and q["subscription"] not in planos_mod.SUBSCRIPTIONS):
+            return JSONResponse({"message": "parâmetros inválidos: day=AAAA-MM-DD e subscription=claude|zai|codex"}, status_code=400)
+        try:
+            if "subscription" in q:
+                result = await run_in_threadpool(store.read, lambda con: planos_mod.at_day(con, q["subscription"], day))
+            else:
+                result = await run_in_threadpool(store.read, lambda con: planos_mod.view(con, day))
+        except Exception as e:  # leitura que falhou: 500, a causa só no stderr
+            tel.warn("plans-failed", "consulta de planos falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
+            detail.exception("consulta de planos falhou")
+            return JSONResponse({"message": "consulta falhou"}, status_code=500)
+        return JSONResponse(result)
 
     # ------------------------------------------------ endpoint do tray (#205)
     def _tray_pending(at_ns):

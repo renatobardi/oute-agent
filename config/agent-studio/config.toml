@@ -180,3 +180,27 @@ input = 1.4
 output = 4.4
 cache_read = 0.26
 cache_creation = 0.0
+
+# Planos de assinatura (#746): a semente do cadastro (`/planos`, `GET /v1/plans`). Entra na subida, só para a assinatura que ainda não
+# tem linha nenhuma; depois o cadastro é da tela (credencial de marcação) e editar aqui não muda nada. `start` = dia em que passa a
+# valer (AAAA-MM-DD). Assinatura sem linha aparece como "sem plano", nunca como US$ 0; o `codex` gratuito é US$ 0 de fato.
+# Fontes dos valores, lidas em 2026-10-08 (o Bardi confirma no PR #746):
+#   claude Max 5x: https://claude.com/pricing (card Max: "From $100 / Per month")
+#   zai Lite:      https://docs.z.ai/devpack/overview ("Starting at just 18 USD per month"), e US$ 18 dito pelo Bardi na issue #746
+[[plans]]
+subscription = "claude"
+plan = "Max 5x"
+monthly_usd = 100.0
+start = "2026-10-08"
+
+[[plans]]
+subscription = "zai"
+plan = "Lite"
+monthly_usd = 18.0
+start = "2026-10-08"
+
+[[plans]]
+subscription = "codex"
+plan = "Gratuito"
+monthly_usd = 0.0
+start = "2026-10-08"
