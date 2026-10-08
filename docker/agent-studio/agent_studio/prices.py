@@ -351,15 +351,23 @@ def _parse_iso(s):
     return calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
 
 
+def _step(prev, cur, axis, label):
+    """O degrau de um eixo entre duas linhas do histórico, ou `None` se o valor não mudou."""
+    a, b = prev[axis] or 0, cur[axis] or 0
+    if abs(a - b) > 1e-9 * max(1.0, abs(a), abs(b)):
+        pct = None if a == 0 else (b - a) / a * 100
+        return {"dir": "up" if b > a else "down", "axis": label, "pct": pct, "since": cur["since"]}
+    return None
+
+
 def _trend(history):
     """Selo do último degrau: sobe ou cai (entrada; se a entrada não mudou, a saída), variação sobre o preço anterior
     e a data da troca. `None` com uma linha só ou sem mudança em entrada nem saída."""
     for prev, cur in zip(reversed(history[:-1]), reversed(history[1:])):
         for axis, label in (("input", "Entrada"), ("output", "Saída")):
-            a, b = prev[axis] or 0, cur[axis] or 0
-            if abs(a - b) > 1e-9 * max(1.0, abs(a), abs(b)):
-                pct = None if a == 0 else (b - a) / a * 100
-                return {"dir": "up" if b > a else "down", "axis": label, "pct": pct, "since": cur["since"]}
+            step = _step(prev, cur, axis, label)
+            if step is not None:
+                return step
     return None
 
 
