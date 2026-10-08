@@ -21,6 +21,7 @@ q7() {
 }
 TABLE="$ROOT/config/select/models.toml"
 SPEC="aidlc:spec"   # fase com a cadeia claude → zai → codex: o claude é a assinatura de partida
+INSTR="instrução"
 
 CASE=trava; round "$CASE"; labels 8 "$SPEC"; labels 9 "$SPEC"; labels 10 "$SPEC"; labels 11 "$SPEC"; labels 12 "$SPEC"; labels 13 "$SPEC"
 check "a tabela do repo tem weekly_guard_pct = 85 na claude" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 85, '"'"'zai'"'"': None, '"'"'codex'"'"': None}"' _ "$TABLE"
@@ -28,7 +29,7 @@ check "a tabela do repo tem weekly_guard_pct = 85 na claude" bash -c 'python3 -I
 # acima da trava: recusa com código 5, sem abrir aba nem registrar a sessão
 q7 90
 before="$(cat "$STATE/spawned")"; tabs="$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)"
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 8-alta "instrução"
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 8-alta "$INSTR"
 check "7d=90 (trava 85): código 5"                      [ "$RC" -eq 5 ]
 check "7d=90: diz a assinatura, os números e as opções"  bash -c 'for t in "trava semanal" "assinatura claude" "90% da janela de 7 dias" "trava de 85%" "reseta em cerca de 25 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
 check "7d=90: nada aberto nem registrado"               [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs" ]
@@ -37,35 +38,35 @@ check "7d=90: stdout vazio (a sessão não abriu)"        [ -z "$OUT" ]
 
 # no valor exato: trava (igual ou acima); logo abaixo: abre
 q7 85
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-igual "instrução"
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-igual "$INSTR"
 check "7d=85 (igual à trava): código 5"                 [ "$RC" -eq 5 ]
 q7 84
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 10-abaixo "instrução"
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 10-abaixo "$INSTR"
 check "7d=84 (abaixo): abre, sem aviso, no claude"      [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 10-abaixo)" == claude ]
 check "7d=84: sem linha guard"                          bash -c '! grep -q " guard 10-abaixo " "$1"' _ "$STATE/log"
 
 # --force vence (só o Bardi)
 q7 95
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 11-forca "instrução" --force
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 11-forca "$INSTR" --force
 check "7d=95 com --force: abre, código 0"               [ "$RC" -eq 0 -a "$(sp_agent swarm-test 11-forca)" == claude ]
 check "--force: sem linha guard"                        bash -c '! grep -q " guard 11-forca " "$1"' _ "$STATE/log"
 
 # cota desconhecida: só avisa e abre
 q7 95 error
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 12-semcota "instrução"
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 12-semcota "$INSTR"
 check "cota do claude não lida: abre, código 0"         [ "$RC" -eq 0 -a "$(sp_agent swarm-test 12-semcota)" == claude ]
 check "cota não lida: aviso da trava não conferida"     grep -qF "não li a janela de 7 dias da assinatura claude" <<<"$ERR"
-echo 'lixo' > "$FAKE/quota.json"; OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 13-quebrou "instrução"
+echo 'lixo' > "$FAKE/quota.json"; OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 13-quebrou "$INSTR"
 check "oute-quota quebrado: abre, código 0, avisa"      bash -c '[ "$1" -eq 0 ] && grep -qF "não li a janela de 7 dias" <<<"$2"' _ "$RC" "$ERR"
 
 # sem weekly_guard_pct na assinatura: nada muda (tabela de antes, sem o campo, e assinatura sem o campo na tabela atual)
 CASE=trava-antes; round "$CASE"; labels 8 "$SPEC"; labels 9 "$SPEC"
 q7 97   # abaixo do teto de 98% do seletor, que senão trocaria para a reserva
-OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml" MAX=5 sw spawn 8-antes "instrução"
+OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml" MAX=5 sw spawn 8-antes "$INSTR"
 check "tabela de antes, 7d=97: abre no claude como antes, sem aviso" [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 8-antes)" == claude ]
 check "o JSON do seletor não ganha campo novo (saída de antes)" [ "$(jq -c keys "$STATE/8-antes.select")" == '["agent","confidence","effort","model","origin","phase","reason","reserve","subscription"]' ]
 check "tabela de antes: sem linha guard"                bash -c '! grep -q " guard " "$1"' _ "$STATE/log"
-OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-cx "instrução" --agent codex
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-cx "$INSTR" --agent codex
 check "codex (sem weekly_guard_pct) com 7d=97: abre"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-cx)" == codex ]
 
 # oute-select --weekly-guard: o contrato que o spawn e o oute-task usam
