@@ -239,4 +239,11 @@ check "587: §3: o merge só roda depois da comparação" bash -c 'c=$(grep -n "
 check "587: §4.3 passo 3: fontes incluem o comentário de relatório publicado, com o número" grep -qF 'o texto do comentário de relatório que você acabou de publicar, com o número do comentário' "$D"
 check "587: §4.3 passo 3: fontes incluem os trechos de prompt ou regra citados" grep -qF 'os trechos do prompt (`docker/swarm.md`, `docker/swarm-worker.md`) ou da regra do repo (`AGENTS.md`, `docs/pt-controlado.md`) que o texto cita' "$D"
 check "587: §4.3 passo 3: não diz mais só o que veio do GitHub" bash -c '! grep -qF "só o que veio do GitHub, e passe" "$1"' _ "$D"
+# 742. trava semanal: o código 5 do spawn para as aberturas e vira BLOQUEADO com a pergunta numerada
+check "742: §2: spawn com código 5 é a trava semanal, com o weekly_guard_pct da assinatura" grep -qF '**Trava semanal (#742):** o `oute-swarm spawn` recusa com **código 5**' "$D"
+check "742: §2: janela de 7 dias no valor ou acima, hoje claude = 85" grep -qF 'janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela (`config/select/models.toml`; hoje `claude` = 85) ou acima' "$D"
+check "742: §2: para de abrir sessões novas e as abertas terminam" grep -qF 'você **para de abrir sessões novas** (as que já estão abertas terminam' "$D"
+check "742: §2: BLOQUEADO com as três opções numeradas" bash -c 'for t in "1. esperar o reset da janela de 7 dias" "2. subir o weekly_guard_pct" "3. abrir #<n> mesmo assim (--force)"; do grep -qF -- "$t" "$1" || exit 1; done' _ "$D"
+check "742: §2: cota não lida só avisa, e --force é só do Bardi" bash -c 'grep -qF "Cota não lida não trava: o \`spawn\` abre e avisa em stderr" "$1" && grep -qF "Nunca use \`--force\` por conta própria: é só do Bardi" "$1"' _ "$D"
+check "742: §2: a recomendação vem rotulada" grep -qF 'sua recomendação, rotulada "recomendação do autor", é a 1' "$D"
 check_end
