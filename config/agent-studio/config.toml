@@ -25,7 +25,8 @@ timezone = "America/Sao_Paulo"
 #   - modelo novo aqui entra no histórico na próxima subida (a semente), e só nessa;
 #   - editar o preço de um modelo que já tem histórico NÃO o muda: quem manda é o histórico (e a fonte);
 #   - `fixed = true` na entrada trava o modelo: a fonte nunca o troca (a diferença só gera o alerta "preço fixo
-#     difere da fonte") e o preço deste arquivo vale sempre (editar acrescenta uma linha de origem `config`).
+#     difere da fonte"; fontes que divergem entre si não alertam, #733) e o preço deste arquivo vale sempre (editar
+#     acrescenta uma linha de origem `config`).
 # Modelos conferidos: os da tabela do seletor (`config/select/models.toml`) e todo modelo com chamada nos últimos
 # 30 dias.
 # Fonte dos `gpt-5*`: preços de lista da OpenAI (API, tier padrão). A reserva do ADR-02 (`gpt-6-*`) vem logo depois
@@ -168,12 +169,13 @@ round_stalled_minutes = 30
 
 # `zai` (GLM Coding Plan, ADR-02 adendo #629; #679). O Claude Code serve o `glm-5.3` e calcula o `cost_usd` pela própria
 # tabela, que não conhece `glm-*` (`costBasis: unknown`): o agent-studio descarta esse valor nas chamadas com
-# `oute.subscription=zai` e as estima por este preço (`cost.spans_with_cost`), nunca como custo real. Fonte: models.dev,
-# provedor `zai` (https://models.dev/api.json), lida em 2026-10-06; a escrita em cache é de graça lá (`cache_write` 0),
-# então `cache_creation = 0`. O OpenRouter (`z-ai/glm-5.3`) trazia outros valores nessa data, então as duas fontes
-# divergem e a conferência (#339) não troca este preço sozinha. Plano de assinatura: o valor é de lista da API, para
-# comparar com os outros modelos, não o que a assinatura cobra.
+# `oute.subscription=zai` e as estima por este preço (`cost.spans_with_cost`), nunca como custo real. Fonte: Z.ai
+# (https://docs.z.ai/guides/overview/pricing), decisão do Bardi de 2026-10-07 (#673, #733): os valores são os mesmos do
+# models.dev (provedor `zai`) e o OpenRouter (`z-ai/glm-5.3`) traz outros, então `fixed = true` trava o preço aqui — a
+# divergência entre as fontes não troca e nem alerta (#733). A escrita em cache é de graça (`cache_creation = 0`).
+# Plano de assinatura: o valor é de lista da API, para comparar com os outros modelos, não o que a assinatura cobra.
 [prices."glm-5.3"]
+fixed = true
 input = 1.4
 output = 4.4
 cache_read = 0.26

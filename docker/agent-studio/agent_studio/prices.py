@@ -10,9 +10,9 @@
   resolver": some quando a conferência seguinte não o repete.
 
 **Semente** (`seed`, na subida): o `config.toml` dá a primeira linha dos modelos que ainda não têm nenhuma. Modelo com
-`fixed = true` no `config.toml` é a trava manual: a fonte nunca o troca (só gera alerta) e o preço do arquivo vale
-sempre (editar o arquivo acrescenta uma linha `config`). Modelo sem a marca: depois da semente, o preço do arquivo
-deixa de valer (o histórico manda).
+`fixed = true` no `config.toml` é a trava manual: a fonte nunca o troca (só gera o alerta `price_fixed_differs`;
+divergência entre as fontes não alerta, #733) e o preço do arquivo vale sempre (editar o arquivo acrescenta uma linha
+`config`). Modelo sem a marca: depois da semente, o preço do arquivo deixa de valer (o histórico manda).
 
 **Conferência** (`check`, na subida e uma vez por dia): confere os modelos da tabela do seletor mais todo modelo
 com chamada nos últimos 30 dias. Só troca o preço quando **as duas fontes concordam** (`agree`); fonte fora do ar,
@@ -192,7 +192,8 @@ def decide(current, fixed, reads):
 
     `current` = `ModelPrice` vigente (ou `None`); `fixed` = trava do `config.toml`; `reads` = {fonte: parcial | None
     (a fonte não tem o modelo) | `src.E_*` (a fonte falhou)}. O preço novo só existe quando as duas fontes concordam
-    e o valor é novo (modelo sem preço ou preço diferente do vigente) e o modelo não é fixo."""
+    e o valor é novo (modelo sem preço ou preço diferente do vigente) e o modelo não é fixo. Modelo fixo com fontes
+    que divergem entre si: status `diverge` com a marca `fixed` no detalhe, que o alerta lê para não disparar (#733)."""
     down = sorted(s for s, r in reads.items() if isinstance(r, str))
     if down:
         return SOURCE_DOWN, {"sources": down}, None
@@ -201,7 +202,8 @@ def decide(current, fixed, reads):
         return NO_SOURCE, {"missing": missing}, None
     agreed, bad = agree(reads[src.MODELS_DEV], reads[src.OPENROUTER])
     if agreed is None:
-        return DIVERGE, {"fields": {f: {s: reads[s].get(f) for s in src.SOURCES} for f in bad}}, None
+        # `fixed` no detalhe: a divergência não importa para um preço travado, o alerta não dispara (#733)
+        return DIVERGE, {"fields": {f: {s: reads[s].get(f) for s in src.SOURCES} for f in bad}, "fixed": fixed}, None
     if current is None:
         return NEW, {"new": _price_dict(agreed)}, agreed
     if same(current, agreed):

@@ -3,7 +3,8 @@ de preços na hora da consulta, sem estado próprio.
 
 - **`price_changed`** (`preço trocado`, informativo): a conferência trocou o preço de um modelo nos últimos
   `CHANGED_DAYS` (7) dias; some sozinho depois. Um alerta por modelo e campo, com valor antigo e novo.
-- **`price_sources_diverge`** (`fontes divergem`): na última conferência as duas fontes tinham valores diferentes.
+- **`price_sources_diverge`** (`fontes divergem`): na última conferência as duas fontes tinham valores diferentes;
+  modelo com `fixed = true` não alerta (a divergência não importa para um preço travado, #733).
 - **`price_source_down`** (`fonte fora do ar`): a fonte falhou em conferências de `SOURCE_DOWN_DAYS` (2) dias UTC
   diferentes seguidos (desde o último sucesso dela).
 - **`price_model_unpriced`** (`modelo em uso sem preço`): modelo com chamada sem custo real nos últimos 30 dias que
@@ -63,7 +64,7 @@ def _from_checks(con, at_ns):
     for r in _last_checks(con, at_ns):
         info = json.loads(r["detail"]) if r["detail"] else {}
         since, m = r["checked_unix_nano"], r["model"]
-        if r["status"] == prices_mod.DIVERGE:
+        if r["status"] == prices_mod.DIVERGE and not info.get("fixed"):
             fields = info.get("fields", {})
             note = "; ".join(f"{m} {f}: " + " × ".join(f"{s} {_fmt(v)}" for s, v in vals.items() if v is not None)
                              for f, vals in sorted(fields.items()))
