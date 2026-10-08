@@ -19,7 +19,8 @@ studio_init
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 PKG="$ROOT/docker/agent-studio"
-SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml")
+SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREAL_TEST_PASS" AGENT_STUDIO_CONFIG="$ROOT/config/agent-studio/config.toml"
+      AGENT_STUDIO_PHASE_JOB=0)   # sem a rotina da fase (#749): ela espelharia a fase no SurrealDB esvaziado e mudaria a contagem de "antes"
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 DB="$TMP/s/db.duckdb"
 
@@ -73,7 +74,9 @@ check "ingestão: spans" test "$(post traces "$TMP/spans.json")" = 200
 check "ingestão: log da conversa" test "$(post logs "$TMP/b3.json")" = 200
 TABLES=(rodada worker sessao pedido conversa)
 # snapshot <arquivo>: as cinco tabelas, registro a registro, ordenadas pelo id
-snap() { local t; : > "$1"; for t in "${TABLES[@]}"; do echo "== $t" >> "$1"; surreal_q "SELECT * FROM $t ORDER BY id" >> "$1"; done; }
+# a fase da conversa (#749) é derivada depois da ingestão (rotina e leitura do Uso), não pela ingestão: fica fora da comparação
+# do estado, e os campos dela têm o caso próprio abaixo
+snap() { local t omit; : > "$1"; for t in "${TABLES[@]}"; do omit=""; [[ "$t" != conversa ]] || omit="OMIT phase, phase_origin, phase_confidence"; echo "== $t" >> "$1"; surreal_q "SELECT * $omit FROM $t ORDER BY id" >> "$1"; done; }
 snap "$TMP/ingestao.json"
 sstate() { surreal_q "SELECT count() FROM $1 GROUP ALL" | jq -r 'try (.[0].count) // 0'; }
 check "a ingestão gerou 1 rodada, 1 worker, 2 sessões, 3 pedidos e 1 conversa" \
@@ -102,6 +105,9 @@ snap "$TMP/remontado.json"
 check "o estado remontado é igual ao da ingestão (as cinco tabelas, todos os campos)" cmp -s "$TMP/ingestao.json" "$TMP/remontado.json"
 check "o rebuild-state remontou a assinatura da conversa (#679)" \
   test "$(surreal_q 'SELECT subscription FROM conversa:`conv-0001`' | jq -r '.[0].subscription')" = zai
+check "o rebuild-state refez a fase da conversa (#749): uma fase do ADR-07, a origem e a confiança" \
+  test "$(surreal_q 'SELECT phase, phase_origin, phase_confidence FROM conversa:`conv-0001`' | jq -r '.[0] | [.phase, .phase_origin, .phase_confidence] | join(",")')" = "build,acao,baixa"
+check "rebuild-state: a linha fases: conta a conversa" has_line "fases: conversas=1"
 check "stderr vazio no caso feliz" test ! -s "$TMP/err"
 
 # ---------------------------------------------------------------- 3. idempotente, em blocos de 1 linha, sem apagar

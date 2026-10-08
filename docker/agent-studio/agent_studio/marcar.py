@@ -1,6 +1,6 @@
 """Marcar ação como feita na página da rodada (#510, ADR-08 "Página da rodada e do ciclo", exceção ao §10).
 
-`POST /rodada/acao` e `POST /ack` (#537, abaixo) são as **únicas escritas do navegador além do login e do logout**. A primeira só grava a marca (uma linha de
+`POST /rodada/acao`, `POST /ack` (#537, abaixo) e `POST /fase` (#749, no fim) são as **únicas escritas do navegador além do login e do logout**. A primeira só grava a marca (uma linha de
 `action_marks`, `marks.py`, e o `acao` derivado no SurrealDB): não faz o host rodar nada, não faz merge e não fecha issue (ADR-01
 não muda). Só existe com a credencial de marcação configurada (`auth.mark`); sem ela, nem esta rota nem `/marcar` são registradas.
 
@@ -27,6 +27,13 @@ não responde pergunta, não fecha gate, não faz o host rodar nada e não escre
 - **O servidor calcula tudo:** identidade, versão, hora e prazo (24 h). O navegador não escolhe quem marcou nem o prazo.
 - **Repetir não renova:** com um ack ainda válido para a ocorrência, nada é acrescentado e a resposta é a do ack que já vale.
 - **2xx só depois do commit**, como acima: falha = 503 e nada fica; tentar de novo não renova ack nenhum.
+
+**`POST /fase` (#749, ADR-08 "Fase da conversa"):** troca a fase de uma conversa (a tela `/fases`). Grava uma linha em `phase_marks` (só
+de acréscimo) e reclassifica a conversa: a troca (origem `manual`, confiança alta) vale sobre a classificação automática, também
+depois de um `rebuild-state`. Não faz o host rodar nada. A mesma credencial, o mesmo `Origin` e o mesmo `csrf`.
+
+- **Corpo:** `conversa` (o `session.id`, até 128 caracteres de `[A-Za-z0-9._:-]`), `fase` (uma das 12 do ADR-07) e `csrf`.
+- **Só conversa que existe** na `conversation_phase` (400 se não); fase fora das 12 = 400.
 """
 import logging
 import re
@@ -37,7 +44,7 @@ from fastapi import Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from . import acks, acoes as acoes_mod, etapas as etapas_mod, marks, state
+from . import acks, acoes as acoes_mod, etapas as etapas_mod, marks, phase as phase_mod, state
 
 detail_log = logging.getLogger("agent_studio_detail")
 
@@ -47,6 +54,8 @@ LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 ACK_FIELDS = frozenset({"alvo", "desde", "visto", "voltar", "csrf"})
 ACK_SEEN = re.compile(r"^[0-9]{1,20}\Z")
 ACK_BACK_MAX = 1024
+PHASE_FIELDS = frozenset({"conversa", "fase", "csrf"})
+CONV_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
 
 
 def origin_ok(request):
@@ -102,6 +111,16 @@ def parse_ack(form):
     if not acks.TARGET.match(alvo) or not acks.SINCE.match(desde) or not ACK_SEEN.match(visto) or len(voltar) > ACK_BACK_MAX:
         return None
     return alvo, desde, int(visto), voltar, csrf
+
+
+def parse_phase(form):
+    """O formulário da troca de fase -> `(conversa, fase, csrf)`, ou `None` se algum campo falta, sobra ou foge do formato."""
+    if not isinstance(form, dict) or set(form) != PHASE_FIELDS or any(len(v) != 1 for v in form.values()):
+        return None
+    conv, fase, csrf = (form[k][0] for k in ("conversa", "fase", "csrf"))
+    if not CONV_ID.match(conv) or fase not in phase_mod.PHASES:
+        return None
+    return conv, fase, csrf
 
 
 def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers, ack_items=None):
@@ -257,6 +276,54 @@ def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers,
             return JSONResponse({"alvo": row["target"], "visto_em": state.iso(row["acked_unix_nano"]),
                                  "vale_ate": state.iso(row["expires_unix_nano"]), "novo": new}, headers=headers)
         return RedirectResponse(safe_next(back), status_code=303, headers=headers)
+
+    @app.post("/fase")
+    async def change_phase(request: Request):
+        # 1. quem: só o cookie de marcação, como no `/rodada/acao`
+        if not auth.marker(request):
+            if auth.reader(request):
+                tel.warn("phase-forbidden", "recusado: credencial de leitura na troca de fase")
+                return refuse(403, "forbidden")
+            tel.warn("phase-unauthorized", "recusado: sem credencial de marcação na troca de fase")
+            return refuse(401, "unauthorized")
+        # 2. de onde: Origin igual ao Host
+        if not origin_ok(request):
+            tel.warn("phase-origin", "recusado: Origin da troca de fase ausente ou diferente do Host")
+            return refuse(403, "forbidden")
+        # 3. o corpo: teto, formato e campos
+        form = await read_form(request)
+        if form == "grande":
+            tel.warn("phase-too-large", "recusado: troca de fase com corpo acima de %d bytes", MAX_BODY)
+            return refuse(413, "corpo grande demais")
+        fields = parse_phase(form)
+        if fields is None:
+            tel.warn("phase-bad", "recusado: troca de fase com campos fora do formato")
+            return refuse(400, "campos inválidos")
+        conv, fase, csrf = fields
+        if not auth.csrf_ok(csrf):
+            tel.warn("phase-csrf", "recusado: campo csrf da troca de fase errado")
+            return refuse(403, "forbidden")
+        # 4. grava: DuckDB e SurrealDB juntos ou nenhum; 2xx só depois do commit. Só conversa que já tem fase classificada
+        def write(con):
+            if phase_mod.phase_of(con, conv) is None:
+                return None
+            res = phase_mod.mark(con, conv, fase, time.time_ns())
+            if surreal is not None and res:
+                surreal.apply([s for s in state.phase_statements(conv, res["phase"], res["origin"], res["confidence"])])
+            return res
+        try:
+            res = await run_in_threadpool(store.transact, write)
+        except Exception as e:  # noqa: BLE001 — qualquer falha na gravação é retentável
+            tel.warn("phase-failed", "troca de fase: gravação falhou, respondi 503: %s", type(e).__name__, level=logging.ERROR)
+            detail_log.exception("troca de fase: gravação falhou")
+            return retry("gravação falhou; tente de novo")
+        if res is None:
+            tel.warn("phase-unknown", "recusado: troca de fase de conversa que não existe")
+            return refuse(400, "conversa inexistente")
+        # só valores já conferidos voltam na resposta
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"conversa": conv, "fase": res["phase"], "origem": res["origin"], "confianca": res["confidence"]}, headers=headers)
+        return RedirectResponse("/fases?trocada=" + quote(conv, safe=""), status_code=303, headers=headers)
 
 
 def find_action(data, kind, key, action_id):

@@ -38,7 +38,7 @@ from . import (acks as acks_mod, acoes as acoes_mod, alert_text, conversations a
 from . import alerts as alerts_mod
 from . import cost as cost_mod
 from . import loading as loading_mod
-from . import marcar as marcar_mod
+from . import marcar as marcar_mod, phase as phase_mod
 from . import usage_charts as charts_mod
 
 detail_log = logging.getLogger("agent_studio_detail")
@@ -978,6 +978,18 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if data["summary"] is not None:
             etapas_mod.render([data["summary"]])
         return page(request, "ciclo.html", c=data, state_read=data["state_read"])
+
+    # ------------------------------------------------ fases de baixa confiança (#749): a lista; a troca é o `POST /fase` do `marcar.py`
+    @app.get("/fases")
+    async def phases_page(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        rows, failed = await read(request, "fases de baixa confiança", store.read_free, lambda con: phase_mod.low_confidence(con), "fases")
+        if failed:
+            return failed
+        changed = request.query_params.get("trocada", "")
+        changed = changed if marcar_mod.CONV_ID.match(changed) else ""
+        return page(request, "fases.html", rows=rows, phases=phase_mod.PHASES, changed=changed)
 
     # ------------------------------------------------ marcar ação (#510) e ack (#537): as únicas escritas do navegador além do login; só com a credencial de marcação
     if auth.mark:

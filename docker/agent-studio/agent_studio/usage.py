@@ -2,15 +2,15 @@
 agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
-Papel e fase da sessão (#433): `role` = dispatcher, worker ou avulsa; `phase` = o `aidlc:<fase>` que o seletor usou,
-`desconhecida` (sessão com `oute.task.id` e sem fase registrada) ou `interativa` (conversa sem `oute.task.id`, #599). Nada vem
-de atributo novo: saem dos eventos `oute.task.opened`/`reopened` da própria sessão (`oute.task.phase` e
-`oute.swarm.round`/`oute.swarm.session`), também no histórico, e a chamada de sessão sem esses eventos cai no que o resource
-dela diz (papel) ou em `desconhecida`/`interativa`/`avulsa`: nunca some do total.
+Papel e fase da conversa (#433, #749): `role` = dispatcher, worker ou avulsa, dos eventos `oute.task.opened`/`reopened` da sessão
+(`oute.swarm.round`/`oute.swarm.session`) ou, sem eles, do resource da chamada. `phase` = **sempre uma fase do ADR-07**: a da
+conversa em `conversation_phase` (o `phase.py` a deriva: abertura, label, skill, papel, ação, Jev ou troca do Bardi), a da abertura da
+sessão se a conversa ainda não foi classificada, `build` (a mais provável) se nem isso, e `ops` para o fato sem conversa (ex.: o
+LLM do ai-memory). Nunca `desconhecida` nem `interativa`; a chamada nunca some do total.
 
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
-from . import repo as repo_mod, subscription as sub_mod, tz as tz_mod
+from . import phase as phase_mod, repo as repo_mod, subscription as sub_mod, tz as tz_mod
 from .tabela import Col, Table, usage_cols
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
                    SUBSCRIPTION_EXPR, SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
@@ -31,10 +31,6 @@ ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE = _table("role"), _table("phase"), _
 NO_SUBSCRIPTION = "sem assinatura"  # a chamada que não é de assinatura nenhuma (ex.: o LLM do ai-memory), só na exibição
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo", "subscription")
 ROLES = ("dispatcher", "worker", "avulsa")
-UNKNOWN_PHASE = "desconhecida"
-# conversa sem `oute.task.id` (aberta direto numa pasta, fora do `oute-task`, #599): categoria de exibição, não é fase do
-# AI-DLC (ADR-07). `desconhecida` fica só para a sessão com id e sem fase registrada
-INTERACTIVE_PHASE = "interativa"
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
@@ -57,8 +53,8 @@ def local_expr(tz):
     return f"timezone('{tz.key}', make_timestamp_ns(CAST(time_unix_nano AS BIGINT)) AT TIME ZONE 'UTC')"
 
 
-# papel e fase por sessão, dos eventos de abertura (valores fixos no SQL; nada vem de entrada). Fase fora de `[a-z]{2,16}`
-# não vale (é só o nome de uma fase do ADR-07); a primeira fase conhecida fica
+# papel e fase da abertura por sessão, dos eventos de abertura (valores fixos no SQL; nada vem de entrada). Fase fora de `[a-z]{2,16}`
+# não vale (é só o nome de uma fase do ADR-07); a primeira fase conhecida fica. A fase que vale vem da conversa (`phase.sql_phase`)
 _SESSION_INFO = (
     "(SELECT oute_task_id AS task, "
     "CASE WHEN count(*) FILTER (WHERE json_extract_string(attributes, '$.\"oute.swarm.session\"') IS NOT NULL) > 0 "
@@ -69,9 +65,9 @@ _SESSION_INFO = (
 # sem evento da sessão: o papel sai do resource da própria chamada
 _SCOPE = (f"(SELECT t.*, COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
           "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
-          f"ELSE 'avulsa' END) AS role, COALESCE(i.phase, CASE WHEN t.oute_task_id IS NULL THEN '{INTERACTIVE_PHASE}' "
-          f"ELSE '{UNKNOWN_PHASE}' END) AS phase "
-          f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id)")
+          f"ELSE 'avulsa' END) AS role, {phase_mod.sql_phase()} AS phase "
+          f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id "
+          "LEFT JOIN conversation_phase cp ON cp.conversation = t.session_id)")
 
 
 def _scope(table, keys):
@@ -278,7 +274,7 @@ def _sorted(groups):
 def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub=None):
     """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
     o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
-    `by_phase` (fase do seletor, `desconhecida` ou `interativa`) e, por assinatura (#679), `by_subscription` (`claude`, `zai`,
+    `by_phase` (só fases do ADR-07, #749) e, por assinatura (#679), `by_subscription` (`claude`, `zai`,
     `codex`; `null` = chamada sem assinatura, como a do ai-memory): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""
     fine_keys = ("day", "host", "agent", "model", "role", "phase", "subscription")

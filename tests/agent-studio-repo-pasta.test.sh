@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Testes do repositório da pasta no agent-studio (#599, ADR-04 "Repositório da pasta"): a conversa aberta direto numa pasta
 # chega com `oute.task.repo` e sem `oute.task.id`. Ela entra no filtro de repositório das cinco telas (Dashboard, Conversas,
-# Sessões, Uso, Ferramentas) sob o repositório dela e na fase `interativa`; `desconhecida` fica só para a sessão com id e
-# sem fase. No histórico, o repositório é inferido só pelo `file_path` dos spans de ferramenta (`repo_infer`): checkout
+# Sessões, Uso, Ferramentas) sob o repositório dela; a fase dela é classificada depois do fato (#749: sem sinal, `build` com
+# baixa confiança), nunca `interativa` nem `desconhecida`. No histórico, o repositório é inferido só pelo `file_path` dos spans de ferramenta (`repo_infer`): checkout
 # principal, subpasta, worktree (formato novo e antigo) e a pasta codificada do harness; caminho fora de repositório,
 # empate, conversa sem `file_path` e o texto do comando não dão repositório. Sem Docker e sem processo em segundo plano.
 # As datas ficam depois de 2026-10-06 (o corte do acerto do histórico, #617), para valer a regra normal.
@@ -227,17 +227,16 @@ def usos(html):
 
 check("Ferramentas: usos por filtro (alfa 9, beta 2, sem repositório 4)", [usos(get(app, "/ferramentas", q(r))[1]) for r in ("alfa", "beta", NONE)] == ["9", "2", "4"])
 
-# ---- 6. a fase: `interativa` para a conversa sem oute.task.id; `desconhecida` só para a sessão com id e sem fase
+# ---- 6. a fase (#749): `interativa` e `desconhecida` acabaram; a conversa sem sinal entra em build, com baixa confiança
 fases = dict(re.findall(r'data-fase="(\w+)" data-tokens="(\d+)"', dash))
-check("Dashboard: as fases são build, desconhecida e interativa", sorted(fases) == ["build", "desconhecida", "interativa"])
-check("Dashboard: desconhecida = só a sessão com id e sem fase (T-beta, 1 chamada); interativa = as 13 sem id",
-      fases == {"build": "1100", "desconhecida": "1100", "interativa": str(13 * 1100)})
+check("Dashboard: só a fase build (nenhuma interativa nem desconhecida)", sorted(fases) == ["build"])
+check("Dashboard: build = as 13 conversas sem id + T-beta + a sessão em build (15 chamadas)", fases == {"build": str(15 * 1100)})
 html = get(app, "/uso", Q)[1]
 rows = dict(re.findall(r'data-phase="(\w+)"[^>]*data-calls="(\d+)"', html))
-check("Uso: tabela por fase com interativa (13), desconhecida (1) e build (1)", rows == {"interativa": "13", "desconhecida": "1", "build": "1"})
-check("Uso: a nota da tabela explica as duas", "fica em desconhecida, e conversa aberta fora do oute-task, em interativa" in html)
+check("Uso: tabela por fase só com build (15 chamadas)", rows == {"build": "15"})
+check("Uso: a nota da tabela explica a fase derivada e a troca em Fases", "as de baixa confiança estão em Fases, onde o Bardi as troca" in html and "interativa" not in html)
 rows = dict(re.findall(r'data-phase="(\w+)"[^>]*data-calls="(\d+)"', get(app, "/uso", q("alfa"))[1]))
-check("Uso com filtro alfa: a conversa da pasta e o histórico em interativa (6), a sessão em build (1)", rows == {"interativa": "6", "build": "1"})
+check("Uso com filtro alfa: a conversa da pasta, o histórico e a sessão em build (7)", rows == {"build": "7"})
 st.close()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true

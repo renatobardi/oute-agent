@@ -199,7 +199,7 @@ sn = attrs(lat["claude-sonnet-5"].split(">", 1)[0])
 check("3) latência do sonnet: percentis em ms (20 chamadas, 6 de 8 s)", sn["calls"] == "20" and float(sn["p50-ms"]) == 2000
       and float(sn["p90-ms"]) == 8000 and float(sn["p95-ms"]) == 8000 and float(sn["p99-ms"]) == 8000)
 check("3) latência: mini-barra <svg> no p95 (a maior ocupa a largura toda)", 'class="mini"' in lat["claude-opus-5"] and 'width="100.00"' in lat["claude-opus-5"])
-check("4) fases: barras por fase, a maior primeiro", re.findall(r'data-fase="(\w+)"', sec("fases")) == ["build", "qa", "desconhecida"])
+check("4) fases: barras por fase, a maior primeiro (a sessão sem fase cai em build, #749: nenhuma fase desconhecida)", re.findall(r'data-fase="(\w+)"', sec("fases")) == ["build", "qa"])
 heat = sec("atividade")
 check("5) heatmap: 7 linhas × 24 células", heat.count('class="calor-linha" data-dia=') == 7 and heat.count('class="calor-celula n') == 7 * 24 + 5)
 check("5) heatmap: soma dos 7 dias até o fim da janela (inclui a anterior)", 'data-total="34"' in heat)
