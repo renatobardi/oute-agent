@@ -15,6 +15,7 @@ command -v jq >/dev/null && command -v python3 >/dev/null && command -v git >/de
   || die "precisa de jq, python3, git e timeout"
 REG="$ROOT/docker/oute-regression"
 [[ -x "$REG" ]] || die "oute-regression ausente ou sem +x: $REG"
+cd "$ROOT" || die "sem a raiz do repo"   # as notas das tarefas são as do checkout do diretório atual (#712): a seção 9 troca
 
 # --- ambiente isolado: HOME, PATH e credenciais reais fora
 BIN="$TMP/bin"; LOG="$TMP/log"; mkdir -p "$BIN" "$LOG" "$TMP/home"
@@ -41,16 +42,23 @@ printf 'cwd=%s\nora=%s\nmemory=%s\npropose=%s\nsudo=%s\n--\n' "$PWD" "${OTEL_RES
 printf '%s|%s|%s|%s|%s\n' "${ANTHROPIC_BASE_URL:-}" "${ANTHROPIC_AUTH_TOKEN:-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" "${ANTHROPIC_API_KEY:-}" \
   "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" >> "$FAKE_LOG/claude.zai"
 [[ -z "${FAKE_CLAUDE_FAIL:-}" ]] || { echo "sem login" >&2; exit 1; }
-prompt="$2"; task=""; round=""; model=""; mcp=""
+prompt="$2"; task=""; round=""; model=""; mcp=""; settings='{}'
 for ((i = 1; i <= $#; i++)); do
   [[ "${!i}" = --model ]] && { j=$((i + 1)); model="${!j}"; }
   [[ "${!i}" = --mcp-config ]] && { j=$((i + 1)); mcp="${!j}"; }
+  [[ "${!i}" = --settings ]] && { j=$((i + 1)); settings="${!j}"; }
 done
 cat "$mcp" >> "$FAKE_LOG/mcp.json" 2>/dev/null
 case "$model" in *haiku*) al=haiku ;; *sonnet*) al=sonnet ;; glm-*) al=zai ;; *) al=outro ;; esac
 case "$OTEL_RESOURCE_ATTRIBUTES" in *oute.task.slug=regression-*) task="${OTEL_RESOURCE_ATTRIBUTES##*oute.task.slug=regression-}" ;; esac
 task="${task%%,*}"   # na zai o resource ainda leva oute.subscription depois do slug
 [[ "$OTEL_RESOURCE_ATTRIBUTES" =~ oute.task.id=[^,]*-r([0-9]+) ]] && round="${BASH_REMATCH[1]}"
+# as notas que o claude leria (#712), como o de verdade: o CLAUDE.md do usuário, salvo se o --settings o exclui
+# (claudeMdExcludes), e o CLAUDE.md de cada pasta acima do diretório da chamada; um arquivo por chamada
+user_md="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
+{ jq -e --arg u "$user_md" '(.claudeMdExcludes // []) | index($u)' <<<"$settings" >/dev/null 2>&1 || cat "$user_md" 2>/dev/null
+  d="$PWD"; while [[ -n "$d" ]]; do [[ ! -f "$d/CLAUDE.md" ]] || cat "$d/CLAUDE.md"; d="${d%/*}"; done
+} > "$FAKE_LOG/notes.$task-$al-r$round"
 bad=0; for b in ${FAKE_BAD:-}; do [[ "$b" = "$task:$round" || "$b" = "$task@$al:$round" ]] && bad=1; done
 [[ -z "${FAKE_SLEEP:-}" ]] || { echo + >> "$FAKE_LOG/conc"; sleep "$FAKE_SLEEP"; echo - >> "$FAKE_LOG/conc"; }
 echo '{"type":"system","subtype":"init"}'
@@ -626,7 +634,7 @@ check "zai: o resource leva oute.subscription=zai em toda chamada" bash -c '[ "$
 check "zai: a chave não aparece em argv, relato, saída json nem evento" bash -c '! grep -qF "$1" "$2" "$3" "$4" && ! grep -qF "$1" <<<"$5"' _ "$ZKEY" "$LOG/claude.argv" "$LOG/emit.calls" "$LOG/mcp.json" "$OUT"
 check "zai: o evento diz o modelo glm-5.3 e 13 tarefas @zai"    bash -c 'ev="$(grep "^ARGS regression " "$1")"; grep -q "models=glm-5.3 " <<<"$ev" && grep -q "tasks=root@zai=verde" <<<"$ev" && grep -q "calls=13 " <<<"$ev"' _ "$LOG/emit.calls"
 OUTE_ZAI_API_KEY="$ZKEY" run --task select --rounds 1
-check "sem --subscription: a chave da zai não vai ao processo (claude, haiku e sonnet)" bash -c '[ "$(sort -u "$1")" = "||||" ] && ! grep -q -- "--settings\|glm-" "$2"' _ "$LOG/claude.zai" "$LOG/claude.argv"
+check "sem --subscription: a chave da zai não vai ao processo (claude, haiku e sonnet)" bash -c '[ "$(sort -u "$1")" = "||||" ] && ! grep -q -- "permissions\|glm-" "$2"' _ "$LOG/claude.zai" "$LOG/claude.argv"
 # cota: só a da zai conta com --subscription zai
 FAKE_QUOTA="$(qz 10 70)" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
 check "zai em 70%: recusa, saída 3, nomeando a zai e nenhuma tarefa" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 70% (assinatura zai, janela 5h; limite 60%)" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
@@ -647,5 +655,86 @@ check "--write-baseline na zai: acrescenta @zai e mantém haiku e sonnet" jqe '.
 FAKE_BAD="select@zai:1" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --baseline "$WZ" --task root --task select --rounds 1
 check "zai contra a base: select@zai piorou, saída 1"         bash -c '[ "$1" -eq 1 ] && grep -q "^piorou (.*): select@zai$" <<<"$2"' _ "$RC" "$OUT"
 check "a linha de base do repo tem as 13 tarefas da zai e as de haiku e sonnet" bash -c '[ "$(jq "[.tasks | keys[] | select(endswith(\"@zai\"))] | length" "$1")" -eq 13 ] && [ "$(jq "[.tasks | keys[] | select(endswith(\"@haiku\") or endswith(\"@sonnet\"))] | length" "$1")" -eq 26 ]' _ "$ROOT/docker/regression/baseline.json"
+
+# ---------------------------------------------------------------- 9. notas do checkout (#712)
+# o CLAUDE.md de quem roda traz as notas "da imagem" no bloco gerenciado e texto próprio fora dele; o checkout traz outras
+BEGIN_M='<!-- oute:managed:ops-handoff -->'; END_M='<!-- /oute:managed:ops-handoff -->'
+CK="$TMP/checkout"; mkdir -p "$CK/docker/sub" "$HOME/.claude"; git -C "$CK" init -q
+printf 'NOTAS-DO-CHECKOUT-712\n' > "$CK/docker/agent-notes.md"
+printf 'ANTES-DO-BLOCO\n%s\nNOTAS-DA-IMAGEM-712\n%s\nDEPOIS-DO-BLOCO\n' "$BEGIN_M" "$END_M" > "$HOME/.claude/CLAUDE.md"
+printf '{"hooks":{}}\n' > "$HOME/.claude/settings.json"
+printf 'ANTES-DO-BLOCO\n%s\nNOTAS-DO-CHECKOUT-712\n%s\nDEPOIS-DO-BLOCO\n' "$BEGIN_M" "$END_M" > "$TMP/notas-esperadas"
+snap() { # pasta → tudo o que há nela (tipo, modo, tamanho, hora de alteração, destino do link) e o sha256 de cada arquivo
+  local d="$1"
+  ( cd "$d" && find . -printf '%p %y %m %s %T@ %l\n' | sort && find . -type f -exec sha256sum {} + | sort )
+  return $?
+}
+notes_with() { # texto → em quantas chamadas as notas lidas trazem o texto
+  local text="$1"
+  grep -lF -- "$text" "$LOG"/notes.* 2>/dev/null | wc -l | tr -d ' '
+  return 0
+}
+notes_equal() { # arquivo → em quantas chamadas as notas lidas são iguais ao arquivo, byte a byte
+  local want="$1" f n=0
+  for f in "$LOG"/notes.*; do cmp -s "$f" "$want" && n=$((n + 1)); done
+  echo "$n"
+  return 0
+}
+SNAP0="$(snap "$HOME/.claude")"
+cd "$CK/docker/sub" || die "sem o checkout de teste"
+run --task root --task worktree --rounds 1 --json
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas: as 4 chamadas rodaram, saída 0"            [ "$RC" -eq 0 -a "$(nclaude)" -eq 4 ]
+check "notas: toda chamada leu as notas do checkout"     [ "$(notes_with NOTAS-DO-CHECKOUT-712)" -eq 4 ]
+check "notas: nenhuma chamada leu as notas da imagem"    [ "$(notes_with NOTAS-DA-IMAGEM-712)" -eq 0 ]
+check "notas: só o bloco gerenciado muda; o texto de fora do bloco fica igual, uma vez" [ "$(notes_equal "$TMP/notas-esperadas")" -eq 4 ]
+check "notas: a pasta ~/.claude de quem roda não muda, byte a byte" [ "$(snap "$HOME/.claude")" = "$SNAP0" ]
+check "notas: o --settings de toda chamada exclui o CLAUDE.md do usuário" bash -c '[ "$(grep -cF -- "--settings {\"claudeMdExcludes\":[\"$2\"]}" "$1")" -eq 4 ]' _ "$LOG/claude.argv" "$HOME/.claude/CLAUDE.md"
+check "notas: o relato diz o arquivo e que veio do checkout" has_line "  notas: $CK/docker/agent-notes.md (do checkout de onde a suíte foi chamada)"
+check "notas: o json diz o arquivo e a origem"           jqe --arg f "$CK/docker/agent-notes.md" '.notes == {file: $f, from: "checkout"}' <<<"$STDOUT"
+check "notas: sem --codex o relato não fala das notas do codex" hasnt_str "notas no codex"
+# CLAUDE_CONFIG_DIR sem CLAUDE.md (a pasta nem existe): só o bloco, e a pasta não é criada
+printf '%s\nNOTAS-DO-CHECKOUT-712\n%s\n' "$BEGIN_M" "$END_M" > "$TMP/notas-so-bloco"
+cd "$CK" || die "sem o checkout de teste"
+CLAUDE_CONFIG_DIR="$TMP/cfg-vazio" run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas: sem CLAUDE.md do usuário, a chamada lê só o bloco com as notas do checkout" [ "$RC" -eq 0 -a "$(notes_equal "$TMP/notas-so-bloco")" -eq 1 ]
+check "notas: a pasta de configuração que não existia não é criada" [ ! -e "$TMP/cfg-vazio" ]
+check "notas: com CLAUDE_CONFIG_DIR, o excluído é o CLAUDE.md dessa pasta" bash -c 'grep -qF -- "--settings {\"claudeMdExcludes\":[\"$2\"]}" "$1"' _ "$LOG/claude.argv" "$TMP/cfg-vazio/CLAUDE.md"
+# pasta de configuração por link: o excluído leva o caminho dado e o caminho real
+ln -s "$HOME/.claude" "$TMP/cfg-link"
+cd "$CK" || die "sem o checkout de teste"
+CLAUDE_CONFIG_DIR="$TMP/cfg-link" run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas: pasta de configuração por link: exclui o caminho dado e o real, e lê as do checkout" bash -c \
+  'grep -qF -- "\"$2\"" "$1" && grep -qF -- "\"$3\"" "$1" && [ "$4" -eq 1 ] && [ "$5" -eq 0 ]' _ "$LOG/claude.argv" \
+  "$TMP/cfg-link/CLAUDE.md" "$(realpath "$HOME/.claude/CLAUDE.md")" "$(notes_equal "$TMP/notas-esperadas")" "$(notes_with NOTAS-DA-IMAGEM-712)"
+check "notas: depois das 3 execuções a pasta ~/.claude segue igual, byte a byte" [ "$(snap "$HOME/.claude")" = "$SNAP0" ]
+# fora de um checkout: as notas ao lado das tarefas (aqui, as do repo; na imagem, as da imagem), e o relato diz
+cd "$TMP" || die "sem a pasta temporária"
+run --task root --rounds 1 --model haiku --json
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas: fora de um checkout valem as que estão ao lado das tarefas" bash -c '[ "$1" -eq 0 ] && [ "$2" -eq 1 ] && [ "$3" -eq 0 ]' _ \
+  "$RC" "$(notes_with "$(head -n1 "$ROOT/docker/agent-notes.md")")" "$(notes_with NOTAS-DA-IMAGEM-712)"
+check "notas: fora de um checkout o relato diz de onde vieram" has_line "  notas: $ROOT/docker/agent-notes.md (ao lado das tarefas; a suíte foi chamada fora de um checkout com docker/agent-notes.md)"
+check "notas: fora de um checkout o json diz a origem"   jqe --arg f "$ROOT/docker/agent-notes.md" '.notes == {file: $f, from: "tarefas"}' <<<"$STDOUT"
+# sem notas em lugar nenhum (pasta de tarefas própria, fora de um checkout): não roda
+cd "$TMP" || die "sem a pasta temporária"
+OUTE_REGRESSION_DIR="$PROBE" run --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas: sem arquivo de notas a suíte não roda (saída 2, nenhuma chamada)" bash -c '[ "$1" -eq 2 ] && grep -q "sem as notas dos agentes" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
+# zai: o mesmo --settings leva a negação do Read de imagem e a exclusão do CLAUDE.md do usuário
+cd "$CK" || die "sem o checkout de teste"
+OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas na zai: um --settings só, com a negação do Read de imagem e a exclusão; lê as do checkout" bash -c \
+  '[ "$(grep -o -- "--settings" "$1" | wc -l)" -eq 1 ] && grep -qF -- "--settings {\"permissions\":{\"deny\":[\"Read(**/*.png)\"" "$1" && grep -qF -- "\"claudeMdExcludes\":[\"$2\"]}" "$1" && [ "$3" -eq 1 ]' _ \
+  "$LOG/claude.argv" "$HOME/.claude/CLAUDE.md" "$(notes_equal "$TMP/notas-esperadas")"
+# --codex: a troca não vale para o codex, e o relato diz
+cd "$CK" || die "sem o checkout de teste"
+run --codex --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "notas com --codex: o relato diz que o codex lê as instaladas" has_line "  notas no codex: as instaladas em ~/.codex/AGENTS.md (a troca só vale para o claude)"
+check "notas: no fim a pasta ~/.claude segue igual, byte a byte" [ "$(snap "$HOME/.claude")" = "$SNAP0" ]
 
 check_end
