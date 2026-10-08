@@ -363,7 +363,10 @@ SENV=(AGENT_STUDIO_READ_TOKEN="$READ_T" AGENT_STUDIO_MARK_TOKEN="$MARK_T" AGENT_
       AGENT_STUDIO_JEV_URL="$JEV_URL" AGENT_STUDIO_JEV_KEY="$JEV_KEY" SSL_CERT_FILE="$TMP/ts/cert.pem" AGENT_STUDIO_PHASE_INTERVAL_S=1)
 RC_="Cookie: agent_studio=$COOKIE_R"; MC_="Cookie: agent_studio=$COOKIE_R; agent_studio_mark=$COOKIE_M"
 Q="from=2026-10-07T00%3A00%3A00Z&to=2026-10-08T00%3A00%3A00Z"
-phases_of() { curl -s -H "Authorization: Bearer $READ_T" "$STUDIO_URL/v1/usage?$Q" | jq -c '[.by_phase[] | {(.phase): .calls}] | add'; }
+phases_of() {
+  curl -s -H "Authorization: Bearer $READ_T" "$STUDIO_URL/v1/usage?$Q" | jq -c '[.by_phase[] | {(.phase): .calls}] | add'
+  return $?
+}
 # fase <cabeçalho Cookie ou vazio> <Origin ou vazio> <corpo>: POST /fase; imprime o código HTTP e deixa o corpo em $TMP/resp
 fase() {
   local cookie="$1" origin="$2" body="$3"; shift 3
