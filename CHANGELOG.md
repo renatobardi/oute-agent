@@ -4,6 +4,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.47] - 2026-10-08
+
+### Fixed
+- **`oute-regression` roda as tarefas com as notas do checkout, não com as da imagem** (#712). A tarefa do `claude` passa a ler as notas de `docker/agent-notes.md` do checkout de onde a suíte é chamada (a raiz do repositório git do diretório atual); antes lia as que a imagem instalou no `~/.claude/CLAUDE.md`, e o PR que muda as notas era medido contra o texto antigo. Fora de um checkout valem as notas da imagem. O relato ganha a linha `notas:` com o arquivo usado e o `--json` o campo `notes`. A suíte não escreve no `~/.claude` de quem roda (nem em `$CLAUDE_CONFIG_DIR`): monta uma cópia do `CLAUDE.md` com o bloco gerenciado trocado, grava na pasta descartável de cada chamada e tira o `CLAUDE.md` do usuário da conversa pelo `claudeMdExcludes` do `--settings`. Limite: a tarefa do Codex (`--codex`) segue lendo as notas instaladas em `~/.codex/AGENTS.md`, e o relato diz isso. **Precisa de release** (`docker/oute-regression` vai na imagem).
+- **Regressão na zai: schema do dublê e padrões de prazo, turno e paralelismo** (#730). `root@zai` e `memory@zai` ficavam vermelhas na regressão por falhas nossas, não do `glm-5.3`: o dublê do ai-memory declarava `inputSchema` sem nenhuma propriedade e o endpoint da Z.ai só emite os argumentos que o schema declara (a chamada saía com input vazio e o avaliador reprovava por falta de `workspace`/`project`); e o prazo de 180 s e o limite de 8 turnos derrubavam a tarefa `root`, que sozinha já leva ~139 s no `glm-5.3`. Com `--subscription zai`, o `oute-regression` passa a usar prazo de 600 s por chamada, turno padrão 12 e 4 chamadas ao mesmo tempo (o override por `OUTE_REGRESSION_TIMEOUT`, `TASK_MAX_TURNS` das tarefas e `OUTE_REGRESSION_PARALLEL` continua valendo); o dublê declara os parâmetros do servidor real, com `workspace` e `project` opcionais. O teste do `oute-regression` não depende mais do ambiente de uma sessão zai (unset das `ANTHROPIC_DEFAULT_*` e de `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`). **Precisa de release** (`docker/oute-regression` e `docker/regression/` vão na imagem).
+
 ## [0.7.46] - 2026-10-07
 
 ### Added
