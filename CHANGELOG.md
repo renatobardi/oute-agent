@@ -4,6 +4,15 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.7.48] - 2026-10-08
+
+### Added
+- **Trava semanal no `oute-swarm spawn`** (#742, ADR-02 adendo). O campo opcional `weekly_guard_pct` em `[[subscription]]` de `config/select/models.toml` (`85` na `claude`) faz o `spawn` recusar com código 5 quando a janela de 7 dias da assinatura escolhida está no valor ou acima, com a linha `guard` no log da rodada; `--force` vence e cota não lida só avisa. O `docker/swarm.md` manda o dispatcher parar de abrir sessões e abrir `BLOQUEADO` com a pergunta numerada. O `oute-select` ganha `--weekly-guard <assinatura>`; o `oute-task` avisa em stderr; o `scripts/models-check` confere o campo (1 a 100). A tabela entra com `git pull` + `oute down/up`, mas `oute-swarm`, `oute-select`, `oute-task` e `swarm.md` vão na imagem: **precisa de release**.
+
+### Fixed
+- **Subnet fixa nas redes `studio`, `memoria`, `llm` e `saida`** (#707). Sem subnet, o alocador do Docker pegava a primeira faixa livre do pool padrão (172.17.0.0/12, em /16s) e podia dar a uma dessas redes a 172.19.0.0/16 da rede `oute`, e o `oute up`/`oute update` falhava com "failed to allocate gateway: Address already in use" — foi o que deixou o oute-server com a stack no chão no deploy da 0.7.45. As quatro passam a ter subnet fixa em 172.16.0.0/24–172.16.3.0/24: faixa privada fora do pool padrão do Docker (que aloca a partir de 172.17), sem cruzar a lxdbr0 (10.173.117.0/24), a tailscale0 (100.64.0.0/10) nem a rede do host (10.0.1.0/24). Cada uma é ajustável pela variável `OUTE_NET_SUBNET_STUDIO`, `OUTE_NET_SUBNET_MEMORIA`, `OUTE_NET_SUBNET_LLM` ou `OUTE_NET_SUBNET_SAIDA` (ambiente ou `.env`, como o `OUTE_NET_SUBNET` da rede `oute`), e o `oute up` recusa, antes do `compose up` e dizendo quais redes, subnet que cruza a da `oute` ou outra rede. **Não precisa de release** (só `docker/compose.yaml` e `scripts/oute`, que entram com `git pull` + `oute down/up`).
+- **Preço do `glm-5.3` travado na Z.ai, sem alerta de divergência** (#733). O `glm-5.3` ganha `fixed = true` no `config/agent-studio/config.toml`, com a página de preços da Z.ai como fonte; modelo com `fixed = true` deixa de gerar o alerta `price_sources_diverge` quando as duas fontes divergem entre si (a divergência não importa para um preço travado). A config entra com `git pull` + `oute down/up`; a mudança em `price_alerts.py`/`prices.py` **precisa de release** (vai na imagem).
+
 ## [0.7.47] - 2026-10-08
 
 ### Fixed

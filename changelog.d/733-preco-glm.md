@@ -1,2 +1,0 @@
-### Fixed
-- **Preço do `glm-5.3` travado na Z.ai, sem alerta de divergência** (#733). O `glm-5.3` ganha `fixed = true` no `config/agent-studio/config.toml`, com a página de preços da Z.ai como fonte; modelo com `fixed = true` deixa de gerar o alerta `price_sources_diverge` quando as duas fontes divergem entre si (a divergência não importa para um preço travado). A config entra com `git pull` + `oute down/up`; a mudança em `price_alerts.py`/`prices.py` **precisa de release** (vai na imagem).
