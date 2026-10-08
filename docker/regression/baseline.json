@@ -1,7 +1,7 @@
 {
-  "commit": "cbe10c012413",
-  "image": "0.7.45",
-  "measured_at": "2026-10-07",
+  "commit": "d8f719c8c438",
+  "image": "0.7.46",
+  "measured_at": "2026-10-08",
   "rounds": 3,
   "tasks": {
     "branch@haiku": "verde",
@@ -24,7 +24,7 @@
     "issue@zai": "verde",
     "memory@haiku": "verde",
     "memory@sonnet": "verde",
-    "memory@zai": "vermelho",
+    "memory@zai": "verde",
     "ptbr@haiku": "verde",
     "ptbr@sonnet": "verde",
     "ptbr@zai": "verde",
@@ -33,7 +33,7 @@
     "remove@zai": "verde",
     "root@haiku": "verde",
     "root@sonnet": "verde",
-    "root@zai": "vermelho",
+    "root@zai": "verde",
     "segredo@haiku": "verde",
     "segredo@sonnet": "verde",
     "segredo@zai": "verde",

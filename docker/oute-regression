@@ -16,6 +16,9 @@
 #                não valem; a cota conferida é a da zai (plano Lite: 2.000 créditos na janela de 5h). Sem a chave, sai 2 sem rodar tarefa.
 #                As variáveis da Z.ai (e a chave, como ANTHROPIC_AUTH_TOKEN) só existem no processo de cada tarefa, nunca em argv,
 #                relato, --keep ou evento; o Read de imagem fica negado por --settings, como na sessão zai do oute-task (#678).
+#                Padrões próprios da zai (#730): prazo por chamada 600 s (o glm-5.3 levou 139 s na tarefa root sozinha e
+#                estourou os 180 s com a suíte em paralelo), turno padrão 12 (o 8 derrubou uma rodada em 9 turnos no PR #711)
+#                e 4 chamadas ao mesmo tempo (rajadas de 6–8 pedidos derrubam 1–2 com HTTP 429; #629).
 #   --keep <pasta>  guarda as transcrições e os registros dos dublês de cada chamada em <pasta>/<run>/<tarefa>-<agente>-<modelo>-r<N>/
 #                (transcript.jsonl, err, res.json, status, reason, e o que os dublês gravaram: ssh.log, gh.log, propose.log…).
 #                Antes de gravar, apaga dos arquivos o valor de segredo: variável de ambiente com TOKEN, SECRET, PASSWORD ou
@@ -56,8 +59,8 @@
 # verde/vermelho por tarefa e modelo, chamadas, tempo e custo somados), sem texto de prompt nem de resposta. O resultado
 # de cada tarefa e o custo são só do que o claude devolve em `--output-format stream-json` (linha `result`:
 # `total_cost_usd`, custo equivalente na API; o Codex não tem custo aqui).
-# ambiente (para teste): OUTE_REGRESSION_DIR (tarefas), OUTE_REGRESSION_TIMEOUT (s por chamada, padrão 180),
-#   OUTE_REGRESSION_PARALLEL (chamadas ao mesmo tempo, padrão 8),
+# ambiente (para teste): OUTE_REGRESSION_DIR (tarefas), OUTE_REGRESSION_TIMEOUT (s por chamada, padrão 180; na zai, 600),
+#   OUTE_REGRESSION_PARALLEL (chamadas ao mesmo tempo, padrão 8; na zai, 4),
 #   OUTE_REGRESSION_STUDIO_WAIT / _STEP (espera pela conversa no agent-studio, padrão 60 / 5 s),
 #   OUTE_REGRESSION_AGENT (oute.agent do evento: claude, codex ou human, o padrão).
 { set +x; } 2>/dev/null
@@ -119,11 +122,16 @@ else
   die2 "sem as notas dos agentes: rode de dentro de um checkout do oute-agent (docker/agent-notes.md) ou com agent-notes.md ao lado da pasta das tarefas"
 fi
 USER_NOTES="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"
-TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-180}"
+# padrões da zai (#730): o glm-5.3 é mais lento por chamada (139 s na tarefa root, sozinha) e às vezes passa dos 8 turnos
+# (9 numa rodada do PR #711), e a suíte a 8 paralelas esticou a latência até o prazo de 180 s virar a falha; na zai o
+# prazo sobe para 600 s, o turno padrão para 12 e o paralelismo padrão para 4. O override pelas variáveis continua valendo.
+DEF_TIMEOUT=180; DEF_PARALLEL=8; DEF_TURNS=8
+if [[ $SUB = zai ]]; then DEF_TIMEOUT=600; DEF_PARALLEL=4; DEF_TURNS=12; fi
+TIMEOUT="${OUTE_REGRESSION_TIMEOUT:-$DEF_TIMEOUT}"
 [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_TIMEOUT tem de ser inteiro > 0"
 STUDIO_WAIT="${OUTE_REGRESSION_STUDIO_WAIT:-60}"; STUDIO_STEP="${OUTE_REGRESSION_STUDIO_STEP:-5}"
 [[ "$STUDIO_WAIT" =~ ^[0-9]+$ && "$STUDIO_STEP" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_STUDIO_WAIT/_STEP inválidos"
-PARALLEL="${OUTE_REGRESSION_PARALLEL:-8}"
+PARALLEL="${OUTE_REGRESSION_PARALLEL:-$DEF_PARALLEL}"
 [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]] || die2 "OUTE_REGRESSION_PARALLEL tem de ser inteiro > 0"
 # --- linha de base (#647): {"tasks": {"<tarefa>@<modelo>": "verde|vermelho"}, "measured_at", "commit"}; ausente = regra antiga
 BASE_FILE="${BASELINE_ARG:-${OUTE_REGRESSION_BASELINE:-$DIR/baseline.json}}"
@@ -343,7 +351,7 @@ attempt() {
     export PATH="$att/bin:$PATH" OTEL_RESOURCE_ATTRIBUTES="$ora"
     t0="$(date +%s)"
     if [[ $agent = claude ]]; then
-      timeout "$TIMEOUT" claude -p "$prompt" --model "${MODEL_ID[$alias]}" --max-turns "${TASK_MAX_TURNS:-8}" \
+      timeout "$TIMEOUT" claude -p "$prompt" --model "${MODEL_ID[$alias]}" --max-turns "${TASK_MAX_TURNS:-$DEF_TURNS}" \
         --mcp-config "$att/rec/mcp.json" --strict-mcp-config --output-format stream-json --verbose --settings "$settings" \
         > "$att/out" 2> "$att/err" < /dev/null
       jq -c 'select(type == "object" and .type == "result")' "$att/out" 2>/dev/null | tail -n1 > "$att/res"

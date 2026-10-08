@@ -24,7 +24,9 @@ export HOME="$TMP/home" OUTE_REGRESSION_DIR="$ROOT/docker/regression" OUTE_SELEC
   FAKE_LOG="$LOG" FAKE_REAL_PROPOSE_LOG="$LOG/real-propose.log"
 unset OUTE_TYPESAFE_API_KEY AGENT_STUDIO_URL AGENT_STUDIO_READ_TOKEN OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_LOGS_ENDPOINT \
   OTEL_RESOURCE_ATTRIBUTES GH_TOKEN OCI_S3_ACCESS_KEY OUTE_REGRESSION_AGENT OUTE_REGRESSION_MAX_PCT FAKE_BAD FAKE_EMIT_ERR \
-  FAKE_QUOTA FAKE_CLAUDE_FAIL OUTE_ZAI_API_KEY OUTE_ZAI_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_API_KEY FAKE_LEAK_ZAI
+  FAKE_QUOTA FAKE_CLAUDE_FAIL OUTE_ZAI_API_KEY OUTE_ZAI_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_API_KEY FAKE_LEAK_ZAI \
+  ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL API_TIMEOUT_MS \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC   # (#730) sessão zai exporta estas: sem o unset, o teste depende do ambiente
 export OTEL_RESOURCE_ATTRIBUTES="host.name=teste,oute.instance=teste"
 ln -s "$ROOT/docker/oute-select" "$BIN/oute-select"
 
@@ -161,6 +163,13 @@ cat > "$BIN/oute-quota" <<'FAKE'
 #!/usr/bin/env bash
 [[ -n "${FAKE_QUOTA:-}" ]] || exit 1
 printf '%s\n' "$FAKE_QUOTA"
+FAKE
+# timeout falso: registra em claude.timeout o prazo que a suíte deu a cada chamada e roda o real igual (#730)
+REAL_TIMEOUT="$(command -v timeout)"; export REAL_TIMEOUT
+cat > "$BIN/timeout" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$FAKE_LOG/claude.timeout"
+exec "$REAL_TIMEOUT" "$@"
 FAKE
 chmod +x "$BIN"/*
 export PATH="$BIN:$PATH"
@@ -394,6 +403,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
   | (cd "$TMP/memdir" && python3 "$ROOT/docker/regression/ai-memory-double.py") > "$TMP/memory-double.out"
 check "dublê do ai-memory: initialize responde com o protocolo pedido" jqe 'select(.id == 1) | .result.protocolVersion == "2025-06-18" and .result.serverInfo.name == "ai-memory"' < "$TMP/memory-double.out"
 check "dublê do ai-memory: lista memory_write_page e memory_query" bash -c 'jq -e "select(.id == 2) | [.result.tools[].name] | (index(\"memory_write_page\") != null and index(\"memory_query\") != null)" "$1" >/dev/null' _ "$TMP/memory-double.out"
+check "dublê do ai-memory: o schema declara os parâmetros do servidor real (workspace e project em toda ferramenta; path e body na write_page — #730)" \
+  bash -c 'jq -e "select(.id == 2) | ([.result.tools[] | (.inputSchema.properties | has(\"workspace\") and has(\"project\"))] | all) and ([.result.tools[] | select(.name == \"memory_write_page\") | (.inputSchema.properties | has(\"path\") and has(\"body\"))] | length == 1)" "$1" >/dev/null' _ "$TMP/memory-double.out"
+check "dublê do ai-memory: workspace e project ficam opcionais, como no servidor real" \
+  jqe 'select(.id == 2) | [.result.tools[] | .inputSchema.required // []] | flatten | (index("workspace") == null and index("project") == null)' < "$TMP/memory-double.out"
 check "dublê do ai-memory: grava a chamada com os argumentos e responde ok" bash -c '[ "$(cat "$1")" = "{\"tool\": \"memory_write_page\", \"args\": {\"workspace\": \"w\", \"project\": \"p\"}}" ] && jq -e "select(.id == 3) | .result.isError == false" "$2" >/dev/null' _ "$MEMLOG" "$TMP/memory-double.out"
 check "dublê do ai-memory: não lê caminho da linha de comando (o log é memory.log na pasta de trabalho)" bash -c '! grep -q "argv" "$1" && grep -q "^LOG_NAME = \"memory.log\"" "$1"' _ "$ROOT/docker/regression/ai-memory-double.py"
 check "dublê do ai-memory: ping ok, método desconhecido = erro, lixo ignorado, notificação sem resposta" bash -c 'jq -e "select(.id == 4) | .result == {}" "$1" >/dev/null && jq -e "select(.id == 5) | .error.code == -32601" "$1" >/dev/null && [ "$(wc -l < "$1")" -eq 5 ]' _ "$TMP/memory-double.out"
@@ -628,6 +641,7 @@ for t in $ALL13; do
   check "zai: $t@zai verde"                                    [ "$(verdict "$t@zai")" = verde ]
 done
 check "zai: o relato nomeia o modelo da zai e não roda haiku nem sonnet" bash -c 'grep -q "modelo zai = glm-5.3" <<<"$1" && ! grep -q "@haiku\|@sonnet\|modelo haiku\|modelo sonnet" <<<"$1"' _ "$OUT"
+check "zai: turno padrão 12 nas chamadas (closes-refs segue em 14; #730)" bash -c '[ "$(grep -c -- "--max-turns 12 " "$1")" -eq 12 ] && [ "$(grep -c -- "--max-turns 14 " "$1")" -eq 1 ]' _ "$LOG/claude.argv"
 check "zai: a variável do ambiente do processo das tarefas é a da zai (url, chave, modelo, tráfego mínimo)" bash -c '[ "$(sort -u "$1")" = "$2|$3|glm-5.3||1" ]' _ "$LOG/claude.zai" "$ZURL" "$ZKEY"
 check "zai: o --settings nega o Read de imagem em toda chamada" bash -c '[ "$(grep -c -- "--settings {\"permissions\":{\"deny\":\[\"Read(\*\*/\*.png)\"" "$1")" -eq 13 ]' _ "$LOG/claude.argv"
 check "zai: o resource leva oute.subscription=zai em toda chamada" bash -c '[ "$(grep -c "^ora=.*oute.subscription=zai$" "$1")" -eq 13 ]' _ "$LOG/claude.env"
@@ -635,6 +649,15 @@ check "zai: a chave não aparece em argv, relato, saída json nem evento" bash -
 check "zai: o evento diz o modelo glm-5.3 e 13 tarefas @zai"    bash -c 'ev="$(grep "^ARGS regression " "$1")"; grep -q "models=glm-5.3 " <<<"$ev" && grep -q "tasks=root@zai=verde" <<<"$ev" && grep -q "calls=13 " <<<"$ev"' _ "$LOG/emit.calls"
 OUTE_ZAI_API_KEY="$ZKEY" run --task select --rounds 1
 check "sem --subscription: a chave da zai não vai ao processo (claude, haiku e sonnet)" bash -c '[ "$(sort -u "$1")" = "||||" ] && ! grep -q -- "permissions\|glm-" "$2"' _ "$LOG/claude.zai" "$LOG/claude.argv"
+# padrões próprios da zai (#730): sem OUTE_REGRESSION_TIMEOUT, o prazo por chamada é 600 s na zai e 180 s no claude
+unset OUTE_REGRESSION_TIMEOUT
+OUTE_ZAI_API_KEY="$ZKEY" OUTE_ZAI_BASE_URL="$ZURL" run --subscription zai --task select --task memory --rounds 1
+check "zai: prazo padrão 600 s por chamada"                   [ "$(sort -u "$LOG/claude.timeout")" = 600 ]
+run --task select --rounds 1
+check "assinatura claude: prazo padrão 180 s por chamada"      [ "$(sort -u "$LOG/claude.timeout")" = 180 ]
+export OUTE_REGRESSION_TIMEOUT=30
+FAKE_SLEEP=0.3 OUTE_ZAI_API_KEY="$ZKEY" OUTE_ZAI_BASE_URL="$ZURL" run --subscription zai --rounds 1
+check "zai: 4 chamadas ao mesmo tempo por padrão"             bash -c 'awk "/\\+/ {n++; if (n>m) m=n} /-/ {n--} END {exit !(m>=1 && m<=4)}" "$1"' _ "$LOG/conc"
 # cota: só a da zai conta com --subscription zai
 FAKE_QUOTA="$(qz 10 70)" OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
 check "zai em 70%: recusa, saída 3, nomeando a zai e nenhuma tarefa" bash -c '[ "$1" -eq 3 ] && grep -q "cota em 70% (assinatura zai, janela 5h; limite 60%)" <<<"$2" && [ "$3" -eq 0 ]' _ "$RC" "$OUT" "$(nclaude)"
