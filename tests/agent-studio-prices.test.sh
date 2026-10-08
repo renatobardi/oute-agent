@@ -380,9 +380,9 @@ check("histórico só de acréscimo: toda linha de antes segue igual depois das 
 check("a rotina só escreve nas tabelas de preço: spans, logs e metrics intactos",
       all(st.read(lambda con, t=t: con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]) == n for t, n in rows_before.items())
       and st.read(lambda con: con.execute("SELECT sha256(string_agg(dedupe_key, ',' ORDER BY dedupe_key)) FROM spans").fetchone()[0]) == other_before)
-check("a rotina só escreve nas tabelas de preço: as únicas tabelas do banco são as da ingestão, as de preço, as marcas de ação (#510), as de ack (#537) e as da fase da conversa (#749), que a rotina não escreve",
+check("a rotina só escreve nas tabelas de preço: as únicas tabelas do banco são as da ingestão, as de preço, as marcas de ação (#510), as de ack (#537) a dos planos (#746) e as da fase da conversa (#749), que a rotina não escreve",
       {r[0] for r in st.read(lambda con: con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall())}
-      == {"logs", "spans", "metrics", "price_history", "price_runs", "price_checks", "action_marks", "ack_marks", "conversation_phase", "phase_jev", "phase_marks"})
+      == {"logs", "spans", "metrics", "price_history", "price_runs", "price_checks", "action_marks", "ack_marks", "plan_history", "conversation_phase", "phase_jev", "phase_marks"})
 
 # fonte fora do ar e as falhas
 serve(ALL, ALL, OR_IDS, or_mode="500")

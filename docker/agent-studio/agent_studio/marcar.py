@@ -1,6 +1,6 @@
 """Marcar ação como feita na página da rodada (#510, ADR-08 "Página da rodada e do ciclo", exceção ao §10).
 
-`POST /rodada/acao`, `POST /ack` (#537, abaixo) e `POST /fase` (#749, no fim) são as **únicas escritas do navegador além do login e do logout**. A primeira só grava a marca (uma linha de
+`POST /rodada/acao`, `POST /ack` (#537, abaixo), `POST /planos/novo` (#746, abaixo) e `POST /fase` (#749, no fim) são as **únicas escritas do navegador além do login e do logout**. A primeira só grava a marca (uma linha de
 `action_marks`, `marks.py`, e o `acao` derivado no SurrealDB): não faz o host rodar nada, não faz merge e não fecha issue (ADR-01
 não muda). Só existe com a credencial de marcação configurada (`auth.mark`); sem ela, nem esta rota nem `/marcar` são registradas.
 
@@ -28,6 +28,11 @@ não responde pergunta, não fecha gate, não faz o host rodar nada e não escre
 - **Repetir não renova:** com um ack ainda válido para a ocorrência, nada é acrescentado e a resposta é a do ack que já vale.
 - **2xx só depois do commit**, como acima: falha = 503 e nada fica; tentar de novo não renova ack nenhum.
 
+**`POST /planos/novo` (#746, ADR-08 "Planos de assinatura"):** acrescenta uma linha ao cadastro de planos (`planos.py`). A mesma credencial,
+o mesmo `Origin` e o mesmo `csrf`; sem a credencial de marcação a rota não existe. Campos `assinatura` (`claude`, `zai` ou `codex`),
+`plano`, `valor` (USD por mês, até 2 casas), `inicio` (`AAAA-MM-DD`) e `csrf`; fora disso = 400. Nunca edita nem apaga linha; a hora
+do registro é a do servidor. 2xx só depois do commit; falha = 503 e nada fica.
+
 **`POST /fase` (#749, ADR-08 "Fase da conversa"):** troca a fase de uma conversa (a tela `/fases`). Grava uma linha em `phase_marks` (só
 de acréscimo) e reclassifica a conversa: a troca (origem `manual`, confiança alta) vale sobre a classificação automática, também
 depois de um `rebuild-state`. Não faz o host rodar nada. A mesma credencial, o mesmo `Origin` e o mesmo `csrf`.
@@ -44,13 +49,14 @@ from fastapi import Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from . import acks, acoes as acoes_mod, etapas as etapas_mod, marks, phase as phase_mod, state
+from . import acks, acoes as acoes_mod, etapas as etapas_mod, marks, phase as phase_mod, planos, state
 
 detail_log = logging.getLogger("agent_studio_detail")
 
 MAX_BODY = 4096
 FIELDS = frozenset({"rodada", "etapa", "acao", "estado", "csrf"})
 LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
+PLAN_FIELDS = frozenset({"assinatura", "plano", "valor", "inicio", "csrf"})
 ACK_FIELDS = frozenset({"alvo", "desde", "visto", "voltar", "csrf"})
 ACK_SEEN = re.compile(r"^[0-9]{1,20}\Z")
 ACK_BACK_MAX = 1024
@@ -100,6 +106,15 @@ def parse_fields(form):
             or (key and not state.STEP_KEY.match(key)) or not acoes_mod.ID.match(acao) or estado not in marks.STATES):
         return None
     return rodada, kind, key, acao, estado, csrf
+
+
+def parse_plan(form):
+    """O formulário de plano -> `(assinatura, plano, valor, início, csrf)` já validados (`planos.validate`), ou `None` se algum campo
+    falta, sobra, repete ou foge do formato."""
+    if not isinstance(form, dict) or set(form) != PLAN_FIELDS or any(len(v) != 1 for v in form.values()):
+        return None
+    sub, plan, usd, start, bad = planos.validate(*(form[k][0] for k in ("assinatura", "plano", "valor", "inicio")))
+    return None if bad else (sub, plan, usd, start, form["csrf"][0])
 
 
 def parse_ack(form):
@@ -212,6 +227,50 @@ def mount(app, store, auth, tel, surreal, page, error, gate, safe_next, headers,
         back = f"/rodada?id={quote(rodada, safe='')}#{etapas_mod.anchor({'kind': kind, 'key': key})}"
         return page(request, "marcado.html", back=back, action=action_id, marked=estado)
 
+
+    @app.post("/planos/novo")
+    async def plan_add(request: Request):
+        """Acrescenta uma linha ao cadastro de planos (#746). Nunca edita nem apaga linha; não faz o host rodar nada."""
+        # 1. quem: só o cookie de marcação, como no `/rodada/acao`
+        if not auth.marker(request):
+            if auth.reader(request):
+                tel.warn("plan-forbidden", "recusado: credencial de leitura no cadastro de plano")
+                return refuse(403, "forbidden")
+            tel.warn("plan-unauthorized", "recusado: sem credencial de marcação no cadastro de plano")
+            return refuse(401, "unauthorized")
+        # 2. de onde: Origin igual ao Host
+        if not origin_ok(request):
+            tel.warn("plan-origin", "recusado: Origin do cadastro de plano ausente ou diferente do Host")
+            return refuse(403, "forbidden")
+        # 3. o corpo: teto, formato e campos
+        form = await read_form(request)
+        if form == "grande":
+            tel.warn("plan-too-large", "recusado: cadastro de plano com corpo acima de %d bytes", MAX_BODY)
+            return refuse(413, "corpo grande demais")
+        fields = parse_plan(form)
+        if fields is None:
+            tel.warn("plan-bad", "recusado: cadastro de plano com campos fora do formato")
+            return refuse(400, "campos inválidos")
+        sub, plan, usd, start, csrf = fields
+        if not auth.csrf_ok(csrf):
+            tel.warn("plan-csrf", "recusado: campo csrf do cadastro de plano errado")
+            return refuse(403, "forbidden")
+        # 4. grava: DuckDB e SurrealDB juntos ou nenhum; 2xx só depois do commit
+        def write(con):
+            row = planos.append(con, sub, plan, usd, start)
+            if surreal is not None:
+                surreal.apply(state.plan_statements(row))
+            return row
+        try:
+            row = await run_in_threadpool(store.transact, write)
+        except Exception as e:  # noqa: BLE001 — qualquer falha na gravação é retentável
+            tel.warn("plan-failed", "cadastro de plano: gravação falhou, respondi 503: %s", type(e).__name__, level=logging.ERROR)
+            detail_log.exception("cadastro de plano: gravação falhou")
+            return retry("gravação falhou; tente de novo")
+        # só valores já conferidos acima voltam na resposta
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"assinatura": sub, "plano": plan, "valor_usd": usd, "inicio": start}, headers=headers)
+        return RedirectResponse("/planos", status_code=303, headers=headers)
 
     def retry(message):
         return JSONResponse({"message": message}, status_code=503, headers={**headers, "Retry-After": "5"})

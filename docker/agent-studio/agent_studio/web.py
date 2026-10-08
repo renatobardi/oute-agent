@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 from starlette.datastructures import QueryParams
 
-from . import (acks as acks_mod, acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
+from . import (acks as acks_mod, acoes as acoes_mod, alert_text, conversations as conv_mod, dashboard as dash_mod, etapas as etapas_mod, names as names_mod, planos as planos_mod, prices as prices_mod, proposals as prop_mod, repo as repo_mod,
                sessions as sess_mod, subscription as sub_mod, tabela as tabela_mod, tools as tools_mod, tz as tz_mod, usage as usage_mod)
 from . import alerts as alerts_mod
 from . import cost as cost_mod
@@ -445,7 +445,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         back = "/" + nav
         if nav in ("conversas", "sessoes"):
             group = "Telemetria"
-        elif nav in ("uso", "ferramentas", "precos"):
+        elif nav in ("uso", "ferramentas", "precos", "planos"):
             group = "Análise"
         else:
             group = "Governança"
@@ -994,6 +994,19 @@ def mount(app, store, auth, config, tel, window, surreal=None):
     # ------------------------------------------------ marcar ação (#510) e ack (#537): as únicas escritas do navegador além do login; só com a credencial de marcação
     if auth.mark:
         marcar_mod.mount(app, store, auth, tel, surreal, page, error, gate, safe_next, HEADERS, ack_items)
+
+    # ------------------------------------------------ planos de assinatura (#746): leitura; o formulário só com o cookie de marcação
+    @screen("/planos")
+    async def plans(request: Request):
+        if (denied := await gate(request)) is not None:
+            return denied
+        today = datetime.now(config.tz).date().isoformat()
+        data, failed = await read(request, "planos", store.read, lambda con: planos_mod.view(con, today))
+        if failed:
+            return failed
+        marker = auth.marker(request)
+        form = {"enabled": auth.mark, "active": marker, "csrf": auth.mark_csrf if marker else "", "today": today}
+        return page(request, "planos.html", form=form, **data)
 
     # ------------------------------------------------ preços (#340): só leitura
     @screen("/precos")
