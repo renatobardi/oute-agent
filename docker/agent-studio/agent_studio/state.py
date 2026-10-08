@@ -100,6 +100,28 @@ def ack_statements(row):
                           "b": {k: base64.b64encode(str(fields[k]).encode()).decode() for k in _ACK_TEXT}})]
 
 
+# plano de assinatura (#746, ADR-08): vem da `plan_history`, não dos logs. Registro derivado e idempotente (id = assinatura, dia de início
+# e hora do registro): remontar não muda nada
+PLAN_SUBSCRIPTIONS = ("claude", "zai", "codex")
+PLAN_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z", re.ASCII)
+_PLAN_TEXT = ("subscription", "plan", "start", "origin")
+PLAN_UPSERT = (
+    'UPSERT type::record("plano", $v.id) SET monthly_usd = <float> $v.usd, registered_ns = $v.ns, registered_at = <datetime> $v.t, '
+    + ", ".join(f"`{k}` = <string>encoding::base64::decode($v.b.`{k}`)" for k in _PLAN_TEXT) + ";")
+
+
+def plan_statements(row):
+    """Uma linha da `plan_history` (`planos.COLUMNS`) -> statements do `plano`. Linha fora do formato não vira estado: o fato
+    continua no DuckDB."""
+    sub, start = row["subscription"], row["start_date"]
+    if sub not in PLAN_SUBSCRIPTIONS or not isinstance(start, str) or not PLAN_DAY_RE.match(start):
+        return []
+    ns = int(row["registered_unix_nano"])
+    fields = {"subscription": sub, "plan": row["plan"], "start": start, "origin": row["origin"]}
+    return [(PLAN_UPSERT, {"id": [sub, start, ns], "usd": float(row["monthly_usd"]), "ns": ns, "t": iso(ns),
+                           "b": {k: base64.b64encode(str(fields[k]).encode()).decode() for k in _PLAN_TEXT}})]
+
+
 def iso(ns):
     s, rest = divmod(int(ns), 1_000_000_000)
     return datetime.fromtimestamp(s, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + f".{rest:09d}Z"

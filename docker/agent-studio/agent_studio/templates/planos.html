@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set nav = "planos" %}
+{% set crumbs = [("Análise", none), ("Planos", none)] %}
+{% from "_macros.html" import badge, icon %}
+{% block title %}Planos · Agent Studio{% endblock %}
+{% block main %}
+<div class="pagina">
+<div class="pagina-topo">
+  {% if loading_target is none %}<h1>Planos de assinatura</h1>{% endif %}
+</div>
+
+{% call fragment("planos") %}
+<div class="rolagem">
+<table class="precos" id="planos-vigentes">
+  <thead><tr><th>Assinatura</th><th>Plano</th><th class="n">Valor mensal (USD)</th><th>Vale desde</th></tr></thead>
+  <tbody>
+  {% for s in subscriptions %}
+  <tr data-assinatura="{{ s.subscription }}" data-plano="{{ s.label }}">
+    <td>{{ s.subscription }}</td>
+    {% if s.current %}
+    <td>{{ s.current.plan }}</td><td class="n" data-valor="{{ '%.2f'|format(s.current.monthly_usd) }}">US$ {{ '%.2f'|format(s.current.monthly_usd)|replace('.', ',') }}</td><td class="hora">{{ s.current.since }}</td>
+    {% else %}
+    <td>{{ badge("sem plano", "secundario") }}</td><td class="n" data-valor="">—</td><td class="hora">—</td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="nota">Valor do plano na data de hoje ({{ today }}). Assinatura sem plano cadastrado aparece como "sem plano": não conta como US$ 0.</p>
+{% if form.enabled %}
+{% if form.active %}
+<form class="login" method="post" action="/planos/novo" id="novo-plano">
+  <h2>Cadastrar mudança de plano</h2>
+  <p class="nota">Acrescenta uma linha com a data em que passa a valer. Nenhuma linha é editada nem apagada: para corrigir, cadastre outra linha com a mesma data.</p>
+  <div class="campo"><div class="campo-rotulo"><label for="assinatura">Assinatura</label></div>
+    <div class="campo-entrada"><select id="assinatura" name="assinatura" required>{% for s in subscriptions %}<option value="{{ s.subscription }}">{{ s.subscription }}</option>{% endfor %}</select></div></div>
+  <div class="campo"><div class="campo-rotulo"><label for="plano">Nome do plano</label></div>
+    <div class="campo-entrada"><input id="plano" name="plano" type="text" maxlength="60" required></div></div>
+  <div class="campo"><div class="campo-rotulo"><label for="valor">Valor mensal (USD)</label></div>
+    <div class="campo-entrada"><input id="valor" name="valor" type="text" inputmode="decimal" pattern="[0-9]{1,6}([.,][0-9]{1,2})?" required></div></div>
+  <div class="campo"><div class="campo-rotulo"><label for="inicio">Vale desde (AAAA-MM-DD)</label></div>
+    <div class="campo-entrada"><input id="inicio" name="inicio" type="date" value="{{ form.today }}" required></div></div>
+  <input type="hidden" name="csrf" value="{{ form.csrf }}">
+  <button type="submit" class="botao primario">Cadastrar</button>
+</form>
+{% else %}
+<p class="nota" data-cadastro="sem-cookie">Para cadastrar, guarde a credencial de marcação neste aparelho em <a href="/marcar?next=/planos">/marcar</a>.</p>
+{% endif %}
+{% endif %}
+{% endcall %}
+
+{% call fragment("historico") %}
+{% for s in subscriptions %}
+<section class="cartao" data-historico-de="{{ s.subscription }}">
+  <h2>{{ s.subscription }}</h2>
+  {% if s.history %}
+  <div class="rolagem">
+  <table class="precos historico">
+    <thead><tr><th>Vale desde</th><th>Plano</th><th class="n">Valor mensal (USD)</th><th>Origem</th><th>Registrado ({{ tzl() }})</th></tr></thead>
+    <tbody>
+    {% for h in s.history|reverse %}
+    <tr data-linha><td class="hora">{{ h.since }}</td><td>{{ h.plan }}</td><td class="n">US$ {{ '%.2f'|format(h.monthly_usd)|replace('.', ',') }}</td><td>{{ h.origin }}</td><td class="hora">{{ h.registered|when }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="nota">Sem plano cadastrado.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endcall %}
+</div>
+{% endblock %}

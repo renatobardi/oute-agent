@@ -19,7 +19,7 @@ import duckdb
 if importlib.util.find_spec("pandas") is None:
     sys.modules["pandas"] = None
 
-from . import (acks as acks_mod, alerts as alerts_mod, conversations as conv_mod, cost as cost_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, prices as prices_mod, proposals as prop_mod,
+from . import (acks as acks_mod, alerts as alerts_mod, conversations as conv_mod, cost as cost_mod, dashboard as dash_mod, decisions as decisions_mod, marks as marks_mod, planos as planos_mod, prices as prices_mod, proposals as prop_mod,
                repo as repo_mod, repo_infer, sessions as sess_mod, tools as tools_mod, tray as tray_mod, tz as tz_mod, usage as usage_mod)
 
 # (coluna, tipo) de cada tabela; `time`/`received_at` são derivadas dos *_unix_nano na gravação
@@ -250,6 +250,7 @@ class Store:
             repo_mod.apply_legacy(self.con)  # acerto único: o que sobrou sem repositório antes do corte (#617)
             prices_mod.create(self.con)  # histórico de preços (#339)
             marks_mod.create(self.con)   # marcas das ações do Bardi (#510): só de acréscimo, escrita só pela rota
+            planos_mod.create(self.con)  # cadastro de planos de assinatura (#746): só de acréscimo, escrita só pela rota e pela semente
             acks_mod.create(self.con)    # acks de alerta e de decisão pendente (#537): só de acréscimo, escrita só pela rota
 
     def close(self):

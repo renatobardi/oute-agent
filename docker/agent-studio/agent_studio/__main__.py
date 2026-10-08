@@ -5,7 +5,7 @@ import sys
 
 import uvicorn
 
-from . import config as config_mod, price_sources, prices as prices_mod
+from . import config as config_mod, planos as planos_mod, price_sources, prices as prices_mod
 from . import app as app_mod
 from .app import create_app
 from . import store as store_mod
@@ -83,6 +83,7 @@ def main():
     # preços (#339): a semente do config.toml entra no histórico e o histórico vira a tabela viva; a conferência diária
     # nas fontes públicas só liga com AGENT_STUDIO_PRICE_CHECK=1 (o compose liga; teste e uso local ficam sem rede)
     prices_mod.sync(store, config)
+    planos_mod.sync(store, surreal, config)
     price_job = None
     if os.environ.get("AGENT_STUDIO_PRICE_CHECK") == "1":
         price_job = prices_mod.Job(lambda: prices_mod.check(store, config, tel, urls=price_urls()),

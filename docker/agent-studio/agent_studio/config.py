@@ -1,5 +1,5 @@
 """Config do agent-studio em `config/agent-studio/config.toml` (ADR-08, #203), montada só leitura no compose:
-mudança entra com `git pull` + `oute down/up`, sem release. `[prices]` (#203; `fixed = true` trava o modelo, #339) e `[alerts]` (#204).
+mudança entra com `git pull` + `oute down/up`, sem release. `[prices]` (#203; `fixed = true` trava o modelo, #339) e `[alerts]` (#204) e `[[plans]]` (a semente do cadastro de planos, #746).
 
 Nunca derruba o serviço: arquivo ausente ou inválido = sem preços e alertas com os padrões, com o motivo em `errors`
 (vai ao stderr e às respostas do `/v1/usage` e do `/v1/alerts`). Entrada de preço inválida fica de fora (o modelo
@@ -12,7 +12,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 
-from . import tz as tz_mod
+from . import planos as planos_mod, tz as tz_mod
 from .alerts import AlertConfig
 from .cost import ModelPrice, PriceTable
 
@@ -28,6 +28,7 @@ class Config:
     errors: list = field(default_factory=list)
     tz: object = tz_mod.UTC                        # `ZoneInfo` de exibição (`timezone` do config.toml, #415); padrão UTC
     warnings: list = field(default_factory=list)   # avisos que só vão ao log (fuso ausente), fora de `errors` da API
+    plans: list = field(default_factory=list)      # [(assinatura, plano, valor, início)] do `[[plans]]`: a semente do cadastro de planos (#746)
 
 
 def load(path=None):
@@ -41,12 +42,13 @@ def load(path=None):
         return Config(errors=[f"config inválida ({path}): {type(e).__name__}"])
     alerts, errors = AlertConfig.parse(data.get("alerts", {}))
     zone, warnings = _timezone(data, errors)
+    plans = planos_mod.parse_seed(data.get("plans"), errors)
     raw = data.get("prices", {})
     if not isinstance(raw, dict):
-        return Config(alerts=alerts, errors=["[prices] não é tabela", *errors], tz=zone, warnings=warnings)
+        return Config(alerts=alerts, errors=["[prices] não é tabela", *errors], tz=zone, warnings=warnings, plans=plans)
     prices, fixed = _prices(raw, errors)
     return Config(prices=PriceTable(prices), seed={str(m).lower(): p for m, p in prices.items()},
-                  fixed=frozenset(fixed), alerts=alerts, errors=errors, tz=zone, warnings=warnings)
+                  fixed=frozenset(fixed), alerts=alerts, errors=errors, tz=zone, warnings=warnings, plans=plans)
 
 
 def _timezone(data, errors):
