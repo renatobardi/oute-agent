@@ -250,6 +250,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     AGENT_STUDIO_READ_TOKEN: não verificado). Grader em bash, lê efeitos; nenhum LLM julga.
   --subscription zai (#680): as 13 tarefas na assinatura zai (claude na API da Z.ai, glm-5.3), chaves <tarefa>@zai na base; pede OUTE_ZAI_API_KEY
                                     no ambiente (sem ela, saída 2 e nenhuma tarefa); só a cota da zai conta; não vale com --model nem --codex.
+  Notas (#712): a tarefa lê as notas de docker/agent-notes.md do checkout de onde a suíte é chamada (a raiz do repositório git do
+  diretório atual), e não as que a imagem instalou no ~/.claude/CLAUDE.md; fora de um checkout, as notas da imagem. O relato diz o
+  arquivo (linha `notas:`) e o --json traz `notes`. Nada é escrito no ~/.claude de quem roda. O Codex (--codex) lê as instaladas.
   --baseline <arquivo> / --write-baseline (#647): compara cada tarefa e modelo com a linha de base (docker/regression/baseline.json
   ou $OUTE_REGRESSION_BASELINE): igual, falha de base, piorou ou melhorou; só piorou dá saída 1 (sem o arquivo, qualquer vermelha
   reprova). --write-baseline grava a base a partir da execução, só quando pedido; --json traz vs_baseline.
