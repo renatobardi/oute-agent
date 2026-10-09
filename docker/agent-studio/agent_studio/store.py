@@ -491,9 +491,9 @@ class Store:
         return self.read_free(lambda con: decisions_mod.pending(con, at_ns, cfg), "decisions")
 
     # leituras da tela (#206), sob a mesma trava
-    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT):
+    def conversations(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT, tz=tz_mod.UTC):
         with self.lock:
-            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid)
+            return conv_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid, tz=tz)
 
     def tools(self, from_ns, to_ns, tz=tz_mod.UTC, repo=None, host=None, agent=None):
         """Tela Ferramentas (#535), sob a mesma trava."""
@@ -504,9 +504,9 @@ class Store:
         with self.lock:
             return tools_mod.conversations(self.con, tool, from_ns, to_ns, repo, host, agent, group)
 
-    def conversation(self, session_id, prices, errors_only=False, paid=False):
+    def conversation(self, session_id, prices, errors_only=False, paid=False, tz=tz_mod.UTC):
         with self.lock:
-            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only, paid=paid)
+            return conv_mod.detail(self.con, session_id, prices, errors_only=errors_only, paid=paid, tz=tz)
 
     def conversation_logs(self, session_id, offset, errors_only=False):
         with self.lock:
@@ -517,13 +517,13 @@ class Store:
             return conv_mod.span(self.con, trace_id, span_id)
 
     # leituras da tela de sessões (#207), sob a mesma trava
-    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT):
+    def sessions(self, from_ns, to_ns, prices, host=None, agent=None, repo=None, paid=False, limit=conv_mod.LIST_LIMIT, tz=tz_mod.UTC):
         with self.lock:
-            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid)
+            return sess_mod.listing(self.con, from_ns, to_ns, prices, host, agent, limit=limit, repo=repo, paid=paid, tz=tz)
 
-    def session(self, task_id, prices, paid=False):
+    def session(self, task_id, prices, paid=False, tz=tz_mod.UTC):
         with self.lock:
-            return sess_mod.detail(self.con, task_id, prices, paid=paid)
+            return sess_mod.detail(self.con, task_id, prices, paid=paid, tz=tz)
 
     # leitura da página do pedido (#208), sob a mesma trava
     def proposal(self, proposal_id):

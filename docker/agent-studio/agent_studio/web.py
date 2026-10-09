@@ -686,7 +686,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "lista de conversas", store.conversations, from_ns, to_ns, config.prices,
-                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None)
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None, config.tz)
         if failed:
             return failed
         (t,), keep = table_ctx(q, CONVERSAS, (conv_mod.TABLE, st, data["conversations"]))
@@ -702,7 +702,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, "Falta o id da conversa.")
         errors_only = request.query_params.get("erros") == "1"
         data, failed = await read(request, "conversa", store.conversation, session_id, config.prices, errors_only,
-                                  cost_mode(request.query_params) == "pago")
+                                  cost_mode(request.query_params) == "pago", config.tz)
         if failed:
             return failed
         if data is None:
@@ -773,7 +773,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
             return error(request, 400, str(e))
         repo = q.get("repo", "")
         data, failed = await read(request, "lista de sessões", store.sessions, from_ns, to_ns, config.prices,
-                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None)
+                                  "", "", repo_mod.parse(repo), cost_mode(q) == "pago", None, config.tz)
         if failed:
             return failed
         state = await with_state(data["sessions"])   # o estado antes da tabela: ele é uma coluna de filtro
@@ -789,7 +789,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if not task_id:
             return error(request, 400, "Falta o id da sessão.")
         data, failed = await read(request, "sessão", store.session, task_id, config.prices,
-                                  cost_mode(request.query_params) == "pago")
+                                  cost_mode(request.query_params) == "pago", config.tz)
         if failed:
             return failed
         # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
@@ -833,7 +833,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         by_sub = by_cost([{**r, "subscription": r["subscription"] or usage_mod.NO_SUBSCRIPTION} for r in data["by_subscription"]])
         (t_role, t_phase, t_sub), keep = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase),
                                                    (usage_mod.SUBSCRIPTION_TABLE, st_sub, by_sub))
-        return page(request, "usage.html", totals=data["totals"], t_role=t_role, t_phase=t_phase, t_sub=t_sub, keep=keep,
+        return page(request, "usage.html", idle=data.get("idle", []), totals=data["totals"], t_role=t_role, t_phase=t_phase, t_sub=t_sub, keep=keep,
                     charts=charts_mod.build(data, by_role, by_phase, by_sub),
                     from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, sub=sub or "", repos=repos,
                     **period(q, from_ns, to_ns, config.tz))

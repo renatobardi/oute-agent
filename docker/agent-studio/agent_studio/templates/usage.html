@@ -69,6 +69,21 @@
 {% call fragment("assinatura") %}
 <h2>Por assinatura</h2>
 {{ usage_table("subscription", "Assinatura", t_sub, "claude, zai e codex: a assinatura da conversa (oute.subscription; no histórico, o agente); sem custo informado pela fonte, o custo sai calculado pela tabela (#747), sem marca de estimado") }}
+{% if custo == "pago" %}
+<h3>Dias sem uso</h3>
+<div class="cartao rolagem">
+<table class="uso" data-uso="sem-uso">
+  <thead><tr><th>Dia</th><th>Assinatura</th><th class="n">Valor do dia</th></tr></thead>
+  <tbody>
+  {% for r in idle %}
+  <tr data-sem-uso="{{ r.day }}" data-subscription="{{ r.subscription }}" data-usd="{{ r.usd }}"><td>{{ r.day }}</td><td>{{ r.subscription }}</td><td class="n custo">{{ r.usd|usd }} <span class="fino">sem uso</span></td></tr>
+  {% else %}
+  <tr><td colspan="3">Nenhum dia com plano e sem chamada nessa janela.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 {% endcall %}
 </div>
 {% endblock %}

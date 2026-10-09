@@ -133,8 +133,8 @@ cost_tag = lambda page: kpi(page, "cost").split(">", 1)[0]
 check("KPI custo: a dica diz 'Preço de lista, não gasto'", 'title="Preço de lista, não gasto: os agentes rodam por assinatura."' in cost_tag(html)
       and "Custo (lista)" in kpi(html, "cost"))
 pago = get(app, "/", Q + "&custo=pago")[1]
-check("KPI custo pago: a dica diz que a assinatura conta US$ 0, sem o texto do preço de lista",
-      'title="Custo pago: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece."' in cost_tag(pago)
+check("KPI custo pago: a dica diz que é a mensalidade do plano rateada pelo uso (#748), sem o texto do preço de lista",
+      'title="Custo pago: a mensalidade do plano de cada assinatura, rateada pelo uso, mais o pago por uso."' in cost_tag(pago)
       and "Preço de lista" not in cost_tag(pago) and "Custo (pago)" in kpi(pago, "cost"))
 
 # ------------------------------------------------------------------------------ totais batendo com /uso e /v1/usage

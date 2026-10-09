@@ -10,7 +10,7 @@ LLM do ai-memory). Nunca `desconhecida` nem `interativa`; a chamada nunca some d
 
 `aggregate` é a peça reusável (alertas #204, tray #205, tela #206 e #207); `usage` monta a resposta do `/v1/usage`.
 """
-from . import phase as phase_mod, repo as repo_mod, subscription as sub_mod, tz as tz_mod
+from . import phase as phase_mod, rateio, repo as repo_mod, subscription as sub_mod, tz as tz_mod
 from .tabela import Col, Table, usage_cols
 from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
                    SUBSCRIPTION_EXPR, SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
@@ -133,23 +133,39 @@ def _empty():
     return {"calls": 0, "tokens": dict.fromkeys(("input", "output", "cache_read", "cache_creation"), 0),
             "real_usd": None, "listed_usd": None, "estimated_usd": None,
             "real_calls": 0, "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 0,
-            "unpriced_models": set(), "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
+            "unpriced_models": set(), "no_plan_calls": 0, "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
 
 
 def _add(a, b):
     return b if a is None else a + b
 
 
-def _add_call(a, rec, prices, at_ns, paid):
-    """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço e assinatura) no acumulador `a`."""
+def _list_cost(rec, prices, at_ns):
+    """Custo de lista do grupo `rec`: o informado pela fonte mais o calculado pela tabela para o que veio sem custo
+    (sem preço = 0). É o peso da chamada no rateio do plano (#748)."""
+    total = rec["cost_real"] or 0.0
+    if rec["calls"] - rec["calls_real"]:
+        est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"], rec["est_cache_creation"],
+                                prices.lookup(rec["model"], at_ns(rec["epoch"])))
+        total += est or 0.0
+    return total
+
+
+def _add_call(a, rec, prices, at_ns, alloc):
+    """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço, dia e assinatura) no acumulador `a`. `alloc` (`rateio.Alloc`)
+    só no custo pago."""
     a["calls"] += rec["calls"]
     for t in a["tokens"]:
         a["tokens"][t] += rec[t]
-    if paid and rec["sub"]:
-        # assinatura (#531): a chamada custa 0 (fica entre as "com custo": sem cálculo e sem "sem preço"); a soma de
-        # `real_calls`, `listed_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
+    if alloc is not None and rec["sub"]:
+        # assinatura no custo pago (#748): a parte do valor do plano do dia (fica entre as "com custo": sem cálculo e sem "sem
+        # preço"); a soma de `real_calls`, `listed_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
+        share = alloc.share(rec["day"], rec["subname"], _list_cost(rec, prices, at_ns), rec["calls"])
+        if share is None:
+            a["no_plan_calls"] += rec["calls"]  # sem plano naquele dia: conta 0 e é dito na tela
+            share = 0.0
         a["real_calls"] += rec["calls"]
-        a["real_usd"] = _add(a["real_usd"], 0.0)
+        a["real_usd"] = _add(a["real_usd"], share)
         return
     a["real_calls"] += rec["calls_real"]
     if rec["cost_real"] is not None:
@@ -173,32 +189,70 @@ def _add_call(a, rec, prices, at_ns, paid):
         a["estimated_usd"] = _add(a["estimated_usd"], est)
 
 
-def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, paid=False, sub=None):
+def _price_epochs(prices):
+    bounds = prices.boundaries()
+
+    def at_ns(epoch):
+        # qualquer hora da faixa serve (nenhum preço muda dentro dela): o início dela; a faixa 0 é "desde sempre"
+        return bounds[epoch - 1] if epoch else 0
+    return at_ns
+
+
+def paid_alloc(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
+    """O rateio do plano (`rateio.Alloc`, #748) para a janela: o peso de cada (dia, assinatura) vem dos dias **inteiros** que a
+    janela toca e de todas as chamadas da assinatura, sem filtro de repositório nem de assinatura."""
+    prices = prices.snapshot()
+    alloc = rateio.Alloc(rateio.Plan.load(con))
+    span = rateio.day_bounds(from_ns, to_ns, tz)
+    if span is None:
+        return alloc
+    at_ns = _price_epochs(prices)
+    for rec in _calls(con, ("day", "model"), span[0], span[1], prices, tz):
+        if rec["sub"]:
+            alloc.add_weight(rec["day"], rec["subname"], _list_cost(rec, prices, at_ns), rec["calls"])
+    return alloc
+
+
+def _idle_key(k, day, name):
+    if k == "day":
+        return day
+    return name if k == "subscription" else rateio.NO_USE
+
+
+def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, paid=False, sub=None, alloc=None):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
     depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
     na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas.
     `p95=False` pula o p95 (ele não soma entre grupos: quem reagrupa o lê à parte, com `fill_p95`). `repo` (#528) =
     só os fatos desse repositório (`repo.NONE` = os sem repositório); `None` = todos. `sub` (#679) = só as chamadas dessa assinatura (`subscription.py`); `None` = todas.
     Sem custo real, a chamada de assinatura vira **custo de lista calculado** (`listed_*`, #747) e as outras viram estimado (`estimated_*`).
-    `paid=True` (#531, custo pago): a chamada de assinatura (`cost.SUBSCRIPTION_SQL`, a regra de `cost.is_subscription`) conta US$ 0 (entra no `real_*`, sem estimativa);
-    chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
+    `paid=True` (#531, custo pago; rateado desde o #748): a chamada de assinatura (`cost.SUBSCRIPTION_SQL`, a regra de `cost.is_subscription`) recebe a sua
+    parte do valor do plano do dia (`rateio.py`; entra no `real_*`, sem estimativa), e o dia com plano e sem chamada da assinatura vira um grupo "sem uso"
+    (`rateio.NO_USE` em toda chave que não é o dia nem a assinatura; sem ele a soma não fecha com a mensalidade; só sem filtro de repositório); `alloc` = o
+    `paid_alloc` já calculado, se quem chama já o tem. Chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
     keys = tuple(keys)
     if set(keys) - set(KEYS):
         raise ValueError(f"chave inválida: {keys}")
     prices = prices.snapshot()  # uma versão da tabela do começo ao fim, mesmo se a rotina de preços trocar no meio
-    bounds = prices.boundaries()
+    at_ns = _price_epochs(prices)
     groups = {} if keys else {(): _empty()}
-
-    def at_ns(epoch):
-        # qualquer hora da faixa serve (nenhum preço muda dentro dela): o início dela; a faixa 0 é "desde sempre"
-        return bounds[epoch - 1] if epoch else 0
+    if paid and alloc is None:
+        alloc = paid_alloc(con, from_ns, to_ns, prices, tz)
+    if not paid:
+        alloc = None
 
     def acc(rec):
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
     fine = keys if "model" in keys else keys + ("model",)
+    if alloc is not None and "day" not in fine:
+        fine += ("day",)  # o rateio é por dia
     for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, sub):
-        _add_call(acc(rec), rec, prices, at_ns, paid)
+        _add_call(acc(rec), rec, prices, at_ns, alloc)
+    if alloc is not None and repo is None:
+        for day, name, usd in alloc.idle(from_ns, to_ns, tz, sub):
+            a = groups.setdefault(tuple(_idle_key(k, day, name) for k in keys), _empty())
+            a["real_usd"] = _add(a["real_usd"], usd)
     if p95:
         fill_p95(con, groups, keys, from_ns, to_ns, tz, repo, sub)
     for rec in _spans(con, keys, from_ns, to_ns, tz, repo, sub):
@@ -221,7 +275,7 @@ def fill_p95(con, groups, keys, from_ns, to_ns, tz=tz_mod.UTC, repo=None, sub=No
 
 def merge(into, a):
     """Soma o acumulador `a` em `into` (o `p95` não soma: quem precisa dele o lê à parte)."""
-    for k in ("calls", "real_calls", "listed_calls", "claude_no_log_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
+    for k in ("calls", "real_calls", "listed_calls", "claude_no_log_calls", "estimated_calls", "unpriced_calls", "no_plan_calls", "spans", "span_errors", "log_errors"):
         into[k] += a[k]
     for t in into["tokens"]:
         into["tokens"][t] += a["tokens"][t]
@@ -267,6 +321,8 @@ def render(key, a, keys):
             "claude_no_log_calls": a["claude_no_log_calls"],  # parte das listed_calls: chamada do claude sem log de custo, calculada pela tabela (#747)
             "estimated_calls": a["estimated_calls"],
             "unpriced_calls": a["unpriced_calls"],  # sem custo real e sem preço: fora das três somas
+            # só no custo pago (#748): chamadas de assinatura sem plano cadastrado no dia (contam 0); na lista a chave não existe
+            **({"no_plan_calls": a["no_plan_calls"]} if a["no_plan_calls"] else {}),
         },
         "errors": {"spans": a["span_errors"], "logs": a["log_errors"], "total": a["span_errors"] + a["log_errors"]},
         "latency_p95_ms": None if a["p95"] is None else round(a["p95"], 3),
@@ -290,7 +346,8 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
     `codex`; `null` = chamada sem assinatura, como a do ai-memory): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""
     fine_keys = ("day", "host", "agent", "model", "role", "phase", "subscription")
-    fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, paid=paid, sub=sub)  # a junção com os logs de custo roda uma vez só (#504)
+    alloc = paid_alloc(con, from_ns, to_ns, prices, tz) if paid else None
+    fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, paid=paid, sub=sub, alloc=alloc)  # a junção com os logs de custo roda uma vez só (#504)
 
     def cut(keys):
         return fill_p95(con, regroup(fine, fine_keys, keys), keys, from_ns, to_ns, tz, repo, sub)
@@ -301,7 +358,7 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
     by_role = cut(("role",))
     by_phase = cut(("phase",))
     by_subscription = cut(("subscription",))
-    return {
+    out = {
         "timezone": tz.key,
         "totals": render((), total, ()),
         # modelos com chamada sem custo real e sem preço na tabela (null = span sem modelo)
@@ -312,3 +369,8 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
         "by_phase": [render(k, a, ("phase",)) for k, a in _sorted(by_phase)],
         "by_subscription": [render(k, a, ("subscription",)) for k, a in _sorted(by_subscription)],
     }
+    if paid:
+        # os dias com plano e sem uso (#748), já somados no total; sem filtro de repositório ficam de fora, como no `aggregate`
+        idle = alloc.idle(from_ns, to_ns, tz, sub) if repo is None else []
+        out["idle"] = [{"day": d.isoformat(), "subscription": name, "usd": usd} for d, name, usd in idle]
+    return out

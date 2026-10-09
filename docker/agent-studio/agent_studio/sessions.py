@@ -13,7 +13,7 @@ cada conversa é o das chamadas ao modelo (a mesma agregação, com a chave `mod
 """
 import json
 
-from . import repo as repo_mod, usage as usage_mod
+from . import repo as repo_mod, tz as tz_mod, usage as usage_mod
 from .conversations import LIST_LIMIT, _dicts, _first, _pretty
 from .tabela import Col, Table, usage_cols
 
@@ -116,17 +116,17 @@ def _models(calls):
     return [{"model": m, "calls": n} for m, n in sorted(calls.items(), key=lambda kv: (-kv[1], kv[0] or ""))]
 
 
-def _with_usage(con, sessions, loose, prices, paid=False):
+def _with_usage(con, sessions, loose, prices, paid=False, tz=tz_mod.UTC):
     """Põe em cada sessão e em cada conversa as somas e o p95 do #203 (inteiros, não só o trecho da janela) e os
     modelos chamados."""
     items = [x for x in sessions + loose if x["start_ns"] is not None]
     if not items:
         return
     lo, hi = min(x["start_ns"] for x in items), max(x["end_ns"] for x in items) + 1
-    by_session = usage_mod.aggregate(con, lo, hi, prices, ("session",), paid=paid)
-    by_conv = usage_mod.aggregate(con, lo, hi, prices, ("session", "conversation"), paid=paid)
+    by_session = usage_mod.aggregate(con, lo, hi, prices, ("session",), tz, paid=paid)
+    by_conv = usage_mod.aggregate(con, lo, hi, prices, ("session", "conversation"), tz, paid=paid)
     session_models, conv_models = {}, {}
-    for (sid, cid, model), a in usage_mod.aggregate(con, lo, hi, prices, ("session", "conversation", "model"), paid=paid).items():
+    for (sid, cid, model), a in usage_mod.aggregate(con, lo, hi, prices, ("session", "conversation", "model"), tz, paid=paid).items():
         if a["calls"]:
             conv_models.setdefault((sid, cid), {})[model] = a["calls"]
             calls = session_models.setdefault(sid, {})
@@ -139,7 +139,7 @@ def _with_usage(con, sessions, loose, prices, paid=False):
         c["models"] = _models(conv_models.get((c["session"], c["id"]), {}))
 
 
-def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, conv_limit=CONV_LIMIT, repo=None, paid=False):
+def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, conv_limit=CONV_LIMIT, repo=None, paid=False, tz=tz_mod.UTC):
     """Sessões e conversas sem sessão com algum fato na janela [from_ns, to_ns), da mais recente para a mais antiga
     (pelo início). Os números são da sessão (ou da conversa) inteira.
 
@@ -170,7 +170,7 @@ def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT
     for s in sessions:
         s["hidden"] = max(0, len(s["conversations"]) - conv_limit)
         s["conversations"] = s["conversations"][s["hidden"]:]
-    _with_usage(con, sessions, loose, prices, paid)
+    _with_usage(con, sessions, loose, prices, paid, tz)
     return {"sessions": sessions, "total": total, "loose": loose, "loose_total": loose_total,
             "hosts": hosts, "agents": agents, "repos": repos}
 
@@ -204,13 +204,13 @@ def _reserve(raw):
     return {"from": origin, "to": target, "reason": reason}
 
 
-def detail(con, session_id, prices, event_limit=EVENT_LIMIT, paid=False):
+def detail(con, session_id, prices, event_limit=EVENT_LIMIT, paid=False, tz=tz_mod.UTC):
     """Uma sessão com todas as conversas e os eventos dela (logs com o `oute.task.id` e sem conversa: `oute.task.*`
     e o que mais levar a identidade da sessão); `None` se o DuckDB não tem fato nenhum dela."""
     sessions, _ = _group(_pairs(con, "oute_task_id = ?", [session_id]))
     if not sessions:
         return None
-    _with_usage(con, sessions, [], prices, paid)
+    _with_usage(con, sessions, [], prices, paid, tz)
     events = _dicts(con.execute(
         "SELECT time_unix_nano, severity_number, severity_text, event_name, body, attributes "
         "FROM logs WHERE oute_task_id = ? AND session_id IS NULL ORDER BY time_unix_nano, dedupe_key LIMIT ?",

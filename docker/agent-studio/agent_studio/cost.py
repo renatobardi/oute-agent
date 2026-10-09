@@ -48,7 +48,7 @@ MODEL_CALL_PARAMS = (*MODEL_CALL_SPANS, DECISION_SPAN, ROUTER_AGENT)
 
 # Assinatura (#531, #679): a conversa traz `oute.subscription` (`claude`, `zai` ou `codex`) no resource. Histórico sem o
 # atributo: `claude` ou `codex` pelo `oute.agent` (CONTEXT.md, ADR-02). Chamada de qualquer assinatura é de assinatura
-# (conta 0 no custo pago); o resto é pago por uso. É a única definição: o `usage.aggregate` (modo pago), o filtro
+# (recebe a mensalidade rateada no custo pago, #748); o resto é pago por uso. É a única definição: o `usage.aggregate` (modo pago), o filtro
 # e a quebra por assinatura e o detalhe da conversa a usam. Limite conhecido: erra se um dia o Claude ou o Codex rodar
 # com chave de API.
 SUBSCRIPTIONS = ("claude", "zai", "codex")
@@ -75,7 +75,7 @@ def subscription_of(agent, subscription):
 
 
 def is_subscription(subscription):
-    """Assinatura da chamada (`subscription_of`) -> `True` se a chamada é de assinatura (conta 0 no custo pago)."""
+    """Assinatura da chamada (`subscription_of`) -> `True` se a chamada é de assinatura (recebe a mensalidade rateada no custo pago, #748)."""
     return subscription in SUBSCRIPTIONS
 
 

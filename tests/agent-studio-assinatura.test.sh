@@ -99,7 +99,8 @@ kinds = [(s["cost_kind"], round(s["cost"], 6)) for s in det["spans"] if s["is_ca
 check("detalhe da conversa zai: cada chamada é de lista (o custo do Claude Code é descartado)",
       [k for k, _ in kinds] == ["listed"] * 3 and kinds[0][1] == round(1.4 + 0.44, 6) and kinds[2][1] == 1.4)
 dete = CV.detail(st.con, "c-zai", prices, paid=True)
-check("detalhe da conversa zai no custo pago: 0 em cada chamada", [s["cost_kind"] for s in dete["spans"] if s["is_call"]] == ["paid"] * 3)
+check("detalhe da conversa zai no custo pago, sem plano cadastrado (#748): 0 e \"sem plano\" em cada chamada",
+      [(s["cost_kind"], s["cost"]) for s in dete["spans"] if s["is_call"]] == [("noplan", 0.0)] * 3)
 
 # ---------------------------------------------------------------- as telas
 app = create_app(st, TOKEN, config=cfg)

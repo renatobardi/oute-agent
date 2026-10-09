@@ -17,10 +17,11 @@
 {% macro copy_button(target, label="Copiar") %}<button type="button" class="botao copiar" aria-controls="{{ target }}" hidden>{{ icon("copy", 14) }}<span>{{ label }}</span></button>{% endmacro %}
 
 {# custo informado pela fonte, de lista calculado (#747) e estimado sempre separados; só o estimado vai marcado "≈" (#203).
-   O informado e o de lista calculado (assinatura sem custo informado) somam num número só, sem marca. No custo pago (#531) a assinatura conta 0 #}
+   O informado e o de lista calculado (assinatura sem custo informado) somam num número só, sem marca. No custo pago (#531, #748) a assinatura recebe a mensalidade do plano rateada pelo uso #}
 {% macro cost(c) %}
-{% if c.real_usd is not none or c.listed_usd is not none %}<span class="real" title="{{ 'custo pago: o pago por uso informado pela fonte; assinatura conta 0' if custo == 'pago' else 'preço de lista, não gasto: o informado pela fonte somado ao calculado pela tabela de preços (config.toml) para a chamada de assinatura sem custo informado' }}">{{ ((c.real_usd or 0) + (c.listed_usd or 0))|usd }}</span>{% endif %}
-{% if c.estimated_usd is not none %}<span class="est" title="{{ 'custo pago: estimado pela tabela de preços; assinatura conta 0' if custo == 'pago' else 'estimado pela tabela de preços (config.toml), só para chamada fora das assinaturas (#747). Preço de lista, não gasto' }}">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
+{% if c.real_usd is not none or c.listed_usd is not none %}<span class="real" title="{{ 'custo pago: o pago por uso informado pela fonte e a mensalidade do plano rateada pelo uso (assinatura)' if custo == 'pago' else 'preço de lista, não gasto: o informado pela fonte somado ao calculado pela tabela de preços (config.toml) para a chamada de assinatura sem custo informado' }}">{{ ((c.real_usd or 0) + (c.listed_usd or 0))|usd }}</span>{% endif %}
+{% if c.estimated_usd is not none %}<span class="est" title="{{ 'custo pago: estimado pela tabela de preços (chamada fora das assinaturas)' if custo == 'pago' else 'estimado pela tabela de preços (config.toml), só para chamada fora das assinaturas (#747). Preço de lista, não gasto' }}">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
+{% if c.no_plan_calls is defined and c.no_plan_calls %}<span class="semp" data-sem-plano title="assinatura sem plano cadastrado nesses dias: a chamada conta 0. Cadastre o plano em Planos">{{ c.no_plan_calls|num }} sem plano</span>{% endif %}
 {% if c.unpriced_calls %}<span class="semp" title="chamadas sem custo informado pela fonte e sem preço na tabela: fora das somas">{{ c.unpriced_calls|num }} sem preço</span>{% endif %}
 {% if c.real_usd is none and c.listed_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
 {% endmacro %}
@@ -283,7 +284,7 @@
 {% endmacro %}
 
 {# aviso do custo pago (#531): só nesse modo; vai dentro do #conteudo, em toda tela que mostra custo #}
-{% macro aviso_custo() %}{% if custo == "pago" %}<p class="aviso" data-custo-pago>Custo pago: as assinaturas (chamadas do claude e do codex) contam como 0; só aparece o que é pago por uso.</p>{% endif %}{% endmacro %}
+{% macro aviso_custo() %}{% if custo == "pago" %}<p class="aviso" data-custo-pago>Custo pago: a mensalidade do plano de cada assinatura, rateada pelo uso (por dia, na proporção do custo de lista das chamadas; dia sem chamada aparece como "sem uso"), mais o que é pago por uso.</p>{% endif %}{% endmacro %}
 
 {# a etapa publicada (rodada e ciclo, #507 e #509): o texto da etapa é dado não confiável (ADR-08): o parser (etapas.py) devolve só dados, nunca HTML, e tudo aqui sai escapado #}
 {% macro inl(tokens) %}{% for t in tokens %}{% if t.t == "code" %}<code>{{ t.s }}</code>{% elif t.t == "b" %}<strong>{{ t.s }}</strong>{% elif t.t == "a" %}<a href="{{ t.href }}" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer" title="{{ t.href }}">{{ t.s }}</a> <span class="link-host">({{ t.host }})</span>{% else %}{{ t.s }}{% endif %}{% endfor %}{% endmacro %}
