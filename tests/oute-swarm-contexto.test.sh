@@ -13,13 +13,15 @@ unset HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID OUTE_SWARM_RESTART_MERGES
 
 # merges <n>: n linhas de PR mergeado no log, como o watch grava
 merges() { local n="$1" i; for i in $(seq 1 "$n"); do echo "2026-10-09T10:0$i:00Z watch [pr] PR #$i mergeado (issue #$((i + 20)))" >> "$STATE/log"; done; return 0; }
+# dtab <rótulo>: a aba do dispatcher (w1:t0) no `tab list`, com o rótulo da rodada
+dtab() { local rotulo="$1"; jq --arg l "$rotulo" '.result.tabs += [{tab_id: "w1:t0", label: $l}]' "$FAKE/tabs.json" > "$FAKE/tabs.new" && mv "$FAKE/tabs.new" "$FAKE/tabs.json"; return $?; }
 # rd <caso> [merges]: rodada de dispatcher parado, com prompt.md e <merges> merges no log
-rd() { local caso="$1" n="${2:-0}"; dround "$caso"; echo "instruções do dispatcher" > "$STATE/prompt.md"; merges "$n"; return 0; }
-est() { cat "$STATE/estado.md" 2>/dev/null; }
-estl() { grep -qxF -- "$1" <<<"$(est)"; }
+rd() { local caso="$1" n="${2:-0}"; dround "$caso"; dtab swarm-test; echo "instruções do dispatcher" > "$STATE/prompt.md"; merges "$n"; return 0; }
+est() { cat "$STATE/estado.md" 2>/dev/null; return 0; }
+estl() { local linha="$1"; grep -qxF -- "$linha" <<<"$(est)"; return $?; }
 # hold: o `sleep` falso conta também o do send_field (0,5 s): os dois primeiros não fecham a rodada, para a passada seguinte entregar a fila
 hold() { : > "$FAKE/on-sleep-1"; : > "$FAKE/on-sleep-2"; return 0; }
-typed() { cat "$FAKE/typed.log" 2>/dev/null; }
+typed() { cat "$FAKE/typed.log" 2>/dev/null; return 0; }
 
 # ---------------------------------------------------------------- 1. a abertura guarda o prompt do dispatcher
 CASE=abre; round "$CASE"
@@ -59,7 +61,7 @@ check "estado: opção desconhecida, código 1"             [ "$RC" -eq 1 ]
 
 # ---------------------------------------------------------------- 3. N merges: limpa a conversa e manda reler o disco
 CASE=n5; rd "$CASE" 5
-printf '2026-10-09T09:00:00Z pergunta 2. ajustar o #9?\n' >> "$STATE/log"
+printf '2026-10-09T09:00:00Z pergunta 2. ajustar o #9?\n2026-10-09T09:05:00Z resposta\n' >> "$STATE/log"
 hold
 wd
 check "5 merges: código 0"                               [ "$RC" -eq 0 ]
@@ -67,11 +69,16 @@ check "5 merges: o /clear é a primeira digitação"        [ "$(typed | sed -n 
 check "5 merges: o [contexto] é a segunda, com o prefixo do watch" grep -qE '^\[watch swarm-test\] 1 evento\(s\): [0-9]{2}:[0-9]{2} \[contexto\] contexto reiniciado depois de 5 merge\(s\)' <<<"$(typed | sed -n 2p)"
 check "5 merges: manda reler o prompt.md e o estado.md"  bash -c 'l="$(sed -n 2p "$1")"; grep -qF "$2/prompt.md" <<<"$l" && grep -qF "$2/estado.md" <<<"$l"' _ "$FAKE/typed.log" "$STATE"
 check "5 merges: duas digitações e dois Enter"           [ "$(texts)" -eq 2 -a "$(enters)" -eq 2 ]
-check "5 merges: o estado.md foi gravado com a pergunta pendente" bash -c 'grep -A1 "^## Pergunta pendente" <<<"$1" | grep -qxF "2. ajustar o #9?"' _ "$(est)"
+check "5 merges: o estado.md foi gravado"                 estl "# Estado da rodada swarm-test"
 check "5 merges: reinicio.n guarda a contagem"           [ "$(cat "$STATE/reinicio.n")" == 5 ]
 check "5 merges: o evento [contexto] está no log da rodada" grep -q ' watch \[contexto\] contexto reiniciado depois de 5 merge(s)' "$STATE/log"
-check "5 merges: a pergunta pendente continua no log, sem resposta nova" bash -c '! grep -q " resposta$" "$1"' _ "$STATE/log"
 
+# 3a. pergunta pendente ao Bardi: não limpa a conversa
+CASE=pend; rd "$CASE" 5
+printf '2026-10-09T09:00:00Z pergunta 2. ajustar o #9?\n' >> "$STATE/log"
+hold
+wd
+check "pergunta pendente: nada digitado e sem reinicio.n" [ "$(texts)" -eq 0 -a ! -e "$STATE/reinicio.n" ]
 # 3b. a contagem recomeça do último reinício: mais 2 merges não reiniciam, mais 5 sim
 CASE=n5b; rd "$CASE" 7; echo 5 > "$STATE/reinicio.n"
 hold
@@ -116,7 +123,7 @@ printf '%s\n' '──────────────────' '❯ ' '�
 hold
 wd
 check "/clear que não ficou no campo: sem Enter e sem reinicio.n" [ "$(enters)" -eq 0 -a ! -e "$STATE/reinicio.n" ]
-check "/clear que não ficou no campo: adiado, com o motivo no log" grep -qF 'watch reinício do contexto adiado: /clear não digitado em w1:p0 (código 3)' "$STATE/log"
+check "/clear que não ficou no campo: adiado, com o motivo no log" grep -qF 'watch reinício do contexto adiado: /clear não digitado em w1:p0 (código 3, tentativa 1 de 3)' "$STATE/log"
 CASE=sem-agente; rd "$CASE" 5; echo '{"result":{"agents":[]}}' > "$FAKE/agents.json"
 wd
 check "sem agente no pane: nada digitado"                [ "$(texts)" -eq 0 ]
@@ -131,5 +138,31 @@ check "codex: o comando é /new"                          [ "$(typed | sed -n 1p
 CASE=sem-deliver; rd "$CASE" 9; : > "$STATE/x"
 watch
 check "watch sem --deliver: nada digitado e sem reinicio.n" [ "$(texts)" -eq 0 -a ! -e "$STATE/reinicio.n" ]
+
+# ---------------------------------------------------------------- 8. pane que não é o da aba do dispatcher
+CASE=pane-alheio; rd "$CASE" 5; echo '{"result":{"tabs":[{"tab_id":"w1:t0","label":"#7 foo"}]}}' > "$FAKE/tabs.json"
+hold
+wd
+check "aba sem o rótulo da rodada: nada digitado"        [ "$(texts)" -eq 0 -a ! -e "$STATE/reinicio.n" ]
+CASE=pane-sem-aba; rd "$CASE" 5; echo '{"result":{"tabs":[]}}' > "$FAKE/tabs.json"
+wd
+check "aba que o herdr não lista: nada digitado"         [ "$(texts)" -eq 0 ]
+CASE=pane-nome; rd "$CASE" 5; echo '{"result":{"tabs":[]}}' > "$FAKE/tabs.json"; dtab "Mighty_Badger · swarm-test"
+wd
+check "rótulo com o nome da rodada e o id: reinicia"     [ "$(typed | sed -n 1p)" == "/clear" ]
+
+# ---------------------------------------------------------------- 9. teto de tentativas
+CASE=teto; rd "$CASE" 5
+printf '%s\n' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"   # a tela não mostra o que foi digitado
+hold
+wd; wd; wd
+check "teto: três falhas seguidas contadas"              [ "$(cat "$STATE/reinicio.falhas")" == 3 ]
+antes="$(texts)"; wd
+check "teto: a quarta passada não digita mais"           [ "$(texts)" -eq "$antes" ]
+check "teto: cada tentativa vai ao log com o número"     grep -qF 'tentativa 3 de 3' "$STATE/log"
+CASE=teto-zera; rd "$CASE" 5; echo 2 > "$STATE/reinicio.falhas"
+hold
+wd
+check "sucesso zera o contador de falhas"                [ ! -e "$STATE/reinicio.falhas" -a "$(cat "$STATE/reinicio.n")" == 5 ]
 
 check_end

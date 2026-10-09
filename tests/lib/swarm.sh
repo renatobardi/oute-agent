@@ -178,7 +178,7 @@ closes() { grep -c 'tab close' "$FAKE/herdr.log"; }
 # ag <status> [agente] [pane]: o `herdr agent list` com o dispatcher (pane w1:p0, o do meta) nesse estado
 ag() {
   local st="$1" agente="${2:-claude}" pane="${3:-w1:p0}"
-  jq -n --arg s "$st" --arg a "$agente" --arg p "$pane" '{result: {agents: [{pane_id: $p, agent: $a, agent_status: $s}]}}' > "$FAKE/agents.json"
+  jq -n --arg s "$st" --arg a "$agente" --arg p "$pane" '{result: {agents: [{pane_id: $p, tab_id: "w1:t0", agent: $a, agent_status: $s}]}}' > "$FAKE/agents.json"
   return 0
 }
 # wd: o watch --deliver até a rodada fechar (o `sleep` falso fecha na passada sem gancho); stdout em $OUT, stderr em $ERR
@@ -192,8 +192,8 @@ wd() {
 }
 # dround <caso>: rodada de dispatcher no Codex/Claude: round() + dispatcher_pane no meta e o dispatcher parado
 dround() { local caso="$1"; round "$caso"; echo "dispatcher_pane=w1:p0" >> "$STATE/meta"; : > "$FAKE/enter-clears"; ag idle; return 0; }
-texts() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-text' || true; }
-enters() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-keys w1:p0 enter' || true; }
-sent() { tail -n 1 "$FAKE/typed.log" 2>/dev/null; }
-dlog() { grep -F ' watch entrega' "$STATE/log" 2>/dev/null || true; }
-qlen() { wc -l < "$STATE/watch.queue" 2>/dev/null | tr -d ' ' || true; }
+texts() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-text' || true; return 0; }
+enters() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-keys w1:p0 enter' || true; return 0; }
+sent() { tail -n 1 "$FAKE/typed.log" 2>/dev/null; return 0; }
+dlog() { grep -F ' watch entrega' "$STATE/log" 2>/dev/null || true; return 0; }
+qlen() { wc -l < "$STATE/watch.queue" 2>/dev/null | tr -d ' ' || true; return 0; }

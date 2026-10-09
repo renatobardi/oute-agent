@@ -31,8 +31,8 @@ prv() {
   return 0
 }
 # rcout <código> <texto>: o código de saída do último `sw` e o texto na saída (rcerr: no stderr), sem regex
-rcout() { local rc="$1" txt="$2"; [ "$RC" -eq "$rc" ] && grep -qF -- "$txt" <<<"$OUT"; return $?; }
-rcerr() { local rc="$1" txt="$2"; [ "$RC" -eq "$rc" ] && grep -qF -- "$txt" <<<"$ERR"; return $?; }
+rcout() { local rc="$1" txt="$2"; [[ "$RC" -eq "$rc" ]] && grep -qF -- "$txt" <<<"$OUT"; return $?; }
+rcerr() { local rc="$1" txt="$2"; [[ "$RC" -eq "$rc" ]] && grep -qF -- "$txt" <<<"$ERR"; return $?; }
 GREEN='[{"name":"test","conclusion":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"SUCCESS"}]'
 
 # 1. tudo em ordem: código 0 e uma linha que diz head, base e CI
@@ -43,9 +43,17 @@ check "ok: uma linha só"                                 [ "$(wc -l <<<"$OUT")"
 check "ok: a linha diz head, base e CI com SonarCloud"   grep -qF "premerge #12: ok, head ${HEAD1:0:7}, base ${BASE:0:7} em main, CI verde com SonarCloud" <<<"$OUT"
 sw premerge '#12' --head "${HEAD1:0:7}" --base "${BASE:0:7}"
 check "ok: aceita #12 e sha de 7 caracteres"             [ "$RC" -eq 0 ]
-prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","state":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"NEUTRAL"}]'
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","state":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"SUCCESS"}]'
 sw premerge 12 --head "$HEAD1" --base "$BASE"
-check "ok: SUCCESS por state e NEUTRAL contam como verde" [ "$RC" -eq 0 ]
+check "ok: SUCCESS por state conta como verde"          [ "$RC" -eq 0 ]
+for c in NEUTRAL SKIPPED; do
+  prv 12 OPEN "$HEAD1" MERGEABLE "[{\"name\":\"test\",\"conclusion\":\"SUCCESS\"},{\"name\":\"SonarCloud Code Analysis\",\"conclusion\":\"$c\"}]"
+  sw premerge 12 --head "$HEAD1" --base "$BASE"
+  check "$c não é verde: código 4 e o nome do check"      rcout 4 "CI não verde (pendente: SonarCloud Code Analysis)"
+done
+prv 12 OPEN "$HEAD1" UNKNOWN "$GREEN"
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "mergeable UNKNOWN: código 5, não é sem conflito" rcout 5 "mergeable UNKNOWN"
 
 # 2. head diferente do auditado: 2
 prv 12 OPEN bbbbbbb2222222222222222222222222222222bb MERGEABLE "$GREEN"
