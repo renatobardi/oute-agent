@@ -38,10 +38,10 @@ final class SnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.proposals.pending, [])
     }
 
-    func testCustoDeHojeTotalEPorAgenteComEstimadoMarcado() throws {
+    func testCustoDeHojeTotalEPorAgenteComAssinaturaSemEstimado() throws {
         let snapshot = try TraySnapshot.decode(Fixture.data("tray.json"))
         XCTAssertEqual(snapshot.costToday.usd, 5.5404)
-        XCTAssertTrue(snapshot.costToday.estimated)
+        XCTAssertFalse(snapshot.costToday.estimated)  // assinatura = custo de lista (#747), não estimado
         XCTAssertEqual(snapshot.costToday.unpricedCalls, 1)
         XCTAssertEqual(snapshot.costToday.agents.map(\.agent), ["claude", "codex"])
         XCTAssertEqual(snapshot.costToday.agents[1].usd, 2.51)

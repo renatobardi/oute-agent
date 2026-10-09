@@ -49,7 +49,8 @@ public struct TraySnapshot: Decodable, Equatable {
         }
 
         public let usd: Double?
-        /// Parte do total veio da tabela de preços, e não do custo real.
+        /// Parte do total é estimada pela tabela (chamada fora das assinaturas); o custo de lista calculado das
+        /// assinaturas (#747) entra no total sem essa marca.
         public let estimated: Bool
         /// Chamadas sem preço na tabela: ficam fora do total.
         public let unpricedCalls: Int?
