@@ -284,21 +284,20 @@ cmd_start() {
   (( max <= 5 )) || die "--max acima de 5 não é permitido (quota e revisão humana)"
   [[ -z "$workers" ]] || check_agent "$workers"
   [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr (o dispatcher abre abas nele)"
-  # dispatcher no Codex (#213): sem a ferramenta Monitor do Claude, o watch roda numa aba própria e digita os eventos
+  # dispatcher (#213, #761): o watch roda numa aba própria e digita os eventos
   # no campo do dispatcher, que é este pane; sem ele o dispatcher nunca receberia evento
   [[ "$workers" != codex ]] || dagent=codex
-  if [[ "$dagent" != claude ]]; then
-    [[ -n "${HERDR_PANE_ID:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "dispatcher $dagent precisa de HERDR_PANE_ID e HERDR_WORKSPACE_ID (rode no pane do herdr em que ele vai abrir)"
-  fi
+  # (#761) todo dispatcher, Claude inclusive, tem a aba do watch --deliver: precisa do pane e do workspace do herdr
+  [[ -n "${HERDR_PANE_ID:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "dispatcher $dagent precisa de HERDR_PANE_ID e HERDR_WORKSPACE_ID (rode no pane do herdr em que ele vai abrir)"
   command -v gh >/dev/null || die "gh não encontrado"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
   space="$(herdr_space)"
   # agent = o do dispatcher (oute.agent dos eventos da rodada): claude, ou o do --agent quando é codex (#213);
   # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
-  # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (só fora do Claude)
+  # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (#761: em todo dispatcher)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=%s\n%s%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" "$dagent" \
-    "${workers:+workers=$workers$'\n'}${prefer:+prefer=$prefer$'\n'}${subscr:+subscription=$subscr$'\n'}" "$([[ "$dagent" == claude ]] || printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
+    "${workers:+workers=$workers$'\n'}${prefer:+prefer=$prefer$'\n'}${subscr:+subscription=$subscr$'\n'}" "$(printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
   [[ -z "$space" ]] || meta_add "$STATE_ROOT/$id" "space=$space"
   set_round_name_locked "$id"
   rname="$(meta_get "$STATE_ROOT/$id" name)"; rlabel="$(round_label "$STATE_ROOT/$id")"
@@ -321,22 +320,20 @@ cmd_start() {
   fi
   # rótulo da aba do dispatcher: nome e id (#605); o herdr é só o rótulo, falha não impede a rodada
   if [[ -n "${HERDR_TAB_ID:-}" ]]; then herdr tab rename "$HERDR_TAB_ID" "${rname:+$rname · }$id" >/dev/null 2>&1 || true; fi
-  if [[ "$dagent" != claude ]]; then
-    # aba do watch: fora do agente, entrega os eventos digitando no campo do dispatcher (watch --deliver). Sem a aba o
-    # dispatcher ficaria cego: recusa a abertura em vez de abrir sem acompanhamento
-    wout="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "watch $id" --no-focus)" \
-      || die "herdr tab create falhou ao abrir a aba do watch: $wout"
-    wpane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
-    wtab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
-    if [[ -z "$wpane" ]]; then
-      [[ -z "$wtab" ]] || herdr tab close "$wtab" >/dev/null 2>&1 || true
-      slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch não iniciado: pane da aba não achado na saída do herdr"
-      die "não achei o pane da aba do watch na saída do herdr; dispatcher não aberto: $wout"
-    fi
-    printf -v wcmd 'OUTE_SWARM_ID=%q oute-swarm watch --round %q --deliver' "$id" "$id"
-    herdr pane run "$wpane" "$wcmd" >/dev/null || die "herdr pane run falhou na aba do watch ($wpane)"
-    slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch --deliver aberto na aba $wpane (dispatcher $dagent, pane $HERDR_PANE_ID)"
+  # aba do watch: fora do agente, entrega os eventos digitando no campo do dispatcher (watch --deliver). Sem a aba o
+  # dispatcher ficaria cego: recusa a abertura em vez de abrir sem acompanhamento
+  wout="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$main" --label "watch $id" --no-focus)" \
+    || die "herdr tab create falhou ao abrir a aba do watch: $wout"
+  wpane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
+  wtab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$wout" 2>/dev/null || true)"
+  if [[ -z "$wpane" ]]; then
+    [[ -z "$wtab" ]] || herdr tab close "$wtab" >/dev/null 2>&1 || true
+    slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch não iniciado: pane da aba não achado na saída do herdr"
+    die "não achei o pane da aba do watch na saída do herdr; dispatcher não aberto: $wout"
   fi
+  printf -v wcmd 'OUTE_SWARM_ID=%q oute-swarm watch --round %q --deliver' "$id" "$id"
+  herdr pane run "$wpane" "$wcmd" >/dev/null || die "herdr pane run falhou na aba do watch ($wpane)"
+  slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch --deliver aberto na aba $wpane (dispatcher $dagent, pane $HERDR_PANE_ID)"
   OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
     exec oute-task --phase plan -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
 }
@@ -1083,7 +1080,7 @@ cmd_watch() {
   [[ -d "$main" ]] || die "repo da rodada não encontrado: $main"
   command -v herdr >/dev/null && command -v gh >/dev/null && command -v jq >/dev/null || die "precisa de herdr, gh e jq"
   if (( W_DELIVER )); then
-    [[ -n "$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)" ]] || die "meta da rodada sem dispatcher_pane ($W_STATE/meta): --deliver só vale para dispatcher aberto fora do Claude"
+    [[ -n "$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)" ]] || die "meta da rodada sem dispatcher_pane ($W_STATE/meta): --deliver só vale para dispatcher aberto pelo oute-swarm"
     command -v herdr >/dev/null || die "precisa do herdr"
   fi
   sfile="$W_STATE/watch.state"

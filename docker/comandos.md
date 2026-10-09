@@ -131,8 +131,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       `1 sessão, 2 issue, 3 descarta`) → issues/sessões kaizen → fecha com clean + cancela handoffs órfãos.
       --max = abas abertas ao mesmo tempo (default 3, teto 5); aba fechada com close libera a vaga.
       --agent = agente do dispatcher e de todas as sessões da rodada, kaizen inclusive (sem ele: dispatcher em
-      claude e o seletor escolhe cada sessão). Com `--agent codex` o dispatcher abre no Codex e o watch roda numa aba
-      `watch <rodada>` que digita os eventos no campo dele (`watch --deliver`); com claude nada muda (ferramenta Monitor).
+      claude e o seletor escolhe cada sessão). O watch roda numa aba
+      `watch <rodada>` que digita os eventos no campo do dispatcher (`watch --deliver`), Claude ou Codex (#761). Com `--agent codex` o dispatcher abre no Codex.
       O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
       --subscription <assinatura> (#678): as sessões abrem nessa assinatura (`zai` = claude na Z.ai, sem leitura de imagem); o dispatcher segue no claude.
       Merge só quando você pedir.

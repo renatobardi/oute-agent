@@ -16,7 +16,7 @@ trap 'rcv_stop; rm -rf "$TMP"' EXIT
 # ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
 # 8. abertura, spawn, tell (ok e recusado), close, rodada fechada e watch
 CASE=eventos-op; round "$CASE"; rcv_start "$TMP/$CASE/rcv"
-OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 "$SWARM" "$REPO" --max 2 --label bug 2>&1)"; RC=$?
+OUT="$(env PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 HERDR_PANE_ID=w1:p0 "$SWARM" "$REPO" --max 2 --label bug 2>&1)"; RC=$?
 nr="$(ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1)"
 check "abertura: código 0"                               [ "$RC" -eq 0 -a -n "$nr" ]
 check "abertura: meta com o agente do dispatcher"      grep -qx 'agent=claude' "$H/.oute/swarm/$nr/meta"
@@ -104,7 +104,8 @@ watch
 check "watch: pr, ci e rodada como observação"           [ "$(n '.name == "oute.swarm.watch.pr" and .attrs["oute.swarm.source"] == "watch" and (.body | startswith("[pr] PR #12 aberto"))')" -eq 1 -a \
                                                            "$(n '.name == "oute.swarm.watch.ci" and .body == "[ci] PR #12 · test: fail"')" -eq 1 -a "$(n '.name == "oute.swarm.watch.rodada"')" -eq 1 ]
 check "todos: oute.agent=claude e origem do host"        [ "$(n 'true')" -gt 0 -a "$(n '.attrs["oute.agent"] != "claude" or .res["oute.agent"] != "claude" or .res["host.name"] != "oute-mac" or .res["oute.instance"] != "oute-agent"')" -eq 0 ]
-check "todos: uma linha do log = um evento"              [ "$(n 'true')" -eq "$(( $(wc -l < "$STATE/log") + $(wc -l < "$H/.oute/swarm/$nr/log") ))" ]
+# a linha "watch --deliver aberto" (#761) é só registro do host: não vira evento
+check "todos: uma linha do log = um evento"              [ "$(n 'true')" -eq "$(( $(wc -l < "$STATE/log") + $(grep -vc ' watch --deliver aberto ' "$H/.oute/swarm/$nr/log") ))" ]
 rcv_stop
 # 9. coletor fora do ar: mesma saída e mesmo código, sem travar
 CASE=fora; round "$CASE"

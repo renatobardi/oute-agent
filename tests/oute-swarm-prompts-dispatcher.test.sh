@@ -46,17 +46,13 @@ check "triagem: tabela com ordem de abertura e marca"    grep -qF 'ordem de aber
 check "triagem: outras abrem juntas até o limite"        grep -qF 'depois do merge as outras abrem juntas, até 2;' "$FAKE/oute-task.last"
 check "abertura: ordem só com o merge da regra comum"    grep -qF -- '- **Ordem de abertura:** issue com `depois do merge da #<n>` na tabela da triagem só abre com o PR da #<n> mergeado' "$FAKE/oute-task.last"
 # reinício do monitor sem evento novo (#267): no máximo uma linha, sem repetir a pergunta pendente
-check "monitor: reinício sem evento não repete a pergunta (#267)" grep -qF 'não repita a pergunta pendente, as opções numeradas nem o estado da rodada' "$FAKE/oute-task.last"
-check "monitor: no máximo uma linha (#267)"              grep -qF 'Escreva no máximo uma linha (ex.: "monitor reiniciado, sem eventos")' "$FAKE/oute-task.last"
-check "monitor: a pergunta pendente continua valendo (#267)" grep -qF 'A pergunta pendente continua valendo sem ser repetida' "$FAKE/oute-task.last"
-check "monitor: a regra fica no trecho do reinício, no §3 (#267)" bash -c '[ "$(grep -c "reinicie o mesmo comando sem perguntar.*só avise o Bardi se o reinício falhar\. \*\*Reinício sem evento novo não é motivo de mensagem:\*\*" "$1")" -eq 1 ] && [ "$(grep -n -e "^## 3\. " -e "Reinício sem evento novo" -e "^## 4\. " "$1" | sed "s/^[0-9]*:\(.\{4\}\).*/\1/" | tr "\n" "|")" = "## 3|- Ro|## 4|" ]' _ "$FAKE/oute-task.last"
-# monitor pela ferramenta Monitor (#364, ideia 1): não por Bash run_in_background; religa e confere o estado
-check "monitor: ferramenta Monitor com timeout_ms no máximo (#364)" grep -qF '` com a ferramenta `Monitor`, com o `timeout_ms` no máximo que ela aceita; não escreva laço próprio.' "$FAKE/oute-task.last"
-check "monitor: não por Bash run_in_background (#364)"   grep -qF '**Não use `Bash` com `run_in_background` para o `watch`:**' "$FAKE/oute-task.last"
-check "monitor: a exceção é o tell --wait (#364)"        grep -qF 'A exceção é o `tell --wait` (abaixo), que roda em `run_in_background`.' "$FAKE/oute-task.last"
-check "monitor: religa com sessão, PR ou pergunta (#364)" grep -qF 'a rodada ainda estiver aberta (sessão aberta, PR aberto ou pergunta pendente), reinicie o mesmo comando sem perguntar**, de novo com a ferramenta `Monitor`' "$FAKE/oute-task.last"
-check "monitor: confere o estado da rodada ao religar (#364)" grep -qF 'ao religar confira o estado da rodada (`oute-swarm list` e os PRs abertos dela)' "$FAKE/oute-task.last"
-check "monitor: o texto antigo, ambíguo, não fica (#364)" bash -c '! grep -qF "como monitor em segundo plano" "$1"' _ "$FAKE/oute-task.last"
+# watch pela aba --deliver, sem Monitor (#761, antes #267/#364): igual para Claude e Codex
+check "watch: roda sozinho na aba, sem o dispatcher armar nada (#761)" grep -qF 'já roda sozinho, fora de você, na aba `watch ' "$FAKE/oute-task.last"
+check "watch: não o rode e não escreva laço próprio (#761)" grep -qF '**não o rode e não escreva laço próprio**' "$FAKE/oute-task.last"
+check "watch: sem a ferramenta Monitor nem reinício (#761)" bash -c '! grep -qF -e "Monitor" -e "reinicie o mesmo comando" -e "timeout_ms" "$1"' _ "$FAKE/oute-task.last"
+check "watch: mensagem sem evento não repete a pergunta (#267)" grep -qF '**Mensagem sem evento novo não é motivo de pergunta:** não repita a pergunta pendente, as opções numeradas nem o estado da rodada' "$FAKE/oute-task.last"
+check "watch: aba caída, avisa o Bardi em uma linha (#761)" grep -qF 'avise o Bardi **em uma linha**' "$FAKE/oute-task.last"
+check "watch: o tell --wait do Claude segue em run_in_background (#364)" grep -qF '`run_in_background`)' "$FAKE/oute-task.last"
 # merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
 check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.last"
 check "merges em série: fica no §3, antes do §4"         [ "$(grep -n -e '^## 3\. ' -e 'Merges em série\*\*' -e '^## 4\. ' "$FAKE/oute-task.last" | cut -d: -f2 | cut -c1-6 | tr '\n' '|')" == '## 3. |  - **|## 4. |' ]
@@ -90,7 +86,7 @@ check "sem PR: aplicar e comentar o resultado só depois do ok (#115)" grep -qF 
 check "sem PR: done sem PR não é alerta para esse tipo (#115)" grep -qF 'para a issue com `só GitHub` na tabela da triagem, `done` sem PR não é alerta: é o esperado.' "$FAKE/oute-task.last"
 check "sem PR: o alerta continua para issue que deveria gerar PR (#115)" grep -qF 'O alerta `idle`/`done` sem PR continua valendo para a issue que deveria gerar PR (`PR` na tabela).' "$FAKE/oute-task.last"
 check "sem PR: o alerta geral do monitor fica como estava (#115)" grep -qF 'uma sessão ficar `blocked` ou `idle`/`done` sem PR; um PR abrir;' "$FAKE/oute-task.last"
-check "done sem PR: antes de avisar, confira o branch da sessão (#403)" grep -qF '**Antes de avisar uma sessão `idle`/`done` sem PR**, confira o branch da sessão (releia `git log` na worktree dela, `gh pr list --head <branch>` no repo da issue) e aguarde o próximo evento do `oute-swarm watch`' "$FAKE/oute-task.last"
+check "done sem PR: antes de avisar, confira o branch da sessão (#403)" grep -qF '**Antes de avisar uma sessão `idle`/`done` sem PR**, confira o branch da sessão (releia `git log` na worktree dela, `gh pr list --head <branch>` no repo da issue) e aguarde o próximo evento do `watch`' "$FAKE/oute-task.last"
 check "done sem PR: só avise se sem commit novo nem PR (#403)" grep -qF 'só avise o Bardi se não houver commit novo nem PR aberto nesse ínterim e a sessão continuar parada' "$FAKE/oute-task.last"
 check "done sem PR: fica no §3, antes de avisar o Bardi (#403)" bash -c 'sed -n "/^## 3\. /,/^## 4\. /p" "$1" | grep -q "\*\*Antes de avisar uma sessão.*Avise o Bardi quando:"' _ "$FAKE/oute-task.last"
 check "sem PR: ok do Bardi por opção numerada, repassado por tell (#115)" grep -qF 'Só com a escolha dele repasse o ok à sessão com `oute-swarm tell`.' "$FAKE/oute-task.last"
