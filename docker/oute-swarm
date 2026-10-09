@@ -861,11 +861,12 @@ w_ask_mark() {
 # sessão parada por cota esgotada (#759): a tela do pane (as últimas linhas) traz o erro do fornecedor. Claude e Codex:
 # "usage limit reached", "5-hour limit reached"; zai: "API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted".
 # Só o texto da tela é lido (nada é digitado). Pane que não lê, ou sem o erro, não gera nada. $1 = pane
-W_QUOTA_RE='(request rejected \(429\)|api error[^[:cntrl:]]*429|429[^[:cntrl:]]*(limit|quota)|limit (reached|exhausted)|usage limit|quota (exceeded|exhausted)|out of (usage|credits))'
+W_QUOTA_RE='^((api error|error|request rejected)[^[:cntrl:]]*(429|limit|quota)|you.ve hit your (usage )?limit|(claude )?usage limit reached|([0-9]+-hour|weekly) limit reached)'
 w_quota_stop() {
   local pane="$1" scr
   scr="$(herdr pane read "$pane" --source visible 2>/dev/null)" || return 1
-  printf '%s\n' "$scr" | tail -n 20 | grep -qiE -- "$W_QUOTA_RE"
+  # só a linha que COMEÇA com o erro do fornecedor (tirados os marcadores ● ⎿ ■ do começo): "usage limit" no meio de um texto comum não conta
+  printf '%s\n' "$scr" | tail -n 20 | sed -E 's/^[^[:alnum:]]+//' | grep -qiE -- "$W_QUOTA_RE"
   return $?
 }
 # assinatura da sessão: o 8º campo do spawned; linha antiga (`-`) = o agente dela. $1 = campo, $2 = agente

@@ -62,6 +62,14 @@ watch
 check "idle sem erro na tela: sem [cota]"                bash -c '! grep -q "\[cota\]" <<<"$1"' _ "$(log_events)"
 check "idle sem erro na tela: segue a [sessao] idle"     logged "[sessao] #7 foo: idle (sem PR)"
 
+# a frase em texto comum numa tela parada (auditoria do PR): não é o erro do fornecedor, nenhuma troca
+CASE=watch-prosa; round "$CASE"; qq 10 10 92 10; set_sub zai claude
+printf '%s\n' '● Expliquei que o plano tem um usage limit semanal e que o erro 429 aparece quando o limit reached é atingido.' '  Veja também a doc: Request rejected (429) quando o limite acaba.' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"
+echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
+watch
+check "frase de cota em texto comum (idle): sem [cota]"  bash -c '! grep -q "\[cota\]" <<<"$1"' _ "$(log_events)"
+check "frase em texto comum: segue a [sessao] idle"      logged "[sessao] #7 foo: idle (sem PR)"
+
 # erro antigo na tela, mas a sessão voltou a trabalhar: só sessão parada conta
 CASE=watch-working; round "$CASE"; qq 10 10 92 10; set_sub zai claude; screen_429
 echo 'fake-tabs working' > "$FAKE/on-sleep-1"
