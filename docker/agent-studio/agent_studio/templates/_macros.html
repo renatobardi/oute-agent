@@ -254,7 +254,7 @@
 <span class="badges">
 {% if st and st.state %}{{ badge(st.state, "", "loader" if st.state == "aberta" else "") }}{% endif %}
 {% if s.swarm_round %}{{ badge("rodada " ~ s.swarm_round ~ ((" (" ~ s.round.label ~ ")") if s.round and s.round.label else ""), "contorno", "repeat") }}
-{% else %}{{ badge("avulsa", "contorno") }}{% endif %}
+{% else %}{{ badge("standalone", "contorno") }}{% endif %}
 {% if st and st.issue is not none %}{{ badge("issue #" ~ st.issue, "contorno", "circle-dot") }}{% endif %}
 </span>
 {% endmacro %}

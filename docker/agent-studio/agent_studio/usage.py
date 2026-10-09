@@ -2,7 +2,7 @@
 agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
-Papel e fase da conversa (#433, #749): `role` = dispatcher, worker ou avulsa, dos eventos `oute.task.opened`/`reopened` da sessão
+Papel e fase da conversa (#433, #749): `role` = dispatcher, worker ou standalone (a sessão avulsa), dos eventos `oute.task.opened`/`reopened` da sessão
 (`oute.swarm.round`/`oute.swarm.session`) ou, sem eles, do resource da chamada. `phase` = **sempre uma fase do ADR-07**: a da
 conversa em `conversation_phase` (o `phase.py` a deriva: abertura, label, skill, papel, ação, Jev ou troca do Bardi), a da abertura da
 sessão se a conversa ainda não foi classificada, `build` (a mais provável) se nem isso, e `ops` para o fato sem conversa (ex.: o
@@ -30,7 +30,7 @@ def _table(kind):
 ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE = _table("role"), _table("phase"), _table("subscription")
 NO_SUBSCRIPTION = "sem assinatura"  # a chamada que não é de assinatura nenhuma (ex.: o LLM do ai-memory), só na exibição
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo", "subscription")
-ROLES = ("dispatcher", "worker", "avulsa")
+ROLES = ("dispatcher", "worker", "standalone")
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
@@ -58,14 +58,14 @@ def local_expr(tz):
 _SESSION_INFO = (
     "(SELECT oute_task_id AS task, "
     "CASE WHEN count(*) FILTER (WHERE json_extract_string(attributes, '$.\"oute.swarm.session\"') IS NOT NULL) > 0 "
-    "THEN 'worker' WHEN count(oute_swarm_round) > 0 THEN 'dispatcher' ELSE 'avulsa' END AS role, "
+    "THEN 'worker' WHEN count(oute_swarm_round) > 0 THEN 'dispatcher' ELSE 'standalone' END AS role, "
     "arg_min(phase, time_unix_nano) FILTER (WHERE regexp_full_match(phase, '[a-z]{2,16}')) AS phase "
     "FROM (SELECT *, json_extract_string(attributes, '$.\"oute.task.phase\"') AS phase FROM logs "
     "WHERE event_name IN ('oute.task.opened', 'oute.task.reopened') AND oute_task_id IS NOT NULL) GROUP BY oute_task_id)")
 # sem evento da sessão: o papel sai do resource da própria chamada
 _SCOPE = (f"(SELECT t.*, COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
           "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
-          f"ELSE 'avulsa' END) AS role, {phase_mod.sql_phase()} AS phase "
+          f"ELSE 'standalone' END) AS role, {phase_mod.sql_phase()} AS phase "
           f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id "
           "LEFT JOIN conversation_phase cp ON cp.conversation = t.session_id)")
 
@@ -273,7 +273,7 @@ def _sorted(groups):
 
 def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub=None):
     """Resposta do `/v1/usage`: `totals`, `rows` (host × agente × modelo), `series` (dia × host × agente × modelo;
-    o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, avulsa) e
+    o dia é o do fuso `tz`, e `timezone` diz qual) e, por sessão (#433), `by_role` (dispatcher, worker, standalone) e
     `by_phase` (só fases do ADR-07, #749) e, por assinatura (#679), `by_subscription` (`claude`, `zai`,
     `codex`; `null` = chamada sem assinatura, como a do ai-memory): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""

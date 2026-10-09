@@ -1,0 +1,2 @@
+### Changed
+- **Papel `avulsa` passa a `standalone` no agent-studio** (#750, ADR-08, pedido do Bardi em 2026-10-08): Uso, Sessões e a tabela por papel mostram `standalone`, e o `GET /v1/usage` devolve `standalone` em `by_role[].role` (**mudança de contrato**; `dispatcher` e `worker` não mudam; `by_phase` já não tinha `interativa` nem `desconhecida` desde a #749). O histórico não é regravado: o papel é calculado na leitura. O texto corrido segue "sessão avulsa". Nenhum leitor do repo (`ops-observe`, tray) lia `by_role`. **Precisa de release** (código do agent-studio).

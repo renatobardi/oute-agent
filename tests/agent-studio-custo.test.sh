@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Testes do custo por papel e por fase do agent-studio (#433, ADR-08 §9): `GET /v1/usage` devolve `by_role`
-# (dispatcher, worker, avulsa) e `by_phase` (só fases do ADR-07, #749) ao lado dos agrupamentos de
+# (dispatcher, worker, standalone) e `by_phase` (só fases do ADR-07, #749) ao lado dos agrupamentos de
 # sempre, e a tela `/uso` mostra as duas tabelas. Papel e fase saem dos eventos `oute.task.opened`/`reopened` da sessão
 # (e, sem eles, do resource da chamada); nenhum atributo novo. O DuckDB de exemplo nasce pela ingestão de verdade
 # (POST /v1/traces e /v1/logs). Sem Docker.
@@ -23,7 +23,7 @@ studio_init
 #   TB avulsa com fase hostil no evento ("<b>x</b>"): a fase não vale e cai em build (a mais provável, #749); chamada real 0,04.
 #   TX sem nenhum evento de abertura, mas com rodada e sessão do swarm no resource: worker/build, real 0,02.
 #   TY com evento de outro nome levando oute.task.phase=ops: o evento não vale, fica em build; real 0,03.
-#   chamada sem oute.task.id e sem conversa: avulsa/ops (fato sem sessão nem conversa, #749), real 0,07; chamada sem preço de TW: fora das somas (unpriced).
+#   chamada sem oute.task.id e sem conversa: standalone/ops (fato sem sessão nem conversa, #749), real 0,07; chamada sem preço de TW: fora das somas (unpriced).
 #   Chamada de TW em janeiro de 2025: fora da janela.
 PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
 import json, sys
@@ -84,12 +84,12 @@ role() { jq -c --arg k "$1" '.by_role[] | select(.role == $k)' <<<"$R"; }
 phase() { jq -c --arg k "$1" '.by_phase[] | select(.phase == $k)' <<<"$R"; }
 
 # ---------------------------------------------------------------- 1. por papel
-check "by_role: os três papéis, nada além"             jqe '[.by_role[].role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$R"
+check "by_role: os três papéis, nada além"             jqe '[.by_role[].role] | sort == ["dispatcher", "standalone", "worker"]' <<<"$R"
 check "dispatcher: 2 chamadas, real 0,80"              jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000) and .cost.estimated_usd == null and .tokens.input == 300" <<<"$(role dispatcher)"
 check "worker: real 0,17, estimado 3,00 (TW, e TX sem evento de abertura pelo resource)"     jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 170000) and (.cost.estimated_usd | $(usd .) == 3000000)" <<<"$(role worker)"
 check "worker: chamada sem preço fora das somas"       jqe ".cost.unpriced_calls == 1 and .cost.real_calls == 3 and .cost.estimated_calls == 1" <<<"$(role worker)"
 check "worker: o erro do span entra no grupo"          jqe ".errors.spans == 1" <<<"$(role worker)"
-check "avulsa: real 0,14 (TB, TY, sem sessão), est 1,25" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(role avulsa)"
+check "standalone: real 0,14 (TB, TY, sem sessão), est 1,25" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(role standalone)"
 
 # ---------------------------------------------------------------- 2. por fase
 check "by_phase: só plan, build e ops (fases do ADR-07; nem desconhecida nem interativa)" jqe '[.by_phase[].phase] | sort == ["build", "ops", "plan"]' <<<"$R"
@@ -120,7 +120,7 @@ check "/uso janela inválida: 400"                      test "$(code "${A[@]}" "
 check "POST no /uso: 405"                              test "$(code -X POST "${A[@]}" "$STUDIO_URL/uso")" = 405
 HTML="$(studio_page "${A[@]}" "$STUDIO_URL/uso?$WIN")"
 P="$(data <<<"$HTML")"
-check "tela: tabela por papel com as três linhas"      jqe '[.[] | select(.role) | .role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$P"
+check "tela: tabela por papel com as três linhas"      jqe '[.[] | select(.role) | .role] | sort == ["dispatcher", "standalone", "worker"]' <<<"$P"
 check "tela: tabela por fase com as três linhas (ADR-07)" jqe '[.[] | select(.phase) | .phase] | sort == ["build", "ops", "plan"]' <<<"$P"
 check "tela: linha do dispatcher = a da API"           jqe ".[] | select(.role == \"dispatcher\") | .calls == \"2\" and (.[\"real-usd\"] | $(usd .) == 800000)" <<<"$P"
 check "tela: mais cara primeiro (build antes de plan)" jqe '[.[] | select(.phase) | .phase] | index("build") < index("plan")' <<<"$P"
@@ -132,7 +132,7 @@ check "tela: barras de papel, fase e assinatura somam três vezes o total (real 
 # as dicas de Papel e de Fase (#592): cada uma no cabeçalho da sua coluna, e só nela
 TH_ROLE="$(sed -n '/data-uso="role"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
 TH_PHASE="$(sed -n '/data-uso="phase"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
-check "tela: a coluna Papel leva a dica de dispatcher, worker e avulsa" grep -qF 'title="dispatcher e worker são as sessões de uma rodada do swarm; avulsa, a sessão fora de rodada (e a conversa sem sessão)"' <<<"$TH_ROLE"
+check "tela: a coluna Papel leva a dica de dispatcher, worker e standalone" grep -qF 'title="dispatcher e worker são as sessões de uma rodada do swarm; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)"' <<<"$TH_ROLE"
 check "tela: a coluna Fase leva a dica da fase do ADR-07" grep -qF 'title="a fase do AI-DLC (ADR-07) da conversa: a da abertura ou a derivada depois do fato (label, skill, papel, ação, Jev); as de baixa confiança estão em Fases, onde o Bardi as troca"' <<<"$TH_PHASE"
 check "tela: a dica de Papel não está na coluna Fase, nem a de Fase na coluna Papel" bash -c '! grep -qF "aidlc:" <<<"$1" && ! grep -qF "dispatcher e worker" <<<"$2"' _ "$TH_ROLE" "$TH_PHASE"
 check "tela: menu com o link do uso"                  grep -q 'href="/uso"' <<<"$HTML"
