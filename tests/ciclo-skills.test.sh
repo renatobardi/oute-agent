@@ -31,4 +31,11 @@ check "qa-pr-audit: o passo 13 remete à mesma limpeza" grep -qF 'depois `rm -rf
 check "qa-pr-audit: oute-refcheck e gh pr comment encadeados com &&" grep -qF 'oute-refcheck <arquivo do relatório> && gh pr comment <N> --body-file <arquivo do relatório>' "$AUDIT"
 check "qa-pr-audit: não publica com quebrada ou nao-abre" grep -qF 'não publica se a saída do `oute-refcheck` tiver `quebrada` ou `nao-abre`' "$AUDIT"
 check "qa-pr-audit: referência de arquivo leva o caminho completo desde a raiz" grep -qF 'caminho completo desde a raiz do repo' "$AUDIT"
+# skill dividida (#754): o corpo fica com o caminho de toda auditoria; o passo 14 e o modelo do relatório vão para arquivos da pasta
+AUDIT_DIR="$ROOT/addons/skills/oute-aidlc-qa-pr-audit"
+check "qa-pr-audit: o corpo da skill fica abaixo de 50000 bytes (#754)" bash -c '[ "$(wc -c < "$1")" -lt 50000 ]' _ "$AUDIT"
+check "qa-pr-audit: passo 14 e modelo do relatório são arquivos da pasta, com o marcador (#754)" bash -c 'grep -qF "gh pr merge <N> --squash --match-head-commit" "$1/merge.md" && grep -qF "<!-- oute-aidlc-qa-pr-audit:merge -->" "$1/merge.md" && grep -qF "<!-- oute-aidlc-qa-pr-audit -->" "$1/relatorio.md"' _ "$AUDIT_DIR"
+check "qa-pr-audit: o corpo não repete o passo 14 nem o modelo (#754)" bash -c '! grep -qF -e "--match-head-commit" -e "oute-aidlc-qa-pr-audit:merge -->" -e "### Prós e contras" "$1"' _ "$AUDIT"
+check "qa-pr-audit: o corpo manda ler merge.md e relatorio.md (#754)" bash -c 'grep -qF "\`merge.md\`" "$1" && grep -qF "\`relatorio.md\`" "$1"' _ "$AUDIT"
+check "qa-pr-audit: a skill mantém o passo 13 com as três condições do pedido de merge (#754)" bash -c 'grep -qF "Na dúvida sobre qualquer uma das três" "$1"' _ "$AUDIT"
 check_end
