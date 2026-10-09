@@ -43,6 +43,12 @@
 #                                                   imprime os resets e sai com 6 (o dispatcher abre BLOQUEADO)
 #   oute-swarm busy [--repo <repo>]                 (usado pelo dispatcher, #605) issues com sessão aberta em OUTRA rodada do
 #                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
+#   oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]   (usado pelo dispatcher, #752) conferência de antes do merge,
+#                                                   sem modelo: PR aberto e sem conflito, head = o auditado, base = a ensaiada, CI verde (só SUCCESS; pulado e neutro não contam) com
+#                                                   o SonarCloud Code Analysis. Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
+#   oute-swarm estado [--autorizacao "<texto>"]     (#752) grava ~/.oute/swarm/<rodada>/estado.md só do disco; --autorizacao registra a
+#                                                   autorização permanente de merge. O watch --deliver recomeça o contexto do dispatcher
+#                                                   a cada OUTE_SWARM_RESTART_MERGES merges (padrão 5, 0 desliga): /clear + [contexto]
 #
 # Rodada (#605): id técnico único (`swarm-<MMDD>-<HHMM>`, com sufixo curto se a pasta já existe: reserva por mkdir sem -p) e
 # nome amigável `Adjetivo_Substantivo` (docker/agent-studio/agent_studio/names.py), sorteado na abertura entre os que nenhuma
@@ -317,6 +323,7 @@ cmd_start() {
                 -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
                 -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|${rname:+ (nome amigável **$rname**: o id é a chave em tudo, mas para o Bardi escreva sempre os dois, ex.: \`$rname ($id)\`)}|g")"
   prompt="${prompt//'{{OUTRAS}}'/${others:-nenhuma}}"
+  printf '%s' "$prompt" > "$STATE_ROOT/$id/prompt.md"   # o dispatcher recomeçado relê as instruções daqui (#752)
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id${rname:+ · $rname} (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
   echo "dispatcher $rlabel · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
   if [[ -n "$others" ]]; then
@@ -1145,8 +1152,45 @@ w_deliver() {
   return 0
 }
 
+# recomeço do contexto do dispatcher (#752): a cada N merges vistos (OUTE_SWARM_RESTART_MERGES, padrão 5; 0 desliga), com o
+# dispatcher parado, o campo vazio e a fila de eventos entregue, o watch grava o estado.md, digita o comando que limpa a
+# conversa (`/clear` no Claude, `/new` no Codex) e enfileira a mensagem [contexto], que o dispatcher recebe como qualquer
+# evento e que o manda reler o prompt.md e o estado.md. Não recomeça: rodada sem prompt.md (aberta antes da #752); com pergunta
+# pendente ao Bardi (a resposta dele, com o número da opção, precisa da conversa que a viu); com o pane que não é da aba do
+# dispatcher (rótulo da aba terminando no id da rodada); depois de W_RENEW_TRIES falhas seguidas de digitação.
+W_RENEW_TRIES=3
+w_renew() {
+  local n="${OUTE_SWARM_RESTART_MERGES:-5}" total prev pane agents agent st field cmd sf tab label fails
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || return 0
+  [[ ! -s "$W_STATE/watch.queue" && -s "$W_STATE/prompt.md" ]] || return 0
+  total="$(merges_seen "$W_STATE")"; prev="$(cat "$W_STATE/reinicio.n" 2>/dev/null || echo 0)"
+  (( total - prev >= n )) || return 0
+  fails="$(cat "$W_STATE/reinicio.falhas" 2>/dev/null || echo 0)"
+  (( fails < W_RENEW_TRIES )) || return 0
+  [[ -z "$(pergunta_pendente "$W_STATE")" ]] || return 0
+  pane="$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)"
+  agents="$(herdr agent list 2>&1)" || return 0
+  read -r agent st tab < <(jq -r --arg p "$pane" '[.. | objects | select(.pane_id? == $p and has("agent_status"))][0] | "\(.agent // "-") \(.agent_status // "-") \(.tab_id // "-")"' <<<"$agents" 2>/dev/null || echo "- - -")
+  case "$agent" in claude) cmd=/clear ;; codex) cmd=/new ;; *) return 0 ;; esac
+  case "$st" in idle|done) ;; *) return 0 ;; esac
+  label="$(herdr tab list 2>/dev/null | jq -r --arg t "$tab" '[.. | objects | select((.tab_id? // "") == $t)][0].label // empty' 2>/dev/null || true)"
+  [[ -n "$label" && "$label" == *"$(basename "$W_STATE")" ]] || return 0
+  if ! field="$(field_text "$pane" "$agent")" || [[ -n "$field" ]]; then return 0; fi
+  estado_write "$W_STATE"
+  send_field "$pane" "$agent" "$cmd" "$st" && sf=0 || sf=$?
+  if (( sf != 0 )); then
+    fails=$((fails + 1)); printf '%s\n' "$fails" > "$W_STATE/reinicio.falhas"
+    slog "$W_STATE" "$(date -u +%FT%TZ) watch reinício do contexto adiado: $cmd não digitado em $pane (código $sf, tentativa $fails de $W_RENEW_TRIES)"
+    return 0
+  fi
+  rm -f "$W_STATE/reinicio.falhas"
+  printf '%s\n' "$total" > "$W_STATE/reinicio.n"
+  w_ev contexto "contexto reiniciado depois de $((total - prev)) merge(s). Você é o dispatcher da rodada $(basename "$W_STATE"): releia $W_STATE/prompt.md (suas instruções) e $W_STATE/estado.md (o estado em disco, com a pergunta pendente) e siga dali"
+  return 0
+}
+
 cmd_watch() {
-  local interval=60 round="" main since sfile tmp k v first=1
+  local interval=60 round="" main since sfile tmp k v first=1 hadq
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --interval) interval="${2:?}"; shift 2 ;;
@@ -1184,7 +1228,10 @@ cmd_watch() {
     w_snapshot "$W_STATE" "$main" "$since"
     (( first )) || { w_diff; w_check_merged_issues; }
     first=0
+    # o recomeço do contexto só numa passada em que a fila já estava vazia: evento entregue agora deixa o dispatcher trabalhando (#752)
+    hadq=0; [[ ! -s "$W_STATE/watch.queue" ]] || hadq=1
     (( ! W_DELIVER )) || w_deliver
+    (( ! W_DELIVER || hadq )) || w_renew
     tmp="$(mktemp "$W_STATE/.watch.XXXXXX")"
     for k in "${!W_CUR[@]}"; do printf '%s\t%s\n' "$k" "${W_CUR[$k]}"; done | sort > "$tmp"
     mv "$tmp" "$sfile"
@@ -1623,8 +1670,143 @@ cmd_busy() {
   return 0
 }
 
+# ---------------------------------------------------------------- estado em disco e conferência de merge (#752)
+# merges que o watch viu na rodada (linhas `watch [pr] PR #n mergeado` do log): a contagem do recomeço do dispatcher
+merges_seen() {
+  local state="$1" n
+  n="$(grep -c ' watch \[pr\] PR .* mergeado' "$state/log" 2>/dev/null || true)"
+  printf '%s' "${n:-0}"
+  return 0
+}
+
+# pergunta_pendente <pasta da rodada>: o texto do último `ask` sem `answered` depois dele; vazio se não há
+pergunta_pendente() {
+  local state="$1"
+  awk '$2 == "pergunta" { sub(/^[^ ]+ pergunta /, ""); p = $0 } $2 == "resposta" { p = "" } END { print p }' "$state/log" 2>/dev/null || true
+  return 0
+}
+
+# estado_write <pasta da rodada>: grava estado.md, o que o dispatcher precisa para recomeçar sem a conversa, só do que está em
+# disco (meta, spawned, closed, log, autorizacao, etapas). Sem modelo e sem rede.
+estado_write() {
+  local state="${1%/}" id f slug q auth
+  id="$(basename "$state")"
+  q="$(pergunta_pendente "$state")"
+  auth="$(cat "$state/autorizacao" 2>/dev/null || true)"
+  {
+    echo "# Estado da rodada $id"
+    echo
+    echo "Gerado em $(date -u +%FT%TZ) por \`oute-swarm estado\`, só do que está em disco. Suas instruções: \`$state/prompt.md\`."
+    echo
+    echo "- repo: $(meta_get "$state" repo)"
+    echo "- nome: $(meta_get "$state" name | grep . || echo '(sem nome)')"
+    echo "- max: $(meta_get "$state" max) · label: $(meta_get "$state" label | grep . || echo '(nenhum)') · agente das sessões: $(meta_get "$state" workers | grep . || echo seletor)"
+    echo "- merges vistos pelo watch: $(merges_seen "$state")"
+    echo
+    echo "## Pergunta pendente ao Bardi"
+    echo "${q:-nenhuma}"
+    echo
+    echo "## Autorização permanente de merge"
+    echo "${auth:-nenhuma registrada}"
+    echo
+    echo "## Sessões"
+    while read -r slug _; do
+      [[ -n "$slug" ]] || continue
+      if is_closed "$state" "$slug"; then echo "- $slug: fechada"; else echo "- $slug: aberta"; fi
+    done < <(cat "$state/spawned" 2>/dev/null)
+    echo
+    echo "## PRs mergeados (linhas do log)"
+    grep ' watch \[pr\] PR .* mergeado' "$state/log" 2>/dev/null | sed -E 's/ watch \[pr\] / /; s/^/- /' || true
+    echo
+    echo "## Etapas publicadas na página da rodada"
+    for f in "$state"/etapas/*.md; do if [[ -e "$f" ]]; then echo "- $(basename "$f")"; fi; done
+    echo
+    echo "## Linha do tempo"
+    echo "Leia o fim de \`$state/log\` e rode \`oute-swarm list\` antes de agir."
+  } > "$state/estado.md.tmp" && mv "$state/estado.md.tmp" "$state/estado.md"
+  return 0
+}
+
+# oute-swarm estado [--autorizacao "<texto>"]: grava o estado.md da rodada. --autorizacao registra a autorização permanente de
+# merge que o Bardi deu (uma linha, até 300 caracteres), a única coisa do estado que não está em outro lugar do disco
+cmd_estado() {
+  local state auth="" have_auth=0 opt val
+  while [[ $# -gt 0 ]]; do
+    opt="$1"; val="${2:-}"
+    case "$opt" in
+      --autorizacao) auth="${val:?}"; have_auth=1; shift 2 ;;
+      *) die 'uso: oute-swarm estado [--autorizacao "<texto>"]' ;;
+    esac
+  done
+  state="$(ask_dir)"
+  if (( have_auth )); then
+    auth="$(printf '%s' "$auth" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | cut -c1-300)"
+    printf '%s\n' "$auth" > "$state/autorizacao"
+  fi
+  estado_write "$state"
+  echo "estado gravado em $state/estado.md"
+  return 0
+}
+
+# oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
+# um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
+# mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
+cmd_premerge() {
+  local pr="" head="" base="" repo="" main round info st cur_head bref mg ci cur_base a v
+  while [[ $# -gt 0 ]]; do
+    a="$1"; v="${2:-}"
+    case "$a" in
+      --head) head="${v:?}"; shift 2 ;;
+      --base) base="${v:?}"; shift 2 ;;
+      --repo) repo="${v:?}"; shift 2 ;;
+      -*) die "opção desconhecida: $a" ;;
+      *) [[ -z "$pr" ]] || die "argumento a mais: $a"; pr="${a#\#}"; shift ;;
+    esac
+  done
+  [[ "$pr" =~ ^[0-9]+$ && "$head" =~ ^[0-9a-f]{7,40}$ && "$base" =~ ^[0-9a-f]{7,40}$ ]] \
+    || die 'uso: oute-swarm premerge <pr> --head <sha auditado> --base <sha da base ensaiada> [--repo <repo>]  (sha com 7 a 40 hex)'
+  if [[ -n "$repo" ]]; then main="$(resolve_repo "$repo")"
+  else
+    round="$(round_id || true)"; main="${OUTE_SWARM_REPO:-}"
+    if [[ -z "$main" && -n "$round" ]]; then main="$(meta_get "$STATE_ROOT/$round" repo)"; fi
+    [[ -n "$main" ]] || main="$(main_root "$PWD" || true)"
+  fi
+  [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher ou passe --repo)"
+  if ! info="$(cd "$main" && gh pr view "$pr" --json state,headRefOid,baseRefName,mergeable,statusCheckRollup 2>/dev/null)" || ! jq -e .state >/dev/null 2>&1 <<<"$info"; then
+    echo "premerge #$pr: sem resposta do gh"; return 6
+  fi
+  st="$(jq -r .state <<<"$info")"; cur_head="$(jq -r '.headRefOid // ""' <<<"$info")"
+  bref="$(jq -r '.baseRefName // ""' <<<"$info")"; mg="$(jq -r '.mergeable // "UNKNOWN"' <<<"$info")"
+  if [[ "$st" != OPEN ]]; then echo "premerge #$pr: recusado, PR $st (não está aberto)"; return 5; fi
+  if [[ "$mg" == CONFLICTING ]]; then echo "premerge #$pr: recusado, PR em conflito com a base"; return 5; fi
+  if [[ "$mg" != MERGEABLE ]]; then echo "premerge #$pr: recusado, mergeable $mg (o GitHub ainda não calculou); repita em instantes"; return 5; fi
+  if [[ -z "$cur_head" || "$cur_head" != "$head"* ]]; then
+    echo "premerge #$pr: recusado, head mudou (auditado ${head:0:7}, atual ${cur_head:0:7})"; return 2
+  fi
+  [[ -n "$bref" ]] || { echo "premerge #$pr: sem resposta do gh (base do PR)"; return 6; }
+  if ! git -C "$main" fetch -q origin "$bref" 2>/dev/null || ! cur_base="$(git -C "$main" rev-parse "origin/$bref" 2>/dev/null)"; then
+    echo "premerge #$pr: sem resposta do git (origin/$bref)"; return 6
+  fi
+  if [[ "$cur_base" != "$base"* ]]; then
+    echo "premerge #$pr: recusado, base mudou (ensaiada ${base:0:7}, atual ${cur_base:0:7} em $bref)"; return 3
+  fi
+  ci="$(jq -r '
+    def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
+           | if test("^SUCCESS$") then "pass"
+             elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail" else "pending" end;
+    [(.statusCheckRollup // [])[] | {n: (.name // .context // "?"), r: r}] as $c
+    | if ($c | length) == 0 then "pendente: sem checks"
+      elif any($c[]; .r == "fail") then "falhou: " + ([$c[] | select(.r == "fail") | .n] | join(", "))
+      elif any($c[]; .r == "pending") then "pendente: " + ([$c[] | select(.r == "pending") | .n] | join(", "))
+      elif all($c[]; .n != "SonarCloud Code Analysis") then "pendente: sem o SonarCloud Code Analysis"
+      else "pass" end' <<<"$info")"
+  if [[ "$ci" != pass ]]; then echo "premerge #$pr: recusado, CI não verde ($ci)"; return 4; fi
+  echo "premerge #$pr: ok, head ${cur_head:0:7}, base ${cur_base:0:7} em $bref, CI verde com SonarCloud, aberto e sem conflito"
+  return 0
+}
+
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;
@@ -1635,5 +1817,7 @@ case "${1:-}" in
   step) shift; cmd_step "$@" ;;
   list) cmd_list ;;
   busy) shift; cmd_busy "$@" ;;
+  estado) shift; cmd_estado "$@" ;;
+  premerge) shift; cmd_premerge "$@" ;;
   *) cmd_start "$@" ;;
 esac
