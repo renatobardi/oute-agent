@@ -132,7 +132,7 @@ check "tela: barras de papel, fase e assinatura somam três vezes o total (real,
 # as dicas de Papel e de Fase (#592): cada uma no cabeçalho da sua coluna, e só nela
 TH_ROLE="$(sed -n '/data-uso="role"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
 TH_PHASE="$(sed -n '/data-uso="phase"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
-check "tela: a coluna Papel leva a dica de dispatcher, worker e standalone" grep -qF 'title="dispatcher e worker são as sessões de uma rodada do swarm; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)"' <<<"$TH_ROLE"
+check "tela: a coluna Papel leva a dica de dispatcher, worker e standalone" grep -qF 'title="dispatcher e worker são as sessões de uma rodada do swarm; reviewer, o revisor das etapas; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)"' <<<"$TH_ROLE"
 check "tela: a coluna Fase leva a dica da fase do ADR-07" grep -qF 'title="a fase do AI-DLC (ADR-07) da conversa: a da abertura ou a derivada depois do fato (label, skill, papel, ação, Jev); as de baixa confiança estão em Fases, onde o Bardi as troca"' <<<"$TH_PHASE"
 check "tela: a dica de Papel não está na coluna Fase, nem a de Fase na coluna Papel" bash -c '! grep -qF "aidlc:" <<<"$1" && ! grep -qF "dispatcher e worker" <<<"$2"' _ "$TH_ROLE" "$TH_PHASE"
 check "tela: menu com o link do uso"                  grep -q 'href="/uso"' <<<"$HTML"

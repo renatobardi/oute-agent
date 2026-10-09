@@ -3,23 +3,83 @@
 {% set crumbs = [("Análise", none), ("Uso", none)] %}
 {% from "_macros.html" import cost, filter, aviso_custo, ta, tb with context %}
 {% from "_graficos_uso.html" import custo_dia, custo_barras, tokens_dia with context %}
+{# a parte do custo que é saída (#751): o preço de lista dos tokens de saída sobre o de saída + entrada + cache #}
+{% macro saida(r) %}{% set tot = r.cost.output_usd + r.cost.input_cache_usd %}{% if tot %}{{ (r.cost.output_usd / tot)|pct }}<span class="fino" title="preço de lista dos tokens: saída / entrada + cache">{{ r.cost.output_usd|usd }} / {{ r.cost.input_cache_usd|usd }}</span>{% else %}—{% endif %}{% endmacro %}
+{% macro share_attrs(r) %} data-output-usd="{{ r.cost.output_usd }}" data-input-cache-usd="{{ r.cost.input_cache_usd }}"{% endmacro %}
 {% macro usage_table(kind, label, t, title) %}
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}" data-tabela>
   <thead><tr>
     <th{{ ta(t, "name", "", title) }}>{{ tb(t, "name", label) }}</th><th{{ ta(t, "calls", "n") }}>{{ tb(t, "calls", "Chamadas") }}</th>
     <th{{ ta(t, "tokens", "n", "tokens de entrada / saída (a ordem soma os dois); o cache (leitura / escrita) na linha de baixo") }}>{{ tb(t, "tokens", "Tokens ent / saí") }}</th><th{{ ta(t, "cost", "n") }}>{{ tb(t, "cost", "Custo (" ~ custo_nome() ~ ")") }}</th>
+    <th{{ ta(t, "out_share", "n", "a parte do custo que é saída (preço de lista dos tokens); embaixo, saída / entrada + cache em dólares") }}>{{ tb(t, "out_share", "Saída") }}</th>
   </tr></thead>
   <tbody>
   {% for r in t.rows %}
-  <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}" data-listed-usd="{{ '' if r.cost.listed_usd is none else r.cost.listed_usd }}">
+  <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}" data-listed-usd="{{ '' if r.cost.listed_usd is none else r.cost.listed_usd }}"{{ share_attrs(r) }}>
     <td>{{ r[kind] }}</td>
     <td class="n">{{ r.calls|num }}</td>
     <td class="n">{{ r.tokens.input|num }} / {{ r.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</span></td>
     <td class="n custo">{{ cost(r.cost) }}</td>
+    <td class="n" data-saida>{{ saida(r) }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="4">Nenhuma chamada ao modelo nessa janela.</td></tr>
+  <tr><td colspan="5">Nenhuma chamada ao modelo nessa janela.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+{# papel × modelo e papel × fase (#751): `second` = model ou phase #}
+{% macro pair_table(kind, second, label, t, title) %}
+<div class="cartao rolagem">
+<table class="uso" data-uso="{{ kind }}" data-tabela>
+  <thead><tr>
+    <th{{ ta(t, "role", "", "dispatcher, worker, reviewer (o revisor das etapas) e standalone") }}>{{ tb(t, "role", "Papel") }}</th><th{{ ta(t, second, "", title) }}>{{ tb(t, second, label) }}</th>
+    <th{{ ta(t, "calls", "n") }}>{{ tb(t, "calls", "Chamadas") }}</th>
+    <th{{ ta(t, "tokens", "n", "tokens de entrada / saída (a ordem soma os dois); o cache (leitura / escrita) na linha de baixo") }}>{{ tb(t, "tokens", "Tokens ent / saí") }}</th><th{{ ta(t, "cost", "n") }}>{{ tb(t, "cost", "Custo (" ~ custo_nome() ~ ")") }}</th>
+    <th{{ ta(t, "out_share", "n", "a parte do custo que é saída (preço de lista dos tokens)") }}>{{ tb(t, "out_share", "Saída") }}</th>
+  </tr></thead>
+  <tbody>
+  {% for r in t.rows %}
+  <tr data-par-papel="{{ r.role }}" data-par-{{ 'modelo' if second == 'model' else 'fase' }}="{{ r[second] if r[second] is not none else '' }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}" data-listed-usd="{{ '' if r.cost.listed_usd is none else r.cost.listed_usd }}"{{ share_attrs(r) }}>
+    <td>{{ r.role }}</td><td>{{ r[second] if r[second] is not none else "sem modelo" }}</td>
+    <td class="n">{{ r.calls|num }}</td>
+    <td class="n">{{ r.tokens.input|num }} / {{ r.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</span></td>
+    <td class="n custo">{{ cost(r.cost) }}</td>
+    <td class="n" data-saida>{{ saida(r) }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Nenhuma chamada ao modelo nessa janela.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+{# as sessões e as conversas mais caras (#751): `kind` = session ou conversation #}
+{% macro top_table(kind, label, link, t) %}
+<div class="cartao rolagem">
+<table class="uso" data-uso="top-{{ kind }}" data-tabela>
+  <thead><tr>
+    <th{{ ta(t, kind, "") }}>{{ tb(t, kind, label) }}</th><th{{ ta(t, "calls", "n") }}>{{ tb(t, "calls", "Chamadas") }}</th>
+    <th{{ ta(t, "tokens", "n", "tokens de entrada / saída (a ordem soma os dois); o cache (leitura / escrita) na linha de baixo") }}>{{ tb(t, "tokens", "Tokens ent / saí") }}</th><th{{ ta(t, "cost", "n") }}>{{ tb(t, "cost", "Custo (" ~ custo_nome() ~ ")") }}</th>
+    <th{{ ta(t, "ctx_avg", "n", "contexto por chamada = tokens de entrada + cache lido; a média") }}>{{ tb(t, "ctx_avg", "Contexto médio") }}</th>
+    <th{{ ta(t, "ctx_max", "n", "contexto por chamada = tokens de entrada + cache lido; o maior de uma chamada") }}>{{ tb(t, "ctx_max", "Contexto máximo") }}</th>
+    <th{{ ta(t, "out_share", "n", "a parte do custo que é saída (preço de lista dos tokens)") }}>{{ tb(t, "out_share", "Saída") }}</th>
+  </tr></thead>
+  <tbody>
+  {% for r in t.rows %}
+  <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-cache-read="{{ r.tokens.cache_read }}" data-cache-creation="{{ r.tokens.cache_creation }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}" data-listed-usd="{{ '' if r.cost.listed_usd is none else r.cost.listed_usd }}" data-context-avg="{{ r.context.avg }}" data-context-max="{{ r.context.max }}"{{ share_attrs(r) }}>
+    <td class="prim"><a href="{{ com_custo(link ~ (r[kind]|urlencode)) }}">{{ r[kind] }}</a></td>
+    <td class="n">{{ r.calls|num }}</td>
+    <td class="n">{{ r.tokens.input|num }} / {{ r.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</span></td>
+    <td class="n custo">{{ cost(r.cost) }}</td>
+    <td class="n">{{ r.context.avg|num }}</td>
+    <td class="n">{{ r.context.max|num }}</td>
+    <td class="n" data-saida>{{ saida(r) }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">Nenhuma chamada ao modelo nessa janela.</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -60,11 +120,27 @@
 </div>
 {% call fragment("papel") %}
 <h2>Por papel</h2>
-{{ usage_table("role", "Papel", t_role, "dispatcher e worker são as sessões de uma rodada do swarm; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)") }}
+{{ usage_table("role", "Papel", t_role, "dispatcher e worker são as sessões de uma rodada do swarm; reviewer, o revisor das etapas; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)") }}
 {% endcall %}
 {% call fragment("fase") %}
 <h2>Por fase</h2>
 {{ usage_table("phase", "Fase", t_phase, "a fase do AI-DLC (ADR-07) da conversa: a da abertura ou a derivada depois do fato (label, skill, papel, ação, Jev); as de baixa confiança estão em Fases, onde o Bardi as troca") }}
+{% endcall %}
+{% call fragment("papel-modelo") %}
+<h2>Papel × modelo</h2>
+{{ pair_table("papel-modelo", "model", "Modelo", t_rm, "o modelo da chamada") }}
+{% endcall %}
+{% call fragment("papel-fase") %}
+<h2>Papel × fase</h2>
+{{ pair_table("papel-fase", "phase", "Fase", t_rp, "a fase do AI-DLC (ADR-07) da conversa") }}
+{% endcall %}
+{% call fragment("sessoes-caras") %}
+<h2>Sessões mais caras</h2>
+{{ top_table("session", "Sessão", "/sessao?id=", t_ts) }}
+{% endcall %}
+{% call fragment("conversas-caras") %}
+<h2>Conversas mais caras</h2>
+{{ top_table("conversation", "Conversa", "/conversa?id=", t_tc) }}
 {% endcall %}
 {% call fragment("assinatura") %}
 <h2>Por assinatura</h2>

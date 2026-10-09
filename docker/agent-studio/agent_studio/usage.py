@@ -2,7 +2,7 @@
 qualquer agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
-Papel e fase da conversa (#433, #749): `role` = dispatcher, worker ou standalone (a sessão avulsa), dos eventos `oute.task.opened`/`reopened` da sessão
+Papel e fase da conversa (#433, #749, #751): `role` = dispatcher, worker, reviewer (o revisor das etapas, #751) ou standalone (a sessão avulsa), dos eventos `oute.task.opened`/`reopened` da sessão
 (`oute.swarm.round`/`oute.swarm.session`) ou, sem eles, do resource da chamada. `phase` = **sempre uma fase do ADR-07**: a da
 conversa em `conversation_phase` (o `phase.py` a deriva: abertura, label, skill, papel, ação, Jev ou troca do Bardi), a da abertura da
 sessão se a conversa ainda não foi classificada, `build` (a mais provável) se nem isso, e `ops` para o fato sem conversa (ex.: o
@@ -21,16 +21,40 @@ DAY_NS = 86_400_000_000_000
 _TABLE_SUFFIX = {"role": "_papel", "phase": "_fase", "subscription": "_assinatura"}
 
 
+def out_share(r):
+    """A parte do custo que é saída (#751), de 0 a 1: `output_usd` sobre `output_usd + input_cache_usd` da linha renderizada; sem tokens com preço, `None`."""
+    total = r["cost"]["output_usd"] + r["cost"]["input_cache_usd"]
+    return r["cost"]["output_usd"] / total if total else None
+
+
 def _table(kind):
     # as tabelas por papel, por fase e por assinatura (#679) da tela (#529): só a ordem (sem filtro nem página); a de sempre é a do que mais custou
-    return Table([Col("name", "text", lambda r: r[kind]), *usage_cols(lambda r: r, detail=False)], default=("cost", "desc"),
-                 suffix=_TABLE_SUFFIX[kind], paginate=False)
+    return Table([Col("name", "text", lambda r: r[kind]), *usage_cols(lambda r: r, detail=False), Col("out_share", "num", out_share)],
+                 default=("cost", "desc"), suffix=_TABLE_SUFFIX[kind], paginate=False)
 
 
+def _pair_table(first, second, suffix):
+    # papel × modelo e papel × fase (#751): as duas colunas de nome, o consumo e a parte de saída; a ordem é a do que mais custou
+    return Table([Col(first, "text", lambda r: r[first]), Col(second, "text", lambda r: r[second] or NO_MODEL), *usage_cols(lambda r: r, detail=False),
+                  Col("out_share", "num", out_share)], default=("cost", "desc"), suffix=suffix, paginate=False)
+
+
+def _top_table(kind, suffix):
+    # as sessões e as conversas mais caras (#751): o consumo, o contexto por chamada (média e máximo) e a parte de saída
+    return Table([Col(kind, "text", lambda r: r[kind]), *usage_cols(lambda r: r, detail=False),
+                  Col("ctx_avg", "num", lambda r: r["context"]["avg"]), Col("ctx_max", "num", lambda r: r["context"]["max"]),
+                  Col("out_share", "num", out_share)], default=("cost", "desc"), suffix=suffix, paginate=False)
+
+
+NO_MODEL = "sem modelo"  # a chamada sem modelo no span, só na exibição
 ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE = _table("role"), _table("phase"), _table("subscription")
+ROLE_MODEL_TABLE, ROLE_PHASE_TABLE = _pair_table("role", "model", "_papelmodelo"), _pair_table("role", "phase", "_papelfase")
+TOP_SESSION_TABLE, TOP_CONVERSATION_TABLE = _top_table("session", "_topsessao"), _top_table("conversation", "_topconversa")
+# as tabelas da tela de Uso, na ordem em que o `web.py` as lê
+TABLES = (ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE, ROLE_MODEL_TABLE, ROLE_PHASE_TABLE, TOP_SESSION_TABLE, TOP_CONVERSATION_TABLE)
 NO_SUBSCRIPTION = "sem assinatura"  # a chamada que não é de assinatura nenhuma (ex.: o LLM do ai-memory), só na exibição
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo", "subscription")
-ROLES = ("dispatcher", "worker", "standalone")
+ROLES = ("dispatcher", "worker", "reviewer", "standalone")
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
@@ -63,9 +87,13 @@ _SESSION_INFO = (
     "FROM (SELECT *, json_extract_string(attributes, '$.\"oute.task.phase\"') AS phase FROM logs "
     "WHERE event_name IN ('oute.task.opened', 'oute.task.reopened') AND oute_task_id IS NOT NULL) GROUP BY oute_task_id)")
 # sem evento da sessão: o papel sai do resource da própria chamada
-_SCOPE = (f"(SELECT t.*, COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
+# o revisor das etapas (#751) é a chamada do `claude -p` que o `oute-swarm step review` roda com `oute.swarm.step` no resource, numa rodada
+# e sem sessão de worker: o mesmo sinal do `phase.py`; vale antes da sessão, porque a chamada pode levar o `oute.task.id` do dispatcher
+_REVIEWER = ("json_extract_string(t.resource_attributes, '$.\"oute.swarm.step\"') IS NOT NULL AND t.oute_swarm_round IS NOT NULL "
+             "AND json_extract_string(t.resource_attributes, '$.\"oute.swarm.session\"') IS NULL")
+_SCOPE = (f"(SELECT t.*, CASE WHEN {_REVIEWER} THEN 'reviewer' ELSE COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
           "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
-          f"ELSE 'standalone' END) AS role, {phase_mod.sql_phase()} AS phase "
+          f"ELSE 'standalone' END) END AS role, {phase_mod.sql_phase()} AS phase "
           f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id "
           "LEFT JOIN conversation_phase cp ON cp.conversation = t.session_id)")
 
@@ -133,7 +161,8 @@ def _empty():
     return {"calls": 0, "tokens": dict.fromkeys(("input", "output", "cache_read", "cache_creation"), 0),
             "real_usd": None, "listed_usd": None, "estimated_usd": None,
             "real_calls": 0, "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 0,
-            "unpriced_models": set(), "no_plan_calls": 0, "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
+            "unpriced_models": set(), "no_plan_calls": 0,
+            "output_usd": 0.0, "input_usd": 0.0, "split_unpriced_calls": 0, "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
 
 
 def _add(a, b):
@@ -151,12 +180,27 @@ def _list_cost(rec, prices, at_ns):
     return total
 
 
+def _split(a, rec, price):
+    """Soma no grupo o preço de lista dos tokens da saída e o dos de entrada + cache (#751), de **todas** as chamadas do grupo, tenham
+    custo real ou não: é linear nos tokens, então o resultado não depende do corte (dia, modelo, papel…). Não reparte o custo informado
+    nem o rateado: a parte de saída do custo é `output_usd` sobre `output_usd + input_cache_usd`. Modelo sem preço: as chamadas vão
+    para `split_unpriced_calls` e ficam fora das duas somas."""
+    if price is None:
+        a["split_unpriced_calls"] += rec["calls"]
+        return
+    out = estimate_cost_usd(0, rec["output"], 0, 0, price)
+    a["output_usd"] += out
+    a["input_usd"] += estimate_cost_usd(rec["input"], rec["output"], rec["cache_read"], rec["cache_creation"], price) - out
+
+
 def _add_call(a, rec, prices, at_ns, alloc):
     """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço, dia e assinatura) no acumulador `a`. `alloc` (`rateio.Alloc`)
     só no custo pago."""
     a["calls"] += rec["calls"]
     for t in a["tokens"]:
         a["tokens"][t] += rec[t]
+    price = prices.lookup(rec["model"], at_ns(rec["epoch"]))
+    _split(a, rec, price)
     if alloc is not None and rec["sub"]:
         # assinatura no custo pago (#748): a parte do valor do plano do dia (fica entre as "com custo": sem cálculo e sem "sem
         # preço"); a soma de `real_calls`, `listed_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
@@ -173,8 +217,7 @@ def _add_call(a, rec, prices, at_ns, alloc):
     pending = rec["calls"] - rec["calls_real"]
     if not pending:
         return
-    est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"], rec["est_cache_creation"],
-                            prices.lookup(rec["model"], at_ns(rec["epoch"])))
+    est = estimate_cost_usd(rec["est_input"], rec["est_output"], rec["est_cache_read"], rec["est_cache_creation"], price)
     if est is None:
         a["unpriced_calls"] += pending
         a["unpriced_models"].add(rec["model"])
@@ -289,6 +332,8 @@ def merge(into, a):
     for k in ("real_usd", "listed_usd", "estimated_usd"):
         if a[k] is not None:
             into[k] = a[k] if into[k] is None else into[k] + a[k]
+    for k in ("output_usd", "input_usd", "split_unpriced_calls"):
+        into[k] += a[k]
     into["unpriced_models"] |= a["unpriced_models"]
     return into
 
@@ -328,6 +373,11 @@ def render(key, a, keys):
             "claude_no_log_calls": a["claude_no_log_calls"],  # parte das listed_calls: chamada do claude sem log de custo, calculada pela tabela (#747)
             "estimated_calls": a["estimated_calls"],
             "unpriced_calls": a["unpriced_calls"],  # sem custo real e sem preço: fora das três somas
+            # a parte do custo que é saída e a que é entrada + cache (#751): o preço de lista dos tokens (de toda chamada com preço, qualquer
+            # que seja a origem do custo); a parte de saída é output_usd / (output_usd + input_cache_usd). Modelo sem preço fica fora
+            "output_usd": a["output_usd"],
+            "input_cache_usd": a["input_usd"],
+            "split_unpriced_calls": a["split_unpriced_calls"],
             # só no custo pago (#748): chamadas de assinatura sem plano cadastrado no dia (contam 0); na lista a chave não existe
             **({"no_plan_calls": a["no_plan_calls"]} if a["no_plan_calls"] else {}),
         },
@@ -352,6 +402,7 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
     `by_phase` (só fases do ADR-07, #749) e, por assinatura (#679), `by_subscription` (`claude`, `zai`,
     `codex`; `null` = chamada sem assinatura, como a do ai-memory): cada uma soma o mesmo que `totals`. `repo` (#528): só a tela `/uso` o
     usa; o `GET /v1/usage` não tem esse parâmetro."""
+    from . import medicao  # aqui dentro: o `medicao` usa o `usage` (agrega e renderiza), e o import circular não fecha no topo
     fine_keys = ("day", "host", "agent", "model", "role", "phase", "subscription")
     alloc = paid_alloc(con, from_ns, to_ns, prices, tz) if paid else None
     fine = aggregate(con, from_ns, to_ns, prices, fine_keys, tz, p95=False, repo=repo, paid=paid, sub=sub, alloc=alloc)  # a junção com os logs de custo roda uma vez só (#504)
@@ -365,6 +416,8 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
     by_role = cut(("role",))
     by_phase = cut(("phase",))
     by_subscription = cut(("subscription",))
+    by_role_model = cut(("role", "model"))
+    by_role_phase = cut(("role", "phase"))
     out = {
         "timezone": tz.key,
         "totals": render((), total, ()),
@@ -375,6 +428,12 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
         "by_role": [render(k, a, ("role",)) for k, a in _sorted(by_role)],
         "by_phase": [render(k, a, ("phase",)) for k, a in _sorted(by_phase)],
         "by_subscription": [render(k, a, ("subscription",)) for k, a in _sorted(by_subscription)],
+        # papel × modelo e papel × fase (#751): cada uma soma o mesmo que `totals`
+        "by_role_model": [render(k, a, ("role", "model")) for k, a in _sorted(by_role_model)],
+        "by_role_phase": [render(k, a, ("role", "phase")) for k, a in _sorted(by_role_phase)],
+        # as sessões e as conversas mais caras da janela, com o contexto por chamada (#751, `medicao.py`)
+        "top_sessions": medicao.top(con, "session", from_ns, to_ns, prices, tz, repo, paid, sub, alloc),
+        "top_conversations": medicao.top(con, "conversation", from_ns, to_ns, prices, tz, repo, paid, sub, alloc),
     }
     if alloc is not None:
         # os dias com plano e sem uso (#748), já somados no total; sem filtro de repositório ficam de fora, como no `aggregate`
