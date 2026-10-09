@@ -37,6 +37,10 @@
 #                                                   mensagem) no campo do dispatcher parado; nunca com ele ocupado nem sem achar
 #                                                   o campo; o resto fica na fila (watch.queue) e tudo vai ao log
 #   oute-swarm list                                 rodadas (nome e id) com as abas abertas + worktrees de tarefa
+#   oute-swarm switch <n>-<slug>                   (usado pelo dispatcher, #759) sessão parada por cota esgotada (linha `[cota]` do watch):
+#                                                   reabre na próxima assinatura da cadeia da issue (oute-select --next-subscription), na
+#                                                   mesma worktree e branch, com a instrução original; sem cota em nenhuma, não muda nada,
+#                                                   imprime os resets e sai com 6 (o dispatcher abre BLOQUEADO)
 #   oute-swarm busy [--repo <repo>]                 (usado pelo dispatcher, #605) issues com sessão aberta em OUTRA rodada do
 #                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
 #
@@ -44,8 +48,8 @@
 # nome amigável `Adjetivo_Substantivo` (docker/agent-studio/agent_studio/names.py), sorteado na abertura entre os que nenhuma
 # rodada aberta usa e gravado em `name=` do meta. O id segue sendo a chave em tudo; rodada antiga, sem nome, só tem o id.
 # spawn recusa (código 4) issue que já tem sessão aberta em outra rodada.
-# Trava semanal (#742): spawn recusa (código 5) quando a janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela
-# (config/select/models.toml; claude = 85) ou acima, e grava a linha `guard` no log; --force vence; cota não lida só avisa.
+# Trava semanal (#742, zai na #759): spawn recusa (código 5) quando a janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela
+# (config/select/models.toml; claude e zai = 85) ou acima, e grava a linha `guard` no log; --force vence; cota não lida só avisa.
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.
@@ -355,8 +359,8 @@ load_warn() {
 }
 
 cmd_spawn() {
-  local agent="" force=0 kaizen=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
-  local busy bslug brid model="" prefer="" subscr="" agent_cli="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve s_sub
+  local agent="" force=0 kaizen=0 switch=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
+  local oldtab busy bslug brid model="" prefer="" subscr="" agent_cli="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve s_sub
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --agent) agent="${2:?}"; agent_cli="$agent"; shift 2 ;;
@@ -366,6 +370,7 @@ cmd_spawn() {
       --force) force=1; shift ;;
       --repo) repo="${2:?}"; shift 2 ;;
       --kaizen) kaizen=1; shift ;;
+      --switch) switch=1; shift ;;   # interno do `oute-swarm switch` (#759): troca a sessão do mesmo slug de assinatura
       -*) die "opção desconhecida: $1" ;;
       *) if [[ -z "$task" ]]; then task="$1"; elif [[ -z "$instr" ]]; then instr="$1"; else die "argumento a mais: $1"; fi; shift ;;
     esac
@@ -384,7 +389,7 @@ cmd_spawn() {
   fi
   # sem --agent: o agente da rodada (workers= do meta, lido do arquivo também com OUTE_SWARM_ID, #212); rodada sem ele
   # ou spawn avulso: o seletor decide (#219, abaixo)
-  if [[ -z "$agent" && "$round" != avulso ]]; then
+  if [[ -z "$agent" && "$round" != avulso ]] && (( ! switch )); then
     agent="$(sed -n 's/^workers=//p' "$STATE_ROOT/$round/meta" 2>/dev/null | head -1)"
     [[ -z "$agent" ]] || check_agent "$agent" "workers= do meta da rodada $round"
   fi
@@ -414,10 +419,10 @@ cmd_spawn() {
     fi
   fi
   state="$STATE_ROOT/$round"; mkdir -p "$state"; touch "$state/spawned" "$state/closed"; rm -f "$state/fechada"
-  if grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
+  if (( ! switch )) && grep -qs "^$slug " "$state/spawned"; then die "$slug já foi aberta nesta rodada"; fi
   # o limite conta as abas abertas agora (spawned menos closed); sessão kaizen (7º campo) não conta
   count="$(awk -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1} $7 != "kaizen" && !($1 in c)' "$state/spawned" | wc -l)"
-  if (( ! force && ! kaizen )) && [[ -n "$max" ]] && (( count >= max )); then
+  if (( ! force && ! kaizen && ! switch )) && [[ -n "$max" ]] && (( count >= max )); then
     die "limite da rodada atingido ($count/$max abertas); feche uma aba com oute-swarm close ou peça ao Bardi para liberar e use --force"
   fi
   # seletor (ADR-02, #219): o --agent (do spawn ou da rodada) e o --model são a escolha explícita; o resto vem da issue
@@ -442,6 +447,7 @@ cmd_spawn() {
   # trava semanal (#742): depois do seletor, antes de qualquer aba; --force (só o Bardi) vence; kaizen também passa pela trava
   (( force )) || [[ -z "${s_sub:-}" ]] || weekly_guard "$s_sub" "$slug" "$state" "$n"
   pfile="$state/$slug.prompt"
+  (( switch )) || printf '%s\n' "$instr" > "$state/$slug.instr"   # a instrução original, para a troca de assinatura (#759)
   [[ -z "$sel" ]] || { sfile="$state/$slug.select"; printf '%s\n' "$sel" > "$sfile"; }
   {
     printf '%s\n\n' "$instr"
@@ -449,6 +455,12 @@ cmd_spawn() {
   } > "$pfile"
   load_warn "$slug"
   label="#$n ${slug#*-}"
+  # troca de assinatura (#759): a aba da sessão parada fecha antes da nova abrir (mesmo label, mesma worktree: o oute-task reabre a
+  # pasta e o branch dela, com as alterações). Sem fechar, as duas sessões mexeriam na mesma worktree
+  if (( switch )); then
+    oldtab="$(tab_by_label "$label")"
+    if [[ -n "$oldtab" ]]; then herdr tab close "$oldtab" >/dev/null 2>&1 || die "não fechei a aba $label ($oldtab) da sessão parada; feche à mão e rode de novo"; fi
+  fi
   # abas que já têm esse label (issue reaberta, rodada antiga com aba aberta): o spawn não fecha nenhuma delas (#289)
   old_ok=1; old="$(tabs_by_label "$label")" || old_ok=0
   # só o stdout é o JSON; o stderr do herdr vai direto para o stderr do spawn
@@ -489,11 +501,52 @@ cmd_spawn() {
     "$([[ -z "$sfile" ]] || printf 'OUTE_SELECT_FILE=%q ' "$sfile")" "$main" "$slug" "$agent" "$pfile"
   herdr pane run "$pane" "$cmd" >/dev/null || die "herdr pane run falhou em $pane"
   # slug pane agente início aba repo tipo assinatura (linhas antigas param na aba: repo = o da rodada; assinatura `-` = sem o dado, #678)
+  if (( switch )); then   # a mesma linha, com a aba, o agente e a assinatura novos
+    grep -v "^$slug " "$state/spawned" > "$state/spawned.new" || true; mv "$state/spawned.new" "$state/spawned"
+  fi
   printf '%s %s %s %s %s %s %s %s\n' "$slug" "$pane" "$agent" "$(date -u +%FT%TZ)" "${tab:--}" "$main" \
     "$( (( kaizen )) && echo kaizen || echo -)" "${s_sub:--}" >> "$state/spawned"
-  slog "$state" "$(date -u +%FT%TZ) spawn $slug $agent$( (( kaizen )) && echo ' kaizen')"
+  slog "$state" "$(date -u +%FT%TZ) $( (( switch )) && echo troca || echo spawn) $slug $agent$( (( kaizen )) && echo ' kaizen')$( (( switch )) && echo " ${s_sub:--}")"
   quota_snapshot spawn
   echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$([[ ! "${s_reserve:-}" =~ ^(indisponivel|cota)$ ]] || printf ' · reserva: %s' "$s_reserve")$([[ -z "${s_sub:-}" || "$s_sub" == "$agent" ]] || printf ' · assinatura %s' "$s_sub")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
+}
+
+# troca de assinatura (#759): a sessão <n>-<slug> parou por cota esgotada (linha `[cota]` do watch). Lê a próxima assinatura da
+# cadeia da linha da issue (`oute-select --next-subscription`, sem as que já pararam) e reabre a sessão nela, na mesma worktree e
+# no mesmo branch (o oute-task reabre a pasta e as alterações), com a instrução original e a nota da retomada. Sem assinatura com cota:
+# não muda nada, imprime os resets de cada uma e sai com 6 (o dispatcher abre BLOQUEADO). Uma linha de resultado em stdout.
+cmd_switch() {
+  local want="" state line slug n main cur js nxt tried instr rrepo opts
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -*) die "opção desconhecida: $1" ;; *) [[ -z "$want" ]] || die "argumento a mais: $1"; want="$(slugify "$1")" ;; esac; shift
+  done
+  [[ -n "$want" ]] || die "uso: oute-swarm switch <n>-<slug>"
+  [[ -n "${HERDR_ENV:-}" ]] || die "rode dentro do herdr"
+  command -v oute-select >/dev/null 2>&1 || die "oute-select não está no PATH"
+  state="$(round_dir)"
+  line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
+  ! is_closed "$state" "$want" || die "$want já foi fechada (oute-swarm close); abra de novo com spawn se for o caso"
+  read -r slug _ cur _ _ main _ nxt <<<"$line"
+  n="${slug%%-*}"
+  [[ -n "$main" ]] || main="${OUTE_SWARM_REPO:-$(sed -n 's/^repo=//p' "$state/meta" | head -1)}"
+  # a assinatura em que parou: a gravada no spawn; linha antiga, a da escolha do seletor, ou o agente
+  [[ -n "$nxt" && "$nxt" != - ]] || nxt="$(jq -r '.subscription // empty' "$state/$slug.select" 2>/dev/null || true)"
+  cur="${nxt:-$cur}"
+  tried="$cur"; [[ ! -s "$state/$slug.tried" ]] || tried="$(tr '\n' ',' < "$state/$slug.tried")$cur"
+  js="$(oute-select --next-subscription "$tried" --repo "$main" --issue "$n")" || die "oute-select --next-subscription falhou"
+  nxt="$(jq -r '.next // empty' <<<"$js" 2>/dev/null)" || nxt=""
+  if [[ -z "$nxt" ]]; then
+    slog "$state" "$(date -u +%FT%TZ) troca $slug sem-cota $cur"
+    printf 'sem cota em nenhuma assinatura da cadeia para #%s: %s\n' "$n" \
+      "$(jq -r '[.options[] | "\(.subscription) \(.status)\(if .detail != "" then " (" + .detail + ")" else "" end)"] | join("; ")' <<<"$js" 2>/dev/null)"
+    exit 6
+  fi
+  printf '%s\n' "$cur" >> "$state/$slug.tried"
+  instr="Retomada de #$n: a sessão anterior parou por cota esgotada na assinatura $cur. A worktree e o branch dela já estão aqui com o trabalho feito até agora: não recomece. Confira \`git status\`, \`git log\` e o PR da issue, e continue de onde ela parou."
+  [[ ! -s "$state/$slug.instr" ]] || instr="$instr"$'\n\n'"$(cat "$state/$slug.instr")"
+  cmd_spawn "$slug" "$instr" --subscription "$nxt" --switch >/dev/null
+  printf 'trocada: #%s %s → %s (cota esgotada; mesma worktree e branch)\n' "$n" "$cur" "$nxt"
+  return 0
 }
 
 # id atual da aba pelo label "#<n> <resto>" (ids mudam quando o herdr restaura a sessão, ex.: depois de oute update)
@@ -805,6 +858,32 @@ w_ask_mark() {
   return 0
 }
 
+# sessão parada por cota esgotada (#759): a tela do pane (as últimas linhas) traz o erro do fornecedor. Claude e Codex:
+# "usage limit reached", "5-hour limit reached"; zai: "API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted".
+# Só o texto da tela é lido (nada é digitado). Pane que não lê, ou sem o erro, não gera nada. $1 = pane
+W_QUOTA_RE='^((api error|error|request rejected)[^[:cntrl:]]*(429|limit|quota)|you.ve hit your (usage )?limit|(claude )?usage limit reached|([0-9]+-hour|weekly) limit reached)'
+w_quota_stop() {
+  local pane="$1" scr
+  scr="$(herdr pane read "$pane" --source visible 2>/dev/null)" || return 1
+  # só a linha que COMEÇA com o erro do fornecedor (tirados os marcadores ● ⎿ ■ do começo): "usage limit" no meio de um texto comum não conta
+  printf '%s\n' "$scr" | tail -n 20 | sed -E 's/^[^[:alnum:]]+//' | grep -qiE -- "$W_QUOTA_RE"
+  return $?
+}
+# assinatura da sessão: o 8º campo do spawned; linha antiga (`-`) = o agente dela. $1 = campo, $2 = agente
+w_sub_of() {
+  local field="$1" agent="$2"
+  if [[ "$field" == - || -z "$field" ]]; then printf '%s' "$agent"; else printf '%s' "$field"; fi
+  return 0
+}
+# quando a assinatura volta (#759): a janela mais cheia do `oute-quota --json --agent <sub>`, com a hora do reset; sem leitura, o aviso
+w_quota_reset() {
+  local sub="$1" r
+  r="$(oute-quota --json --agent "$sub" 2>/dev/null | jq -r --arg a "$sub" '.agents[$a].windows // {} | to_entries | max_by(.value.used_pct // 0)
+        | select(. != null) | "\(.key) em \(.value.used_pct)%\(if .value.resets_at then ", reseta " + .value.resets_at else "" end)"' 2>/dev/null)" || r=""
+  if [[ -n "$r" ]]; then printf '%s' "$r"; else printf 'cota não lida, reset desconhecido'; fi
+  return 0
+}
+
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
   local gh_ok=1 oid old cur k pend seen
@@ -812,7 +891,7 @@ w_snapshot() {
   W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
   if tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs"; then
-    while read -r slug _p _a _ts tab repo _; do
+    while read -r slug _p _a _ts tab repo _ ssub; do
       [[ -n "$slug" ]] || continue
       W_IID[$slug]="$(w_pfx "${repo:-$main}" "$main")${slug%%-*}"
       if is_closed "$state" "$slug"; then W_CUR["tab|$slug"]=closed; continue; fi
@@ -824,9 +903,11 @@ w_snapshot() {
       W_CUR["tab|$slug"]=open
       case "$st" in working|idle|done|blocked) ;; *) st=none ;; esac
       W_CUR["agent|$slug"]="$st"
+      # sessão parada com o erro de cota na tela (#759): a chave guarda a assinatura em que ela parou
+      case "$st" in idle|done|blocked) ! w_quota_stop "$_p" || W_CUR["cota|$slug"]="$(w_sub_of "${ssub:--}" "$_a")" ;; esac
     done < <(cat "$state/spawned" 2>/dev/null)
   else
-    w_keep "tab|"; w_keep "agent|"; W_CUR["falha|herdr"]=1
+    w_keep "tab|"; w_keep "agent|"; w_keep "cota|"; W_CUR["falha|herdr"]=1
   fi
   # PRs da rodada: criados depois do início, branch <tipo>/<n>-… (ou sessao/<n>-…) de uma issue aberta nela, em cada
   # repo das sessões (6º campo do spawned; sem ele, o da rodada). Um repo que falha mantém o estado anterior de todos.
@@ -952,6 +1033,9 @@ w_diff() {
           working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)"; fi ;;
           none) if [[ "$old" =~ ^(working|idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): sem agente na aba (o agente saiu?)"; fi ;;
         esac ;;
+      cota)
+        [[ -z "$old" && -n "$new" ]] || continue
+        w_ev cota "$(w_label "$a"): parada por cota esgotada na assinatura $new ($(w_quota_reset "$new")); troque com oute-swarm switch $a" ;;
       pr)
         [[ -n "$new" ]] || continue
         case "$new" in
@@ -985,7 +1069,7 @@ w_diff() {
         else w_ev aviso "$a respondendo de novo"; fi ;;
     esac
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
-             | awk -F'|' 'BEGIN { split("falha tab agent pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
+             | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
   for a in "${!okpr[@]}"; do
     names="" head="${W_CUR[head|$a]:-}"
@@ -1550,6 +1634,7 @@ case "${1:-}" in
   answered) shift; cmd_answered "$@" ;;
   close) shift; cmd_close "$@" ;;
   watch) shift; cmd_watch "$@" ;;
+  switch) shift; cmd_switch "$@" ;;
   step) shift; cmd_step "$@" ;;
   list) cmd_list ;;
   busy) shift; cmd_busy "$@" ;;

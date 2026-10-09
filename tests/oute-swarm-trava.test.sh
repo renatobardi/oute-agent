@@ -24,7 +24,7 @@ SPEC="aidlc:spec"   # fase com a cadeia claude → zai → codex: o claude é a 
 INSTR="instrução"
 
 CASE=trava; round "$CASE"; labels 8 "$SPEC"; labels 9 "$SPEC"; labels 10 "$SPEC"; labels 11 "$SPEC"; labels 12 "$SPEC"; labels 13 "$SPEC"
-check "a tabela do repo tem weekly_guard_pct = 85 na claude" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 85, '"'"'zai'"'"': None, '"'"'codex'"'"': None}"' _ "$TABLE"
+check "a tabela do repo tem weekly_guard_pct = 85 na claude e na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 85, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
 
 # acima da trava: recusa com código 5, sem abrir aba nem registrar a sessão
 q7 90
