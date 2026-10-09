@@ -128,16 +128,17 @@ check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER
 
 # qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
 A="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
-check "audit: relatório abre com ação e decisão, antes do head (#482)" bash -c 'r=$(sed -n "/^<!-- oute-aidlc-qa-pr-audit -->/,/^### Gates/p" "$1" | head -12); a=$(grep -n "^\*\*Ação recomendada:\*\*" <<<"$r" | head -1 | cut -d: -f1); d=$(grep -n "^\*\*Decisão do Bardi:\*\*" <<<"$r" | head -1 | cut -d: -f1); h=$(grep -n "^\*\*Head auditado:\*\*" <<<"$r" | head -1 | cut -d: -f1); [ -n "$a" ] && [ -n "$d" ] && [ -n "$h" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$h" ]' _ "$A"
-check "audit: decisão com opções numeradas e rótulo do autor (#482)" grep -qF '"recomendação do autor": opção N' "$A"
-check "audit: sem decisão escreve 'Decisão do Bardi: nenhuma' (#482)" grep -qF 'Sem escolha para ele: escreva "Decisão do Bardi: nenhuma"' "$A"
-check "audit: relatório não repete a ação no fim (#482)"   bash -c '! grep -qF "### Ação recomendada" "$1"' _ "$A"
-check "audit: forma curta só com 5 contadores 0 e merge como está (#482)" grep -qF 'Vale só quando os cinco contadores dos achados são 0' "$A"
-check "audit: forma curta mantém head, gates e Closes × Refs (#482)" bash -c 'sed -n "/^\*\*Forma curta\.\*\*/,/^Forma completa:/p" "$1" > "$2"; grep -qF "o head auditado (e a base)" "$2" && grep -qF "a tabela de gates, o CI no head, o SonarCloud" "$2" && grep -qF "a linha \`Closes × Refs\`" "$2"' _ "$A" "$TMP/curta.txt"
-check "audit: forma curta lista cada seção conferida (#482)" grep -qF '**Conferido, sem achado:** superfície sensível e supply chain:' "$A"
-check "audit: achado ou gate não rodado leva a forma completa (#482)" grep -qF 'Qualquer achado, ou um gate que não rodou, leva a forma completa.' "$A"
-check "audit: forma completa mantém todas as seções (#482)" bash -c 'for t in "### Gates" "### Achados" "### Eixo Spec" "### Superfície sensível e supply chain" "### Eixo Standards" "### Registro de alegações" "### Checklist funcional" "### Prós e contras" "### Correção sugerida e limites"; do [ "$(grep -cF "$t" "$1")" -ge 1 ] || exit 1; done' _ "$A"
-check "audit: cita o doc de PT controlado (#482)"          bash -c 'sed -n "/^\*\*Ordem do relatório/p" "$1" | grep -qF docs/pt-controlado.md' _ "$A"
+R="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/relatorio.md"   # modelo do relatório (passo 12), em arquivo próprio (#754)
+check "audit: relatório abre com ação e decisão, antes do head (#482)" bash -c 'r=$(sed -n "/^<!-- oute-aidlc-qa-pr-audit -->/,/^### Gates/p" "$1" | head -12); a=$(grep -n "^\*\*Ação recomendada:\*\*" <<<"$r" | head -1 | cut -d: -f1); d=$(grep -n "^\*\*Decisão do Bardi:\*\*" <<<"$r" | head -1 | cut -d: -f1); h=$(grep -n "^\*\*Head auditado:\*\*" <<<"$r" | head -1 | cut -d: -f1); [ -n "$a" ] && [ -n "$d" ] && [ -n "$h" ] && [ "$a" -lt "$d" ] && [ "$d" -lt "$h" ]' _ "$R"
+check "audit: decisão com opções numeradas e rótulo do autor (#482)" grep -qF '"recomendação do autor": opção N' "$R"
+check "audit: sem decisão escreve 'Decisão do Bardi: nenhuma' (#482)" grep -qF 'Sem escolha para ele: escreva "Decisão do Bardi: nenhuma"' "$R"
+check "audit: relatório não repete a ação no fim (#482)"   bash -c '! grep -qF "### Ação recomendada" "$1"' _ "$R"
+check "audit: forma curta só com 5 contadores 0 e merge como está (#482)" grep -qF 'Vale só quando os cinco contadores dos achados são 0' "$R"
+check "audit: forma curta mantém head, gates e Closes × Refs (#482)" bash -c 'sed -n "/^\*\*Forma curta\.\*\*/,/^Forma completa:/p" "$1" > "$2"; grep -qF "o head auditado (e a base)" "$2" && grep -qF "a tabela de gates, o CI no head, o SonarCloud" "$2" && grep -qF "a linha \`Closes × Refs\`" "$2"' _ "$R" "$TMP/curta.txt"
+check "audit: forma curta lista cada seção conferida (#482)" grep -qF '**Conferido, sem achado:** superfície sensível e supply chain:' "$R"
+check "audit: achado ou gate não rodado leva a forma completa (#482)" grep -qF 'Qualquer achado, ou um gate que não rodou, leva a forma completa.' "$R"
+check "audit: forma completa mantém todas as seções (#482)" bash -c 'for t in "### Gates" "### Achados" "### Eixo Spec" "### Superfície sensível e supply chain" "### Eixo Standards" "### Registro de alegações" "### Checklist funcional" "### Prós e contras" "### Correção sugerida e limites"; do [ "$(grep -cF "$t" "$1")" -ge 1 ] || exit 1; done' _ "$R"
+check "audit: cita o doc de PT controlado (#482)"          bash -c 'sed -n "/^\*\*Ordem do relatório/p" "$1" | grep -qF docs/pt-controlado.md' _ "$R"
 check "audit: Refs troca para Closes e o Falta só de (ship) fica (#488)" grep -qF 'A correção é trocar para `Closes`; o `## Falta` com itens só de `(ship)` fica como está, com a marca, e sem item nenhum a seção sai.' "$A"
 check "audit: sem o 'remover a seção ou manter como está' (#488)" bash -c '! grep -qF "remover a seção ou manter como está" "$1"' _ "$A"
 # 501. função de shell nova com local e return (#501)
@@ -160,7 +161,7 @@ check "484: worker: a saída inteira vai no corpo, na seção ## Regressão dos 
 check "484: worker: saída 3 = trava de cota; não sobe o limite e declara no ## Falta" grep -qF 'Saída 3 é a trava de cota (`OUTE_REGRESSION_MAX_PCT`, padrão 60%): não suba o limite e não rode de outro jeito. Declare no `## Falta` do PR que a regressão não rodou' "$W"
 check "484: worker: o merge sem a regressão fica para o Bardi (decisão do Bardi)" grep -qF 'o merge fica para o Bardi decidir (a auditoria recomenda `decisão do Bardi`)' "$W"
 check "484: skill de auditoria: confere a saída da regressão e recomenda decisão do Bardi sem ela" bash -c 'grep -qF "**Regressão dos agentes (#484).**" "$1" && grep -qF "a ação recomendada é \`decisão do Bardi\`" "$1" && grep -qF -- "- \`decisão do Bardi\`: PR de prompt" "$1"' _ "$A"
-check "484: skill de auditoria: a ação decisão do Bardi está no modelo do relatório" grep -qF 'perguntar ao autor | decisão do Bardi | não fazer merge' "$A"
+check "484: skill de auditoria: a ação decisão do Bardi está no modelo do relatório" grep -qF 'perguntar ao autor | decisão do Bardi | não fazer merge' "$R"
 
 # 11z. bloco "Antes de abrir o PR" no topo das regras e a regra do rm no texto que o spawn acrescenta (#578)
 CASE=antes-pr; round "$CASE"
