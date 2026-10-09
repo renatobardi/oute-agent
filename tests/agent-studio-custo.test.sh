@@ -86,30 +86,30 @@ phase() { jq -c --arg k "$1" '.by_phase[] | select(.phase == $k)' <<<"$R"; }
 # ---------------------------------------------------------------- 1. por papel
 check "by_role: os três papéis, nada além"             jqe '[.by_role[].role] | sort == ["avulsa", "dispatcher", "worker"]' <<<"$R"
 check "dispatcher: 2 chamadas, real 0,80"              jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000) and .cost.estimated_usd == null and .tokens.input == 300" <<<"$(role dispatcher)"
-check "worker: real 0,17, estimado 3,00 (TW, e TX sem evento de abertura pelo resource)"     jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 170000) and (.cost.estimated_usd | $(usd .) == 3000000)" <<<"$(role worker)"
-check "worker: chamada sem preço fora das somas"       jqe ".cost.unpriced_calls == 1 and .cost.real_calls == 3 and .cost.estimated_calls == 1" <<<"$(role worker)"
+check "worker: real 0,17, custo de lista 3,00 (TW, e TX sem evento de abertura pelo resource)"     jqe ".calls == 5 and (.cost.real_usd | $(usd .) == 170000) and (.cost.listed_usd | $(usd .) == 3000000) and .cost.estimated_usd == null" <<<"$(role worker)"
+check "worker: chamada sem preço fora das somas"       jqe ".cost.unpriced_calls == 1 and .cost.real_calls == 3 and .cost.listed_calls == 1 and .cost.estimated_calls == 0 and .cost.claude_no_log_calls == 1 and (.cost.real_calls + .cost.listed_calls + .cost.estimated_calls + .cost.unpriced_calls == .calls)" <<<"$(role worker)"
 check "worker: o erro do span entra no grupo"          jqe ".errors.spans == 1" <<<"$(role worker)"
-check "avulsa: real 0,14 (TB, TY, sem sessão), est 1,25" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.estimated_usd | $(usd .) == 1250000)" <<<"$(role avulsa)"
+check "avulsa: real 0,14 (TB, TY, sem sessão), lista 1,25 (Codex)" jqe ".calls == 4 and (.cost.real_usd | $(usd .) == 140000) and (.cost.listed_usd | $(usd .) == 1250000) and .cost.estimated_usd == null" <<<"$(role avulsa)"
 
 # ---------------------------------------------------------------- 2. por fase
 check "by_phase: só plan, build e ops (fases do ADR-07; nem desconhecida nem interativa)" jqe '[.by_phase[].phase] | sort == ["build", "ops", "plan"]' <<<"$R"
 check "plan: o dispatcher"                             jqe ".calls == 2 and (.cost.real_usd | $(usd .) == 800000)" <<<"$(phase plan)"
-check "build: TW (primeira fase conhecida vale) e a sessão sem fase (sem evento, hostil, outro evento, Codex): a mais provável" jqe ".calls == 8 and (.cost.real_usd | $(usd .) == 240000) and (.cost.estimated_usd | $(usd .) == 4250000)" <<<"$(phase build)"
+check "build: TW (primeira fase conhecida vale) e a sessão sem fase (sem evento, hostil, outro evento, Codex): a mais provável" jqe ".calls == 8 and (.cost.real_usd | $(usd .) == 240000) and (.cost.listed_usd | $(usd .) == 4250000) and .cost.estimated_usd == null" <<<"$(phase build)"
 check "ops: a chamada sem sessão nem conversa, real 0,07 (#749)" jqe ".calls == 1 and (.cost.real_usd | $(usd .) == 70000) and .cost.estimated_usd == null" <<<"$(phase ops)"
 check "nenhuma fase desconhecida nem interativa na resposta" bash -c '! grep -qE "desconhecida|interativa" <<<"$1"' _ "$R"
 check "fase hostil não aparece em lugar nenhum"        bash -c '! grep -qF "<b>x</b>" <<<"$1"' _ "$R"
 
 # ---------------------------------------------------------------- 3. as somas batem com o total da janela
 sums() { jq -c --arg k "$1" '{calls: ([.[$k][].calls] | add), spans: ([.[$k][].spans] | add), input: ([.[$k][].tokens.input] | add),
-  output: ([.[$k][].tokens.output] | add), real: ([.[$k][].cost.real_usd // 0] | add), est: ([.[$k][].cost.estimated_usd // 0] | add),
+  output: ([.[$k][].tokens.output] | add), real: ([.[$k][].cost.real_usd // 0] | add), listed: ([.[$k][].cost.listed_usd // 0] | add), est: ([.[$k][].cost.estimated_usd // 0] | add),
   unpriced: ([.[$k][].cost.unpriced_calls] | add), errors: ([.[$k][].errors.total] | add)}' <<<"$R"; }
-TOT="$(jq -c '.totals | {calls, spans, input: .tokens.input, output: .tokens.output, real: .cost.real_usd, est: .cost.estimated_usd,
+TOT="$(jq -c '.totals | {calls, spans, input: .tokens.input, output: .tokens.output, real: .cost.real_usd, listed: (.cost.listed_usd // 0), est: (.cost.estimated_usd // 0),
   unpriced: .cost.unpriced_calls, errors: .errors.total}' <<<"$R")"
 check "total: 11 chamadas na janela, 1 sem preço"      jqe '.calls == 11 and .unpriced == 1' <<<"$TOT"
-check "soma por papel = total (chamadas, spans, tokens, erros)" bash -c 'test "$(jq -S -c "del(.real, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .est)" <<<"$2")"' _ "$(sums by_role)" "$TOT"
-check "soma por fase = total (chamadas, spans, tokens, erros)"  bash -c 'test "$(jq -S -c "del(.real, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .est)" <<<"$2")"' _ "$(sums by_phase)" "$TOT"
-check "soma por papel = total (custo real e estimado)" bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_role)" "$TOT"
-check "soma por fase = total (custo real e estimado)"  bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_phase)" "$TOT"
+check "soma por papel = total (chamadas, spans, tokens, erros)" bash -c 'test "$(jq -S -c "del(.real, .listed, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .listed, .est)" <<<"$2")"' _ "$(sums by_role)" "$TOT"
+check "soma por fase = total (chamadas, spans, tokens, erros)"  bash -c 'test "$(jq -S -c "del(.real, .listed, .est)" <<<"$1")" = "$(jq -S -c "del(.real, .listed, .est)" <<<"$2")"' _ "$(sums by_phase)" "$TOT"
+check "soma por papel = total (custo real, de lista e estimado)" bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.listed - \$t.listed | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_role)" "$TOT"
+check "soma por fase = total (custo real, de lista e estimado)"  bash -c 'jq -n -e --argjson a "$1" --argjson t "$2" "(\$a.real - \$t.real | fabs) < 1e-9 and (\$a.listed - \$t.listed | fabs) < 1e-9 and (\$a.est - \$t.est | fabs) < 1e-9" >/dev/null' _ "$(sums by_phase)" "$TOT"
 check "agrupamentos de sempre seguem na resposta"      jqe '(.rows | length) > 0 and (.series | length) > 0 and (.totals.calls == 11)' <<<"$R"
 check "janela vazia: papéis e fases vazios"            jqe '.by_role == [] and .by_phase == [] and .totals.calls == 0' <<<"$(curl -s "${A[@]}" "$STUDIO_URL/v1/usage?from=2030-01-01&to=2030-01-02")"
 
@@ -126,9 +126,9 @@ check "tela: linha do dispatcher = a da API"           jqe ".[] | select(.role =
 check "tela: mais cara primeiro (build antes de plan)" jqe '[.[] | select(.phase) | .phase] | index("build") < index("plan")' <<<"$P"
 check "tela: total da janela"                          jqe '.[] | select(.tag == "p" and .calls == "11")' <<<"$P"
 check "tela: gráfico por papel com as três linhas, por fase com as três e por assinatura com as linhas da tabela" jqe '([.[] | select(.subscription)] | length) as $s | ([.[] | select(.grafico == "uso-custo-role")] | length == 1) and ([.[] | select(.grafico == "uso-custo-phase")] | length == 1) and ([.[] | select(.nome)] | length == 6 + $s)' <<<"$P"
-check "tela: barras de papel, fase e assinatura somam três vezes o total (real e estimado)" bash -c 'jq -n -e --argjson g "$1" "
-  ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
-  [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 3 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e / 3 - (\$c[\"estimated-usd\"] | tonumber)) | fabs) < 1e-9" >/dev/null' _ "$P"
+check "tela: barras de papel, fase e assinatura somam três vezes o total (real, de lista e estimado)" bash -c 'jq -n -e --argjson g "$1" "
+  ([\$g[] | select(.nome)] | map(.[\"real-usd\"] | select(. != \"\") | tonumber) | add) as \$r | ([\$g[] | select(.nome)] | map(.[\"listed-usd\"] | select(. != \"\") | tonumber) | add) as \$l | ([\$g[] | select(.nome)] | map(.[\"estimated-usd\"] | select(. != \"\") | tonumber) | add) as \$e |
+  [\$g[] | select(.grafico == \"uso-custo-role\")][0] as \$c | ((\$r / 3 - (\$c[\"real-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$l / 3 - (\$c[\"listed-usd\"] | tonumber)) | fabs) < 1e-9 and ((\$e // 0) / 3 - (\$c[\"estimated-usd\"] | if . == \"\" then 0 else tonumber end) | fabs) < 1e-9" >/dev/null' _ "$P"
 # as dicas de Papel e de Fase (#592): cada uma no cabeçalho da sua coluna, e só nela
 TH_ROLE="$(sed -n '/data-uso="role"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"
 TH_PHASE="$(sed -n '/data-uso="phase"/,/<\/thead>/p' <<<"$HTML" | grep -o '<th title="[^"]*" aria-sort="[a-z]*" data-col="name">')"

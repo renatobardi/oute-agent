@@ -286,13 +286,13 @@ check "conv-a: início e duração (31 s)"                jqe '.["start-ns"] == 
 check "conv-a: 3 chamadas (tool e interação não contam)" jqe '.calls == "3"' <<<"$RA"
 check "conv-a: tokens só das chamadas"                 jqe '.input == "1000600" and .output == "50" and .["cache-read"] == "1000" and .["cache-creation"] == "10"' <<<"$RA"
 check "conv-a: custo real 0,01 (o da tool não soma)"   jqe "$(usd '.["real-usd"]') == 10000" <<<"$RA"
-check "conv-a: estimado 3,00, separado do real"        jqe "$(usd '.["estimated-usd"]') == 3000000" <<<"$RA"
-check "conv-a: estimado marcado na tela"               jqe '.text | test("US\\$ 0,0100 ≈ US\\$ 3,0000 est\\. 1 sem preço")' <<<"$RA"
+check "conv-a: custo de lista 3,00 (#747), separado do real e sem estimado" jqe "$(usd '.["listed-usd"]') == 3000000 and .[\"estimated-usd\"] == \"\"" <<<"$RA"
+check "conv-a: real e lista somados na tela, sem a marca de estimado" jqe '.text | test("US\\$ 3,0100 1 sem preço") and (test("est\\.") | not)' <<<"$RA"
 check "conv-a: chamada sem preço fora das somas"       jqe '.["unpriced-calls"] == "1"' <<<"$RA"
 check "conv-a: erros (1 span + 1 log)"                 jqe '.errors == "2"' <<<"$RA"
 RB="$(row conv-b)"
-check "conv-b (Codex): só estimado (2,50), sem real"   jqe ".[\"real-usd\"] == \"\" and $(usd '.["estimated-usd"]') == 2500000 and .host == \"oute-mac\" and .agent == \"codex\"" <<<"$RB"
-check "conv-b: tela não mostra custo real"             jqe '.text | test("≈ US\\$ 2,5000 est\\.") and (test("US\\$ 0,") | not)' <<<"$RB"
+check "conv-b (Codex): só custo de lista (2,50), sem real e sem estimado" jqe ".[\"real-usd\"] == \"\" and .[\"estimated-usd\"] == \"\" and $(usd '.["listed-usd"]') == 2500000 and .host == \"oute-mac\" and .agent == \"codex\"" <<<"$RB"
+check "conv-b: tela mostra o custo de lista como custo, sem ≈ nem est." jqe '.text | test("US\\$ 2,5000") and (test("≈|est\\.") | not) and (test("US\\$ 0,") | not)' <<<"$RB"
 RD="$(row 'conv d/1&x=é')"
 check "conversa que começou antes da janela: números da conversa inteira" jqe ".calls == \"2\" and $(usd '.["real-usd"]') == 750000" <<<"$RD"
 check "lista: link do detalhe com o id codificado"     grep -qF 'href="/conversa?id=conv%20d/1%26x%3D%C3%A9"' "$TMP/list.html"
@@ -324,17 +324,17 @@ check "árvore: span com pai ausente vira raiz, marcado" jqe '.orphan == "1" and
 check "árvore: só o órfão é marcado"                   jqe '[.[] | select(.orphan == "1")] | length == 1' <<<"$S"
 check "span: nome, duração e modelo"                   jqe '.text | test("claude_code.llm_request \\+1,0 s 2,0 s claude-sonnet-5 100 / 50 cache 1\\.000 / 10 US\\$ 0,0100")' <<<"$(sp a2)"
 check "span: custo real"                               jqe ".[\"cost-kind\"] == \"real\" and $(usd .cost) == 10000" <<<"$(sp a2)"
-check "span: custo estimado, marcado"                  jqe ".[\"cost-kind\"] == \"estimated\" and $(usd .cost) == 3000000 and (.text | test(\"≈ US\\\\$ 3,0000 est\\\\.\"))" <<<"$(sp a5)"
+check "span: custo de lista, sem a marca de estimado"   jqe ".[\"cost-kind\"] == \"listed\" and $(usd .cost) == 3000000 and (.text | test(\"US\\\\$ 3,0000\")) and (.text | test(\"≈|est\\\\.\") | not)" <<<"$(sp a5)"
 check "span: modelo sem preço nunca vira zero"         jqe '.["cost-kind"] == "unpriced" and .cost == "" and (.text | test("sem preço"))' <<<"$(sp a6)"
 check "span que não é chamada: sem tokens nem custo"   jqe '.["cost-kind"] == "" and .cost == "" and (.text | test("999|50,0") | not)' <<<"$(sp a3)"
 check "span: status de erro"                           jqe '.status == "erro" and (.text | test("erro$"))' <<<"$(sp a4)"
 check "span: os outros sem erro"                       jqe '[.[] | select(.status == "erro")] | length == 1' <<<"$S"
 R="$(jq -c '.[] | select(has("resumo"))' <<<"$DA")"
-check "resumo: as somas do #203"                       jqe ".calls == \"3\" and $(usd '.["real-usd"]') == 10000 and $(usd '.["estimated-usd"]') == 3000000 and .[\"unpriced-calls\"] == \"1\"" <<<"$R"
+check "resumo: as somas do #203"                       jqe ".calls == \"3\" and $(usd '.["real-usd"]') == 10000 and $(usd '.["listed-usd"]') == 3000000 and .[\"estimated-usd\"] == \"\" and .[\"unpriced-calls\"] == \"1\"" <<<"$R"
 check "resumo: host, instância, agente e sessão"       jqe '.text | test("oute-server \\(oute-agent\\).*claude · claude-code.*oute-agent-206")' <<<"$R"
 check "resumo = soma das linhas da árvore (mesma regra)" jqe --argjson r "$R" \
   '([.[] | select(.["cost-kind"] == "real") | .cost | tonumber] | add) == ($r["real-usd"] | tonumber)
-   and ([.[] | select(.["cost-kind"] == "estimated") | .cost | tonumber] | add) == ($r["estimated-usd"] | tonumber)
+   and ([.[] | select(.["cost-kind"] == "listed") | .cost | tonumber] | add) == ($r["listed-usd"] | tonumber)
    and ([.[] | select(.["cost-kind"] == "unpriced")] | length) == ($r["unpriced-calls"] | tonumber)' <<<"$S"
 G="$(jq -c '[.[] | select(.log)]' <<<"$DA")"
 check "logs: em ordem da hora do fato"                 jqe 'map(.log) == ["1759000000500000000", "1759000003000000000", "1759000008000000000"]' <<<"$G"
@@ -469,8 +469,13 @@ D1 = 1759000000 * 10**9
 r = conversations.listing(con, D1 - 86400 * 10**9, D1 + 86400 * 10**9, cost.PriceTable(), limit=1)
 check("lista: limite corta, total conta tudo", r["total"] == 3 and [c["id"] for c in r["conversations"]] == ["conv-b"])
 check("lista: sem tabela de preços, sem estimativa (nunca zero)",
-      r["conversations"][0]["usage"]["cost"] == {"real_usd": None, "estimated_usd": None, "real_calls": 0,
-                                                 "estimated_calls": 0, "unpriced_calls": 1})
+      r["conversations"][0]["usage"]["cost"] == {"real_usd": None, "listed_usd": None, "estimated_usd": None, "real_calls": 0,
+                                                 "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1})
+price = cost.ModelPrice(2.0, 10.0, 0.1, 2.5)
+check("custo da chamada (#747): assinatura sem custo informado = lista; fora das três assinaturas segue estimado (marcado)",
+      [cost.call_cost(None, 1_000_000, 0, 0, 0, price, sub)[0] for sub in ("claude", "codex", "zai", None)] == ["listed", "listed", "listed", "estimated"]
+      and cost.call_cost(0.5, 1_000_000, 0, 0, 0, price, "claude") == ("real", 0.5)
+      and cost.call_cost(None, 1_000_000, 0, 0, 0, None, "codex") == ("unpriced", None))
 d = conversations.detail(con, "conv-a", cost.PriceTable(), span_limit=2)
 check("detalhe: limite de spans avisa o corte", d["spans_truncated"] and len(d["spans"]) == 2)
 check("detalhe: filho cujo pai ficou fora do limite não some", conversations.detail(con, "conv-a", cost.PriceTable())["spans_truncated"] is False)
@@ -501,7 +506,7 @@ for path, query in (("/conversas", ""), ("/conversa", "id=a"), ("/conversa/logs"
 PY
 cat "$TMP/py.out" | grep -v '^Traceback\|^  \|^RuntimeError\|^$\|tela: .* falhou' || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 16 casos rodaram"          test "$((n_ok + n_fail))" = 16
+check "lógica em Python: os 17 casos rodaram"          test "$((n_ok + n_fail))" = 17
 
 # ---------------------------------------------------------------- 6. imagem e compose
 check "templates e htmx vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/base.html" && test -f "$1/static/htmx.min.js" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"

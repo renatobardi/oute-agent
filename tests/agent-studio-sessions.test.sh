@@ -171,13 +171,13 @@ check "S1: começa no evento de abertura (3 dias antes): números da sessão int
   jqe '.["start-ns"] == "1758740810000000000" and .calls == "4"' <<<"$R1"
 check "S1: tokens só das chamadas"                     jqe '.input == "1000117" and .output == "50" and .["cache-read"] == "1000" and .["cache-creation"] == "10"' <<<"$R1"
 check "S1: custo real 0,76 (o da tool não soma)"       jqe "$(usd '.["real-usd"]') == 760000" <<<"$R1"
-check "S1: estimado 3,00, separado do real e marcado"  jqe "$(usd '.["estimated-usd"]') == 3000000 and (.text | test(\"US\\\\$ 0,7600 ≈ US\\\\$ 3,0000 est\\\\.\"))" <<<"$R1"
+check "S1: custo de lista 3,00 (#747), separado do real, somado a ele na tela e sem a marca de estimado" jqe "$(usd '.["listed-usd"]') == 3000000 and .[\"estimated-usd\"] == \"\" and (.text | test(\"US\\\\$ 3,7600\")) and (.text | test(\"est\\\\.\") | not)" <<<"$R1"
 check "S1: p95 das chamadas (1, 2, 4 e 10 s = 9,1 s)"  jqe '(.["p95-ms"] | tonumber) == 9100 and (.text | test("9,1 s"))' <<<"$R1"
 check "S1: erros (1 span + 1 log)"                     jqe '.errors == "2"' <<<"$R1"
 check "S1: estado, repo e slug do SurrealDB"           jqe '.state == "aberta" and (.text | test("oute-agent · 207-tela aberta"))' <<<"$R1"
 check "S1: rodada do swarm, com o label e a issue"     jqe --arg r "$RND" '.round == $r and (.text | test("rodada " + $r + " \\(studio-tela\\) issue #207"))' <<<"$R1"
 R2="$(srow "$S2")"
-check "S2 (Codex): só estimado (2,50), sem real"       jqe ".[\"real-usd\"] == \"\" and $(usd '.["estimated-usd"]') == 2500000 and .host == \"oute-mac\" and .agents == \"codex\" and .models == \"gpt-5-codex\"" <<<"$R2"
+check "S2 (Codex): só custo de lista (2,50), sem real e sem estimado" jqe ".[\"real-usd\"] == \"\" and .[\"estimated-usd\"] == \"\" and $(usd '.["listed-usd"]') == 2500000 and .host == \"oute-mac\" and .agents == \"codex\" and .models == \"gpt-5-codex\"" <<<"$R2"
 check "S2: removida e avulsa (sem rodada)"             jqe '.state == "removida" and .round == "" and (.text | test("lab · ajuste removida avulsa"))' <<<"$R2"
 check "S2: um modelo só não leva contagem"             jqe '.text | test("×") | not' <<<"$R2"
 R3="$(srow "$S3")"
@@ -195,16 +195,16 @@ check "conversa: link para o detalhe (#206)"           grep -qF "<a href=\"/conv
 check "conversa: nome amigável e, abaixo, o id inteiro (#530)" grep -qF "<span class=\"fino conv-id\">s1-a</span>" "$TMP/list.html"
 check "conversa com erro: o selo é link para os erros dela (#530)" grep -qF 'href="/conversa?id=s1-b&amp;erros=1"' "$TMP/list.html"
 check "conversa sem erro: sem link de erros (#530)"    bash -c '! grep -qF "id=s1-a&amp;erros=1" "$1"' _ "$TMP/list.html"
-check "conversa: agente, modelo e números dela"        jqe ".agent == \"claude\" and .models == \"claude-sonnet-5\" and .calls == \"2\" and $(usd '.["real-usd"]') == 10000 and $(usd '.["estimated-usd"]') == 3000000" <<<"$(jq -c '.[] | select(.conversa == "s1-a")' <<<"$V")"
+check "conversa: agente, modelo e números dela"        jqe ".agent == \"claude\" and .models == \"claude-sonnet-5\" and .calls == \"2\" and $(usd '.["real-usd"]') == 10000 and $(usd '.["listed-usd"]') == 3000000" <<<"$(jq -c '.[] | select(.conversa == "s1-a")' <<<"$V")"
 check "conversa: p95 dela (2 e 4 s = 3,9 s)"           jqe '(.["p95-ms"] | tonumber) == 3900' <<<"$(jq -c '.[] | select(.conversa == "s1-a")' <<<"$V")"
 check "sessão = soma das conversas dela (mesma regra)" jqe --argjson r "$R1" \
   '(map(.calls | tonumber) | add) == ($r.calls | tonumber)
    and (map(.["real-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($r["real-usd"] | tonumber * 1e6 | round)
-   and (map(.["estimated-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($r["estimated-usd"] | tonumber * 1e6 | round)
+   and (map(.["listed-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($r["listed-usd"] | tonumber * 1e6 | round)
    and (map(.errors | tonumber) | add) == ($r.errors | tonumber)' <<<"$(of "$S1")"
 LOOSE="$(of "")"
 check "sem sessão: uma linha por session.id, da mais recente para a mais antiga" jqe 'map(.conversa) == ["solta 2/&é", "solta-1"]' <<<"$LOOSE"
-check "sem sessão: agente, modelo e custo de cada"     jqe ".[0].agent == \"codex\" and .[0].models == \"gpt-5-codex\" and $(usd '.[0]["estimated-usd"]') == 2500000 and $(usd '.[1]["real-usd"]') == 20000" <<<"$LOOSE"
+check "sem sessão: agente, modelo e custo de cada"     jqe ".[0].agent == \"codex\" and .[0].models == \"gpt-5-codex\" and $(usd '.[0]["listed-usd"]') == 2500000 and $(usd '.[1]["real-usd"]') == 20000" <<<"$LOOSE"
 check "sem sessão: link do detalhe com o id codificado" grep -qF 'href="/conversa?id=solta%202/%26%C3%A9"' "$TMP/list.html"
 # os mesmos números do /v1/usage (#203): tudo o que a tela soma é o total da API na janela que cobre o ano
 studio_page "${C[@]}" "$STUDIO_URL/sessoes?from=2025-01-01&to=2026-01-01" | data > "$TMP/year.json"
@@ -213,7 +213,8 @@ check "sessões + sem sessão = totais do /v1/usage"     jqe --argjson u "$U" \
   '[.[] | select(.sessao or (.conversa and .["da-sessao"] == ""))] as $g
    | ($g | map(.calls | tonumber) | add) == $u.calls
    and ($g | map(.["real-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($u.cost.real_usd * 1e6 | round)
-   and ($g | map(.["estimated-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($u.cost.estimated_usd * 1e6 | round)
+   and ($g | map(.["listed-usd"] | select(. != "") | tonumber) | add * 1e6 | round) == ($u.cost.listed_usd * 1e6 | round)
+   and ($g | map(.["estimated-usd"] | select(. != "") | tonumber) | add // 0) == ($u.cost.estimated_usd // 0)
    and ($g | map(.input | tonumber) | add) == $u.tokens.input
    and ($g | map(.errors | tonumber) | add) == $u.errors.total' "$TMP/year.json"
 check "janela do ano: a sessão e a conversa de janeiro entram" jqe '([.[] | select(.sessao)] | length) == 5 and any(.[]; .conversa == "solta-jan")' "$TMP/year.json"
@@ -318,8 +319,8 @@ r = sessions.listing(con, D1 - DAY, D1 + DAY, none, limit=1)
 check("lista: limite corta sessões e conversas sem sessão, os totais contam tudo",
       r["total"] == 4 and r["loose_total"] == 2 and len(r["sessions"]) == 1 and len(r["loose"]) == 1)
 check("lista: sem tabela de preços, sem estimativa (nunca zero)",
-      r["sessions"][0]["usage"]["cost"] == {"real_usd": None, "estimated_usd": None, "real_calls": 0,
-                                            "estimated_calls": 0, "unpriced_calls": 1})
+      r["sessions"][0]["usage"]["cost"] == {"real_usd": None, "listed_usd": None, "estimated_usd": None, "real_calls": 0,
+                                            "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1})
 r = sessions.listing(con, D1 - DAY, D1 + DAY, none, conv_limit=2)
 s1 = next(s for s in r["sessions"] if s["id"] == S1)
 check("lista: conversas por sessão cortadas nas mais recentes, com as que faltam contadas",
