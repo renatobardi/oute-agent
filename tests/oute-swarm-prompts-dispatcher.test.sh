@@ -249,4 +249,9 @@ check "742: §2: para de abrir sessões novas e as abertas terminam" grep -qF 'v
 check "742: §2: BLOQUEADO com as três opções numeradas" bash -c 'for t in "1. esperar o reset da janela de 7 dias" "2. subir o weekly_guard_pct" "3. abrir #<n> mesmo assim (--force)"; do grep -qF -- "$t" "$1" || exit 1; done' _ "$D"
 check "742: §2: cota não lida só avisa, e --force é só do Bardi" bash -c 'grep -qF "Cota não lida não trava: o \`spawn\` abre e avisa em stderr" "$1" && grep -qF "Nunca use \`--force\` por conta própria: é só do Bardi" "$1"' _ "$D"
 check "742: §2: a recomendação vem rotulada" grep -qF 'sua recomendação, rotulada "recomendação do autor", é a 1' "$D"
+# 771. fontes do revisor: arquivo de fatos locais, SHA de 12 caracteres, sem URL de job
+check "771: §4.3 passo 3: grava arquivo de fatos com a saída de cada comando local citado" bash -c 'l="$(grep -F "Fatos locais e filtro de segredo (#771)" "$1")"; for t in "grave em um arquivo de fatos a saída de cada comando local" "oute-select" "oute-quota" "oute-swarm busy"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "771: §4.3 passo 3: SHA de 12 caracteres, por causa do filtro de segredo" grep -qF 'use SHA de **12 caracteres** (`git rev-parse --short=12`)' "$D"
+check "771: §4.3 passo 3: tira a URL de job do Actions das fontes" grep -qF 'Tire das fontes a URL de job do Actions' "$D"
+check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" bash -c 'l="$(grep -F "Fontes para o revisor (#771)" "$1")"; grep -qF "arquivo de fatos" <<<"$l" && grep -qF "§4.3, passo 3" <<<"$l"' _ "$D"
 check_end

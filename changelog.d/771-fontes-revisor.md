@@ -1,0 +1,2 @@
+### Changed
+- **`swarm.md` ensina o arquivo de fontes do revisor das etapas** (#771). Na triagem (§1) e no fechamento (§4.3, passo 3) o dispatcher grava um arquivo de fatos com a saída de cada comando local que o texto cita, usa SHAs de 12 caracteres e tira URLs de job do Actions das fontes, para o filtro de segredo do `step review` não recusar o arquivo. **Precisa de release** (`docker/swarm.md` vai na imagem).
