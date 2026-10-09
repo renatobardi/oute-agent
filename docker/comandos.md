@@ -142,6 +142,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       --model: modelo da sessão (sem ele: o da fase da issue, pelo oute-select)
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max
       --subscription: a assinatura só desta sessão (#678; vence a da rodada e vale como escolha explícita)
+  oute-swarm switch <n>-<slug>      sessão parada por cota esgotada (linha [cota] do watch): reabre na próxima
+                                    assinatura da cadeia da issue, mesma worktree e branch (#759). Sem cota em
+                                    nenhuma: não muda nada, lista os resets e sai com 6 (o dispatcher abre BLOQUEADO)
   oute-swarm tell <n>-<slug> "mensagem" [--force]
                                     repassa sua decisão à sessão (o dispatcher usa quando você decide).
                                     Só com a sessão parada (idle/done/blocked); confere o campo antes do Enter
