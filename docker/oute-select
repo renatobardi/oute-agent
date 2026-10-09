@@ -19,6 +19,14 @@
                    (#742) imprime uma linha de JSON com a trava semanal da assinatura frente à janela de 7 dias:
                    {"subscription","status","guard_pct","used_pct","resets_in_s","resets_at"}; `status` = none (sem
                    `weekly_guard_pct`), ok, over (no valor ou acima) ou unknown (cota não lida). Sempre sai 0; não escolhe nada
+  --next-subscription <parada>[,<já-tentada>…]
+                   (#759) para a troca de assinatura de uma sessão parada por cota: com `--issue`/`--repo` (ou `--phase`), lê a
+                   cadeia da linha da issue e imprime uma linha de JSON {"phase","chain","next","next_agent","next_model",
+                   "next_effort","options":[{"subscription","status","resets_in_s","resets_at","detail"}]}. `status` por
+                   assinatura: parada (as da lista, nunca candidatas), indisponivel, cheia (janela no teto de `max_pct`),
+                   trava (7 dias no `weekly_guard_pct`), desconhecida (cota não lida) ou ok. `next` = a primeira `ok` na ordem
+                   da cadeia, senão a primeira `desconhecida`, senão "". `resets_*` = quando a assinatura volta (a janela
+                   cheia que reseta por último). Sempre sai 0; não abre nada
   --json           {"phase","origin","subscription","agent","model","effort","reason","confidence","reserve"} (+ "reserve_from"
                    só quando houve reserva: a assinatura de onde a sessão saiu); sem ele, uma linha para ler
 
@@ -599,9 +607,60 @@ def weekly_guard(name):
     return 0
 
 
+def option_row(sub, stopped, q, cut):
+    """linha de `options` do --next-subscription (#759) para a assinatura `sub`: estado, quando volta e o texto das janelas"""
+    name = sub["name"]
+    row = {"subscription": name, "status": "ok", "resets_in_s": None, "resets_at": None, "detail": ""}
+    st, wins = quota_windows(q, name) if q else ("unknown", {})
+    if name in stopped:
+        row["status"] = "parada"
+    elif sub["status"] and agent_state(sub["status"]) == "down":
+        row["status"] = "indisponivel"
+    guard = sub.get("weekly_guard_pct")
+    over = quota_over(wins, cut) if st == "ok" else {}
+    if row["status"] == "ok" and st != "ok":
+        row["status"] = "desconhecida"
+    elif row["status"] == "ok" and over:
+        row["status"] = "cheia"
+    elif row["status"] == "ok" and guard is not None and "7d" in wins and wins["7d"][0] >= guard:
+        row["status"], over = "trava", {"7d": wins["7d"]}
+    if row["status"] == "parada" and st == "ok":
+        over = quota_over(wins, cut) or {n: w for n, w in wins.items() if w[0] == max(x[0] for x in wins.values())}
+    if over:
+        last = max(over.values(), key=lambda w: -1 if w[1] is None else w[1])
+        row.update(resets_in_s=None if last[1] is None else int(last[1]), resets_at=last[2], detail=wins_text(over))
+    return row
+
+
+def next_subscription(opt, phases, exceptions, default, subs):
+    """--next-subscription (#759): a próxima assinatura da cadeia da linha da issue, dada a lista das que já pararam"""
+    stopped = opt["next-subscription"].split(",")
+    names = [x["name"] for x in subs]
+    if not all(n in names for n in stopped):
+        die(f"assinatura inválida em --next-subscription: {opt['next-subscription']}; use {' ou '.join(names)}")
+    if opt["phase"]:
+        phase, ln = opt["phase"], phases.get(opt["phase"])
+    else:
+        ln, phase = by_issue(opt["repo"], opt["issue"], phases, exceptions)[:2]
+    ln = ln or default
+    default_sub = next(x["name"] for x in subs if x["default"])
+    chain = (ln.get("chain") if ln else None) or [default_sub] + [n for n in names if n != default_sub]
+    by_name = {x["name"]: x for x in subs}
+    q = quota_read()
+    cut = num(q.get("max_pct"), QUOTA_MAX_PCT) if q else QUOTA_MAX_PCT
+    rows = [option_row(by_name[n], stopped, q, cut) for n in chain if n in by_name]
+    pick = next((r for r in rows if r["status"] == "ok"), None) or next((r for r in rows if r["status"] == "desconhecida"), None)
+    nxt = pick["subscription"] if pick else ""
+    out = {"phase": phase, "chain": chain, "next": nxt, "next_agent": by_name[nxt]["agent"] if nxt else "",
+           "next_model": ln[nxt] if nxt and ln else "", "next_effort": ln["effort"] if nxt and ln and by_name[nxt]["effort"] else "",
+           "options": rows}
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def main(argv):
     opt = {"json": False, "repo": "", "issue": None, "phase": "", "agent": "", "subscription": "", "model": "", "prefer": "",
-           "text-file": ""}
+           "text-file": "", "next-subscription": ""}
     it = iter(argv)
     for a in it:
         if a in ("-h", "--help"):
@@ -616,7 +675,7 @@ def main(argv):
                 die(f"--weekly-guard sem assinatura válida\n{USAGE}")
             return weekly_guard(name)
         if a not in ("--repo", "--issue", "--task", "--phase", "--agent", "--subscription", "--prefer", "--model",
-                     "--text-file"):
+                     "--text-file", "--next-subscription"):
             die(f"opção desconhecida: {a}\n{USAGE}")
         v = next(it, None)
         if v is None:
@@ -633,6 +692,8 @@ def main(argv):
     agent, model = opt["agent"], opt["model"]
     default, phases, exceptions, subs, mode = load_table()
     names = [x["name"] for x in subs]
+    if opt["next-subscription"]:
+        return next_subscription(opt, phases, exceptions, default, subs)
     agents = list(dict.fromkeys(x["agent"] for x in subs))
     if agent == "pi":
         die("Pi saiu do stack (#217), use claude ou codex")
