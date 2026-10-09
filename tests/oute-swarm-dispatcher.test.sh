@@ -200,21 +200,35 @@ check "tab create sem pane: recusa"                      [ "$RC" -ne 0 ]
 check "tab create sem pane: diz a causa"                 grep -qF 'não achei o pane da aba do watch' <<<"$ERR"
 check "tab create sem pane: o agente não abre"           [ ! -e "$FAKE/oute-task.last" ]
 check "tab create sem pane: o log registra"              grep -qF 'watch não iniciado: pane da aba não achado' "$H/.oute/swarm/$nr/log"
-# 12d. --agent claude explícito e sem --agent: Monitor, sem aba de watch, meta como sempre
+# 12d. --agent claude explícito e sem --agent (#761): a mesma aba watch --deliver do Codex, sem Monitor, meta com o pane
 for ag_args in "--agent claude" ""; do
   CASE="ab-claude${ag_args:+-explicito}"; round "$CASE"
   # shellcheck disable=SC2086
   opn --max 2 $ag_args
   nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
   check "claude [${ag_args:-sem --agent}]: código 0"      [ "$RC" -eq 0 -a -n "$nr" ]
-  check "claude [${ag_args:-sem --agent}]: sem aba de watch" bash -c '! grep -qsF "tab create" "$1"' _ "$FAKE/herdr.log"
-  check "claude [${ag_args:-sem --agent}]: meta sem dispatcher_pane, agent=claude" [ -z "$(grep '^dispatcher_pane' "$M")" -a "$(grep -cx 'agent=claude' "$M")" -eq 1 ]
+  check "claude [${ag_args:-sem --agent}]: aba do watch criada" grep -qF -- "tab create --workspace w1 --cwd $REPO --label watch $nr --no-focus" "$FAKE/herdr.log"
+  check "claude [${ag_args:-sem --agent}]: a aba roda o watch --deliver" grep -qF "pane run w1:p2 OUTE_SWARM_ID=$nr oute-swarm watch --round $nr --deliver" "$FAKE/herdr.log"
+  check "claude [${ag_args:-sem --agent}]: meta com dispatcher_pane, agent=claude" [ "$(grep -cxE 'agent=claude|dispatcher_pane=w1:p0' "$M")" -eq 2 ]
+  check "claude [${ag_args:-sem --agent}]: o log registra a aba do watch" grep -qF " watch --deliver aberto na aba w1:p2 (dispatcher claude, pane w1:p0)" "$H/.oute/swarm/$nr/log"
   check "claude [${ag_args:-sem --agent}]: oute-task com claude" [ "$(tr '\n' ' ' < "$FAKE/oute-task.args")" == "--phase plan -r $REPO $nr claude " ]
-  check "claude [${ag_args:-sem --agent}]: prompt com a ferramenta Monitor" grep -qF 'com a ferramenta `Monitor`, com o `timeout_ms` no máximo que ela aceita' "$FAKE/oute-task.last"
-  check "claude [${ag_args:-sem --agent}]: prompt sem o trecho do Codex" bash -c '! grep -qF -e "--deliver" -e "Sem ai-memory" -e "nohup oute-swarm tell" "$1"' _ "$FAKE/oute-task.last"
+  check "claude [${ag_args:-sem --agent}]: prompt com o watch fora do agente" grep -qF 'já roda sozinho, fora de você, na aba `watch '"$nr"'` do herdr' "$FAKE/oute-task.last"
+  check "claude [${ag_args:-sem --agent}]: prompt sem a ferramenta Monitor" bash -c '! grep -qF "Monitor" "$1"' _ "$FAKE/oute-task.last"
+  check "claude [${ag_args:-sem --agent}]: prompt sem o trecho do Codex" bash -c '! grep -qF -e "Sem ai-memory" -e "nohup oute-swarm tell" "$1"' _ "$FAKE/oute-task.last"
   check "claude [${ag_args:-sem --agent}]: sem marcador no prompt" [ -z "$(grep -oE '@@/?(CL|CX)@@' "$FAKE/oute-task.last")" ]
 done
-# o prompt do Claude é o swarm.md sem marcador nem trecho do Codex: o texto de sempre, byte a byte (referência: main antes do #213)
+# 12e. claude sem HERDR_PANE_ID: recusa antes de criar a rodada; tab create sem pane: o dispatcher não abre
+CASE=ab-claude-sem-pane; round "$CASE"
+OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX -u HERDR_PANE_ID PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$ROOT/docker" HERDR_ENV=1 \
+       HERDR_WORKSPACE_ID=w1 "$SWARM" "$REPO" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+check "claude sem pane: recusa"                          [ "$RC" -ne 0 ]
+check "claude sem pane: diz a causa"                     grep -qF 'dispatcher claude precisa de HERDR_PANE_ID e HERDR_WORKSPACE_ID' <<<"$ERR"
+check "claude sem pane: nenhuma rodada, nenhum oute-task" so_teste
+CASE=ab-claude-tab-falha; round "$CASE"; echo 'não é json' > "$FAKE/tab-create.out"
+opn
+check "claude tab create sem pane: recusa"               [ "$RC" -ne 0 ]
+check "claude tab create sem pane: o agente não abre"    [ ! -e "$FAKE/oute-task.last" ]
+# o prompt do Claude é o swarm.md sem marcador nem trecho do Codex (o item do watch é comum a todos)
 CASE=ab-claude-bytes; round "$CASE"
 opn --max 2
 nr="$(nova)"
