@@ -403,7 +403,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if path in ("/", "/uso"):
             sub_mod.check(q.get(sub_mod.PARAM, ""))
         tables = {CONVERSAS: (conv_mod.TABLE,), SESSOES: (sess_mod.TABLE, sess_mod.LOOSE),
-                  "/uso": (usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE, usage_mod.SUBSCRIPTION_TABLE),
+                  "/uso": usage_mod.TABLES,
                   "/pedidos": (prop_mod.PENDING_TABLE, prop_mod.RECENT_TABLE), "/rodadas": (etapas_mod.TABLE,)}
         if path in tables:
             table_states(q, *tables[path])
@@ -810,7 +810,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         except ValueError as e:
             return error(request, 400, str(e))
         try:
-            st_role, st_phase, st_sub = table_states(q, usage_mod.ROLE_TABLE, usage_mod.PHASE_TABLE, usage_mod.SUBSCRIPTION_TABLE)
+            st_role, st_phase, st_sub, st_rm, st_rp, st_ts, st_tc = table_states(q, *usage_mod.TABLES)
             sub = sub_mod.check(q.get(sub_mod.PARAM, ""))
         except ValueError as e:
             return error(request, 400, str(e))
@@ -831,9 +831,14 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         by_role, by_phase = by_cost(data["by_role"]), by_cost(data["by_phase"])
         # a chamada sem assinatura (ai-memory) aparece com o nome de exibição, não como `null`
         by_sub = by_cost([{**r, "subscription": r["subscription"] or usage_mod.NO_SUBSCRIPTION} for r in data["by_subscription"]])
-        (t_role, t_phase, t_sub), keep = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase),
-                                                   (usage_mod.SUBSCRIPTION_TABLE, st_sub, by_sub))
-        return page(request, "usage.html", idle=data.get("idle", []), totals=data["totals"], t_role=t_role, t_phase=t_phase, t_sub=t_sub, keep=keep,
+        by_role_model, by_role_phase = by_cost(data["by_role_model"]), by_cost(data["by_role_phase"])
+        tabs = table_ctx(q, "/uso", (usage_mod.ROLE_TABLE, st_role, by_role), (usage_mod.PHASE_TABLE, st_phase, by_phase),
+                         (usage_mod.SUBSCRIPTION_TABLE, st_sub, by_sub), (usage_mod.ROLE_MODEL_TABLE, st_rm, by_role_model),
+                         (usage_mod.ROLE_PHASE_TABLE, st_rp, by_role_phase), (usage_mod.TOP_SESSION_TABLE, st_ts, data["top_sessions"]),
+                         (usage_mod.TOP_CONVERSATION_TABLE, st_tc, data["top_conversations"]))
+        (t_role, t_phase, t_sub, t_rm, t_rp, t_ts, t_tc), keep = tabs
+        return page(request, "usage.html", idle=data.get("idle", []), totals=data["totals"], t_role=t_role, t_phase=t_phase, t_sub=t_sub,
+                    t_rm=t_rm, t_rp=t_rp, t_ts=t_ts, t_tc=t_tc, keep=keep,
                     charts=charts_mod.build(data, by_role, by_phase, by_sub),
                     from_ns=from_ns, to_ns=to_ns, windows=WINDOWS, repo=repo, sub=sub or "", repos=repos,
                     **period(q, from_ns, to_ns, config.tz))

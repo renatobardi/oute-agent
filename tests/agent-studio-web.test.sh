@@ -470,7 +470,8 @@ r = conversations.listing(con, D1 - 86400 * 10**9, D1 + 86400 * 10**9, cost.Pric
 check("lista: limite corta, total conta tudo", r["total"] == 3 and [c["id"] for c in r["conversations"]] == ["conv-b"])
 check("lista: sem tabela de preços, sem estimativa (nunca zero)",
       r["conversations"][0]["usage"]["cost"] == {"real_usd": None, "listed_usd": None, "estimated_usd": None, "real_calls": 0,
-                                                 "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1})
+                                                 "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1,
+                                                 "output_usd": 0.0, "input_cache_usd": 0.0, "split_unpriced_calls": 1})
 price = cost.ModelPrice(2.0, 10.0, 0.1, 2.5)
 check("custo da chamada (#747): assinatura sem custo informado = lista; fora das três assinaturas segue estimado (marcado)",
       [cost.call_cost(None, 1_000_000, 0, 0, 0, price, sub)[0] for sub in ("claude", "codex", "zai", None)] == ["listed", "listed", "listed", "estimated"]

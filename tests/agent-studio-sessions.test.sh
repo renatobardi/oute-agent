@@ -320,7 +320,8 @@ check("lista: limite corta sessões e conversas sem sessão, os totais contam tu
       r["total"] == 4 and r["loose_total"] == 2 and len(r["sessions"]) == 1 and len(r["loose"]) == 1)
 check("lista: sem tabela de preços, sem estimativa (nunca zero)",
       r["sessions"][0]["usage"]["cost"] == {"real_usd": None, "listed_usd": None, "estimated_usd": None, "real_calls": 0,
-                                            "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1})
+                                            "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 1,
+                                            "output_usd": 0.0, "input_cache_usd": 0.0, "split_unpriced_calls": 1})
 r = sessions.listing(con, D1 - DAY, D1 + DAY, none, conv_limit=2)
 s1 = next(s for s in r["sessions"] if s["id"] == S1)
 check("lista: conversas por sessão cortadas nas mais recentes, com as que faltam contadas",
