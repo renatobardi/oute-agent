@@ -59,7 +59,7 @@ check "ingestão: logs = 200"                           test "$(post logs "$TMP/
 check "ingestão: métricas = 200"                       test "$(post metrics "$TMP/metrics.json")" = 200
 A=(-H "Authorization: Bearer $STUDIO_TOKEN")
 R="$(curl -s "${A[@]}" "$STUDIO_URL/v1/usage$WIN")"
-row() { jq -c --arg h "$1" --arg a "$2" '.rows[] | select(.host == $h and .agent == $a)' <<<"$R"; }
+row() { local host="$1" agent="$2"; jq -c --arg h "$host" --arg a "$agent" '.rows[] | select(.host == $h and .agent == $a)' <<<"$R"; return $?; }
 
 # ---------------------------------------------------------------- 1. /v1/usage
 S="$(row oute-server ai-memory)"
@@ -80,11 +80,11 @@ check "soma por agente bate com o total (estimado)"         jqe "([.rows[].cost.
 P="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN" | data)"
 check "/uso: total da janela inclui as 5 chamadas do ai-memory" jqe '.[] | select(.tag == "p" and .calls == "6")' <<<"$P"
 check "/uso: custo real do total = o da API"                  jqe ".[] | select(.tag == \"p\" and .calls == \"6\") | (.[\"real-usd\"] | $(usd .)) == $(jq "(.totals.cost.real_usd | $(usd .))" <<<"$R")" <<<"$P"
-check "/uso: chamada do ai-memory (sem sessão) cai em avulsa" jqe '.[] | select(.role == "avulsa") | (.calls | tonumber) >= 5' <<<"$P"
+check "/uso: chamada do ai-memory (sem sessão) cai em standalone" jqe '.[] | select(.role == "standalone") | (.calls | tonumber) >= 5' <<<"$P"
 
 # ---------------------------------------------------------------- 3. alerta do proxy fora
-iso() { python3 -c 'import sys, datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
-alerts() { curl -s "${A[@]}" "$STUDIO_URL/v1/alerts?at=$(iso "$1")"; }
+iso() { local ts="$1"; python3 -c 'import sys, datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$ts"; return $?; }
+alerts() { local ts="$1"; curl -s "${A[@]}" "$STUDIO_URL/v1/alerts?at=$(iso "$ts")"; return $?; }
 L='[.alerts[] | select(.type == "llm_proxy_down")]'
 AL="$(alerts "$AT")"
 check "proxy parado há 20 min no oute-server: alerta ligado" jqe "$L | length == 1 and .[0].host == \"oute-server\" and .[0].unit == \"seconds\" and .[0].value == 1200 and .[0].limit == 300" <<<"$AL"
