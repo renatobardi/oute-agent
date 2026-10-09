@@ -80,7 +80,7 @@ check "soma por agente bate com o total (estimado)"         jqe "([.rows[].cost.
 P="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN" | data)"
 check "/uso: total da janela inclui as 5 chamadas do ai-memory" jqe '.[] | select(.tag == "p" and .calls == "6")' <<<"$P"
 check "/uso: custo real do total = o da API"                  jqe ".[] | select(.tag == \"p\" and .calls == \"6\") | (.[\"real-usd\"] | $(usd .)) == $(jq "(.totals.cost.real_usd | $(usd .))" <<<"$R")" <<<"$P"
-check "/uso: chamada do ai-memory (sem sessão) cai em avulsa" jqe '.[] | select(.role == "avulsa") | (.calls | tonumber) >= 5' <<<"$P"
+check "/uso: chamada do ai-memory (sem sessão) cai em standalone" jqe '.[] | select(.role == "standalone") | (.calls | tonumber) >= 5' <<<"$P"
 
 # ---------------------------------------------------------------- 3. alerta do proxy fora
 iso() { python3 -c 'import sys, datetime; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
