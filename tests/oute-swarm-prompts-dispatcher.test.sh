@@ -249,4 +249,8 @@ check "742: §2: para de abrir sessões novas e as abertas terminam" grep -qF 'v
 check "742: §2: BLOQUEADO com as três opções numeradas" bash -c 'for t in "1. esperar o reset da janela de 7 dias" "2. subir o weekly_guard_pct" "3. abrir #<n> mesmo assim (--force)"; do grep -qF -- "$t" "$1" || exit 1; done' _ "$D"
 check "742: §2: cota não lida só avisa, e --force é só do Bardi" bash -c 'grep -qF "Cota não lida não trava: o \`spawn\` abre e avisa em stderr" "$1" && grep -qF "Nunca use \`--force\` por conta própria: é só do Bardi" "$1"' _ "$D"
 check "742: §2: a recomendação vem rotulada" grep -qF 'sua recomendação, rotulada "recomendação do autor", é a 1' "$D"
+# 772. auditoria delegada a subagente: ele devolve o texto, o dispatcher publica com oute-refcheck
+check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente de auditoria não publica nada" "devolve o texto do relatório" "**você** o publica" "oute-refcheck <arquivo>" "gh pr comment <n> --body-file <arquivo>"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "772: §3: o refcheck vem antes da publicação" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; a="${l%%oute-refcheck*}"; b="${l%%gh pr comment*}"; [ "${#a}" -lt "${#b}" ]' _ "$D"
+check "772: §3: recusa da ferramenta de escrita ao subagente não bloqueia a auditoria" grep -qF 'Se a ferramenta de escrita recusar ao subagente, isso não bloqueia a auditoria' "$D"
 check_end
