@@ -14,24 +14,6 @@ TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 # nenhum pane ou agente de verdade no ambiente de quem roda
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID
 
-# ag <status> [agente] [pane]: o `herdr agent list` com o dispatcher (pane w1:p0, o do meta) nesse estado
-ag() { jq -n --arg s "$1" --arg a "${2:-claude}" --arg p "${3:-w1:p0}" '{result: {agents: [{pane_id: $p, agent: $a, agent_status: $s}]}}' > "$FAKE/agents.json"; }
-# wd: o watch --deliver até a rodada fechar (o `sleep` falso fecha na passada sem gancho); stdout em $OUT, stderr em $ERR
-wd() {
-  local g=(); command -v timeout >/dev/null && g=(timeout 30)
-  rm -f "$FAKE/sleeps" "$STATE/fechada"
-  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
-         OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" \
-         ${g[@]+"${g[@]}"} "$SWARM" watch --round swarm-test --deliver "$@" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
-}
-# dround <caso>: rodada de dispatcher no Codex/Claude: round() + dispatcher_pane no meta e o dispatcher parado
-dround() { round "$1"; echo "dispatcher_pane=w1:p0" >> "$STATE/meta"; : > "$FAKE/enter-clears"; ag idle; }
-texts() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-text' || true; }
-enters() { { cat "$FAKE/herdr.log" 2>/dev/null || true; } | grep -c '^pane send-keys w1:p0 enter' || true; }
-sent() { tail -n 1 "$FAKE/typed.log" 2>/dev/null; }
-dlog() { grep -F ' watch entrega' "$STATE/log" 2>/dev/null || true; }
-qlen() { wc -l < "$STATE/watch.queue" 2>/dev/null | tr -d ' ' || true; }
-
 # ---------------------------------------------------------------- 1. dispatcher parado: um evento é digitado e enviado
 CASE=dlv-idle; dround "$CASE"
 echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
