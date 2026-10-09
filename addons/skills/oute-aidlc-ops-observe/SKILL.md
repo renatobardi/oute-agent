@@ -24,7 +24,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no agent-studio nem 
    ```
    Padrões: janela de 24 h (`--hours`), base de 7 dias antes dela (`--baseline-days`, `0` = sem base) e metadados das últimas 6 h do bucket (`--content-hours`, `0` = só listagem). `studio` ou `bucket` no lugar de `all` roda uma fonte só. Código ≠ 0 = uma fonte não pôde ser lida: a linha `ERRO` diz qual e por quê (variável ausente, `HTTP 401` = credencial errada, `HTTP 500` ou falha de conexão = agent-studio fora do ar ou inalcançável deste host).
 2. **Ler as seções.**
-   - agent-studio, por host (`host.name`) × agente (`oute.agent`), pela hora do fato: chamadas ao modelo, spans, erros de span e de log, **custo real** e **custo estimado** em colunas separadas (nunca some as duas num número só sem dizer), chamadas sem preço, tokens, latência p95 (a maior entre os modelos do grupo) e custo médio por dia da base. Depois, custo por modelo.
+   - agent-studio, por host (`host.name`) × agente (`oute.agent`), pela hora do fato: chamadas ao modelo, spans, erros de span e de log, **custo real**, **custo de lista** e **custo estimado** em colunas separadas (nunca some as três num número só sem dizer), chamadas sem preço, tokens, latência p95 (a maior entre os modelos do grupo) e custo médio por dia da base. Depois, custo por modelo.
    - alertas do pipeline (`ALERTA`, os do `GET /v1/alerts` agora: `queue`, `destination_refusing`, `host_no_data`, `spool`, `quota`) e o último dado de cada host no agent-studio. `AVISO config` = entrada inválida no `config/agent-studio/config.toml`.
    - Bucket: último lote por sinal (`traces`, `logs`, `metrics`) × host × instância, com idade e volume na janela; depois, por host × agente (`oute.agent`), spans, spans com erro, logs, logs de erro e custo (`cost_usd` do `api_request` do Claude).
 3. **Tratar cada `ANOMALIA`** (o script marca; você confirma):
@@ -36,7 +36,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no agent-studio nem 
    | `agente-sem-telemetria` | agente em `OUTE_AGENTS` deste host sem registro no bucket nas horas lidas | ocioso é normal; se houve uso, é falha. |
    | `sem-oute.agent` | registro sem `oute.agent` | `service.name` novo, fora do `transform/agent` (regra do ADR-04 para agente novo e upgrade). |
    | `erro-alto` | > 5 % de erro (mín. 5): no agent-studio, spans com status de erro sobre todos os spans do host × agente; no bucket, logs de erro sobre os logs | o script só conta; não abra o texto do erro (é conteúdo). Causa → `oute-aidlc-ops-diagnose`. |
-   | `custo-alto` | custo **por dia** da janela (real + estimado, ÷ dias da janela = `--hours` ÷ 24) > 3 × a média diária da base (custo da base ÷ dias da base com dado), com mais de US$ 1 na janela. Janela menor que 24 h conta como um dia (o custo dela não é extrapolado). Só com uso na base: sem histórico, leia as colunas de custo | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. A linha traz o total da janela, o custo por dia e a base por dia. Pico de um dia se dilui em janela longa: na dúvida, rode de novo com `--hours 24`. |
+   | `custo-alto` | custo **por dia** da janela (real + lista + estimado, ÷ dias da janela = `--hours` ÷ 24) > 3 × a média diária da base (custo da base ÷ dias da base com dado), com mais de US$ 1 na janela. Janela menor que 24 h conta como um dia (o custo dela não é extrapolado). Só com uso na base: sem histórico, leia as colunas de custo | rodada de swarm, modelo mais caro, loop? Veja o custo por modelo. A linha traz o total da janela, o custo por dia e a base por dia. Pico de um dia se dilui em janela longa: na dúvida, rode de novo com `--hours 24`. |
    | `sem-preço` | chamadas sem custo real e sem preço na tabela: ficam fora das duas somas de custo | o modelo citado falta em `config/agent-studio/config.toml` (ou é span sem modelo). Proponha a issue para acrescentar o preço, com a fonte; não edite a tabela. |
 
    Cada `ALERTA` também entra no relatório, com o host, o valor, o limite e desde quando. `host_no_data` só existe para host sempre ligado (o oute-server); o Mac fechado não alerta.
@@ -44,7 +44,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no agent-studio nem 
    Sem marca não quer dizer tudo bem: confira também host que sumiu (só na base ou parado há muito no "último dado por host"), p95 fora do normal, as duas fontes discordando sobre o mesmo host × agente e `(legado)` (lotes do bucket anteriores à 0.7.5, sem `host=`; não é anomalia).
 4. **Relatório** na conversa, curto:
    - janela e fontes lidas (e as que falharam, com o motivo);
-   - tabela por host × agente: uso, erros, custo real e estimado;
+   - tabela por host × agente: uso, erros, custo real, de lista e estimado;
    - alertas do pipeline ativos;
    - anomalias confirmadas, cada uma com a evidência (linha do script, número) e uma hipótese;
    - o que descartou e por quê (ex.: host desligado).
@@ -53,7 +53,7 @@ Você **lê** a telemetria; não muda nada. Nada é escrito no agent-studio nem 
 
 ## Lembretes de leitura
 
-- **Custo de Claude e Codex é preço de lista da API**, não gasto: os dois rodam por assinatura (ADR-04). **Real** = o valor que veio na chamada (o Claude Code manda no log `api_request`); **estimado** = tokens × a tabela de `config/agent-studio/config.toml` (o Codex inteiro, e o Claude sem o log). `-` na coluna = nenhuma chamada daquele tipo, não zero.
+- **Custo de Claude e Codex é preço de lista da API**, não gasto: os dois rodam por assinatura (ADR-04). **Real** = o valor que veio na chamada (o Claude Code manda no log `api_request`); **de lista** (#747) = tokens × a tabela de `config/agent-studio/config.toml` para a chamada de assinatura (claude, codex, zai) sem custo real; **estimado** = a mesma conta para chamada fora das três assinaturas. `-` na coluna = nenhuma chamada daquele tipo, não zero.
 - `oute.agent=pi` e `oute.agent=router` só aparecem em registro até 2026-09-30 (#217, #218): não são agentes esperados, e o script não marca a falta deles.
 - O agent-studio agrega pela **hora do fato** (gravada em UTC; os dias do resumo e do custo por dia seguem o fuso do agent-studio, que a linha `fuso_dos_dias` diz, #415), e guarda tudo (sem limite de dias); o bucket é o arquivo frio e o backup. O bucket grava em lotes de 5 min por host; sem atividade não há lote. Idade grande sozinha não é falha.
 - As duas fontes contam coisas diferentes: o agent-studio conta chamadas ao modelo e spans de todos os hosts; a seção de metadados do bucket lê só as últimas horas (`--content-hours`). Diferença de volume entre elas não é anomalia; host × agente presente numa e ausente na outra, na mesma hora, é.

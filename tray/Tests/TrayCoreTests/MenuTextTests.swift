@@ -15,14 +15,24 @@ final class MenuTextTests: XCTestCase {
                        "Reiniciar nginx · root · claude · oute-server · há 5 min")
     }
 
-    func testCustoDeHojeMarcaOEstimadoEAsChamadasSemPreco() throws {
-        XCTAssertEqual(MenuText.cost(try leitura().costToday), "Custo de hoje: US$ 5,54 (estimado) · 1 chamada sem preço")
+    func testCustoDeHojeDaAssinaturaNaoLevaMarcaDeEstimado() throws {
+        // claude e codex são assinatura: o custo calculado pela tabela é de lista (#747), sem "(estimado)"
+        XCTAssertEqual(MenuText.cost(try leitura().costToday), "Custo de hoje: US$ 5,54 · 1 chamada sem preço")
     }
 
     func testCustoPorAgente() throws {
         let agentes = try leitura().costToday.agents
-        XCTAssertEqual(MenuText.agentCost(agentes[0]), "claude: US$ 3,03 (estimado)")
-        XCTAssertEqual(MenuText.agentCost(agentes[1]), "codex: US$ 2,51 (estimado) · 1 chamada sem preço")
+        XCTAssertEqual(MenuText.agentCost(agentes[0]), "claude: US$ 3,03")
+        XCTAssertEqual(MenuText.agentCost(agentes[1]), "codex: US$ 2,51 · 1 chamada sem preço")
+    }
+
+    func testCustoForaDaAssinaturaContinuaMarcadoComoEstimado() throws {
+        // chamada fora das três assinaturas (ex.: LLM do ai-memory sem custo informado) segue "estimado" (#747)
+        let json = #"{"usd": 5.54, "real_usd": null, "listed_usd": null, "estimated_usd": 5.54, "estimated": true, "unpriced_calls": 0, "agents": []}"#
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let custo = try decoder.decode(TraySnapshot.Cost.self, from: Data(json.utf8))
+        XCTAssertEqual(MenuText.cost(custo), "Custo de hoje: US$ 5,54 (estimado)")
     }
 
     func testErrosDaUltimaHora() throws {

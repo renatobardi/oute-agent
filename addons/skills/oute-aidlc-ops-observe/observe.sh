@@ -74,7 +74,7 @@ studio() {
   echo "fuso_dos_dias	$(jq -r '.timezone // "UTC (o agent-studio não informou)"' "$tmp/win")	(horas em UTC, dias da base e do custo por dia nesse fuso)"
   echo "### por host × agente, na janela"
   # o /v1/usage devolve host × agente × modelo: aqui soma por host × agente (p95 = o maior entre os modelos).
-  # custo real (veio na chamada) e estimado (tabela de preços) nunca se somam numa coluna; "-" = nenhuma chamada.
+  # custo real (veio na chamada), de lista (assinatura calculada pela tabela, #747) e estimado nunca se somam numa coluna; "-" = nenhuma chamada.
   # base por dia = custo da base ÷ dias da base que têm algum dado (a base pode ser mais nova que --baseline-days).
   # custo-alto compara por dia dos dois lados (#298): custo da janela ÷ dias da janela (--hours ÷ 24) contra a base
   # por dia. Janela menor que 24 h conta como um dia: uma hora de uso não vira a taxa de um dia inteiro.
@@ -84,22 +84,22 @@ studio() {
     def by_ha: group_by([.host // "?", .agent // "?"])
       | map({host: (.[0].host // "?"), agent: (.[0].agent // "?"), calls: (map(.calls) | add), spans: (map(.spans) | add),
              span_err: (map(.errors.spans) | add), log_err: (map(.errors.logs) | add),
-             real: sumc(.cost.real_usd), est: sumc(.cost.estimated_usd), unpriced: (map(.cost.unpriced_calls) | add),
+             real: sumc(.cost.real_usd), lst: sumc(.cost.listed_usd), est: sumc(.cost.estimated_usd), unpriced: (map(.cost.unpriced_calls) | add),
              tok: (map(.tokens | add) | add), p95: (map(.latency_p95_ms | select(. != null)) | max)}
-            | . + {cost: ((.real // 0) + (.est // 0)), key: "\(.host)/\(.agent)"});
+            | . + {cost: ((.real // 0) + (.lst // 0) + (.est // 0)), key: "\(.host)/\(.agent)"});
     ([$base[0].series[].day] | unique | length | if . == 0 then 1 else . end) as $bdays
     | ($hours / 24 | if . < 1 then 1 else . end) as $wdays
     | ($base[0].rows | by_ha | map({key, value: .}) | from_entries) as $b
     | (.rows | by_ha) as $w
-    | (["host","agente","chamadas","spans","erros_span","erros_log","custo_real_usd","custo_estimado_usd","sem_preço","tokens","p95_ms","base_custo_usd/dia"] | @tsv),
-      ($w[] | [.host, .agent, .calls, .spans, .span_err, .log_err, (.real | usd), (.est | usd), .unpriced, .tok,
+    | (["host","agente","chamadas","spans","erros_span","erros_log","custo_real_usd","custo_lista_usd","custo_estimado_usd","sem_preço","tokens","p95_ms","base_custo_usd/dia"] | @tsv),
+      ($w[] | [.host, .agent, .calls, .spans, .span_err, .log_err, (.real | usd), (.lst | usd), (.est | usd), .unpriced, .tok,
                (.p95 | if . == null then "-" else round end), ((($b[.key].cost // 0) / $bdays) | usd)] | @tsv),
       ( # anomalias (custo-alto só com uso na base: sem histórico não há o que comparar)
         ($w[] | select(.span_err >= 5 and .span_err / .spans > 0.05)
               | ["ANOMALIA","erro-alto",.key,"\(.span_err) de \(.spans) spans com erro"] | @tsv),
         ($w[] | ($b[.key] // {cost: 0, calls: 0, spans: 0}) as $x
               | select(.cost > 1 and ($x.calls + $x.spans) > 0 and .cost / $wdays > 3 * $x.cost / $bdays)
-              | ["ANOMALIA","custo-alto",.key,"US$ \(.cost*100|round/100) na janela (real + estimado) = US$ \(.cost/$wdays*100|round/100)/dia; base US$ \($x.cost/$bdays*100|round/100)/dia"] | @tsv),
+              | ["ANOMALIA","custo-alto",.key,"US$ \(.cost*100|round/100) na janela (real + lista + estimado) = US$ \(.cost/$wdays*100|round/100)/dia; base US$ \($x.cost/$bdays*100|round/100)/dia"] | @tsv),
         # pi e router: só em registro até 2026-09-30 (#217, #218); a falta deles não é anomalia
         ($b | to_entries[] | select((.value.calls + .value.spans) > 0 and (.value.agent | IN("pi", "router") | not)) | .key as $k
               | select([$w[].key] | index($k) | not)
@@ -108,12 +108,12 @@ studio() {
               | ["ANOMALIA","sem-preço","\(.host // "?")/\(.agent // "?")","\(.cost.unpriced_calls) chamadas de \(.model // "(sem modelo)") sem custo real e sem preço (config/agent-studio/config.toml)"] | @tsv)
       ),
       "### custo por modelo, na janela",
-      (["host","modelo","chamadas","custo_real_usd","custo_estimado_usd","sem_preço"] | @tsv),
+      (["host","modelo","chamadas","custo_real_usd","custo_lista_usd","custo_estimado_usd","sem_preço"] | @tsv),
       (.rows | map(select(.calls > 0)) | group_by([.host // "?", .model // "(sem modelo)"])
         | map({host: (.[0].host // "?"), model: (.[0].model // "(sem modelo)"), calls: (map(.calls) | add),
-               real: sumc(.cost.real_usd), est: sumc(.cost.estimated_usd), unpriced: (map(.cost.unpriced_calls) | add)})
-        | sort_by(-((.real // 0) + (.est // 0)))[]
-        | [.host, .model, .calls, (.real | usd), (.est | usd), .unpriced] | @tsv),
+               real: sumc(.cost.real_usd), lst: sumc(.cost.listed_usd), est: sumc(.cost.estimated_usd), unpriced: (map(.cost.unpriced_calls) | add)})
+        | sort_by(-((.real // 0) + (.lst // 0) + (.est // 0)))[]
+        | [.host, .model, .calls, (.real | usd), (.lst | usd), (.est | usd), .unpriced] | @tsv),
       ((.prices.errors // [])[] | ["AVISO","config","\(.)"] | @tsv)
     ' "$tmp/win" || { echo "ERRO	resumo do /v1/usage falhou"; return 1; }
   echo "### alertas do pipeline (agora)"

@@ -826,8 +826,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
                 return failed
 
         def by_cost(rows):
-            # o que mais custou primeiro (real + estimado); empate pela ordem da API
-            return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
+            # o que mais custou primeiro (real + de lista calculado + estimado); empate pela ordem da API
+            return sorted(rows, key=lambda r: -((r["cost"]["real_usd"] or 0) + (r["cost"]["listed_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)))
         by_role, by_phase = by_cost(data["by_role"]), by_cost(data["by_phase"])
         # a chamada sem assinatura (ai-memory) aparece com o nome de exibição, não como `null`
         by_sub = by_cost([{**r, "subscription": r["subscription"] or usage_mod.NO_SUBSCRIPTION} for r in data["by_subscription"]])

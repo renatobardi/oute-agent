@@ -145,7 +145,7 @@ R="$(tray)"
 echo "$R" > "$TMP/tray.json"
 check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$R"
 check "at: a hora da resposta (UTC, ISO)"              jqe --argjson now "$NOW" '(.at | fromdateiso8601) as $t | $t >= $now and $t < $now + 300' <<<"$R"
-check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 1}' <<<"$R"
+check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 3}' <<<"$R"
 check "bar: iguais ao tamanho dos blocos"              jqe '.bar.pending == .proposals.total and .bar.alerts == (.alerts | length)' <<<"$R"
 check "config: erros da config (chave desconhecida)"   jqe '.config | keys == ["errors"] and (.errors | length == 1 and (.[0] | test("foo")))' <<<"$R"
 
@@ -189,16 +189,16 @@ check "etapas: a barra do tray não conta etapa (só pedidos e alertas)" jqe '.b
 
 # custo de hoje
 DAY=$((NOW / 86400 * 86400))
-check "custo: campos do bloco"                         jqe '.cost_today | keys == ["agents", "day", "estimated", "estimated_usd", "from", "real_usd", "to", "unpriced_calls", "usd"]' <<<"$R"
+check "custo: campos do bloco"                         jqe '.cost_today | keys == ["agents", "day", "estimated", "estimated_usd", "from", "listed_usd", "real_usd", "to", "unpriced_calls", "usd"]' <<<"$R"
 check "custo: hoje = o dia UTC inteiro"                jqe --arg f "$(iso "$DAY")" --arg t "$(iso $((DAY + 86400)))" '.cost_today | .day == $f[:10] and .from == $f and .to == $t' <<<"$R"
-check "custo total: real + estimado, estimado marcado; ontem fora" jqe ".cost_today | $(usd .usd) == 5540400 and $(usd .real_usd) == 30400 and $(usd .estimated_usd) == 5510000 and .estimated == true and .unpriced_calls == 1" <<<"$R"
-check "custo por agente: campos"                       jqe '.cost_today.agents | all(keys == ["agent", "calls", "estimated", "estimated_usd", "real_usd", "unpriced_calls", "usd"])' <<<"$R"
+check "custo total: real + lista (#747), sem a marca de estimado; ontem fora" jqe ".cost_today | $(usd .usd) == 5540400 and $(usd .real_usd) == 30400 and $(usd .listed_usd) == 5510000 and .estimated_usd == null and .estimated == false and .unpriced_calls == 1" <<<"$R"
+check "custo por agente: campos"                       jqe '.cost_today.agents | all(keys == ["agent", "calls", "estimated", "estimated_usd", "listed_usd", "real_usd", "unpriced_calls", "usd"])' <<<"$R"
 check "custo por agente: em ordem de agente"           jqe '[.cost_today.agents[].agent] == ["claude", "codex", "pi"]' <<<"$R"
-check "claude: real + estimado, marcado"               jqe ".cost_today.agents[0] | .calls == 3 and $(usd .usd) == 3030000 and $(usd .real_usd) == 30000 and $(usd .estimated_usd) == 3000000 and .estimated == true and .unpriced_calls == 0" <<<"$R"
-check "codex: só estimado; modelo sem preço fora da soma" jqe ".cost_today.agents[1] | .calls == 3 and $(usd .usd) == 2510000 and .real_usd == null and .estimated == true and .unpriced_calls == 1" <<<"$R"
+check "claude: real + lista (a chamada sem log), sem a marca de estimado" jqe ".cost_today.agents[0] | .calls == 3 and $(usd .usd) == 3030000 and $(usd .real_usd) == 30000 and $(usd .listed_usd) == 3000000 and .estimated_usd == null and .estimated == false and .unpriced_calls == 0" <<<"$R"
+check "codex: só lista, sem estimado; modelo sem preço fora da soma" jqe ".cost_today.agents[1] | .calls == 3 and $(usd .usd) == 2510000 and .real_usd == null and $(usd .listed_usd) == 2510000 and .estimated_usd == null and .estimated == false and .unpriced_calls == 1" <<<"$R"
 check "pi: só real, sem a marca de estimado"           jqe ".cost_today.agents[2] | .calls == 1 and $(usd .usd) == 400 and .estimated_usd == null and .estimated == false" <<<"$R"
 US="$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?from=$(iso "$DAY")&to=$(iso $((DAY + 86400)))")"
-check "custo: o mesmo do /v1/usage do dia (#203)"      jqe --argjson u "$US" '.cost_today | .real_usd == $u.totals.cost.real_usd and .estimated_usd == $u.totals.cost.estimated_usd and .unpriced_calls == $u.totals.cost.unpriced_calls' <<<"$R"
+check "custo: o mesmo do /v1/usage do dia (#203)"      jqe --argjson u "$US" '.cost_today | .real_usd == $u.totals.cost.real_usd and .listed_usd == $u.totals.cost.listed_usd and .estimated_usd == $u.totals.cost.estimated_usd and .unpriced_calls == $u.totals.cost.unpriced_calls' <<<"$R"
 
 # erros na última hora
 check "erros: campos do bloco e de cada linha"         jqe '.errors_last_hour | keys == ["from", "rows", "to", "total"] and (.rows | all(keys == ["agent", "host", "logs", "spans", "total"]))' <<<"$R"
@@ -207,8 +207,9 @@ check "erros: por host × agente, em ordem; o de 2 h atrás fora" jqe '.errors_l
 check "erros: os mesmos do /v1/usage da última hora"   jqe --argjson r "$R" '.totals.errors.total == $r.errors_last_hour.total' <<<"$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?hours=1")"
 
 # alertas
-check "alertas: os do /v1/alerts (#204), com os mesmos campos; só ganham title e text (#344)" jqe --argjson a "$AL" '(.alerts | length == 1) and ([.alerts[] | del(.title, .text)] == $a.alerts) and ($a.alerts | all(has("title") | not))' <<<"$R"
+check "alertas: os do /v1/alerts (#204), com os mesmos campos; só ganham title e text (#344)" jqe --argjson a "$AL" '(.alerts | length == 3) and ([.alerts[] | del(.title, .text)] == $a.alerts) and ($a.alerts | all(has("title") | not))' <<<"$R"
 check "alerta: title e text prontos, valor e limite por extenso" jqe '.alerts[0] | .title == "Fila do collector acima do limite" and .text == "80% da fila (limite 50%)"' <<<"$R"
+check "alertas do custo (#747): conferência do claude e assinatura sem preço, com title e text prontos" jqe '([.alerts[] | select(.type == "cost_claude_diff" or .type == "cost_subscription_unpriced")] | map(.type) | sort) == ["cost_claude_diff", "cost_subscription_unpriced"] and all(.alerts[]; (.title | length) > 0 and .title != .type and (.text | length) > 0)' <<<"$R"
 check "alerta: fila do collector do oute-server a 80%" jqe '.alerts[0] | .type == "queue" and .host == "oute-server" and .value == 0.8 and .limit == 0.5 and .unit == "ratio" and (has("since") and has("evidence") and has("instance"))' <<<"$R"
 
 # ---------------------------------------------------------------- 4. SurrealDB fora: o menu segue, sem os pedidos
@@ -217,7 +218,7 @@ D="$(tray)"
 check "SurrealDB fora: 200"                            test "$(code "${C[@]}" "$STUDIO_URL/v1/tray")" = 200
 check "SurrealDB fora: pedidos indisponíveis, contador nulo (nunca zero)" jqe '.proposals == {available: false, total: null, pending: []} and .bar.pending == null' <<<"$D"
 check "SurrealDB fora: etapas indisponíveis (nunca zero por palpite)" jqe '.steps == {available: false, total: null, rows: []}' <<<"$D"
-check "SurrealDB fora: o resto do menu igual"          jqe --argjson r "$R" '.bar.alerts == 1 and .cost_today == $r.cost_today and .errors_last_hour.rows == $r.errors_last_hour.rows and ([.machines[].host] == [$r.machines[].host]) and .alerts == $r.alerts' <<<"$D"
+check "SurrealDB fora: o resto do menu igual"          jqe --argjson r "$R" '.bar.alerts == 3 and .cost_today == $r.cost_today and .errors_last_hour.rows == $r.errors_last_hour.rows and ([.machines[].host] == [$r.machines[].host]) and .alerts == $r.alerts' <<<"$D"
 # fixture do app do tray (#344): mesmas chaves e mesmos tipos da resposta real. Pedido local e de outro host, id com
 # caractere inválido, custo estimado e sem preço e alerta vêm de R; o contador nulo, de D (SurrealDB fora).
 echo "$D" > "$TMP/tray-down.json"
@@ -261,7 +262,7 @@ check "fixture tray-sem-surrealdb.json: mesmas chaves e tipos da resposta com o 
 check "fixture: o mesmo bloco de alertas da API (title e text junto)" jqe '.alerts[0] | keys == ["evidence", "host", "instance", "limit", "since", "text", "title", "type", "unit", "value"]' < "$FIX/tray.json"
 check "fixture: pedido local, de outro host e de id inválido" jqe '[.proposals.pending[] | .host] | unique == ["oute-mac", "oute-server"]' < "$FIX/tray.json"
 check "fixture: o id inválido vai codificado no link" jqe '.proposals.pending[0] | (.id | test("[<>& ]")) and (.url | test("^/pedido\\?id=[A-Za-z0-9%/._-]+$"))' < "$FIX/tray.json"
-check "fixture: custo estimado e chamada sem preço"    jqe '.cost_today | .estimated == true and .unpriced_calls > 0 and (.agents | any(.real_usd == null))' < "$FIX/tray.json"
+check "fixture: custo de lista (não estimado) e chamada sem preço" jqe '.cost_today | .estimated == false and .listed_usd > 0 and .unpriced_calls > 0 and (.agents | any(.real_usd == null))' < "$FIX/tray.json"
 check "fixture: etapas das rodadas, com o merge do PR e o veredito do revisor (#508)" jqe '.steps | .available == true and .total == (.rows | length) and ([.rows[].review] | unique | length) > 1 and (.rows | any(.kind == "merge" and .key != null and (.url | test("^/rodada\\?id=[A-Za-z0-9%._-]+#etapa-merge-[0-9]+$")))) and (.rows | any(.key == null))' < "$FIX/tray.json"
 check "fixture: sem o SurrealDB, etapas indisponíveis" jqe '.steps == {available: false, total: null, rows: []}' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: contador nulo só com o SurrealDB fora" jqe '.bar.pending == null and .proposals.available == false' < "$FIX/tray-sem-surrealdb.json"
@@ -297,6 +298,11 @@ on = dataclasses.replace(cfg.alerts, always_on_hosts=("oute-server", "oute-nunca
 s = tray.snapshot(con, at, cfg.prices, on)
 m = {x["host"]: x for x in s["machines"]}
 out("parado: sem chegada há mais de no_data_minutes (o fato recente não conta)", m["oute-mac"]["state"] == "stopped" and m["oute-mac"]["idle_seconds"] == 7200)
+out("custo (#747): o de lista soma sem a marca; só o estimado (fora das três assinaturas) marca `estimated`",
+    tray._cost({"cost": {"real_usd": None, "listed_usd": 2.0, "estimated_usd": None, "estimated_calls": 0, "unpriced_calls": 0}})
+    == {"usd": 2.0, "real_usd": None, "listed_usd": 2.0, "estimated_usd": None, "estimated": False, "unpriced_calls": 0}
+    and tray._cost({"cost": {"real_usd": 1.0, "listed_usd": 2.0, "estimated_usd": 0.5, "estimated_calls": 1, "unpriced_calls": 0}})
+    == {"usd": 3.5, "real_usd": 1.0, "listed_usd": 2.0, "estimated_usd": 0.5, "estimated": True, "unpriced_calls": 0})
 out("ativo: quem chegou dentro de no_data_minutes", m["oute-server"]["state"] == "active" and m["oute-velho"]["state"] == "active")
 out("sempre ligado sem dado nenhum: parado, último dado nulo", m["oute-nunca"] == {"host": "oute-nunca", "always_on": True, "last_data": None, "idle_seconds": None, "state": "stopped"})
 out("limite do parado = o no_data_minutes do [alerts] (#204)", {x["host"]: x["state"] for x in tray.snapshot(con, at, cfg.prices, dataclasses.replace(on, no_data_minutes=121))["machines"]}["oute-mac"] == "active")

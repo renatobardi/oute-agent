@@ -135,9 +135,12 @@ check("Dashboard: as sessões que mais custaram são só as do repositório",
 check("Dashboard: o insight de erros da mesma ferramenta (2 erros do Bash) só existe em beta e em Todos",
       all(('data-insight="tool_errors"' in h) == want for h, want in ((d_alfa, False), (d_beta, True), (d_none, False), (d_all, True))))
 # sonnet: US$ 3/M de entrada e 15/M de saída; sem preço de cache na tabela, o cache lido custa como entrada
-est = [float(re.search(r'data-kpi="cost"[^>]*data-estimated-usd="([^"]*)"', h).group(1)) for h in (d_alfa, d_beta)]
-check("Dashboard: o custo estimado é o do repositório (alfa 2 chamadas de US$ 0,0045; beta 3 de US$ 0,0195)",
+# as chamadas são do Claude (assinatura) sem log de custo: custo de lista calculado, não estimado (#747)
+est = [float(re.search(r'data-kpi="cost"[^>]*data-listed-usd="([^"]*)"', h).group(1)) for h in (d_alfa, d_beta)]
+check("Dashboard: o custo de lista é o do repositório (alfa 2 chamadas de US$ 0,0045; beta 3 de US$ 0,0195)",
       abs(est[0] - 0.009) < 1e-9 and abs(est[1] - 0.0585) < 1e-9)
+check("Dashboard: sem chamada fora das assinaturas, o estimado do KPI fica vazio",
+      all(re.search(r'data-kpi="cost"[^>]*data-estimated-usd=""', h) for h in (d_alfa, d_beta)))
 
 # Conversas e Sessões
 check("Conversas: cada repositório lista só as conversas dele",
@@ -274,5 +277,5 @@ fresh.close()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 87
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 88
 check_end

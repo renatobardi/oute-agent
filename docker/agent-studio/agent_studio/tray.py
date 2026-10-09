@@ -5,8 +5,9 @@
   sinal): `active` ou `stopped` pela regra de host parado do #204 (`alerts.stopped`, `no_data_minutes`).
 - **Pedidos pendentes** (`proposals`): o estado do SurrealDB (`proposals.pending`, as consultas da lista do #208),
   com a idade e o caminho da página "ver script" (`proposals.page_path`).
-- **Custo de hoje** (`cost_today`): `usage.aggregate` (#203) no dia de agora **no fuso configurado** (#415: a meia-noite do fuso, não a do UTC; `tz=` troca), total e por agente; `estimated`
-  marca o valor que tem parte estimada pela tabela de preços.
+- **Custo de hoje** (`cost_today`): `usage.aggregate` (#203) no dia de agora **no fuso configurado** (#415: a meia-noite do fuso, não a do UTC; `tz=` troca), total e por agente; `listed_usd`
+  (#747) = a parte de custo de lista calculado (chamada de assinatura sem custo real), que não é marcada como estimada; `estimated`
+  marca o valor que tem parte estimada pela tabela de preços (só chamada fora das assinaturas).
 - **Erros na última hora** (`errors_last_hour`): os erros do mesmo `usage.aggregate`, por host × agente.
 - **Alertas** (`alerts`): os do `alerts.evaluate` (#204), como no `GET /v1/alerts`, mais `title` e `text` prontos
   (`alert_text`, o mesmo texto da tela; #344).
@@ -32,12 +33,14 @@ PENDING_LIMIT = 50  # pedidos pendentes na resposta (os mais novos); `proposals.
 
 
 def _cost(group):
-    """Grupo do `usage.render` -> custo do tray. `usd` = real + estimado (`None` = nada com custo); `estimated` =
-    parte dele é estimada; chamada sem custo real e sem preço fica fora da soma (`unpriced_calls`), nunca zero."""
+    """Grupo do `usage.render` -> custo do tray. `usd` = real + de lista calculado + estimado (`None` = nada com
+    custo); `listed_usd` (#747) = a parte de lista calculada (assinatura sem custo real), sem a marca "estimado ≈";
+    `estimated` = parte dele é estimada (só chamada fora das assinaturas); chamada sem custo real e sem preço fica
+    fora da soma (`unpriced_calls`), nunca zero."""
     c = group["cost"]
-    real, est = c["real_usd"], c["estimated_usd"]
-    return {"usd": None if real is None and est is None else (real or 0) + (est or 0),
-            "real_usd": real, "estimated_usd": est, "estimated": c["estimated_calls"] > 0,
+    real, listed, est = c["real_usd"], c["listed_usd"], c["estimated_usd"]
+    return {"usd": None if real is None and listed is None and est is None else (real or 0) + (listed or 0) + (est or 0),
+            "real_usd": real, "listed_usd": listed, "estimated_usd": est, "estimated": c["estimated_calls"] > 0,
             "unpriced_calls": c["unpriced_calls"]}
 
 

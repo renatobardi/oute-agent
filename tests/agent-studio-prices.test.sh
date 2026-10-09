@@ -557,7 +557,7 @@ OUT="$(get /v1/tray)"
 check "GET /v1/tray: os alertas de preço aparecem como os demais, com título e texto" jqe '[.alerts[] | select(.type | startswith("price_"))] | length == 5 and all(.[]; (.title | length) > 0 and (.text | length) > 0 and .title != .type)' <<<"$OUT"
 check "GET /v1/tray: o título do preço trocado" jqe '.alerts[] | select(.type == "price_changed") | .title == "Preço trocado" and (.text | contains("gpt-5-codex"))' <<<"$OUT"
 OUT="$(get "/v1/usage?from=$(date -u -d "@$((NOW - 10800))" +%Y-%m-%dT%H:%M:%SZ)&to=$(date -u -d "@$((NOW + 7200))" +%Y-%m-%dT%H:%M:%SZ)")"
-check "GET /v1/usage: a chamada de antes da troca fica em 1,25 e a de depois usa 1,50 (soma 2,75)" jqe "$(usd '.rows[] | select(.model == "gpt-5-codex") | .cost.estimated_usd') == 2750000" <<<"$OUT"
+check "GET /v1/usage: a chamada de antes da troca fica em 1,25 e a de depois usa 1,50 (soma 2,75, custo de lista do Codex)" jqe "$(usd '.rows[] | select(.model == "gpt-5-codex") | .cost.listed_usd') == 2750000" <<<"$OUT"
 check "GET /v1/usage: modelo sem preço continua sem estimativa (unpriced_models)" jqe '.unpriced_models == ["gpt-9-sem-fonte"]' <<<"$OUT"
 check "a conferência não derruba a API: healthz e a ingestão seguem" bash -c 'test "$(curl -s -o /dev/null -w "%{http_code}" "$1/healthz")" = 200' _ "$STUDIO_URL"
 studio_stop

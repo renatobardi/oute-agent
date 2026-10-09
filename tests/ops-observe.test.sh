@@ -36,7 +36,7 @@ cx = lambda m, i=0, o=0: {"model": m, "codex.turn.token_usage.non_cached_input_t
 calls = [
   claude_call(W, 2, cl(input_tokens=100, output_tokens=50), 0.5),
   claude_call(W + 60, 4, cl(input_tokens=200, output_tokens=20), 0.7),
-  claude_call(W + 120, 3, cl(input_tokens=1_000_000)),          # sem log api_request: estimado (3/M de entrada)
+  claude_call(W + 120, 3, cl(input_tokens=1_000_000)),          # sem log api_request: de lista (3/M de entrada)
   claude_call(B1, 1, cl(input_tokens=10), 0.1),                 # base: 0,2 em 2 dias = 0,1/dia
   claude_call(B2, 1, cl(input_tokens=10), 0.1),
 ]
@@ -98,20 +98,20 @@ check "studio: não troca o fuso (nenhum tz= na consulta)" bash -c '! grep -q "t
 check "studio: cabeçalho com a URL, a janela e a base" has "^## agent-studio ($STUDIO_URL) · janela .*Z → .*Z · base 7 dia(s) antes$"
 check "studio: lê /v1/usage da janela e da base e /v1/alerts" test "$(grep -c '/v1/usage?from=.*&to=' "$ARGV") $(grep -c '/v1/alerts$' "$ARGV") $(wc -l < "$ARGV")" = "2 1 3"
 check "studio: credencial fora do argv e da saída"     bash -c '! grep -qF -- "$2" "$1" && ! grep -qF -- "$2" <<<"$0" && ! grep -qi "bearer" "$1"' "$OUT" "$ARGV" "$READ"
-check "tabela: colunas (real e estimado separados)"    has_line "host	agente	chamadas	spans	erros_span	erros_log	custo_real_usd	custo_estimado_usd	sem_preço	tokens	p95_ms	base_custo_usd/dia"
-check "tabela: Claude com custo real, estimado, p95 e base/dia" has_line "oute-server	claude	3	4	0	0	1.2	3	0	1000370	3900	0.1"
-check "tabela: Codex com erros de span e de log, sem custo real" has "^oute-mac	codex	10	10	6	2	-	0.018	2	9800	1000	0$"
+check "tabela: colunas (real, de lista e estimado separados)"    has_line "host	agente	chamadas	spans	erros_span	erros_log	custo_real_usd	custo_lista_usd	custo_estimado_usd	sem_preço	tokens	p95_ms	base_custo_usd/dia"
+check "tabela: Claude com custo real, de lista, p95 e base/dia" has_line "oute-server	claude	3	4	0	0	1.2	3	-	0	1000370	3900	0.1"
+check "tabela: Codex com erros de span e de log, sem custo real" has "^oute-mac	codex	10	10	6	2	-	0.018	-	2	9800	1000	0$"
 check "anomalia erro-alto (6 de 10 spans)"             has_line "ANOMALIA	erro-alto	oute-mac/codex	6 de 10 spans com erro"
-check "anomalia custo-alto (real + estimado × base)"   has_line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + estimado) = US\$ 4.2/dia; base US\$ 0.1/dia"
+check "anomalia custo-alto (real + lista + estimado × base)"   has_line "ANOMALIA	custo-alto	oute-server/claude	US\$ 4.2 na janela (real + lista + estimado) = US\$ 4.2/dia; base US\$ 0.1/dia"
 check "anomalia sem-telemetria (só na base)"           has_line "ANOMALIA	sem-telemetria	oute-velho/codex	1 chamadas e 1 spans na base e nada na janela"
 check "anomalia sem-preço, com o modelo"               has_line "ANOMALIA	sem-preço	oute-mac/codex	2 chamadas de gpt-9-sem-preco sem custo real e sem preço (config/agent-studio/config.toml)"
 check "router só na base: não é sem-telemetria"        hasnt "ANOMALIA	sem-telemetria	oute-server/router"
 check "Codex sem base: não é custo-alto"               hasnt "ANOMALIA	custo-alto	oute-mac"
 check "só as quatro anomalias"                         test "$(grep -c '^ANOMALIA' <<<"$OUT")" = 4
-check "custo por modelo: do mais caro ao mais barato"  test "$(sed -n '/^### custo por modelo/,/^###/p' <<<"$OUT" | sed -n '3,5p')" = "oute-server	claude-sonnet-5	3	1.2	3	0
-oute-mac	gpt-5-codex	8	-	0.018	0
-oute-mac	gpt-9-sem-preco	2	-	-	2"
-check "alertas: os três ativos contados"               has_line "alertas_ativos	3"
+check "custo por modelo: do mais caro ao mais barato"  test "$(sed -n '/^### custo por modelo/,/^###/p' <<<"$OUT" | sed -n '3,5p')" = "oute-server	claude-sonnet-5	3	1.2	3	-	0
+oute-mac	gpt-5-codex	8	-	0.018	-	0
+oute-mac	gpt-9-sem-preco	2	-	-	-	2"
+check "alertas: os cinco ativos contados (três do pipeline e os dois de custo da #747)"               has_line "alertas_ativos	5"
 check "alerta de rodada parada: o detalhe traz o id da rodada e o motivo (#654)" has "^ALERTA	round_stalled	oute-mac	oute-agent	3[0-9]*	seconds	1800	.*Z	rodada swarm-1006-0001 [(]triage[)]$"
 check "alerta da fila do Mac, com o exporter"          has "^ALERTA	queue	oute-mac	oute-agent	0.9	ratio	0.5	.*Z	otlp_http/studio_logs$"
 check "alerta de host sem dado (oute-server, 1 h)"     has "^ALERTA	host_no_data	oute-server	-	3[0-9]*	seconds	1800	.*Z	-$"
@@ -146,7 +146,7 @@ check "401: sem tabela e sem a credencial na saída"    bash -c '! grep -q "^###
 run AGENT_STUDIO_URL="$STUDIO_URL/healthz?x=" studio
 check "resposta 200 que não é JSON: ERRO"              erro "/v1/usage da janela ilegível: a resposta não é um objeto JSON"
 run AGENT_STUDIO_URL="$STUDIO_URL/" studio
-check "URL com barra no fim: lê igual"                 bash -c '[ "$1" -eq 0 ] && grep -q "^alertas_ativos	3" <<<"$0"' "$OUT" "$RC"
+check "URL com barra no fim: lê igual"                 bash -c '[ "$1" -eq 0 ] && grep -q "^alertas_ativos	5" <<<"$0"' "$OUT" "$RC"
 
 # ---------------------------------------------------------------- all = studio + bucket
 run all --content-hours 0
@@ -157,7 +157,7 @@ run bucket --content-hours 0
 check "bucket: só a seção do bucket, sem chamada ao agent-studio" bash -c '[ "$1" -eq 0 ] && ! grep -q "agent-studio" <<<"$0" && [ ! -s "$2" ]' "$OUT" "$RC" "$ARGV"
 run F_RCLONE_FAIL=1 all --content-hours 0
 check "all com o bucket ilegível: ERRO, código 1"      erro "listagem de traces falhou: ERROR : falha de teste"
-check "all com o bucket ilegível: o studio sai inteiro" has_line "alertas_ativos	3"
+check "all com o bucket ilegível: o studio sai inteiro" has_line "alertas_ativos	5"
 run AGENT_STUDIO_READ_TOKEN= all --content-hours 0
 check "all com o studio ilegível: ERRO, código 1"      erro "AGENT_STUDIO_READ_TOKEN ausente"
 check "all com o studio ilegível: o bucket sai inteiro" has "^traces	h1	i1	"
@@ -191,14 +191,14 @@ PY
 studio_start "$TMP/s3" AGENT_STUDIO_CONFIG="$TMP/prices.toml" AGENT_STUDIO_READ_TOKEN="$READ" || die "agent-studio (custo por dia) não subiu"
 check "custo por dia: ingestão do exemplo"             test "$(post traces "$TMP/traces3.json") $(post logs "$TMP/logs3.json")" = "200 200"
 alto() { grep '^ANOMALIA	custo-alto' <<<"$OUT"; }
-PICO_24='ANOMALIA	custo-alto	h-pico/claude	US$ 9 na janela (real + estimado) = US$ 9/dia; base US$ 1/dia'
+PICO_24='ANOMALIA	custo-alto	h-pico/claude	US$ 9 na janela (real + lista + estimado) = US$ 9/dia; base US$ 1/dia'
 run studio
 check "24 h: código 0"                                 [ "$RC" -eq 0 ]
 check "24 h: gasto igual ao da base e pouco acima não disparam, o pico dispara" test "$(alto)" = "$PICO_24"
 run studio --hours 72
 check "72 h: código 0"                                 [ "$RC" -eq 0 ]
-check "72 h: total da janela e base por dia na tabela" has "^h-acima	claude	3	3	0	0	7.5	-	0	30	1000	2$"
-check "72 h: gasto igual ao da base e pouco acima não disparam, o pico dispara por dia" test "$(alto)" = "ANOMALIA	custo-alto	h-pico/claude	US\$ 11 na janela (real + estimado) = US\$ 3.67/dia; base US\$ 1/dia"
+check "72 h: total da janela e base por dia na tabela" has "^h-acima	claude	3	3	0	0	7.5	-	-	0	30	1000	2$"
+check "72 h: gasto igual ao da base e pouco acima não disparam, o pico dispara por dia" test "$(alto)" = "ANOMALIA	custo-alto	h-pico/claude	US\$ 11 na janela (real + lista + estimado) = US\$ 3.67/dia; base US\$ 1/dia"
 run studio --hours 6
 check "janela menor que 24 h conta como um dia (2 em 6 h contra 2/dia não dispara)" test "$(alto)" = "$PICO_24"
 studio_stop

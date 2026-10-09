@@ -2,19 +2,19 @@
    de cada ponto, do <title>. Informado pela fonte ou pago (cheio) × estimado (tracejado) se distinguem pelo traço e pelo texto; entrada, saída e cache dos tokens,
    também (cheio, tracejado, pontilhado). `c` = o resultado de `usage_charts.build`. #}
 {% macro _raw(v) %}{{ '' if v is none else v }}{% endmacro %}
-{% macro _money(real, est) %}{% if real is none and est is none %}—{% else %}{% if est is not none %}≈ {% endif %}{{ ((real or 0) + (est or 0))|usd2 }}{% endif %}{% endmacro %}
+{% macro _money(real, est, listed=none) %}{% if real is none and est is none and listed is none %}—{% else %}{% if est is not none %}≈ {% endif %}{{ ((real or 0) + (listed or 0) + (est or 0))|usd2 }}{% endif %}{% endmacro %}
 
 {# amostra da legenda de custo #}
 {% macro legenda_custo() %}
-<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Pago (assinatura = 0)" if custo == "pago" else "Informado pela fonte" }}</span>
+<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Pago (assinatura = 0)" if custo == "pago" else "Custo de lista" }}</span>
   <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ (tabela de preços)</span></div>
 {% endmacro %}
 
 {# custo por dia: colunas empilhadas, informado embaixo e estimado em cima #}
 {% macro custo_dia(d, total) %}
 {% set W = 600 %}{% set H = 180 %}{% set n = d.points|length %}
-<section class="cartao bloco grafico" data-grafico="uso-custo-dia" data-days="{{ n }}" data-real-usd="{{ _raw(total.real_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
-  <div class="grafico-topo"><h2>Custo por dia</h2><span class="nota">{{ _money(total.real_usd, total.estimated_usd) }} na janela</span></div>
+<section class="cartao bloco grafico" data-grafico="uso-custo-dia" data-days="{{ n }}" data-real-usd="{{ _raw(total.real_usd) }}" data-listed-usd="{{ _raw(total.listed_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
+  <div class="grafico-topo"><h2>Custo por dia</h2><span class="nota">{{ _money(total.real_usd, total.estimated_usd, total.listed_usd) }} na janela</span></div>
   {% if n %}
   <div class="linha-grafico larga">
     <div class="eixo-y"><span>{{ d.max_cost|usd2 }}</span><span>{{ d.mid_cost|usd2 }}</span><span>0</span></div>
@@ -25,11 +25,11 @@
       <line class="grade" x1="0" x2="{{ W }}" y1="{{ H }}" y2="{{ H }}"/>
       {% for p in d.points %}
       {% set bw = W / n * 0.7 %}{% set bx = p.x * W - bw / 2 %}{% set rh = p.real_frac * H %}{% set eh = p.est_frac * H %}
-      <g class="coluna" data-bucket="{{ p.key }}" data-calls="{{ p.calls }}" data-real-usd="{{ _raw(p.real_usd) }}" data-estimated-usd="{{ _raw(p.estimated_usd) }}">
+      <g class="coluna" data-bucket="{{ p.key }}" data-calls="{{ p.calls }}" data-real-usd="{{ _raw(p.real_usd) }}" data-listed-usd="{{ _raw(p.listed_usd) }}" data-estimated-usd="{{ _raw(p.estimated_usd) }}">
         <rect class="alvo" x="{{ '%.1f'|format(p.x * W - W / n / 2) }}" y="0" width="{{ '%.2f'|format(W / n) }}" height="{{ H }}"/>
         {% if p.real_frac %}<rect class="real" x="{{ '%.1f'|format(bx) }}" y="{{ '%.1f'|format(H - rh) }}" width="{{ '%.2f'|format(bw) }}" height="{{ '%.1f'|format(rh) }}"/>{% endif %}
         {% if p.est_frac %}<rect class="estimado" x="{{ '%.1f'|format(bx) }}" y="{{ '%.1f'|format(H - rh - eh) }}" width="{{ '%.2f'|format(bw) }}" height="{{ '%.1f'|format(eh) }}"/>{% endif %}
-        <title>{{ p.label }} · {{ _money(p.real_usd, p.estimated_usd) }} · {{ p.calls|calls }}</title>
+        <title>{{ p.label }} · {{ _money(p.real_usd, p.estimated_usd, p.listed_usd) }} · {{ p.calls|calls }}</title>
       </g>
       {% endfor %}
     </svg>
@@ -45,18 +45,18 @@
 
 {# custo por papel ou por fase: uma barra por linha, informado pela fonte (cheio) e estimado (tracejado) #}
 {% macro custo_barras(kind, titulo, rows, total) %}
-<section class="cartao bloco grafico" data-grafico="uso-custo-{{ kind }}" data-rows="{{ rows|length }}" data-real-usd="{{ _raw(total.real_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
-  <div class="grafico-topo"><h2>{{ titulo }}</h2><span class="nota">{{ _money(total.real_usd, total.estimated_usd) }} na janela</span></div>
+<section class="cartao bloco grafico" data-grafico="uso-custo-{{ kind }}" data-rows="{{ rows|length }}" data-real-usd="{{ _raw(total.real_usd) }}" data-listed-usd="{{ _raw(total.listed_usd) }}" data-estimated-usd="{{ _raw(total.estimated_usd) }}">
+  <div class="grafico-topo"><h2>{{ titulo }}</h2><span class="nota">{{ _money(total.real_usd, total.estimated_usd, total.listed_usd) }} na janela</span></div>
   {% for r in rows %}
-  <div class="barra-linha" data-nome="{{ r.name }}" data-calls="{{ r.calls }}" data-real-usd="{{ _raw(r.cost.real_usd) }}" data-estimated-usd="{{ _raw(r.cost.estimated_usd) }}"
+  <div class="barra-linha" data-nome="{{ r.name }}" data-calls="{{ r.calls }}" data-real-usd="{{ _raw(r.cost.real_usd) }}" data-listed-usd="{{ _raw(r.cost.listed_usd) }}" data-estimated-usd="{{ _raw(r.cost.estimated_usd) }}"
        title="{{ r.name }}: {{ r.calls|calls }}">
     <span class="rotulo mono">{{ r.name }}</span>
     <svg class="barra-svg" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true">
-      <title>{{ r.name }} · {{ _money(r.cost.real_usd, r.cost.estimated_usd) }}</title>
+      <title>{{ r.name }} · {{ _money(r.cost.real_usd, r.cost.estimated_usd, r.cost.listed_usd) }}</title>
       {% if r.real_frac %}<rect class="real" x="0" y="0" width="{{ '%.2f'|format([r.real_frac * 100, 1]|max) }}" height="14"/>{% endif %}
       {% if r.est_frac %}<rect class="estimado" x="{{ '%.2f'|format(r.real_frac * 100) }}" y="0" width="{{ '%.2f'|format([r.est_frac * 100, 1]|max) }}" height="14"/>{% endif %}
     </svg>
-    <span class="valor{% if r.cost.estimated_usd is not none %} est{% endif %}">{% if r.priced %}{{ _money(r.cost.real_usd, r.cost.estimated_usd) }}{% else %}sem preço{% endif %}</span>
+    <span class="valor{% if r.cost.estimated_usd is not none %} est{% endif %}">{% if r.priced %}{{ _money(r.cost.real_usd, r.cost.estimated_usd, r.cost.listed_usd) }}{% else %}sem preço{% endif %}</span>
   </div>
   {% else %}
   <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>

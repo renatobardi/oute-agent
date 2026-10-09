@@ -210,10 +210,10 @@ def own_pairs(q, tables):
 
 def usage_cols(u, detail=True):
     """As colunas de consumo (chamadas, tokens, custo e, na lista, p95 e erros) de uma linha cujo `u(row)` é o uso
-    renderizado (`usage.rendered`). O custo de ordem é o real mais o estimado, o mesmo que o gráfico do Uso usa."""
+    renderizado (`usage.rendered`). O custo de ordem é o real mais o de lista calculado (#747) mais o estimado, o mesmo que o gráfico do Uso usa."""
     cols = [Col("calls", "num", lambda r: u(r)["calls"]),
             Col("tokens", "num", lambda r: u(r)["tokens"]["input"] + u(r)["tokens"]["output"]),
-            Col("cost", "num", lambda r: (u(r)["cost"]["real_usd"] or 0) + (u(r)["cost"]["estimated_usd"] or 0))]
+            Col("cost", "num", lambda r: (u(r)["cost"]["real_usd"] or 0) + (u(r)["cost"]["listed_usd"] or 0) + (u(r)["cost"]["estimated_usd"] or 0))]
     if detail:
         cols += [Col("p95", "num", lambda r: u(r)["latency_p95_ms"]), Col("errors", "num", lambda r: u(r)["errors"]["total"])]
     return cols

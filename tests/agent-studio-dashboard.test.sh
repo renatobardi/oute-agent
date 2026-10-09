@@ -72,7 +72,7 @@ db = DB("fixa")
 for i in range(6):
     db.span(P0 + (5 + i) * H, 2, model="claude-sonnet-5", task="t-antiga", input=1000, output=100)
 db.span(P0 + 20 * H, 9, model="claude-opus-5", task="t-antiga", input=10, cost_usd=1.0)
-# janela atual: 20 do sonnet (14 de 2 s na sessão T1, 6 de 8 s na T-LENTA), tudo estimado; cache lido em todas
+# janela atual: 20 do sonnet (14 de 2 s na sessão T1, 6 de 8 s na T-LENTA), tudo de lista calculado (assinatura sem custo, #747); cache lido em todas
 for i in range(14):
     db.span(F0 + (1 + i) * H, 2, model="claude-sonnet-5", task="T1", conv="conv-t1", input=10_000, output=1_000, cache_read=100_000)
 for i in range(6):
@@ -111,10 +111,11 @@ check("KPI chamadas: valor, anterior e variação", KP["calls"]["value"] == "27"
       and abs(float(KP["calls"]["delta"]) - (27 - 7) / 7) < 1e-9)
 check("KPI chamadas: Badge com a variação e a seta para cima", '+286%' in kpi(html, "calls") and "lucide.svg#trending-up" in kpi(html, "calls"))
 # sonnet: 20 × (10000×3 + 1000×15 + 100000×0,3)/1e6 = 1,5; codex: 2 × (1e6×1,25 + 1e5×10)/1e6 = 4,5; opus real 10
-check("KPI custo: real, estimado, % estimado e sem preço", abs(float(KP["cost"]["real-usd"]) - 10.0) < 1e-6
-      and abs(float(KP["cost"]["estimated-usd"]) - 6.0) < 1e-6 and abs(float(KP["cost"]["estimated-share"]) - 6 / 16) < 1e-9
+check("KPI custo: real, de lista (assinatura sem custo), estimado vazio e sem preço", abs(float(KP["cost"]["real-usd"]) - 10.0) < 1e-6
+      and abs(float(KP["cost"]["listed-usd"]) - 6.0) < 1e-6 and KP["cost"]["estimated-usd"] == "" and float(KP["cost"]["estimated-share"]) == 0
       and KP["cost"]["unpriced-calls"] == "3" and abs(float(KP["cost"]["value"]) - 16.0) < 1e-6)
-check("KPI custo: ≈ no valor e a nota do % estimado", "≈ US$ 16,00" in kpi(html, "cost") and "38% estimado" in kpi(html, "cost"))
+check("KPI custo: o de lista soma sem '≈' no valor, e a nota diz 0% estimado", "US$ 16,00" in kpi(html, "cost") and "≈" not in kpi(html, "cost")
+      and "0% estimado" in kpi(html, "cost"))
 check("KPI p95: 10,8 s (o opus de 12 s entra) e Badge destrutivo (piorou > 25%)", abs(float(KP["p95"]["value"]) - 10800) < 1 and 'class="badge destrutivo"' in kpi(html, "p95")
       and "piorou" in kpi(html, "p95"))
 # os 3 erros estão em spans de ferramenta (não são chamadas ao modelo): 27 chamadas + 3 desses = 30 spans, taxa 3/30 e não 3/27
@@ -139,8 +140,9 @@ check("KPI custo pago: a dica diz que a assinatura conta US$ 0, sem o texto do p
 # ------------------------------------------------------------------------------ totais batendo com /uso e /v1/usage
 _, uso = get(app, "/uso", Q)
 tot = attrs(re.search(r'<p class="cartao bloco" id="total"[^>]*>', uso).group(0))
-check("totais = /uso na mesma janela (chamadas, real e estimado)", tot["calls"] == KP["calls"]["value"]
-      and abs(float(tot["real-usd"]) - float(KP["cost"]["real-usd"])) < 1e-9 and abs(float(tot["estimated-usd"]) - float(KP["cost"]["estimated-usd"])) < 1e-9)
+check("totais = /uso na mesma janela (chamadas, real, de lista e estimado)", tot["calls"] == KP["calls"]["value"]
+      and abs(float(tot["real-usd"]) - float(KP["cost"]["real-usd"])) < 1e-9 and abs(float(tot["listed-usd"]) - float(KP["cost"]["listed-usd"])) < 1e-9
+      and tot["estimated-usd"] == KP["cost"]["estimated-usd"] == "")
 api = json.loads(get(app, "/v1/usage", Q)[1])["totals"]
 check("totais = /v1/usage (chamadas, custo, p95, erros)", api["calls"] == 27 and abs(api["cost"]["real_usd"] - 10.0) < 1e-6
       and abs(api["latency_p95_ms"] - float(KP["p95"]["value"])) < 1e-6 and api["errors"]["spans"] == 3 and api["cost"]["unpriced_calls"] == 3)
@@ -182,16 +184,17 @@ check("1) linha e área em <path>, dica no <title>, 3 linhas de grade",
       sec("chamadas").count("<path") == 2 and "<title>01/10 01h · 1 chamada · p95 2,0 s</title>" in sec("chamadas")
       and sec("chamadas").count('class="grade') == 3)
 check("1) eixo: teto redondo e metade", re.findall(r"<span>([\d.]+)</span>", sec("chamadas").split('class="eixo-y"')[1].split("</div>")[0]) == ["4", "2", "0"])
-models = re.findall(r'<div class="barra-linha" data-modelo="([^"]*)" data-calls="(\d+)" data-real-usd="([^"]*)" data-estimated-usd="([^"]*)"', sec("custo-modelo"))
-check("2) custo por modelo: em ordem de custo, com real e estimado separados", [m[0] for m in models] ==
+models = re.findall(r'<div class="barra-linha" data-modelo="([^"]*)" data-calls="(\d+)" data-real-usd="([^"]*)" data-listed-usd="([^"]*)" data-estimated-usd="([^"]*)"', sec("custo-modelo"))
+check("2) custo por modelo: em ordem de custo, com real, de lista e estimado separados", [m[0] for m in models] ==
       ["claude-opus-5", "gpt-5-codex", "claude-sonnet-5", "m&lt;b&gt;x&lt;/b&gt;&amp;y"]
-      and models[0][2:] == ("10.0", "") and models[1][2] == "" and abs(float(models[2][3]) - 1.5) < 1e-9)
+      and models[0][2:] == ("10.0", "", "") and models[1][2] == "" and abs(float(models[1][3]) - 4.5) < 1e-9
+      and models[2][2] == "" and abs(float(models[2][3]) - 1.5) < 1e-9 and all(m[4] == "" for m in models))
 check("2) barras: real e estimado em <rect> de classes diferentes (o estimado é tracejado no CSS, não só de outra cor)",
       sec("custo-modelo").count('class="real"') >= 2 and 'class="estimado"' in sec("custo-modelo")
       and re.search(r"\.estimado[^}]*stroke-dasharray", CSS) is not None)
 check("2) modelo sem preço diz 'sem preço' em vez de zero", "sem preço</span>" in sec("custo-modelo"))
-check("2) composição: informado pela fonte, estimado, % e as chamadas sem preço", "Informado pela fonte US$ 10,00 (62%)" in sec("custo-modelo")
-      and "Estimado ≈ US$ 6,00 (38%)" in sec("custo-modelo") and "3 chamadas sem preço, fora da soma" in sec("custo-modelo"))
+check("2) composição: custo de lista (informado + calculado), estimado, % e as chamadas sem preço", "Custo de lista US$ 16,00 (100%)" in sec("custo-modelo")
+      and "Estimado ≈ US$ 0,00 (0%)" in sec("custo-modelo") and "3 chamadas sem preço, fora da soma" in sec("custo-modelo"))
 lat = {m.group(1): m.group(0) for m in re.finditer(r'<tr data-modelo="([^"]*)" data-calls=.*?</tr>', sec("latencia"), re.S)}
 check("3) latência: um modelo por linha, do p95 mais alto ao mais baixo", list(lat) ==
       ["claude-opus-5", "claude-sonnet-5", "gpt-5-codex", "m&lt;b&gt;x&lt;/b&gt;&amp;y"])
@@ -245,6 +248,25 @@ check("7 d bate com /uso (hours=168)", attrs(re.search(r'<p class="cartao bloco"
 check("sem a janela, o padrão é 24 h", get(app2, "/")[1].count('aria-current="true">24 horas') == 1)
 check("sem Gate nem erro: insights que dependem deles não aparecem", "data-insight=\"gate\"" not in h24 and "data-insight=\"tool_errors\"" not in h24)
 check("janela anterior de 24 h sem Gate: sem SurrealDB o aviso diz isso", "data-gate-nao-lido" in h24 and "sem SurrealDB" in h24)
+
+# ------------------------------------------------------------------------------ fora das assinaturas segue estimado (#747)
+# uma chamada do LLM do ai-memory (sem assinatura, sem custo informado) e uma do Claude sem log de custo: a primeira é
+# estimada (≈, tracejada), a segunda é de lista (cheia, sem ≈); a soma fecha
+db4 = DB("fora")
+db4.span(F0 + H, 2, name="ai_memory.llm_request", model="claude-sonnet-5", agent="ai-memory", task="M1", conv="c-m1", input=1_000_000)
+db4.span(F0 + 2 * H, 2, model="claude-sonnet-5", task="M2", conv="c-m2", input=1_000_000)
+app4 = create_app(db4.flush(), TOKEN, config=cfg)
+_, p4 = get(app4, "/", Q)
+k4 = attrs(kpi(p4, "cost").split(">", 1)[0])
+check("fora das assinaturas: o KPI separa de lista (3,00) e estimado (3,00), sem real; a soma fecha",
+      k4["real-usd"] == "" and abs(float(k4["listed-usd"]) - 3.0) < 1e-6 and abs(float(k4["estimated-usd"]) - 3.0) < 1e-6
+      and abs(float(k4["value"]) - 6.0) < 1e-6 and abs(float(k4["estimated-share"]) - 0.5) < 1e-9)
+check("fora das assinaturas: o valor leva '≈' (há estimado) e a nota diz 50% estimado", "≈ US$ 6,00" in kpi(p4, "cost") and "50% estimado" in kpi(p4, "cost"))
+sec4 = re.search(r'<section class="cartao bloco grafico" data-grafico="custo-modelo".*?</section>', p4, re.S).group(0)
+check("fora das assinaturas: a barra tem parte cheia (de lista) e parte tracejada (estimada); a composição separa as duas",
+      'class="real"' in sec4 and 'class="estimado"' in sec4 and "Custo de lista US$ 3,00 (50%)" in sec4 and "Estimado ≈ US$ 3,00 (50%)" in sec4)
+check("fora das assinaturas: /uso soma o mesmo (lista 3,00, estimado 3,00)", (lambda t: abs(float(t["listed-usd"]) - 3.0) < 1e-9
+      and abs(float(t["estimated-usd"]) - 3.0) < 1e-9)(attrs(re.search(r'<p class="cartao bloco" id="total"[^>]*>', get(app4, "/uso", Q)[1]).group(0))))
 
 # ------------------------------------------------------------------------------ regras que NÃO disparam (limites)
 db3 = DB("limites")
@@ -429,5 +451,5 @@ ST.dash_mod.snapshot = real_snapshot
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^$\|^ok   \|tela: .* falhou' "$TMP/py.out" || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 94
+check "o Python rodou todos os casos"       test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 98
 check_end

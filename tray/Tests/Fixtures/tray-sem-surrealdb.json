@@ -41,8 +41,9 @@
     "to": "2026-10-04T00:00:00Z",
     "usd": 5.5404,
     "real_usd": 0.0304,
-    "estimated_usd": 5.51,
-    "estimated": true,
+    "listed_usd": 5.51,
+    "estimated_usd": null,
+    "estimated": false,
     "unpriced_calls": 1,
     "agents": [
       {
@@ -50,8 +51,9 @@
         "calls": 3,
         "usd": 3.03,
         "real_usd": 0.03,
-        "estimated_usd": 3.0,
-        "estimated": true,
+        "listed_usd": 3.0,
+        "estimated_usd": null,
+        "estimated": false,
         "unpriced_calls": 0
       },
       {
@@ -59,8 +61,9 @@
         "calls": 3,
         "usd": 2.51,
         "real_usd": null,
-        "estimated_usd": 2.51,
-        "estimated": true,
+        "listed_usd": 2.51,
+        "estimated_usd": null,
+        "estimated": false,
         "unpriced_calls": 1
       }
     ]

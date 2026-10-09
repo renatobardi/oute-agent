@@ -38,6 +38,7 @@ DIMS = {
     alerts_mod.QUOTA: ("agent", "attributes"), alerts_mod.ROUND_STALLED: ("round",), alerts_mod.ROUND_OLD: ("round",),
     "price_changed": ("model", "field", "changed_at"), "price_sources_diverge": ("model",), "price_source_down": ("source",),
     "price_model_unpriced": ("model",), "price_fixed_differs": ("model",),
+    "cost_claude_diff": ("model",), "cost_subscription_unpriced": ("model",),
 }
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS ack_marks (

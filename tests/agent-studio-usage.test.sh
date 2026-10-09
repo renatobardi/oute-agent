@@ -109,8 +109,10 @@ check "janela devolvida na resposta"                   jqe '.from == "2025-09-27
 check "hora do fato: 9 chamadas (fora da janela e tool fora)" jqe "$T.calls == 9" <<<"$R"
 check "spans: todos os da janela (chamada ou não)"     jqe "$T.spans == 11" <<<"$R"
 check "custo real = 0,061 (Claude + jev.decision)"     jqe "$T.cost.real_usd | $(usd .) == 61000" <<<"$R"
-check "estimado = 5,51 (Claude sem custo + Codex)"     jqe "$T.cost.estimated_usd | $(usd .) == 5510000" <<<"$R"
-check "chamadas: 5 reais, 3 estimadas, 1 sem preço"    jqe "$T.cost | .real_calls == 5 and .estimated_calls == 3 and .unpriced_calls == 1" <<<"$R"
+check "custo de lista = 5,51 (Claude sem log de custo + Codex, #747)" jqe "$T.cost.listed_usd | $(usd .) == 5510000" <<<"$R"
+check "estimado null: toda chamada sem custo é de assinatura (#747)" jqe "$T.cost.estimated_usd == null and $T.cost.estimated_calls == 0" <<<"$R"
+check "chamadas: 5 reais, 3 de lista (1 do Claude sem log), 0 estimadas, 1 sem preço" jqe "$T.cost | .real_calls == 5 and .listed_calls == 3 and .claude_no_log_calls == 1 and .estimated_calls == 0 and .unpriced_calls == 1" <<<"$R"
+check "chamadas: real + lista + estimada + sem preço = chamadas" jqe "$T | (.cost.real_calls + .cost.listed_calls + .cost.estimated_calls + .cost.unpriced_calls) == .calls" <<<"$R"
 check "sem preço listado (nunca zero)"                 jqe '.unpriced_models == ["gpt-9-sem-preco"]' <<<"$R"
 check "tokens: LiteLLM e span fora do modelo não somam" jqe "$T.tokens | .input == 2000920 and .output == 101097 and .cache_read == 2001000 and .cache_creation == 10" <<<"$R"
 check "erros: 2 spans (Codex + LiteLLM) e 2 logs"      jqe "$T.errors == {spans: 2, logs: 2, total: 4}" <<<"$R"
@@ -119,15 +121,15 @@ check "preços carregados e entrada inválida avisada"   jqe '.prices.models == 
 # ---------------------------------------------------------------- 3. linhas host × agente × modelo
 row() { jq -c --arg h "$1" --arg a "$2" --arg m "$3" '.rows[] | select(.host == $h and .agent == $a and (.model // "") == $m)' <<<"$R"; }
 C="$(row oute-server claude claude-sonnet-5)"
-check "Claude: real e estimado separados na mesma linha" jqe "$(usd .cost.real_usd) == 60000 and $(usd .cost.estimated_usd) == 3000000 and .cost.real_calls == 3 and .cost.estimated_calls == 1" <<<"$C"
+check "Claude: real e de lista separados na mesma linha" jqe "$(usd .cost.real_usd) == 60000 and $(usd .cost.listed_usd) == 3000000 and .cost.estimated_usd == null and .cost.real_calls == 3 and .cost.listed_calls == 1 and .cost.claude_no_log_calls == 1 and .cost.estimated_calls == 0" <<<"$C"
 check "Claude: custo real do log api_request; repetido e log sem span não somam" jqe ".calls == 4 and .spans == 4" <<<"$C"
 check "Claude: p95 das chamadas = 3850 ms"             jqe '(.latency_p95_ms | round) == 3850' <<<"$C"
 X="$(row oute-mac codex gpt-5-codex)"
-check "Codex: só estimado (2,50), real null"           jqe ".cost.real_usd == null and $(usd .cost.estimated_usd) == 2500000 and .cost.estimated_calls == 1" <<<"$X"
+check "Codex: só de lista (2,50), real e estimado null" jqe ".cost.real_usd == null and .cost.estimated_usd == null and $(usd .cost.listed_usd) == 2500000 and .cost.listed_calls == 1 and .cost.claude_no_log_calls == 0" <<<"$X"
 check "Codex: tokens de entrada, saída e cache"        jqe '.tokens == {input: 1000000, output: 100000, cache_read: 2000000, cache_creation: 0}' <<<"$X"
-check "Codex: preço achado sem prefixo e sem caixa"    jqe "$(usd .cost.estimated_usd) == 10000 and .errors.spans == 1" <<<"$(row oute-mac codex OpenAI/GPT-5-Codex)"
+check "Codex: preço achado sem prefixo e sem caixa"    jqe "$(usd .cost.listed_usd) == 10000 and .errors.spans == 1" <<<"$(row oute-mac codex OpenAI/GPT-5-Codex)"
 U="$(row oute-mac codex gpt-9-sem-preco)"
-check "sem preço: estimado null, nunca 0"              jqe '.cost.estimated_usd == null and .cost.unpriced_calls == 1 and .tokens.input == 500' <<<"$U"
+check "sem preço: de lista e estimado null, nunca 0"   jqe '.cost.listed_usd == null and .cost.estimated_usd == null and .cost.unpriced_calls == 1 and .tokens.input == 500' <<<"$U"
 # histórico até 2026-09-30 (#218): custo passado do jev.decision continua no /v1/usage
 check "jev.decision conta para o cliente (pi)"         jqe ".calls == 1 and $(usd .cost.real_usd) == 400 and .tokens.input == 50" <<<"$(row oute-server pi openai/gpt-oss-20b)"
 RT="$(row oute-server router openai/gpt-oss-20b)"
@@ -141,8 +143,8 @@ check "spans por linha somam os da janela"             jqe '([.rows[].spans] | a
 # ---------------------------------------------------------------- 4. série diária (UTC, hora do fato)
 ser() { jq -c --arg d "$1" --arg h "$2" --arg a "$3" --arg m "$4" '.series[] | select(.day == $d and .host == $h and .agent == $a and (.model // "") == $m)' <<<"$R"; }
 check "série: só os dois dias da janela"               jqe '[.series[].day] | unique == ["2025-09-27", "2025-09-28"]' <<<"$R"
-check "série Claude D1: 2 chamadas, real 0,03, p95 3900" jqe ".calls == 2 and $(usd .cost.real_usd) == 30000 and .cost.estimated_usd == null and (.latency_p95_ms | round) == 3900" <<<"$(ser 2025-09-27 oute-server claude claude-sonnet-5)"
-check "série Claude D2: real 0,03 + estimado 3,00"     jqe ".calls == 2 and $(usd .cost.real_usd) == 30000 and $(usd .cost.estimated_usd) == 3000000" <<<"$(ser 2025-09-28 oute-server claude claude-sonnet-5)"
+check "série Claude D1: 2 chamadas, real 0,03, p95 3900" jqe ".calls == 2 and $(usd .cost.real_usd) == 30000 and .cost.listed_usd == null and .cost.estimated_usd == null and (.latency_p95_ms | round) == 3900" <<<"$(ser 2025-09-27 oute-server claude claude-sonnet-5)"
+check "série Claude D2: real 0,03 + de lista 3,00"     jqe ".calls == 2 and $(usd .cost.real_usd) == 30000 and $(usd .cost.listed_usd) == 3000000 and .cost.estimated_usd == null" <<<"$(ser 2025-09-28 oute-server claude claude-sonnet-5)"
 check "série: log de erro no dia do fato"              jqe '.errors.logs == 1' <<<"$(ser 2025-09-28 oute-mac codex "")"
 check "série soma o mesmo que os totais"               jqe "([.series[].calls] | add) == 9 and ([.series[].cost.real_usd // 0] | add | $(usd .)) == 61000" <<<"$R"
 
@@ -162,18 +164,22 @@ UH="$(studio_page "${A[@]}" "$STUDIO_URL/uso$WIN")"
 G="$(data <<<"$UH")"
 check "/uso: os cinco gráficos"                        jqe '[.[] | select(.grafico) | .grafico] == ["uso-custo-dia", "uso-tokens-dia", "uso-custo-role", "uso-custo-phase", "uso-custo-subscription"]' <<<"$G"
 check "/uso: custo por dia = um item por dia (2 dias, 2 colunas)" jqe '([.[] | select(.grafico == "uso-custo-dia")][0].days == "2") and ([.[] | select(.bucket and has("real-usd"))] | length == 2)' <<<"$G"
-check "/uso: soma do custo por dia = total da API (real e estimado)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
-  ([\$g[] | select(.bucket and has(\"real-usd\")) | (.[\"real-usd\"] | select(. != \"\") | tonumber)] | add) as \$r |
-  ([\$g[] | select(.bucket and has(\"real-usd\")) | (.[\"estimated-usd\"] | select(. != \"\") | tonumber)] | add) as \$e |
-  ((\$r - \$t.real_usd | fabs) < 1e-9) and ((\$e - \$t.estimated_usd | fabs) < 1e-9)" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
+# n = o atributo do HTML (vazio = sem custo) como número; a API devolve null no que não tem custo
+N='def n: if . == null or . == "" then 0 else tonumber end;'
+check "/uso: soma do custo por dia = total da API (real, de lista e estimado)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "$3
+  ([\$g[] | select(.bucket and has(\"real-usd\")) | .[\"real-usd\"] | n] | add) as \$r |
+  ([\$g[] | select(.bucket and has(\"real-usd\")) | .[\"listed-usd\"] | n] | add) as \$l |
+  ([\$g[] | select(.bucket and has(\"real-usd\")) | .[\"estimated-usd\"] | n] | add) as \$e |
+  ((\$r - (\$t.real_usd // 0) | fabs) < 1e-9) and ((\$l - (\$t.listed_usd // 0) | fabs) < 1e-9) and ((\$e - (\$t.estimated_usd // 0) | fabs) < 1e-9)" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$N"
 for K in uso-custo-dia uso-custo-role uso-custo-phase; do
-  check "/uso: $K traz o total real e estimado da janela (= API)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" --arg k "$3" "
-    [\$g[] | select(.grafico == \$k)][0] | ((.[\"real-usd\"] | tonumber) - \$t.real_usd | fabs) < 1e-9 and ((.[\"estimated-usd\"] | tonumber) - \$t.estimated_usd | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$K"
+  check "/uso: $K traz o total real, de lista e estimado da janela (= API)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" --arg k "$3" "$4
+    [\$g[] | select(.grafico == \$k)][0] | ((.[\"real-usd\"] | n) - (\$t.real_usd // 0) | fabs) < 1e-9 and ((.[\"listed-usd\"] | n) - (\$t.listed_usd // 0) | fabs) < 1e-9 and ((.[\"estimated-usd\"] | n) - (\$t.estimated_usd // 0) | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$K" "$N"
 done
-check "/uso: barras de papel e de fase (1 linha cada, com o custo do total) e as de assinatura (somam o total): três vezes o total no conjunto" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
+check "/uso: barras de papel e de fase (1 linha cada, com o custo do total) e as de assinatura (somam o total): três vezes o total no conjunto" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "$3
   ([\$g[] | select(.subscription)] | length) as \$s | ([\$g[] | select(.nome)] | length == 2 + \$s) and
-  ([\$g[] | select(.nome) | .[\"real-usd\"] | select(. != \"\") | tonumber] | add - 3 * \$t.real_usd | fabs) < 1e-9 and
-  ([\$g[] | select(.nome) | .[\"estimated-usd\"] | select(. != \"\") | tonumber] | add - 3 * \$t.estimated_usd | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")"
+  ([\$g[] | select(.nome) | .[\"real-usd\"] | n] | add - 3 * (\$t.real_usd // 0) | fabs) < 1e-9 and
+  ([\$g[] | select(.nome) | .[\"listed-usd\"] | n] | add - 3 * (\$t.listed_usd // 0) | fabs) < 1e-9 and
+  ([\$g[] | select(.nome) | .[\"estimated-usd\"] | n] | add - 3 * (\$t.estimated_usd // 0) | fabs) < 1e-9" >/dev/null' _ "$G" "$(jq -c '.totals.cost' <<<"$R")" "$N"
 check "/uso: tokens por dia = tokens da API (entrada, saída, cache)" bash -c 'jq -n -e --argjson g "$1" --argjson t "$2" "
   [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
   (\$c.input | tonumber) == \$t.input and (\$c.output | tonumber) == \$t.output and (\$c[\"cache-read\"] | tonumber) == \$t.cache_read and (\$c[\"cache-creation\"] | tonumber) == \$t.cache_creation" >/dev/null' _ "$G" "$(jq -c '.totals.tokens' <<<"$R")"
@@ -181,7 +187,7 @@ check "/uso: tokens: a soma das colunas = a do gráfico" bash -c 'jq -n -e --arg
   [\$g[] | select(.grafico == \"uso-tokens-dia\")][0] as \$c |
   ([\$g[] | select(.bucket and has(\"input\")) | (.input | tonumber) + (.output | tonumber) + (.[\"cache-read\"] | tonumber) + (.[\"cache-creation\"] | tonumber)] | add) ==
   ((\$c.input | tonumber) + (\$c.output | tonumber) + (\$c[\"cache-read\"] | tonumber) + (\$c[\"cache-creation\"] | tonumber))" >/dev/null' _ "$G"
-check "/uso: informado pela fonte × estimado distinguidos por texto e traço"  bash -c 'grep -q "Informado pela fonte" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
+check "/uso: custo de lista × estimado distinguidos por texto e traço (#747)"  bash -c 'grep -q "Custo de lista" <<<"$1" && grep -q "Estimado ≈" <<<"$1" && grep -q "class=\"estimado\"" <<<"$1" && grep -q "class=\"real\"" <<<"$1"' _ "$UH"
 check "/uso: entrada, saída e cache distinguidos por texto e traço" bash -c 'for w in "Entrada (" "Saída (" "Cache, leitura" "t-ent" "t-sai" "t-cache"; do grep -q "$w" <<<"$1" || exit 1; done' _ "$UH"
 check "/uso: sem style= nas tags dos gráficos (CSP)"    bash -c '! grep -q "style=" <<<"$1"' _ "$UH"
 check "/uso: as tabelas por papel, por fase e por assinatura (#679) seguem na tela" jqe '([.[] | select(.uso == "role")] | length) == 1 and ([.[] | select(.uso == "phase")] | length) == 1 and ([.[] | select(.uso == "subscription")] | length) == 1' <<<"$G"
@@ -228,7 +234,7 @@ gp = usage.aggregate(stp.con, 1759000000 * 10**9, (1759000000 + 100) * 10**9, c.
 out("tabela do ADR-02 sem preço: nenhum modelo", not any(v["unpriced_models"] or v["unpriced_calls"] for v in gp.values()) and len(gp) == len(table))
 out("reserva gpt-6-*: 4 eixos do models.dev", [c.prices.lookup(m) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")]
     == [P(10, 50, 1, 12.5), P(2, 10, 0.1, 2.5), P(0.1, 0.5, 0.01, 0.125)])
-out("reserva gpt-6-*: custo estimado de 1000 de entrada + 100 de saída", [round(gp[(m,)]["estimated_usd"], 9) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")] == [0.015, 0.003, 0.00015])
+out("reserva gpt-6-*: custo de lista de 1000 de entrada + 100 de saída (Codex é assinatura, #747)", [round(gp[(m,)]["listed_usd"], 9) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")] == [0.015, 0.003, 0.00015])
 stp.close()
 out("config ausente: vazia, com o motivo", (lambda c: len(c.prices) == 0 and "não encontrada" in c.errors[0])(config.load("/nao/existe.toml")))
 import tempfile, os
@@ -243,7 +249,7 @@ con = duckdb.connect(db, read_only=True)
 lo, hi = 1758931200 * 10**9, 1759104000 * 10**9
 g = usage.aggregate(con, lo, hi, config.load(test_cfg).prices, ("agent",))
 cx = g[("codex",)]
-out("agrupamento só por agente: estimado somado entre modelos", round(cx["estimated_usd"], 9) == 2.51 and cx["unpriced_calls"] == 1)
+out("agrupamento só por agente: custo de lista somado entre modelos, sem estimado", round(cx["listed_usd"], 9) == 2.51 and cx["estimated_usd"] is None and cx["unpriced_calls"] == 1)
 out("agrupamento só por agente: erros de span e log", cx["span_errors"] == 1 and cx["log_errors"] == 2)
 try:
     usage.aggregate(con, lo, hi, config.load(test_cfg).prices, ("rodada",)); out("chave inválida recusada", False)
@@ -294,8 +300,8 @@ g = usage.aggregate(st.con, T0 * 10**9, (T0 + 60) * 10**9, cost.PriceTable({"cla
 cl, cx = g[("claude-sonnet-5",)], g[("gpt-9-sem-preco",)]
 out("custo no span vale antes do log; texto e prefixo do evento aceitos; borda com folga",
     cl["real_calls"] == 4 and round(cl["real_usd"], 9) == 0.5 + 0.25 + 0.75 + 0.125)
-out("custo do log que não é número: a chamada cai no estimado (nunca zero)",
-    cl["estimated_calls"] == 1 and round(cl["estimated_usd"], 9) == 3.0)
+out("custo do log que não é número: a chamada cai no custo de lista (nunca zero)",
+    cl["listed_calls"] == 1 and round(cl["listed_usd"], 9) == 3.0 and cl["claude_no_log_calls"] == 1 and cl["estimated_calls"] == 0)
 out("api_request só dá custo ao span do Claude (o do Codex segue sem preço)", cx["real_calls"] == 0 and cx["unpriced_calls"] == 1)
 sql, params = cost.window_spans_with_cost(0, 10)
 out("janela que começa no zero: a folga não fica negativa", params[-2] == 0)
@@ -317,9 +323,22 @@ g = usage.aggregate(st2.con, T0 * 10**9, (T0 + 60) * 10**9, cost.PriceTable({}),
 out("duas linhas do mesmo request_id: uma chamada, custo máximo; span sem request_id não junta",
     g["calls"] == 2 and g["real_calls"] == 1 and g["real_usd"] == 9.0 and g["unpriced_calls"] == 1)
 st2.close()
+# chamada fora das assinaturas (o LLM do ai-memory sem custo): segue estimada pela tabela, e a soma das categorias fecha (#747)
+st3 = Store(":memory:")
+rm = {"host.name": "h", "oute.agent": "ai-memory"}
+am = span("ai_memory.llm_request", T0, 1, {"model": "claude-sonnet-5", "input_tokens": 1_000_000})
+cc = claude_call(T0 + 5, 1, {"model": "claude-sonnet-5", "input_tokens": 1_000_000})
+st3.write({"spans": otlp.span_rows({"resourceSpans": [rs(rm, [am]), rs(res, [cc[0]])]}, 1), "logs": []})
+g = usage.aggregate(st3.con, T0 * 10**9, (T0 + 60) * 10**9, cost.PriceTable({"claude-sonnet-5": P(3, 15, 3, 3)}), ())[()]
+out("fora das assinaturas (ai-memory): estimado ≈ 3,00; a do Claude sem log é de lista, não estimada",
+    g["calls"] == 2 and g["estimated_calls"] == 1 and round(g["estimated_usd"], 9) == 3.0
+    and g["listed_calls"] == 1 and round(g["listed_usd"], 9) == 3.0 and g["claude_no_log_calls"] == 1)
+out("categorias de chamada somam as chamadas (real + lista + estimada + sem preço)",
+    g["real_calls"] + g["listed_calls"] + g["estimated_calls"] + g["unpriced_calls"] == g["calls"])
+st3.close()
 # dados dos gráficos da tela (#533): dia sem chamada entra zerado, custo só estimado ou sem custo não quebra, 10+ dias afinam o eixo
 from agent_studio import usage_charts
-mk = lambda day, real, est, i=0: {"day": day, "calls": 1, "cost": {"real_usd": real, "estimated_usd": est},
+mk = lambda day, real, est, i=0, listed=None: {"day": day, "calls": 1, "cost": {"real_usd": real, "listed_usd": listed, "estimated_usd": est},
                                   "tokens": {"input": i, "output": 2, "cache_read": 3, "cache_creation": 4}}
 dc = usage_charts.days([mk("2025-09-27", 1.0, None, 10), mk("2025-09-27", None, 1.0, 5), mk("2025-09-29", None, 2.0)])
 out("gráficos: o dia sem chamada (28) entra zerado entre o primeiro e o último",
@@ -327,12 +346,18 @@ out("gráficos: o dia sem chamada (28) entra zerado entre o primeiro e o último
 out("gráficos: custo do dia soma real e estimado; fração pelo maior dia",
     dc["points"][0]["real_usd"] == 1.0 and dc["points"][0]["estimated_usd"] == 1.0 and dc["max_cost"] == 2.0
     and dc["points"][0]["real_frac"] == 0.5 and dc["points"][2]["est_frac"] == 1.0)
+dl = usage_charts.days([mk("2025-09-27", 1.0, None, 0, 1.0), mk("2025-09-27", None, 2.0), mk("2025-09-28", None, None, 0, 4.0)])
+out("gráficos: o custo de lista entra na parte cheia (com o real) e o estimado segue à parte (#747)",
+    dl["points"][0]["listed_usd"] == 1.0 and dl["points"][0]["real_frac"] == 0.5 and dl["points"][0]["est_frac"] == 0.5
+    and dl["points"][1]["real_frac"] == 1.0 and dl["points"][1]["est_frac"] == 0 and dl["max_cost"] == 4.0)
+lb = usage_charts.bars([{"role": "x", "calls": 1, "cost": {"real_usd": None, "listed_usd": 3.0, "estimated_usd": 1.0}}], "role")
+out("gráficos: barra só de lista tem preço e fração cheia; o estimado fica hachurado", lb[0]["priced"] is True and lb[0]["real_frac"] == 0.75 and lb[0]["est_frac"] == 0.25)
 out("gráficos: tokens do dia somam entrada, saída e cache (leitura + escrita)",
     dc["points"][0]["input"] == 15 and dc["points"][0]["cache"] == 14 and dc["points"][0]["tokens"] == 15 + 4 + 14)
 out("gráficos: sem série, nada a desenhar", usage_charts.days([]) == {"points": [], "max_cost": 0, "mid_cost": 0, "max_tokens": 0, "mid_tokens": 0})
 long = usage_charts.days([mk("2025-09-01", 1.0, None), mk("2025-09-30", 1.0, None)])["points"]
 out("gráficos: 30 dias, rótulo de um a cada 4 no eixo", len(long) == 30 and sum(1 for p in long if p["tick"]) == 8)
-sem = usage_charts.bars([{"role": "x", "calls": 1, "cost": {"real_usd": None, "estimated_usd": None}}], "role")
+sem = usage_charts.bars([{"role": "x", "calls": 1, "cost": {"real_usd": None, "listed_usd": None, "estimated_usd": None}}], "role")
 out("gráficos: barra sem custo nenhum fica sem preço e sem largura", sem[0]["priced"] is False and sem[0]["real_frac"] == 0 and sem[0]["est_frac"] == 0)
 PY
 check_py_lines "$TMP/py.out"

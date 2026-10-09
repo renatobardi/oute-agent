@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Testes da assinatura no agent-studio (#679, ticket 4/5 da #673): a conversa traz `oute.subscription` (claude, zai ou
 # codex); a ingestão guarda a coluna e o histórico sem ela vale `claude` ou `codex` pelo `oute.agent`; a chamada da `zai`
-# com `cost_usd` preenchido (o valor do Claude Code, que não conhece `glm-*`) entra como ESTIMADA pelo preço do
-# config.toml e nunca soma ao custo real; o Uso e o Dashboard filtram e quebram por assinatura (o formulário renderizado é
+# com `cost_usd` preenchido (o valor do Claude Code, que não conhece `glm-*`) entra como custo de LISTA calculado pelo
+# preço do config.toml (#747) e nunca soma ao custo real; o estimado fica só para a chamada fora das assinaturas; o Uso e o Dashboard filtram e quebram por assinatura (o formulário renderizado é
 # enviado como o navegador envia); a migração põe a coluna num banco antigo; o estado derivado (`conversa`) leva a
 # assinatura. O `rebuild-state` e o `replay` têm os casos deles nos testes de cada um. Chama o app pelo ASGI sobre um
 # DuckDB de exemplo; sem servidor, sem rede e sem Docker. As datas ficam depois de 2026-10-06 (o corte do #617).
@@ -40,7 +40,7 @@ near = lambda a, b: a is not None and abs(a - b) < 1e-9
 
 # ---------------------------------------------------------------- o banco de exemplo
 # claude (com a assinatura) e histórico (sem ela, agent=claude): custo real do Claude Code. codex: sem custo, estimado
-# pelo gpt-5. zai (agent=claude, sub=zai): três chamadas do glm-5.3 com o `cost_usd` que o Claude Code calcula sem conhecer o
+# de lista pelo gpt-5. zai (agent=claude, sub=zai): três chamadas do glm-5.3 com o `cost_usd` que o Claude Code calcula sem conhecer o
 # modelo (no span, no log api_request de mesmo request_id e uma sem custo nenhum). ai-memory: sem assinatura.
 db = StudioDB(tmp, "a")
 db.span(ts(f"{D}10:00:00"), 2, model="claude-sonnet-5", conv="c-claude", agent="claude", sub="claude", input=1000, output=100, cost_usd=0.5)
@@ -53,7 +53,7 @@ db.log(ts(f"{D}11:20:03"), "api_request", {"request_id": "r-zai", "cost_usd": 0.
 db.span(ts(f"{D}12:00:00"), 1, name="ai_memory.llm_request", model="openai/gpt-oss-120b", conv="c-mem", agent="ai-memory", input=10, output=5, cost_usd=0.01)
 st = db.flush()
 prices = cfg.prices
-USD = {"claude": 0.75, "zai": 1.4 * 3 + 0.44 * 2}   # real do claude (0,5 + 0,25); estimado da zai (3 M de entrada, 200 mil de saída)
+USD = {"claude": 0.75, "zai": 1.4 * 3 + 0.44 * 2}   # real do claude (0,5 + 0,25); de lista da zai (3 M de entrada, 200 mil de saída)
 EST_CODEX = 1000 * 1.25 / 1e6 + 100 * 10 / 1e6
 
 def sub_rows(data):
@@ -63,33 +63,41 @@ u = st.usage(FROM, TO, prices)
 by = sub_rows(u)
 check("quebra por assinatura: claude, codex, zai e a chamada sem assinatura (ai-memory)", set(by) == {"claude", "codex", "zai", None})
 check("claude: o histórico sem o atributo conta como claude pelo oute.agent (2 chamadas, custo real 0,75)",
-      by["claude"]["calls"] == 2 and near(by["claude"]["cost"]["real_usd"], 0.75) and by["claude"]["cost"]["estimated_usd"] is None)
-check("codex: sem oute.subscription, pelo oute.agent; custo estimado pelo gpt-5",
-      by["codex"]["calls"] == 1 and by["codex"]["cost"]["real_usd"] is None and near(by["codex"]["cost"]["estimated_usd"], EST_CODEX))
+      by["claude"]["calls"] == 2 and near(by["claude"]["cost"]["real_usd"], 0.75) and by["claude"]["cost"]["estimated_usd"] is None
+      and by["claude"]["cost"]["listed_usd"] is None)
+check("codex: sem oute.subscription, pelo oute.agent; custo de lista calculado pelo gpt-5, não estimado",
+      by["codex"]["calls"] == 1 and by["codex"]["cost"]["real_usd"] is None and near(by["codex"]["cost"]["listed_usd"], EST_CODEX)
+      and by["codex"]["cost"]["estimated_usd"] is None and by["codex"]["cost"]["listed_calls"] == 1 and by["codex"]["cost"]["estimated_calls"] == 0)
 z = by["zai"]
-check("zai: 3 chamadas, todas estimadas pelo preço do config.toml (3 M de entrada a 1,4 + 200 mil de saída a 4,4)",
-      z["calls"] == 3 and z["cost"]["estimated_calls"] == 3 and near(z["cost"]["estimated_usd"], USD["zai"]))
+check("zai: 3 chamadas, todas de lista pelo preço do config.toml (3 M de entrada a 1,4 + 200 mil de saída a 4,4), nenhuma estimada",
+      z["calls"] == 3 and z["cost"]["listed_calls"] == 3 and near(z["cost"]["listed_usd"], USD["zai"])
+      and z["cost"]["estimated_calls"] == 0 and z["cost"]["estimated_usd"] is None and z["cost"]["claude_no_log_calls"] == 0)
 check("zai: o cost_usd do span (0,227) e o do log api_request (0,9) não entram: custo real nulo e nenhuma chamada real",
       z["cost"]["real_usd"] is None and z["cost"]["real_calls"] == 0 and z["cost"]["unpriced_calls"] == 0)
 check("ai-memory: sem assinatura, custo real dele (0,01)", by[None]["calls"] == 1 and near(by[None]["cost"]["real_usd"], 0.01))
-check("o total: custo real = claude + ai-memory (a zai não soma ao real) e o estimado = codex + zai",
-      near(u["totals"]["cost"]["real_usd"], 0.76) and near(u["totals"]["cost"]["estimated_usd"], EST_CODEX + USD["zai"]))
+check("o total: custo real = claude + ai-memory (a zai não soma ao real), o de lista = codex + zai e nada estimado",
+      near(u["totals"]["cost"]["real_usd"], 0.76) and near(u["totals"]["cost"]["listed_usd"], EST_CODEX + USD["zai"])
+      and u["totals"]["cost"]["estimated_usd"] is None)
+tc = u["totals"]["cost"]
+check("o total: informadas + de lista + estimadas + sem preço = chamadas (3 + 4 + 0 + 0 = 7)",
+      (tc["real_calls"], tc["listed_calls"], tc["estimated_calls"], tc["unpriced_calls"]) == (3, 4, 0, 0)
+      and tc["real_calls"] + tc["listed_calls"] + tc["estimated_calls"] + tc["unpriced_calls"] == u["totals"]["calls"])
 check("glm-5.3 tem preço: não aparece em unpriced_models", u["unpriced_models"] == [] and u["totals"]["cost"]["unpriced_calls"] == 0)
 check("a soma das assinaturas é o total de chamadas", sum(r["calls"] for r in u["by_subscription"]) == u["totals"]["calls"] == 7)
 ue = st.usage(FROM, TO, prices, paid=True)
-check("custo pago: a zai é assinatura e custa 0 (real 0, sem estimativa); o ai-memory segue pago",
-      near(sub_rows(ue)["zai"]["cost"]["real_usd"], 0.0) and sub_rows(ue)["zai"]["cost"]["estimated_usd"] is None and near(ue["totals"]["cost"]["real_usd"], 0.01))
+check("custo pago: a zai é assinatura e custa 0 (real 0, sem custo de lista nem estimativa); o ai-memory segue pago",
+      near(sub_rows(ue)["zai"]["cost"]["real_usd"], 0.0) and sub_rows(ue)["zai"]["cost"]["estimated_usd"] is None and sub_rows(ue)["zai"]["cost"]["listed_usd"] is None and near(ue["totals"]["cost"]["real_usd"], 0.01))
 uz = st.usage(FROM, TO, prices, sub="zai")
 check("filtro zai: só as 3 chamadas dela, e a quebra por assinatura só tem a zai",
-      uz["totals"]["calls"] == 3 and list(sub_rows(uz)) == ["zai"] and near(uz["totals"]["cost"]["estimated_usd"], USD["zai"]))
+      uz["totals"]["calls"] == 3 and list(sub_rows(uz)) == ["zai"] and near(uz["totals"]["cost"]["listed_usd"], USD["zai"]))
 check("filtro claude: 2 chamadas (a com atributo e o histórico); filtro codex: 1",
       st.usage(FROM, TO, prices, sub="claude")["totals"]["calls"] == 2 and st.usage(FROM, TO, prices, sub="codex")["totals"]["calls"] == 1)
 check("filtro: a soma dos filtros das três assinaturas + sem assinatura é o total (7)",
       sum(st.usage(FROM, TO, prices, sub=s)["totals"]["calls"] for s in ("claude", "zai", "codex")) + by[None]["calls"] == 7)
 det = CV.detail(st.con, "c-zai", prices)
 kinds = [(s["cost_kind"], round(s["cost"], 6)) for s in det["spans"] if s["is_call"]]
-check("detalhe da conversa zai: cada chamada é estimada (o custo do Claude Code é descartado)",
-      [k for k, _ in kinds] == ["estimated"] * 3 and kinds[0][1] == round(1.4 + 0.44, 6) and kinds[2][1] == 1.4)
+check("detalhe da conversa zai: cada chamada é de lista (o custo do Claude Code é descartado)",
+      [k for k, _ in kinds] == ["listed"] * 3 and kinds[0][1] == round(1.4 + 0.44, 6) and kinds[2][1] == 1.4)
 dete = CV.detail(st.con, "c-zai", prices, paid=True)
 check("detalhe da conversa zai no custo pago: 0 em cada chamada", [s["cost_kind"] for s in dete["spans"] if s["is_call"]] == ["paid"] * 3)
 
@@ -124,26 +132,27 @@ html = get(app, "/uso", Q)[1]
 rows = re.findall(r'data-subscription="([^"]*)" data-calls="(\d+)"', html)
 check("Uso: tabela por assinatura, a zai com 3 chamadas e a sem assinatura com o nome de exibição",
       dict(rows) == {"claude": "2", "codex": "1", "zai": "3", "sem assinatura": "1"})
-zrow = re.search(r'<tr data-subscription="zai"[^>]*data-real-usd="([^"]*)" data-estimated-usd="([^"]*)"', html)
-check("Uso: a linha da zai tem custo real vazio e o estimado do config.toml", zrow and zrow.group(1) == "" and near(float(zrow.group(2)), USD["zai"]))
+zrow = re.search(r'<tr data-subscription="zai"[^>]*data-real-usd="([^"]*)" data-estimated-usd="([^"]*)" data-listed-usd="([^"]*)"', html)
+check("Uso: a linha da zai tem custo real e estimado vazios e o de lista do config.toml",
+      zrow and zrow.group(1) == "" and zrow.group(2) == "" and near(float(zrow.group(3)), USD["zai"]))
 check("Uso: o gráfico de custo por assinatura traz as quatro barras", len(re.findall(r'data-grafico="uso-custo-subscription".*?</section>', html, re.S)[0].split('class="barra-linha"')) == 5)
 check("Uso: filtrado na zai, a tabela por assinatura só tem a zai", re.findall(r'<tr data-subscription="([^"]*)"', get(app, "/uso", Q + "&assinatura=zai")[1]) == ["zai"])
 dash = get(app, "/", Q)[1]
 bars = dict(re.findall(r'data-assinatura="([^"]*)" data-calls="(\d+)"', dash))
 check("Dashboard: bloco por assinatura (zai 3, claude 2, codex 1 e a sem assinatura, com chave vazia)", bars == {"zai": "3", "claude": "2", "codex": "1", "": "1"})
-check("Dashboard: o custo estimado da zai aparece no bloco e o real não (data-real-usd vazio)",
-      re.search(r'data-assinatura="zai" data-calls="3" data-real-usd="" data-estimated-usd="([^"]*)"', dash) is not None)
+check("Dashboard: o custo de lista da zai aparece no bloco; o real e o estimado não (vazios)",
+      re.search(r'data-assinatura="zai" data-calls="3" data-real-usd="" data-listed-usd="[0-9.]+" data-estimated-usd=""', dash) is not None)
 dz = get(app, "/", Q + "&assinatura=zai")[1]
-check("Dashboard filtrado na zai: o KPI de custo estimado é o dela e os outros blocos seguem o filtro",
-      near(float(re.search(r'data-kpi="cost"[^>]*data-estimated-usd="([^"]*)"', dz).group(1)), USD["zai"])
+check("Dashboard filtrado na zai: o KPI de custo de lista é o dela e os outros blocos seguem o filtro",
+      near(float(re.search(r'data-kpi="cost"[^>]*data-listed-usd="([^"]*)"', dz).group(1)), USD["zai"])
       and re.search(r'data-grafico="chamadas"[^>]*data-total="(\d+)"', dz).group(1) == "3"
       and re.search(r'data-grafico="atividade"[^>]*data-total="(\d+)"', dz).group(1) == "3"
       and re.findall(r'data-modelo="([^"]*)" data-calls', dz) == ["glm-5.3", "glm-5.3"])
 check("Dashboard: as janelas prontas e os links levam a assinatura", "assinatura=zai" in re.findall(r'<nav class="janelas".*?</nav>', dz, re.S)[0] and 'href="/uso?hours=24&amp;assinatura=zai"' in get(app, "/", "hours=24&assinatura=zai")[1])
 check("Dashboard: o formulário do modelo leva a assinatura escondida", '<input type="hidden" name="assinatura" value="zai">' in dz)
 dc = get(app, "/", Q + "&assinatura=zai&custo=pago")[1]
-check("Dashboard filtrado na zai com custo pago: sem custo estimado, a chamada de assinatura custa 0",
-      re.search(r'data-kpi="cost"[^>]*data-estimated-usd=""', dc) is not None)
+check("Dashboard filtrado na zai com custo pago: sem custo de lista nem estimado, a chamada de assinatura custa 0",
+      re.search(r'data-kpi="cost"[^>]*data-listed-usd=""[^>]*data-estimated-usd=""', dc) is not None)
 
 # ---------------------------------------------------------------- ingestão: a coluna `oute_subscription`
 RES = {"host.name": "oute-server", "oute.agent": "claude", "service.name": "oute", "session.id": "c-1"}
@@ -202,5 +211,5 @@ check("estado: conversa de agente sem assinatura (ai-memory) não leva o campo",
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 59
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 60
 check_end

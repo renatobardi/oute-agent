@@ -151,7 +151,8 @@ check "pedido sem id: 400"                             test "$(code "${C[@]}" "$
 # sha256 é calculado no arquivo como o `oute approve` faz (scripts/oute)
 H="$TMP/home"; BIN="$TMP/bin"; mkdir -p "$H/inbox" "$BIN"; ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 rcv_start "$TMP/rcv"
-real() { env -u CLAUDECODE -u CODEX_THREAD_ID PATH="$BIN:$PATH" HOME="$H" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" "$@"; }
+# fora de qualquer repositório: numa worktree do oute-task o oute-propose gravaria a linha `# sessao:` e o sha256 não bateria
+real() ( cd "$TMP" && env -u CLAUDECODE -u CODEX_THREAD_ID PATH="$BIN:$PATH" HOME="$H" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" "$@" )
 approve_sha() { (shasum -a 256 "$1" 2>/dev/null || sha256sum "$1") | cut -c1-12; }
 P6="$(real env OUTE_PROPOSE_AGENT=claude "$ROOT/docker/oute-propose" "Ver disco <b>&" --root <<<$'set -euo pipefail\ndf -h  # é só leitura\n' 2>/dev/null)"
 P7="$(real "$ROOT/docker/oute-propose" "Sem agente" <<<'true' 2>/dev/null)"
