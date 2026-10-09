@@ -1,5 +1,5 @@
-"""Agregação de uso (ADR-08 §9, #203): custo real e estimado, tokens, erros, p95 e série diária, com qualquer
-agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
+"""Agregação de uso (ADR-08 §9, #203): custo real, de lista calculado (#747) e estimado, tokens, erros, p95 e série diária, com
+qualquer agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
 Papel e fase da conversa (#433, #749): `role` = dispatcher, worker ou avulsa, dos eventos `oute.task.opened`/`reopened` da sessão
@@ -94,7 +94,7 @@ def _epoch_col(prices):
     return f"len(list_filter([{', '.join(str(int(b)) for b in bounds)}]::UBIGINT[], x -> x <= time_unix_nano))"
 
 
-def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, paid=False, sub=None):
+def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, sub=None):
     aggs = ["count(*) AS calls", "count(cost_usd) AS calls_real", "sum(cost_usd) AS cost_real"]
     for t in ("input", "output", "cache_read", "cache_creation"):
         aggs.append(f"COALESCE(sum({t}_tokens), 0) AS {t}")
@@ -102,10 +102,11 @@ def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, paid=False, sub=Non
     # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
     rsql, rparams = sub_mod.scope(repo, sub)
     table, params = window_spans_with_cost(from_ns, to_ns, rsql, rparams)
-    extra = {"epoch": _epoch_col(prices)}
-    if paid:  # #531: a chamada de assinatura vira um grupo à parte, para o custo dela contar 0
-        extra["sub"] = SUBSCRIPTION_SQL
-    return _query(con, (*keys, "epoch", *(("sub",) if paid else ())), _cols(tz, extra), aggs, _scope(table, keys), MODEL_CALL_SQL,
+    # `sub` sempre (não só no pago, #531): a chamada de assinatura sem custo real é custo de lista calculado, não
+    # estimado (#747), e a diferença se decide por grupo de assinatura
+    # `subname` (#747): qual assinatura, para contar à parte o `claude` sem o log de custo
+    extra = {"epoch": _epoch_col(prices), "sub": SUBSCRIPTION_SQL, "subname": SUBSCRIPTION_EXPR}
+    return _query(con, (*keys, "epoch", "sub", "subname"), _cols(tz, extra), aggs, _scope(table, keys), MODEL_CALL_SQL,
                   [*params, *MODEL_CALL_PARAMS])
 
 
@@ -130,7 +131,8 @@ def _log_errors(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
 
 def _empty():
     return {"calls": 0, "tokens": dict.fromkeys(("input", "output", "cache_read", "cache_creation"), 0),
-            "real_usd": None, "estimated_usd": None, "real_calls": 0, "estimated_calls": 0, "unpriced_calls": 0,
+            "real_usd": None, "listed_usd": None, "estimated_usd": None,
+            "real_calls": 0, "listed_calls": 0, "claude_no_log_calls": 0, "estimated_calls": 0, "unpriced_calls": 0,
             "unpriced_models": set(), "spans": 0, "span_errors": 0, "log_errors": 0, "p95": None}
 
 
@@ -139,13 +141,13 @@ def _add(a, b):
 
 
 def _add_call(a, rec, prices, at_ns, paid):
-    """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço e, no pago, mesma conta) no acumulador `a`."""
+    """Soma o grupo de chamadas `rec` (mesmo modelo, faixa de preço e assinatura) no acumulador `a`."""
     a["calls"] += rec["calls"]
     for t in a["tokens"]:
         a["tokens"][t] += rec[t]
     if paid and rec["sub"]:
-        # assinatura (#531): a chamada custa 0 (fica entre as "com custo": sem estimativa e sem "sem preço"); a soma de
-        # `real_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
+        # assinatura (#531): a chamada custa 0 (fica entre as "com custo": sem cálculo e sem "sem preço"); a soma de
+        # `real_calls`, `listed_calls`, `estimated_calls` e `unpriced_calls` segue igual a `calls`
         a["real_calls"] += rec["calls"]
         a["real_usd"] = _add(a["real_usd"], 0.0)
         return
@@ -160,6 +162,12 @@ def _add_call(a, rec, prices, at_ns, paid):
     if est is None:
         a["unpriced_calls"] += pending
         a["unpriced_models"].add(rec["model"])
+    elif rec["sub"]:
+        # chamada de assinatura sem custo real (#747): custo de lista calculado pela tabela, sem a marca "estimado ≈"
+        a["listed_calls"] += pending
+        if rec["subname"] == "claude":
+            a["claude_no_log_calls"] += pending  # o Claude Code não mandou o log `api_request` com o custo
+        a["listed_usd"] = _add(a["listed_usd"], est)
     else:
         a["estimated_calls"] += pending
         a["estimated_usd"] = _add(a["estimated_usd"], est)
@@ -171,6 +179,7 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
     na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas.
     `p95=False` pula o p95 (ele não soma entre grupos: quem reagrupa o lê à parte, com `fill_p95`). `repo` (#528) =
     só os fatos desse repositório (`repo.NONE` = os sem repositório); `None` = todos. `sub` (#679) = só as chamadas dessa assinatura (`subscription.py`); `None` = todas.
+    Sem custo real, a chamada de assinatura vira **custo de lista calculado** (`listed_*`, #747) e as outras viram estimado (`estimated_*`).
     `paid=True` (#531, custo pago): a chamada de assinatura (`cost.SUBSCRIPTION_SQL`, a regra de `cost.is_subscription`) conta US$ 0 (entra no `real_*`, sem estimativa);
     chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
     keys = tuple(keys)
@@ -188,7 +197,7 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
     fine = keys if "model" in keys else keys + ("model",)
-    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, paid, sub):
+    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, sub):
         _add_call(acc(rec), rec, prices, at_ns, paid)
     if p95:
         fill_p95(con, groups, keys, from_ns, to_ns, tz, repo, sub)
@@ -212,11 +221,11 @@ def fill_p95(con, groups, keys, from_ns, to_ns, tz=tz_mod.UTC, repo=None, sub=No
 
 def merge(into, a):
     """Soma o acumulador `a` em `into` (o `p95` não soma: quem precisa dele o lê à parte)."""
-    for k in ("calls", "real_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
+    for k in ("calls", "real_calls", "listed_calls", "claude_no_log_calls", "estimated_calls", "unpriced_calls", "spans", "span_errors", "log_errors"):
         into[k] += a[k]
     for t in into["tokens"]:
         into["tokens"][t] += a["tokens"][t]
-    for k in ("real_usd", "estimated_usd"):
+    for k in ("real_usd", "listed_usd", "estimated_usd"):
         if a[k] is not None:
             into[k] = a[k] if into[k] is None else into[k] + a[k]
     into["unpriced_models"] |= a["unpriced_models"]
@@ -241,7 +250,7 @@ def aggregate_p95(con, from_ns, to_ns, tz=tz_mod.UTC, repo=None, sub=None):
 
 
 def render(key, a, keys):
-    """Acumulador -> objeto da resposta (custo real e estimado sempre separados)."""
+    """Acumulador -> objeto da resposta (custo real, de lista calculado e estimado sempre separados)."""
     out = {}
     for k, v in zip(keys, key):
         out[k] = v.isoformat() if k == "day" else v
@@ -251,10 +260,13 @@ def render(key, a, keys):
         "tokens": a["tokens"],
         "cost": {
             "real_usd": a["real_usd"],            # custo que veio na chamada (span ou log api_request); null = nenhuma chamada com custo real
-            "estimated_usd": a["estimated_usd"],  # estimado pela tabela; null = nada estimado (ver unpriced_calls)
+            "listed_usd": a["listed_usd"],        # custo de lista calculado (#747): assinatura sem custo real, pela tabela; null = nenhuma
+            "estimated_usd": a["estimated_usd"],  # estimado pela tabela (chamada fora das assinaturas); null = nada estimado (ver unpriced_calls)
             "real_calls": a["real_calls"],
+            "listed_calls": a["listed_calls"],
+            "claude_no_log_calls": a["claude_no_log_calls"],  # parte das listed_calls: chamada do claude sem log de custo, calculada pela tabela (#747)
             "estimated_calls": a["estimated_calls"],
-            "unpriced_calls": a["unpriced_calls"],  # sem custo real e sem preço: fora das duas somas
+            "unpriced_calls": a["unpriced_calls"],  # sem custo real e sem preço: fora das três somas
         },
         "errors": {"spans": a["span_errors"], "logs": a["log_errors"], "total": a["span_errors"] + a["log_errors"]},
         "latency_p95_ms": None if a["p95"] is None else round(a["p95"], 3),

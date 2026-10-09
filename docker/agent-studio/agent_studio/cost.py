@@ -18,11 +18,18 @@ Vale para todo consumidor do uso: o `GET /v1/usage` (via `usage.py`), os alertas
   mesma chamada. A unidade segue sendo o span: log sem span não é chamada, log repetido conta uma vez (um custo por
   `request_id`). Tudo na consulta (`spans_with_cost`), sem mudar schema nem ingestão: vale para o que já está
   gravado.
-- **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real (Codex; Claude sem log
-  `api_request`; a `zai`, #679). Modelo sem preço = **sem estimativa** (`None`), nunca zero.
+- **Custo de lista calculado (#747, decisão do Bardi de 2026-10-08)** = tabela de preços aplicada aos tokens das
+  chamadas **de assinatura** (`claude`, `codex`, `zai`) sem custo real: `codex` e `zai` nunca informam custo, e o
+  `claude` fica sem o log `api_request`. É o mesmo cálculo do estimado, mas sem a marca "estimado ≈": fornecedor,
+  modelo e CLI consolidados, preço oficial na tabela. A conferência do `claude` (custo informado × tabela) e o
+  modelo de assinatura sem preço são alertas (`cost_alerts.py`).
+- **Custo estimado** = tabela de preços aplicada aos tokens das chamadas **sem** custo real **e fora das três
+  assinaturas** (ex.: o LLM do ai-memory sem `usage`): continua marcado "estimado ≈". Modelo sem preço = **sem
+  estimativa** (`None`), nunca zero.
 - **Custo da `zai` (#679):** o Claude Code calcula o custo pela própria tabela, que não conhece `glm-*` (`costBasis:
   unknown`), então o `cost_usd` da chamada com `oute.subscription=zai` não é real: `spans_with_cost` o descarta (o do
-  span e o do log), e a chamada entra como estimada pelo preço do `config.toml`, nunca somada ao custo real.
+  span e o do log), e a chamada entra como custo de lista calculado pelo preço do `config.toml`, nunca somada ao
+  custo real.
 - **Erros** = spans com status de erro (qualquer span, inclusive os do LiteLLM: o `jev.decision` só nasce de
   chamada que deu certo, então não há duplicata) e logs de severidade ERROR ou acima.
 """
@@ -206,13 +213,17 @@ def estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_crea
             + max(cache_creation_tokens or 0, 0) * price.cache_creation) / 1e6
 
 
-def call_cost(cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price):
+def call_cost(cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price, subscription=None):
     """Custo de UMA chamada ao modelo, pela mesma regra das somas do `usage.aggregate`: `("real", usd)` quando a
-    chamada tem custo efetivo (`cost_usd` de `spans_with_cost`); senão `("estimated", usd)` pela tabela; modelo sem preço = `("unpriced", None)`, nunca zero."""
+    chamada tem custo efetivo (`cost_usd` de `spans_with_cost`); senão `("listed", usd)` para chamada de assinatura
+    (`claude`, `codex`, `zai`; #747) e `("estimated", usd)` para as outras, ambas pela tabela; modelo sem preço =
+    `("unpriced", None)`, nunca zero."""
     if cost_usd is not None:
         return "real", cost_usd
     est = estimate_cost_usd(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, price)
-    return ("unpriced", None) if est is None else ("estimated", est)
+    if est is None:
+        return "unpriced", None
+    return ("listed" if is_subscription(subscription) else "estimated"), est
 
 
 def spans_with_cost(span_where, span_params, log_where, log_params):

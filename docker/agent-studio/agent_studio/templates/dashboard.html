@@ -9,7 +9,8 @@
    do viewBox (largura em % do eixo) e a dica de cada ponto, do <title>; o destaque no hover é CSS. Uma série por gráfico; o que
    distingue o informado pela fonte (ou pago) do estimado é o traço (cheio × tracejado) e o texto, não a cor. #}
 {% macro raw(v) %}{{ '' if v is none else v }}{% endmacro %}
-{% macro money(c) %}{% if c.real_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
+{# o custo de lista calculado das assinaturas (#747) soma com o informado, sem a marca ≈; só o estimado a leva #}
+{% macro money(c) %}{% if c.real_usd is none and c.listed_usd is none and c.estimated_usd is none %}—{% else %}{% if c.estimated_usd is not none %}≈ {% endif %}{{ ((c.real_usd or 0) + (c.listed_usd or 0) + (c.estimated_usd or 0))|usd2 }}{% endif %}{% endmacro %}
 {% block title %}Dashboard · Agent Studio{% endblock %}
 {% block main %}
 {% set W = 600 %}{% set H = 180 %}
@@ -28,7 +29,7 @@
 <section class="kpis" id="kpis" aria-label="Indicadores">
   {% for k in snap.kpis %}
   <div class="kpi" data-kpi="{{ k.key }}" data-value="{{ raw(k.value) }}" data-prev="{{ raw(k.prev) }}" data-delta="{{ raw(k.delta) }}"{% if k.get("hint") %} title="{{ k.hint }}"{% endif %}
-       {% if k.key == "cost" %}data-real-usd="{{ raw(k.real_usd) }}" data-estimated-usd="{{ raw(k.estimated_usd) }}" data-estimated-share="{{ raw(k.estimated_share) }}" data-unpriced-calls="{{ k.unpriced_calls }}"{% endif %}
+       {% if k.key == "cost" %}data-real-usd="{{ raw(k.real_usd) }}" data-listed-usd="{{ raw(k.listed_usd) }}" data-estimated-usd="{{ raw(k.estimated_usd) }}" data-estimated-share="{{ raw(k.estimated_share) }}" data-unpriced-calls="{{ k.unpriced_calls }}"{% endif %}
        {% if k.key == "errors" %}data-errors="{{ k.errors }}" data-prev-errors="{{ k.prev_errors }}"{% endif %}>
     <div class="kpi-topo"><span class="kpi-rotulo">{{ k.label }}</span><span class="kpi-icone">{{ icon(k.icon, 14) }}</span></div>
     <strong class="kpi-valor">
@@ -101,14 +102,14 @@
 </section>
 {% endcall %}
 
-{# 2) custo por modelo: barras empilhadas, informado pela fonte (cheio) × estimado (tracejado) #}
+{# 2) custo por modelo: barras empilhadas, de lista (cheio) × estimado (tracejado) #}
 {% call fragment("custo-modelo") %}
 {% set comp = snap.composition %}
 <section class="cartao bloco grafico" data-grafico="custo-modelo" data-models="{{ snap.models_total }}">
   <div class="grafico-topo"><h2>Custo por modelo</h2><span class="nota">{{ "custo pago" if custo == "pago" else "preço de lista" }} · ≈ estimado</span></div>
   {% for m in snap.models %}
-  <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
-       title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else 'informado pela fonte' }}">
+  <div class="barra-linha" data-modelo="{{ m.model }}" data-calls="{{ m.calls }}" data-real-usd="{{ raw(m.real_usd) }}" data-listed-usd="{{ raw(m.listed_usd) }}" data-estimated-usd="{{ raw(m.estimated_usd) }}" data-unpriced-calls="{{ m.unpriced_calls }}"
+       title="{{ m.model }}: {{ m.calls|calls }} ({{ m.calls_share|pct }} do total) · {{ 'custo estimado pela tabela' if m.estimated_usd is not none else ('custo de lista calculado pela tabela' if m.listed_usd is not none else 'informado pela fonte') }}">
     <span class="rotulo mono">{{ m.model }}</span>
     {% call barra_modelo(m) %}{{ m.model }} · {{ m.calls|calls }} · {{ money(m) }}{% endcall %}
     <span class="valor{% if m.estimated_usd is not none %} est{% endif %}">{% if m.cost is none %}sem preço{% else %}{{ money(m) }}{% endif %}</span>
@@ -116,13 +117,13 @@
   {% else %}
   <p class="nota">Nenhuma chamada ao modelo nesta janela.</p>
   {% endfor %}
-  <div class="composicao" data-composicao data-real-usd="{{ raw(comp.real_usd) }}" data-estimated-usd="{{ raw(comp.estimated_usd) }}" data-unpriced-calls="{{ comp.unpriced_calls }}">
+  <div class="composicao" data-composicao data-real-usd="{{ raw(comp.real_usd) }}" data-listed-usd="{{ raw(comp.listed_usd) }}" data-estimated-usd="{{ raw(comp.estimated_usd) }}" data-unpriced-calls="{{ comp.unpriced_calls }}">
     <span class="nota">Composição do custo</span>
-    {% set real_f = (comp.real_usd or 0) / comp.total if comp.total else 0 %}
+    {% set real_f = ((comp.real_usd or 0) + (comp.listed_usd or 0)) / comp.total if comp.total else 0 %}
     {% set est_f = (comp.estimated_usd or 0) / comp.total if comp.total else 0 %}
     {{ composicao(real_f, est_f) }}
     <div class="legenda">
-      <span>{{ amostra("real") }}{{ 'Pago' if custo == 'pago' else 'Informado pela fonte' }} {{ (comp.real_usd or 0)|usd2 }} ({{ real_f|pct }})</span>
+      <span>{{ amostra("real") }}{{ 'Pago' if custo == 'pago' else 'Custo de lista' }} {{ ((comp.real_usd or 0) + (comp.listed_usd or 0))|usd2 }} ({{ real_f|pct }})</span>
       <span>{{ amostra("estimado") }}Estimado ≈ {{ (comp.estimated_usd or 0)|usd2 }} ({{ est_f|pct }})</span>
       {% if comp.unpriced_calls %}<span class="nota">{{ comp.unpriced_calls|num }} {{ "chamada sem preço" if comp.unpriced_calls == 1 else "chamadas sem preço" }}, fora da soma</span>{% endif %}
     </div>
@@ -192,9 +193,9 @@
 <section class="cartao bloco grafico" data-grafico="sessoes">
   <div class="grafico-topo"><h2>Sessões que mais custaram</h2><a class="nota" href="/sessoes?{{ window_qs }}">ver Sessões</a></div>
   {% for t in snap.top_sessions %}
-  <a class="top-sessao" href="{{ com_custo("/sessao?id=" ~ (t.id|urlencode)) }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
-    <span class="top-linha"><span class="mono">{{ t.id }}</span><span class="valor{% if t.estimated %} est{% endif %}">{{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}</span></span>
-    <span class="top-linha">{% call mini(t.frac) %}{{ t.id }} · {{ money({"real_usd": t.real_usd, "estimated_usd": t.estimated_usd}) }}{% endcall %}
+  <a class="top-sessao" href="{{ com_custo("/sessao?id=" ~ (t.id|urlencode)) }}" data-sessao="{{ t.id }}" data-calls="{{ t.calls }}" data-real-usd="{{ raw(t.real_usd) }}" data-listed-usd="{{ raw(t.listed_usd) }}" data-estimated-usd="{{ raw(t.estimated_usd) }}">
+    <span class="top-linha"><span class="mono">{{ t.id }}</span><span class="valor{% if t.estimated %} est{% endif %}">{{ money({"real_usd": t.real_usd, "listed_usd": t.listed_usd, "estimated_usd": t.estimated_usd}) }}</span></span>
+    <span class="top-linha">{% call mini(t.frac) %}{{ t.id }} · {{ money({"real_usd": t.real_usd, "listed_usd": t.listed_usd, "estimated_usd": t.estimated_usd}) }}{% endcall %}
       <span class="nota">{{ t.agents|join(", ") or "—" }} · {{ t.model or "—" }} · {{ t.calls|calls }}</span></span>
   </a>
   {% else %}
@@ -208,7 +209,7 @@
 <section class="cartao bloco grafico" data-grafico="repos" data-repos="{{ snap.by_repo|length }}" data-total="{{ snap.by_repo|sum(attribute="calls") }}">
   <div class="grafico-topo"><h2>Chamadas por repositório</h2><span class="nota">chamadas ao modelo · {{ "custo pago" if custo == "pago" else "custo de lista" }}</span></div>
   {% for r in snap.by_repo %}
-  <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
+  <div class="barra-linha" data-repo="{{ '' if r.none else r.repo }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-listed-usd="{{ raw(r.listed_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
        title="{{ r.repo }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
     <span class="rotulo mono">{{ r.repo }}</span>
     {% call barra(r.frac) %}{{ r.repo }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}
@@ -220,12 +221,12 @@
 </section>
 {% endcall %}
 
-{# 7b) chamadas e custo por assinatura (#679): claude, zai, codex; a `zai` entra como custo estimado (preço do config.toml) #}
+{# 7b) chamadas e custo por assinatura (#679): claude, zai, codex; a `zai` entra como custo de lista calculado pelo preço do config.toml (#747), sem marca de estimado #}
 {% call fragment("assinaturas") %}
 <section class="cartao bloco grafico" data-grafico="assinaturas" data-assinaturas="{{ snap.by_subscription|length }}" data-total="{{ snap.by_subscription|sum(attribute="calls") }}">
   <div class="grafico-topo"><h2>Chamadas por assinatura</h2><span class="nota">chamadas ao modelo · {{ "custo pago" if custo == "pago" else "custo de lista" }}</span></div>
   {% for r in snap.by_subscription %}
-  <div class="barra-linha" data-assinatura="{{ '' if r.none else r.subscription }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
+  <div class="barra-linha" data-assinatura="{{ '' if r.none else r.subscription }}" data-calls="{{ r.calls }}" data-real-usd="{{ raw(r.real_usd) }}" data-listed-usd="{{ raw(r.listed_usd) }}" data-estimated-usd="{{ raw(r.estimated_usd) }}" data-unpriced-calls="{{ r.unpriced_calls }}"
        title="{{ r.subscription }}: {{ r.calls|calls }} ({{ r.calls_share|pct }} do total)">
     <span class="rotulo mono">{{ r.subscription }}</span>
     {% call barra(r.frac) %}{{ r.subscription }} · {{ r.calls|calls }} · {{ money(r) }}{% endcall %}

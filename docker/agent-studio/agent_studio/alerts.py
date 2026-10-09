@@ -54,7 +54,9 @@ TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD, LLM_P
 # alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
 PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
                "price_fixed_differs")
-ALL_TYPES = TYPES + PRICE_TYPES
+# alertas de custo de lista (#747): critérios e texto em `cost_alerts.py`
+COST_TYPES = ("cost_claude_diff", "cost_subscription_unpriced")
+ALL_TYPES = TYPES + PRICE_TYPES + COST_TYPES
 # só estes recolhem por tempo na faixa da tela (#524); os outros ficam abertos enquanto durarem
 BAND_AGING_TYPES = (ROUND_STALLED, ROUND_OLD) + PRICE_TYPES
 
@@ -88,6 +90,7 @@ class AlertConfig:
     round_stalled_minutes: float = 30
     llm_proxy_stale_minutes: float = 5
     band_recent_hours: float = 2
+    claude_cost_diff_pct: float = 10  # #747: diferença (%) entre o custo informado do claude e a tabela que liga o alerta
 
     @classmethod
     def parse(cls, raw):
@@ -473,9 +476,13 @@ def evaluate(con, at_ns, cfg):
         alerts += _rounds(con, at_ns, cfg)
     except Exception:  # noqa: BLE001 — o cálculo da rodada parada não derruba os outros alertas (#364)
         logging.getLogger(__name__).exception("alerta de rodada parada falhou; os outros seguem")
-    from . import price_alerts  # aqui e não no topo: o `price_alerts` importa este módulo
+    from . import cost_alerts, price_alerts  # aqui e não no topo: eles importam este módulo
     alerts += _llm_proxy(con, lo, at_ns, cfg)
     alerts += price_alerts.evaluate(con, at_ns)
+    try:
+        alerts += cost_alerts.evaluate(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — a conferência de custo não derruba os outros alertas (#747)
+        logging.getLogger(__name__).exception("alertas de custo falharam; os outros seguem")
     idle = {h for h, (t, _) in last.items() if stopped(t, at_ns, cfg)}
     alerts = [a for a in alerts if a["type"] == NO_DATA or a["host"] not in idle]
     alerts.sort(key=lambda a: (ALL_TYPES.index(a["type"]), a["host"] or "", a["instance"] or "",

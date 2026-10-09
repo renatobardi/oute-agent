@@ -29,6 +29,7 @@
       data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}"
       data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
       data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
+      data-listed-usd="{{ '' if u.cost.listed_usd is none else u.cost.listed_usd }}"
       data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-errors="{{ u.errors.total }}">
     <td class="hora sec">{{ c.start_ns|ts }}</td>
     <td class="sec">{{ c.host or "—" }}</td>

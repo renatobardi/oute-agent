@@ -59,6 +59,7 @@
       <td class="n sec">{{ s.input_tokens|num }} / {{ s.output_tokens|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ s.cache_read_tokens|num }} / {{ s.cache_creation_tokens|num }}</span></td>
       <td class="n custo">
         {% if s.cost_kind == "real" %}<span class="real" title="informado pela fonte (preço de lista, não gasto)">{{ s.cost|usd }}</span>
+        {% elif s.cost_kind == "listed" %}<span class="real" title="custo de lista calculado pela tabela de preços (config.toml): chamada de assinatura sem custo informado">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
         {% elif s.cost_kind == "paid" %}<span class="real" title="custo pago: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
         {% else %}<span class="semp" title="sem custo informado pela fonte e sem preço na tabela">sem preço</span>{% endif %}
@@ -84,6 +85,7 @@
     <h2>Resumo</h2>
     <dl class="resumo" data-resumo data-calls="{{ u.calls }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}"
         data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}"
+        data-listed-usd="{{ '' if u.cost.listed_usd is none else u.cost.listed_usd }}"
         data-unpriced-calls="{{ u.cost.unpriced_calls }}">
       <dt>Host</dt><dd>{{ c.host or "—" }}{% if c.instance %} ({{ c.instance }}){% endif %}</dd>
       <dt>Agente</dt><dd>{{ c.agent or "—" }}{% if c.service %} · {{ c.service }}{% endif %}</dd>

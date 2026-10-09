@@ -7,7 +7,7 @@ TOKENS = ("input", "output", "cache_read", "cache_creation")
 
 
 def _zero():
-    return {"calls": 0, "real_usd": None, "estimated_usd": None, "tokens": dict.fromkeys(TOKENS, 0)}
+    return {"calls": 0, "real_usd": None, "listed_usd": None, "estimated_usd": None, "tokens": dict.fromkeys(TOKENS, 0)}
 
 
 def _add_usd(into, key, v):
@@ -21,7 +21,7 @@ def _tick(i, n):
 
 
 def _cost_of(a):
-    return (a["real_usd"] or 0) + (a["estimated_usd"] or 0)
+    return (a["real_usd"] or 0) + (a["listed_usd"] or 0) + (a["estimated_usd"] or 0)
 
 
 def _tok_of(a):
@@ -35,6 +35,7 @@ def _by_day(series):
         a = acc.setdefault(r["day"], _zero())
         a["calls"] += r["calls"]
         _add_usd(a, "real_usd", r["cost"]["real_usd"])
+        _add_usd(a, "listed_usd", r["cost"]["listed_usd"])
         _add_usd(a, "estimated_usd", r["cost"]["estimated_usd"])
         for t in TOKENS:
             a["tokens"][t] += r["tokens"][t]
@@ -57,8 +58,9 @@ def _point(k, i, n, a, max_cost, max_tok):
     label = f"{k[8:10]}/{k[5:7]}"
     return {
         "key": k, "label": label, "tick": label if _tick(i, n) else "", "x": (i + 0.5) / n, "calls": a["calls"],
-        "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"],
-        "real_frac": _frac(a["real_usd"] or 0, max_cost), "est_frac": _frac(a["estimated_usd"] or 0, max_cost),
+        "real_usd": a["real_usd"], "listed_usd": a["listed_usd"], "estimated_usd": a["estimated_usd"],
+        # a parte cheia da barra é a que não é estimada: real + de lista calculado (#747); a estimada segue hachurada
+        "real_frac": _frac((a["real_usd"] or 0) + (a["listed_usd"] or 0), max_cost), "est_frac": _frac(a["estimated_usd"] or 0, max_cost),
         "input": t["input"], "output": t["output"], "cache": cache,
         "cache_read": t["cache_read"], "cache_creation": t["cache_creation"], "tokens": _tok_of(a),
         "in_frac": _frac(t["input"], max_tok), "out_frac": _frac(t["output"], max_tok), "cache_frac": _frac(cache, max_tok),
@@ -66,7 +68,8 @@ def _point(k, i, n, a, max_cost, max_tok):
 
 
 def days(series):
-    """Série do `usage.usage` -> um item por dia, do primeiro ao último dia com chamada. Cada item: custo real e estimado,
+    """Série do `usage.usage` -> um item por dia, do primeiro ao último dia com chamada. Cada item: custo real, de lista
+    calculado (#747) e estimado,
     tokens (`cache` = leitura + escrita), `real_frac`/`est_frac` pelo maior dia de custo e as frações de tokens pelo maior dia."""
     acc = _by_day(series)
     if not acc:
@@ -81,12 +84,13 @@ def days(series):
 
 def bars(rows, kind):
     """Linhas `by_role`/`by_phase` (já na ordem de custo) -> barra por linha, com a fração do maior custo."""
-    cost_of = lambda r: (r["cost"]["real_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)
+    cost_of = lambda r: (r["cost"]["real_usd"] or 0) + (r["cost"]["listed_usd"] or 0) + (r["cost"]["estimated_usd"] or 0)
     top = max((cost_of(r) for r in rows), default=0)
     return [{
         "name": r[kind], "calls": r["calls"], "cost": r["cost"],
-        "priced": r["cost"]["real_usd"] is not None or r["cost"]["estimated_usd"] is not None,
-        "real_frac": (r["cost"]["real_usd"] or 0) / top if top else 0,
+        "priced": any(r["cost"][k] is not None for k in ("real_usd", "listed_usd", "estimated_usd")),
+        # a parte cheia é a que não é estimada: real + de lista calculado (#747); a estimada segue hachurada
+        "real_frac": ((r["cost"]["real_usd"] or 0) + (r["cost"]["listed_usd"] or 0)) / top if top else 0,
         "est_frac": (r["cost"]["estimated_usd"] or 0) / top if top else 0,
     } for r in rows]
 

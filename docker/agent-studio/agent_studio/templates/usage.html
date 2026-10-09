@@ -12,7 +12,7 @@
   </tr></thead>
   <tbody>
   {% for r in t.rows %}
-  <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}">
+  <tr data-{{ kind }}="{{ r[kind] }}" data-calls="{{ r.calls }}" data-input="{{ r.tokens.input }}" data-output="{{ r.tokens.output }}" data-real-usd="{{ '' if r.cost.real_usd is none else r.cost.real_usd }}" data-estimated-usd="{{ '' if r.cost.estimated_usd is none else r.cost.estimated_usd }}" data-listed-usd="{{ '' if r.cost.listed_usd is none else r.cost.listed_usd }}">
     <td>{{ r[kind] }}</td>
     <td class="n">{{ r.calls|num }}</td>
     <td class="n">{{ r.tokens.input|num }} / {{ r.tokens.output|num }}<span class="fino" title="tokens de cache: leitura / escrita">cache {{ r.tokens.cache_read|num }} / {{ r.tokens.cache_creation|num }}</span></td>
@@ -37,8 +37,9 @@
 {{ aviso_custo() }}
 {% endcall %}
 {% call fragment("total") %}
-<p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}">
-  Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span></p>
+<p class="cartao bloco" id="total" data-calls="{{ totals.calls }}" data-real-usd="{{ '' if totals.cost.real_usd is none else totals.cost.real_usd }}" data-estimated-usd="{{ '' if totals.cost.estimated_usd is none else totals.cost.estimated_usd }}" data-listed-usd="{{ '' if totals.cost.listed_usd is none else totals.cost.listed_usd }}" data-listed-calls="{{ totals.cost.listed_calls }}">
+  Total da janela: {{ totals.calls|num }} chamadas · <span class="custo">{{ cost(totals.cost) }}</span>{% if totals.cost.listed_calls %}<span class="fino" title="assinatura sem custo informado pela fonte (claude sem log de custo, codex e zai): tabela de preços do config.toml"> · {{ totals.cost.listed_calls|num }} calculadas pela tabela</span>{% endif %}
+  <span class="fino" id="claude-sem-log" data-claude-no-log-calls="{{ totals.cost.claude_no_log_calls }}" title="chamada do claude que chegou sem o log de custo (api_request): calculada pela tabela de preços, e não informada pela fonte"> · {{ totals.cost.claude_no_log_calls|num }} do claude sem log de custo</span></p>
 {% endcall %}
 <div class="graficos" id="graficos-uso">
 {% call fragment("custo-dia") %}
@@ -67,7 +68,7 @@
 {% endcall %}
 {% call fragment("assinatura") %}
 <h2>Por assinatura</h2>
-{{ usage_table("subscription", "Assinatura", t_sub, "claude, zai e codex: a assinatura da conversa (oute.subscription; no histórico, o agente); a zai tem só custo estimado, pelo preço do config.toml") }}
+{{ usage_table("subscription", "Assinatura", t_sub, "claude, zai e codex: a assinatura da conversa (oute.subscription; no histórico, o agente); sem custo informado pela fonte, o custo sai calculado pela tabela (#747), sem marca de estimado") }}
 {% endcall %}
 </div>
 {% endblock %}

@@ -16,12 +16,13 @@
 {# botão Copiar: nasce escondido e o /static/copiar.js o mostra; copia o texto do elemento `target` e só isso (nenhuma outra ação) #}
 {% macro copy_button(target, label="Copiar") %}<button type="button" class="botao copiar" aria-controls="{{ target }}" hidden>{{ icon("copy", 14) }}<span>{{ label }}</span></button>{% endmacro %}
 
-{# custo informado pela fonte e estimado sempre separados; o estimado vai marcado (#203). No custo pago (#531) a assinatura conta 0 #}
+{# custo informado pela fonte, de lista calculado (#747) e estimado sempre separados; só o estimado vai marcado "≈" (#203).
+   O informado e o de lista calculado (assinatura sem custo informado) somam num número só, sem marca. No custo pago (#531) a assinatura conta 0 #}
 {% macro cost(c) %}
-{% if c.real_usd is not none %}<span class="real" title="{{ 'custo pago: o pago por uso informado pela fonte; assinatura conta 0' if custo == 'pago' else 'informado pela fonte (preço de lista, não gasto: os agentes rodam por assinatura)' }}">{{ c.real_usd|usd }}</span>{% endif %}
-{% if c.estimated_usd is not none %}<span class="est" title="{{ 'custo pago: estimado pela tabela de preços; assinatura conta 0' if custo == 'pago' else 'estimado pela tabela de preços (config.toml). Preço de lista, não gasto: os agentes rodam por assinatura' }}">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
+{% if c.real_usd is not none or c.listed_usd is not none %}<span class="real" title="{{ 'custo pago: o pago por uso informado pela fonte; assinatura conta 0' if custo == 'pago' else 'preço de lista, não gasto: o informado pela fonte somado ao calculado pela tabela de preços (config.toml) para a chamada de assinatura sem custo informado' }}">{{ ((c.real_usd or 0) + (c.listed_usd or 0))|usd }}</span>{% endif %}
+{% if c.estimated_usd is not none %}<span class="est" title="{{ 'custo pago: estimado pela tabela de preços; assinatura conta 0' if custo == 'pago' else 'estimado pela tabela de preços (config.toml), só para chamada fora das assinaturas (#747). Preço de lista, não gasto' }}">≈ {{ c.estimated_usd|usd }} est.</span>{% endif %}
 {% if c.unpriced_calls %}<span class="semp" title="chamadas sem custo informado pela fonte e sem preço na tabela: fora das somas">{{ c.unpriced_calls|num }} sem preço</span>{% endif %}
-{% if c.real_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
+{% if c.real_usd is none and c.listed_usd is none and c.estimated_usd is none and not c.unpriced_calls %}—{% endif %}
 {% endmacro %}
 
 {# o nome amigável da conversa (#530) e, abaixo, o id inteiro em letra menor; `link` = o destino do nome, se tiver #}
@@ -194,7 +195,7 @@
 {% endmacro %}
 
 {# ---- sessões (#207): as mesmas colunas para a linha da sessão e para a linha de cada conversa ---- #}
-{% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
+{% macro usage_data(u) %}data-calls="{{ u.calls }}" data-input="{{ u.tokens.input }}" data-output="{{ u.tokens.output }}" data-cache-read="{{ u.tokens.cache_read }}" data-cache-creation="{{ u.tokens.cache_creation }}" data-real-usd="{{ '' if u.cost.real_usd is none else u.cost.real_usd }}" data-estimated-usd="{{ '' if u.cost.estimated_usd is none else u.cost.estimated_usd }}" data-listed-usd="{{ '' if u.cost.listed_usd is none else u.cost.listed_usd }}" data-unpriced-calls="{{ u.cost.unpriced_calls }}" data-p95-ms="{{ '' if u.latency_p95_ms is none else u.latency_p95_ms }}" data-errors="{{ u.errors.total }}"{% endmacro %}
 
 {# calls, tokens (ent / saí, o cache numa segunda linha menor), custo, p95 e erros; no celular só o custo e os erros ficam à vista #}
 {% macro usage_cells(u, errors_href="") %}

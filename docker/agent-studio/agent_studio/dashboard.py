@@ -46,10 +46,11 @@ def _rows(con, sql, params):
 
 
 def _cost(a):
-    """Custo de lista de um acumulador do `usage.aggregate`: real + estimado (`None` se nenhum dos dois existe)."""
-    if a["real_usd"] is None and a["estimated_usd"] is None:
+    """Custo de lista de um acumulador do `usage.aggregate`: real + de lista calculado + estimado (#747; `None` se
+    nenhum dos três existe)."""
+    if a["real_usd"] is None and a["listed_usd"] is None and a["estimated_usd"] is None:
         return None
-    return (a["real_usd"] or 0.0) + (a["estimated_usd"] or 0.0)
+    return (a["real_usd"] or 0.0) + (a["listed_usd"] or 0.0) + (a["estimated_usd"] or 0.0)
 
 
 def _div(a, b):
@@ -122,8 +123,8 @@ def _kpi_cost(cur, prev, before, paid=False):
     label, hint = (("Custo (pago)", "Custo pago: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece.") if paid
                    else ("Custo (lista)", "Preço de lista, não gasto: os agentes rodam por assinatura."))
     return _kpi("cost", label, "receipt", total, ptotal, rel, _delta_badge(rel), "secundario", note,
-                hint=hint, real_usd=cur["real_usd"], estimated_usd=cur["estimated_usd"], estimated_share=est_share,
-                unpriced_calls=cur["unpriced_calls"])
+                hint=hint, real_usd=cur["real_usd"], listed_usd=cur["listed_usd"], estimated_usd=cur["estimated_usd"],
+                estimated_share=est_share, unpriced_calls=cur["unpriced_calls"])
 
 
 def _p95_note(rel):
@@ -254,8 +255,8 @@ def _subscriptions(by_sub, total_calls):
         if not a["calls"]:
             continue
         rows.append({"subscription": name or usage_mod.NO_SUBSCRIPTION, "none": name is None, "calls": a["calls"],
-                     "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"], "cost": _cost(a),
-                     "unpriced_calls": a["unpriced_calls"], "calls_share": _div(a["calls"], total_calls)})
+                     "real_usd": a["real_usd"], "listed_usd": a["listed_usd"], "estimated_usd": a["estimated_usd"],
+                     "cost": _cost(a), "unpriced_calls": a["unpriced_calls"], "calls_share": _div(a["calls"], total_calls)})
     rows.sort(key=lambda r: (-r["calls"], -(r["cost"] or 0), r["subscription"]))
     for r in rows:
         r["frac"] = _div(r["calls"], rows[0]["calls"])
@@ -270,8 +271,8 @@ def _repos(by_repo, total_calls):
         if not a["calls"]:
             continue  # grupo que só tem erro de log ou span que não é chamada
         rows.append({"repo": name or NO_REPO, "none": name is None, "calls": a["calls"], "real_usd": a["real_usd"],
-                     "estimated_usd": a["estimated_usd"], "cost": _cost(a), "unpriced_calls": a["unpriced_calls"],
-                     "calls_share": _div(a["calls"], total_calls)})
+                     "listed_usd": a["listed_usd"], "estimated_usd": a["estimated_usd"], "cost": _cost(a),
+                     "unpriced_calls": a["unpriced_calls"], "calls_share": _div(a["calls"], total_calls)})
     rows.sort(key=lambda r: (-r["calls"], -(r["cost"] or 0), r["repo"]))
     for r in rows:
         r["frac"] = _div(r["calls"], rows[0]["calls"])
@@ -328,13 +329,14 @@ def _models(by_model, total_cost, total_calls):
         if not a["calls"]:
             continue  # grupo que só tem erro de log (o log não tem modelo) ou span que não é chamada
         cost = _cost(a)
-        rows.append({"model": model or NO_MODEL, "calls": a["calls"], "real_usd": a["real_usd"], "estimated_usd": a["estimated_usd"],
-                     "cost": cost, "unpriced_calls": a["unpriced_calls"],
+        rows.append({"model": model or NO_MODEL, "calls": a["calls"], "real_usd": a["real_usd"], "listed_usd": a["listed_usd"],
+                     "estimated_usd": a["estimated_usd"], "cost": cost, "unpriced_calls": a["unpriced_calls"],
                      "calls_share": _div(a["calls"], total_calls), "cost_share": _div(cost or 0, total_cost)})
     rows.sort(key=lambda r: (-(r["cost"] or 0), -r["calls"], r["model"]))
     peak = max((r["cost"] or 0 for r in rows), default=0)
     for r in rows:
-        r["real_frac"] = _div(r["real_usd"] or 0, peak)
+        # a parte cheia da barra é a que não é estimada: real + de lista calculado (#747); a estimada segue hachurada
+        r["real_frac"] = _div((r["real_usd"] or 0) + (r["listed_usd"] or 0), peak)
         r["est_frac"] = _div(r["estimated_usd"] or 0, peak)
     return rows
 
@@ -350,9 +352,10 @@ def _phases(by_phase):
 
 
 def _add_session(sessions, task, agent, model, a):
-    s = sessions.setdefault(task, {"id": task, "calls": 0, "real": None, "est": None, "agents": set(), "models": {}})
+    s = sessions.setdefault(task, {"id": task, "calls": 0, "real": None, "listed": None, "est": None,
+                                   "agents": set(), "models": {}})
     s["calls"] += a["calls"]
-    for k, v in (("real", a["real_usd"]), ("est", a["estimated_usd"])):
+    for k, v in (("real", a["real_usd"]), ("listed", a["listed_usd"]), ("est", a["estimated_usd"])):
         if v is not None:
             s[k] = (s[k] or 0.0) + v
     if agent:
@@ -364,8 +367,10 @@ def _add_session(sessions, task, agent, model, a):
 
 def _session_row(s):
     main = max(s["models"].items(), key=lambda kv: (kv[1], kv[0]))[0] if s["models"] else None
-    return {"id": s["id"], "calls": s["calls"], "cost": (s["real"] or 0.0) + (s["est"] or 0.0), "estimated": bool(s["est"]),
-            "real_usd": s["real"], "estimated_usd": s["est"], "agents": sorted(s["agents"]), "model": main}
+    # `listed` (#747) não é estimado: soma no custo sem acender a marca de "estimado"
+    return {"id": s["id"], "calls": s["calls"], "cost": (s["real"] or 0.0) + (s["listed"] or 0.0) + (s["est"] or 0.0),
+            "estimated": bool(s["est"]), "real_usd": s["real"], "listed_usd": s["listed"], "estimated_usd": s["est"],
+            "agents": sorted(s["agents"]), "model": main}
 
 
 def _top_sessions(by_session):
@@ -453,8 +458,8 @@ def snapshot(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, model=None, 
         "by_repo": _repos(_regroup(fine, ("repo",)), cur["calls"]),
         "by_subscription": _subscriptions(_regroup(fine, ("subscription",)), cur["calls"]),
         "models": models[:MODELS_SHOWN], "models_total": len(models),
-        "composition": {"real_usd": cur["real_usd"], "estimated_usd": cur["estimated_usd"], "total": total_cost,
-                        "unpriced_calls": cur["unpriced_calls"]},
+        "composition": {"real_usd": cur["real_usd"], "listed_usd": cur["listed_usd"], "estimated_usd": cur["estimated_usd"],
+                        "total": total_cost, "unpriced_calls": cur["unpriced_calls"]},
         "latency": _latency_rows(latency)[:MODELS_SHOWN],
         "phases": _phases(_regroup(fine, ("phase",))),
         "heat": _heat(con, to_ns, tz, repo, sub),

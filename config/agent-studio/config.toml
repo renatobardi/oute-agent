@@ -7,10 +7,13 @@
 # fica antes de qualquer [tabela].
 timezone = "America/Sao_Paulo"
 
-# Preço em USD por 1M tokens, usado só para o **custo estimado** das chamadas que chegam sem custo real (o Codex).
-# O Claude Code manda o custo real, mas não no span: no log `api_request` de mesmo `request_id`, que o agent-studio
-# junta na consulta (#157). O preço do Claude abaixo é só a reserva para a chamada que ficou sem esse log (marcada
-# como estimada, nunca somada ao real). O `jev.decision` do roteador (registro histórico, até 2026-09-30) traz o real.
+# Preço em USD por 1M tokens, usado para o custo calculado das chamadas que chegam sem custo real. Das três assinaturas
+# (`claude`, `codex`, `zai`) ele é **custo de lista**, sem a marca "estimado ≈" (#747); só a chamada fora delas (ex.: o
+# LLM do ai-memory sem `usage`) segue estimada. O Claude Code manda o custo real, mas não no span: no log `api_request`
+# de mesmo `request_id`, que o agent-studio junta na consulta (#157). O preço do Claude abaixo serve para a chamada que
+# ficou sem esse log (contada à parte na tela de Uso, nunca somada ao real) e para a conferência do `cost_usd` informado
+# (alerta `cost_claude_diff`, limite `claude_cost_diff_pct`). Todo modelo da tabela do seletor tem `fixed = true`, com a
+# página oficial e a data da leitura (#747); modelo de assinatura sem preço vira alerta (`cost_subscription_unpriced`). O `jev.decision` do roteador (registro histórico, até 2026-09-30) traz o real.
 #   input          = entrada não cacheada        output         = saída
 #   cache_read     = entrada lida do cache       cache_creation = escrita no cache
 # `input` e `output` são obrigatórios; cache ausente = preço de `input` (estima para cima, nunca de graça).
@@ -67,39 +70,48 @@ input = 0.05
 output = 0.4
 cache_read = 0.005
 
-# Reserva gpt-6-* do ADR-02 (#157). Fonte: models.dev (https://models.dev/api.json), conferida em 2026-10-03 com o
-# OpenRouter e com o LiteLLM (as três concordam). Preço estimado: o Codex não manda custo real.
+# Modelos gpt-6-* do ADR-02 (#157, #747). Fonte oficial: https://developers.openai.com/api/docs/pricing (tier padrão,
+# faixa de contexto curta, até 272K tokens), lida em 2026-10-08. Acima de 272K o preço da OpenAI sobe (ex.: gpt-6.1-sol
+# US$ 4 de entrada e US$ 15 de saída) e esta tabela não tem faixa de contexto: a chamada longa fica subestimada. O Codex não
+# manda custo real; `cache_creation` é a escrita em cache que a página lista (o campo `cache_write_input_tokens` do Codex
+# vale 0 nos 76 spans medidos em 2026-10-08, issue #747).
 [prices."gpt-6-astra"]
+fixed = true
 input = 10.0
 output = 50.0
 cache_read = 1.0
 cache_creation = 12.5
 
 [prices."gpt-6.1-sol"]
+fixed = true
 input = 2.0
 output = 10.0
 cache_read = 0.1
 cache_creation = 2.5
 
 [prices."gpt-6-luna"]
+fixed = true
 input = 0.1
 output = 0.5
 cache_read = 0.01
 cache_creation = 0.125
 
-# Claude (#157): os modelos da tabela do ADR-02 e os que aparecem nas sessões. Só reserva (chamada sem o log
-# `api_request`). Fonte: preços de lista da Anthropic (API, conferidos em 2026-10-02); `cache_creation` = escrita de
-# cache de 5 min (1,25 × `input`); a de 1 h custa 2 × `input` e fica subestimada aqui.
+# Claude (#157, #747): os modelos da tabela do ADR-02 e os que aparecem nas sessões. Fonte oficial:
+# https://platform.claude.com/docs/en/about-claude/pricing (API, lida em 2026-10-08); `cache_creation` = escrita de
+# cache de 5 min (1,25 × `input`); a de 1 h custa 2 × `input` e fica subestimada aqui. A leitura de cache do Opus 5.5 e do
+# Sonnet 5.5 é 0,05 × `input` (e não 0,1 ×). Só os dois modelos da tabela do seletor são `fixed`; os outros seguem as fontes.
 [prices."claude-opus-5-5"]
+fixed = true
 input = 4.0
 output = 20.0
 cache_read = 0.2
 cache_creation = 5.0
 
 [prices."claude-sonnet-5-5"]
+fixed = true
 input = 2.0
 output = 10.0
-cache_read = 0.2
+cache_read = 0.1
 cache_creation = 2.5
 
 [prices."claude-sonnet-5"]
@@ -130,6 +142,9 @@ output = 0.17
 # Alertas do pipeline (ADR-08 §8, #204), devolvidos pelo `GET /v1/alerts`. Chave ausente = o valor abaixo (que é
 # também o padrão do código); chave desconhecida ou valor inválido = o padrão, com o motivo em `config.errors`.
 [alerts]
+# Conferência do claude (#747): diferença (%) acima da qual o custo informado pelo Claude Code, somado por modelo nos últimos
+# 7 dias, e os mesmos tokens × a tabela de preços viram o alerta `cost_claude_diff`.
+claude_cost_diff_pct = 10
 # Hosts sempre ligados: só eles alertam "host sem dado". Os outros (Mac) só mostram o último dado em `hosts`.
 always_on_hosts = ["oute-server"]
 # Host sem dado: minutos sem nenhum registro (log, span ou métrica, pela hora do fato). Host assim está parado e não
@@ -169,8 +184,9 @@ round_stalled_minutes = 30
 
 # `zai` (GLM Coding Plan, ADR-02 adendo #629; #679). O Claude Code serve o `glm-5.3` e calcula o `cost_usd` pela própria
 # tabela, que não conhece `glm-*` (`costBasis: unknown`): o agent-studio descarta esse valor nas chamadas com
-# `oute.subscription=zai` e as estima por este preço (`cost.spans_with_cost`), nunca como custo real. Fonte: Z.ai
-# (https://docs.z.ai/guides/overview/pricing), decisão do Bardi de 2026-10-07 (#673, #733): os valores são os mesmos do
+# `oute.subscription=zai` e as calcula por este preço como custo de lista (`cost.spans_with_cost`, #747), nunca como custo
+# real. Fonte oficial: Z.ai (https://docs.z.ai/guides/overview/pricing), lida de novo em 2026-10-08 (entrada 1,4; saída 4,4;
+# entrada em cache 0,26; armazenamento de cache "limited-time free"); decisão do Bardi de 2026-10-07 (#673, #733): os valores são os mesmos do
 # models.dev (provedor `zai`) e o OpenRouter (`z-ai/glm-5.3`) traz outros, então `fixed = true` trava o preço aqui — a
 # divergência entre as fontes não troca e nem alerta (#733). A escrita em cache é de graça (`cache_creation = 0`).
 # Plano de assinatura: o valor é de lista da API, para comparar com os outros modelos, não o que a assinatura cobra.

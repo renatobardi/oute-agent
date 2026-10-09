@@ -14,7 +14,9 @@ TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFU
           # preços (#339): critérios em `price_alerts.py`
           "price_changed": "Preço trocado", "price_sources_diverge": "Fontes de preço divergem",
           "price_source_down": "Fonte de preço fora do ar", "price_model_unpriced": "Modelo em uso sem preço",
-          "price_fixed_differs": "Preço fixo difere da fonte"}
+          "price_fixed_differs": "Preço fixo difere da fonte",
+          # custo de lista (#747): critérios em `cost_alerts.py`
+          "cost_claude_diff": "Custo do claude difere da tabela", "cost_subscription_unpriced": "Modelo de assinatura sem preço"}
 
 
 def br(text):
@@ -52,6 +54,10 @@ def text(alert):
     v, unit, limit, ev = alert["value"], alert["unit"], alert["limit"], alert["evidence"]
     if v is None:
         return ev.get("note") or "sem valor"
+    if alert["type"] in alerts_mod.COST_TYPES:  # custo de lista (#747): a nota já diz o modelo e os números
+        if alert["type"] == alerts_mod.COST_TYPES[0]:
+            return f"{ev['note']} ({br(f'{v:+g}')}%, limite {br(f'{limit:g}')}%)"
+        return ev["note"]
     if unit == "ratio":
         return f"{br(f'{v * 100:.0f}')}% da fila (limite {br(f'{limit * 100:.0f}')}%)"
     if unit == "pct":
