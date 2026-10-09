@@ -128,6 +128,18 @@ def tree(spans):
     return out
 
 
+def _paid_span(s, alloc, tz):
+    """Custo pago (#748) da linha de um span de assinatura: a parte do valor do plano do dia; sem plano, `noplan` e 0."""
+    if alloc is None or not is_subscription(s["subscription"]):
+        return
+    day = datetime.fromtimestamp(s["time_unix_nano"] // rateio.NS, tz).date()
+    share = alloc.share(day, s["subscription"], s["cost"] or 0.0, 1)
+    if share is None:
+        s["cost_kind"], s["cost"] = "noplan", 0.0
+    else:
+        s["cost_kind"], s["cost"] = "paid", share
+
+
 def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, errors_only=False, paid=False, tz=tz_mod.UTC):
     """Cabeçalho, somas, árvore de spans e a primeira página de logs de uma conversa; `None` se ela não existe.
 
@@ -157,10 +169,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
             s["cost_kind"], s["cost"] = call_cost(
                 s["cost_usd"], s["input_tokens"], s["output_tokens"], s["cache_read_tokens"],
                 s["cache_creation_tokens"], prices.lookup(s["model"], s["time_unix_nano"]), s["subscription"])
-            if alloc is not None and is_subscription(s["subscription"]):
-                day = datetime.fromtimestamp(s["time_unix_nano"] // rateio.NS, tz).date()
-                share = alloc.share(day, s["subscription"], s["cost"] or 0.0, 1)
-                s["cost_kind"], s["cost"] = ("noplan", 0.0) if share is None else ("paid", share)
+            _paid_span(s, alloc, tz)
     if errors_only:
         # sem os pais a árvore não vale: uma lista plana, pela hora do fato
         for s in spans:

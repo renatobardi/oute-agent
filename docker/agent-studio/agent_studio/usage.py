@@ -213,6 +213,21 @@ def paid_alloc(con, from_ns, to_ns, prices, tz=tz_mod.UTC):
     return alloc
 
 
+def _fine_keys(keys, alloc):
+    """Chaves da leitura fina: as pedidas, o modelo (preço) e, no custo pago, o dia (o rateio é por dia)."""
+    fine = keys if "model" in keys else keys + ("model",)
+    return fine + ("day",) if alloc is not None and "day" not in fine else fine
+
+
+def _add_idle(groups, keys, alloc, window, tz, repo, sub):
+    """Põe em `groups` o "sem uso" (#748) do custo pago; sem rateio ou com filtro de repositório, nada."""
+    if alloc is None or repo is not None:
+        return
+    for day, name, usd in alloc.idle(window[0], window[1], tz, sub):
+        a = groups.setdefault(tuple(_idle_key(k, day, name) for k in keys), _empty())
+        a["real_usd"] = _add(a["real_usd"], usd)
+
+
 def _idle_key(k, day, name):
     if k == "day":
         return day
@@ -236,23 +251,15 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
     prices = prices.snapshot()  # uma versão da tabela do começo ao fim, mesmo se a rotina de preços trocar no meio
     at_ns = _price_epochs(prices)
     groups = {} if keys else {(): _empty()}
-    if paid and alloc is None:
-        alloc = paid_alloc(con, from_ns, to_ns, prices, tz)
-    if not paid:
-        alloc = None
+    alloc = (alloc or paid_alloc(con, from_ns, to_ns, prices, tz)) if paid else None
 
     def acc(rec):
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
-    fine = keys if "model" in keys else keys + ("model",)
-    if alloc is not None and "day" not in fine:
-        fine += ("day",)  # o rateio é por dia
+    fine = _fine_keys(keys, alloc)
     for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, sub):
         _add_call(acc(rec), rec, prices, at_ns, alloc)
-    if alloc is not None and repo is None:
-        for day, name, usd in alloc.idle(from_ns, to_ns, tz, sub):
-            a = groups.setdefault(tuple(_idle_key(k, day, name) for k in keys), _empty())
-            a["real_usd"] = _add(a["real_usd"], usd)
+    _add_idle(groups, keys, alloc, (from_ns, to_ns), tz, repo, sub)
     if p95:
         fill_p95(con, groups, keys, from_ns, to_ns, tz, repo, sub)
     for rec in _spans(con, keys, from_ns, to_ns, tz, repo, sub):
@@ -369,7 +376,7 @@ def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub
         "by_phase": [render(k, a, ("phase",)) for k, a in _sorted(by_phase)],
         "by_subscription": [render(k, a, ("subscription",)) for k, a in _sorted(by_subscription)],
     }
-    if paid:
+    if alloc is not None:
         # os dias com plano e sem uso (#748), já somados no total; sem filtro de repositório ficam de fora, como no `aggregate`
         idle = alloc.idle(from_ns, to_ns, tz, sub) if repo is None else []
         out["idle"] = [{"day": d.isoformat(), "subscription": name, "usd": usd} for d, name, usd in idle]
