@@ -120,7 +120,7 @@ def _kpi_cost(cur, prev, before, paid=False):
     est_share = _div((cur["estimated_usd"] or 0), total) if total else None
     note = before if est_share is None else f"{_pct(est_share)} estimado"
     rel = _rel(total, ptotal)
-    label, hint = (("Custo (pago)", "Custo pago: as assinaturas (claude e codex) contam US$ 0; só o pago por uso aparece.") if paid
+    label, hint = (("Custo (pago)", "Custo pago: a mensalidade do plano de cada assinatura, rateada pelo uso, mais o pago por uso.") if paid
                    else ("Custo (lista)", "Preço de lista, não gasto: os agentes rodam por assinatura."))
     return _kpi("cost", label, "receipt", total, ptotal, rel, _delta_badge(rel), "secundario", note,
                 hint=hint, real_usd=cur["real_usd"], listed_usd=cur["listed_usd"], estimated_usd=cur["estimated_usd"],

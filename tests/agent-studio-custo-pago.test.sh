@@ -85,9 +85,9 @@ for p in PAGES:
           st == 200 and select_custo(h) == [("lista", " selected", "custo de lista"), ("pago", "", "custo pago")])
     check(f"{p}: sem a escolha na URL, nenhum aviso de custo pago", NOTE not in h)
     he = get(app, p, EF)[1]
-    check(f"{p}: com custo=pago, o controle marca o pago e a tela diz que as assinaturas contam como 0",
+    check(f"{p}: com custo=pago, o controle marca o pago e a tela diz que o custo pago é a mensalidade rateada",
           select_custo(he) == [("lista", "", "custo de lista"), ("pago", " selected", "custo pago")]
-          and NOTE in he and "as assinaturas (chamadas do claude e do codex) contam como 0" in he)
+          and NOTE in he and "mensalidade do plano de cada assinatura, rateada pelo uso" in he)
     check(f"{p}: valor desconhecido de custo = custo de lista", get(app, p, Q + "&custo=xyz")[1] == get(app, p, Q)[1]
           or re.sub(r'<p class="nota janela".*?</p>', "", get(app, p, Q + "&custo=xyz")[1], flags=re.S)
           == re.sub(r'<p class="nota janela".*?</p>', "", get(app, p, Q)[1], flags=re.S))
@@ -145,7 +145,7 @@ check("Sessões: chamadas, tokens, p95 e erros iguais nos dois custos",
 # detalhe da conversa e da sessão: a chamada de assinatura custa 0 na linha de cada span
 cdl, cde = get(app, "/conversa", "id=c-cx")[1], get(app, "/conversa", "id=c-cx&custo=pago")[1]
 check("Conversa de assinatura: lista = custo de lista; pago = US$ 0 e o resumo zerado",
-      'data-cost-kind="listed"' in cdl and 'data-cost-kind="estimated"' not in cdl and 'data-cost-kind="paid"' in cde and 'data-cost="0.0"' in cde and NOTE in cde and NOTE not in cdl)
+      'data-cost-kind="listed"' in cdl and 'data-cost-kind="estimated"' not in cdl and 'data-cost-kind="noplan"' in cde and 'data-cost="0.0"' in cde and NOTE in cde and NOTE not in cdl)
 adl, ade = get(app, "/conversa", "id=c-ai&custo=pago")[1], get(app, "/conversa", "id=c-ai")[1]
 check("Conversa paga por uso: o custo do span é o mesmo nos dois", re.findall(r'data-cost-kind="[^"]*"\s+data-cost="[^"]*"', adl) == re.findall(r'data-cost-kind="[^"]*"\s+data-cost="[^"]*"', ade))
 sdl, sde = get(app, "/sessao", "id=T-mix")[1], get(app, "/sessao", "id=T-mix&custo=pago")[1]
@@ -189,8 +189,8 @@ for p in PAGES:
         visible = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", "", h, flags=re.S))
         titles = " ".join(re.findall(r'title="([^"]*)"', h))
         check(f"{p} ({nome}): nenhum 'real' como rótulo de custo na tela nem nas dicas", not re.search(r"\b[Rr]eal\b", visible + " " + titles))
-check("Uso: a legenda diz 'Custo de lista' (lista) ou 'Pago (assinatura = 0)' e 'Estimado'",
-      "Custo de lista" in get(app, "/uso", Q)[1] and "Pago (assinatura = 0)" in get(app, "/uso", EF)[1]
+check("Uso: a legenda diz 'Custo de lista' (lista) ou 'Pago (mensalidade rateada)' e 'Estimado'",
+      "Custo de lista" in get(app, "/uso", Q)[1] and "Pago (mensalidade rateada)" in get(app, "/uso", EF)[1]
       and "Estimado ≈" in get(app, "/uso", EF)[1])
 check("Dashboard: a composição diz 'Custo de lista' (lista) ou 'Pago' (pago)", "Custo de lista US$" in dl and "Pago US$" in de)
 

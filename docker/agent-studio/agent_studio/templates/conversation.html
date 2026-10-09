@@ -61,7 +61,8 @@
         {% if s.cost_kind == "real" %}<span class="real" title="informado pela fonte (preço de lista, não gasto)">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "listed" %}<span class="real" title="custo de lista calculado pela tabela de preços (config.toml): chamada de assinatura sem custo informado">{{ s.cost|usd }}</span>
         {% elif s.cost_kind == "estimated" %}<span class="est" title="estimado pela tabela de preços (config.toml)">≈ {{ s.cost|usd }} est.</span>
-        {% elif s.cost_kind == "paid" %}<span class="real" title="custo pago: chamada de assinatura conta 0">{{ s.cost|usd }} assinatura</span>
+        {% elif s.cost_kind == "paid" %}<span class="real" title="custo pago: a parte desta chamada na mensalidade do plano do dia">{{ s.cost|usd }} assinatura</span>
+        {% elif s.cost_kind == "noplan" %}<span class="semp" title="assinatura sem plano cadastrado nesse dia: a chamada conta 0">sem plano</span>
         {% else %}<span class="semp" title="sem custo informado pela fonte e sem preço na tabela">sem preço</span>{% endif %}
       </td>
       {% else %}

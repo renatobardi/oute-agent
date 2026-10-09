@@ -6,7 +6,7 @@
 
 {# amostra da legenda de custo #}
 {% macro legenda_custo() %}
-<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Pago (assinatura = 0)" if custo == "pago" else "Custo de lista" }}</span>
+<div class="legenda"><span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="real" width="8" height="8"/></svg>{{ "Pago (mensalidade rateada)" if custo == "pago" else "Custo de lista" }}</span>
   <span><svg class="amostra" viewBox="0 0 8 8" aria-hidden="true"><rect class="estimado" width="8" height="8"/></svg>Estimado ≈ (tabela de preços)</span></div>
 {% endmacro %}
 
