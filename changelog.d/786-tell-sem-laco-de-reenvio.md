@@ -1,0 +1,2 @@
+### Changed
+- swarm: o `oute-swarm tell` recusa o segundo envio à mesma sessão quando o anterior voltou "ocupada" e nenhum evento `[sessao]` `idle`, `done` ou `blocked` dela chegou depois, com mensagem própria mandando esperar o evento; `--force` e `--wait` seguem valendo. A regra do `tell` em `acompanhamento.md` ficou mais curta (#786). **Precisa de release** (`oute-swarm` e `swarm/acompanhamento.md` vão na imagem).

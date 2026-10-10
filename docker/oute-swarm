@@ -21,6 +21,7 @@
 #              [--force]                            confere o campo e só então Enter). --force (só o Bardi): sessão ocupada
 #              [--wait [--timeout <s>]]             --wait: espera a sessão parar (relê a cada 5 s, OUTE_SWARM_TELL_POLL) e
 #                                                   envia; sem --force; timeout padrão 600 s, recusa final com código 3
+#                                                   2º envio à sessão que voltou ocupada, sem [sessao] parada no log depois: recusado (#786)
 #   oute-swarm ask "<pergunta curta>"               (usado pelo dispatcher) a rodada parou esperando uma decisão do Bardi:
 #                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
@@ -674,6 +675,24 @@ send_field() {
   return 3
 }
 
+# #786: 0 quando o último `tell` registrado para a sessão voltou "ocupada" e nenhum evento `[sessao]` idle/done/blocked
+# dela entrou no log depois (reenvio em laço). Um `tell ... ok` depois da recusa zera a conta. $1 = pasta da rodada,
+# $2 = slug, $3 = rótulo (#<n> <slug>). A recusa própria desta checagem diz "ainda ocupada" e não conta como a do laço
+tell_busy_loop() {
+  local state="$1" slug="$2" label="$3"
+  [[ -f "$state/log" ]] || return 1
+  awk -F'\t' -v slug="$slug" -v label="$label" '
+    { split($1, f, " "); l = $1 }
+    f[2] == "tell" && f[3] == slug && l ~ /tell [^ ]+ ok/ { busy = 0 }
+    f[2] == "tell" && f[3] == slug && index(l, "recusado: sessão " label " ocupada (") && index(l, "); tente depois") { busy = 1 }
+    f[2] == "watch" && f[3] == "[sessao]" {
+      sub(/^[^ ]+ watch \[sessao\] /, "", l)
+      if (index(l, label ": ") == 1) { rest = substr(l, length(label) + 3); if (rest ~ /^(idle|done|blocked)([ (]|$)/) busy = 0 }
+    }
+    END { exit busy ? 0 : 1 }' "$state/log"
+  return $?
+}
+
 cmd_tell() {
   local force=0 wait=0 timeout="" want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text
   local rc=1 start poll waited=0 tag="" sf
@@ -734,7 +753,10 @@ cmd_tell() {
          if (( waited >= timeout )); then rc=3; refuse "sessão $label ocupada ($st) depois de $waited s de espera"; fi
          sleep "$poll"; continue
        fi
-       (( force )) || refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
+       if (( ! force )); then
+         ! tell_busy_loop "$state" "$slug" "$label" || refuse "sessão $label ainda ocupada ($st) e o envio anterior já foi recusado; espere o evento [sessao] idle/done/blocked dela (não reenvie em laço) ou use --wait"
+         refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
+       fi
        echo "aviso: sessão $label em '$st'; seguindo por --force" >&2 ;;
   esac
   break
