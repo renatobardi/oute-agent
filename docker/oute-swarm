@@ -682,8 +682,8 @@ tell_busy_loop() {
   local state="$1" slug="$2" label="$3"
   [[ -f "$state/log" ]] || return 1
   awk -F'\t' -v slug="$slug" -v label="$label" '
-    { split($1, f, " "); l = $1 }
-    f[2] == "tell" && f[3] == slug && l ~ /tell [^ ]+ ok/ { busy = 0 }
+    { l = $0; sub(/\t.*/, "", l); split(l, f, " ") }
+    f[2] == "tell" && f[3] == slug && f[4] == "ok" { busy = 0 }
     f[2] == "tell" && f[3] == slug && index(l, "recusado: sessão " label " ocupada (") && index(l, "); tente depois") { busy = 1 }
     f[2] == "watch" && f[3] == "[sessao]" {
       sub(/^[^ ]+ watch \[sessao\] /, "", l)
