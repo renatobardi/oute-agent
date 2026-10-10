@@ -384,6 +384,14 @@ out("avisos: o texto de uma sessão fora do formato não vira item",
 out("avisos: falha de CI depois do PR fechado sem merge não vale",
     avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
                          {"event_name": avisos.WATCH_PR, "body": "PR #3 fechado sem merge (issue #1)", "t": 2, "slug": None}], "r", 3 * 10**9, None) == [])
+out("avisos: check com ':' no nome é falha, não verde (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · build: unit: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: falha de head já substituído não apaga a falha real (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
+                                            {"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail (head aaaaaaa, já substituído por bbbbbbb)", "t": 2, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: só a linha de verde tira o CI reprovado (#781)",
+    avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
+                         {"event_name": avisos.WATCH_CI, "body": "PR #3 · verde (head abc1234): test", "t": 2, "slug": None}], "r", 3 * 10**9, None) == [])
 out("avisos: nova falha depois do verde é outra ocorrência (id novo)",
     [i["id"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)]
     != [i["id"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 5, "slug": None}], "r", 6 * 10**9, None)])

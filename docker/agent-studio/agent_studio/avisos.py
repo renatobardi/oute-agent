@@ -24,8 +24,8 @@ SESSION_CLOSED = "oute.swarm.session.closed"
 LIMIT = 50  # itens na resposta (os mais novos); `total` diz quantos há
 
 _PR = re.compile(r"^PR #(\d{1,9}) (aberto|mergeado|fechado sem merge)\b")
-_CI = re.compile(r"^PR #(\d{1,9}) · ([^:]{1,100}): fail$")
-_CI_OK = re.compile(r"^PR #(\d{1,9}) · ")
+_CI_GREEN = re.compile(r"^PR #(\d{1,9}) · verde\b")  # a única linha de CI verde do watch; qualquer outra `PR #n · …` é falha
+_CI_LINE = re.compile(r"^PR #(\d{1,9}) · ")
 _SESSION = re.compile(r"^#(\d{1,9}) ([a-z0-9][a-z0-9-]{0,80}): (idle|done|blocked|working|sem agente)\b")
 
 TITLES = {"ci": "CI reprovado no PR #%s", "blocked": "Sessão #%s parada (blocked)", "question": "Pergunta pendente do dispatcher",
@@ -48,10 +48,10 @@ def _round_items(events, rnd, at_ns, name):
         if e["event_name"] == WATCH_PR and (m := _PR.match(body)):
             pr[m.group(1)] = (m.group(2), t)
         elif e["event_name"] == WATCH_CI:
-            if m := _CI.match(body):
-                ci[m.group(1)] = (True, t)
-            elif m := _CI_OK.match(body):
+            if m := _CI_GREEN.match(body):
                 ci[m.group(1)] = (False, t)
+            elif m := _CI_LINE.match(body):
+                ci[m.group(1)] = (True, t)
         elif e["event_name"] == WATCH_SESSION and (m := _SESSION.match(body)):
             sess[f"{m.group(1)}-{m.group(2)}"] = (m.group(3), t)
         elif e["event_name"] == SESSION_CLOSED and e["slug"]:
@@ -78,10 +78,10 @@ def pending(con, at_ns, cfg, limit=LIMIT):
         SELECT oute_swarm_round AS round, event_name, body, time_unix_nano AS t,
                json_extract_string(attributes, '$."oute.swarm.session"') AS slug
         FROM logs
-        WHERE event_name IN (?, ?, ?, ?, ?) AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ? AND time_unix_nano >= ?
+        WHERE event_name IN (?, ?, ?, ?) AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ? AND time_unix_nano >= ?
           AND oute_swarm_round NOT IN (SELECT oute_swarm_round FROM logs
                                         WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ?)
-        ORDER BY t, event_name""", [WATCH_PR, WATCH_CI, WATCH_SESSION, SESSION_CLOSED, SESSION_CLOSED, at_ns, lo,
+        ORDER BY t, event_name""", [WATCH_PR, WATCH_CI, WATCH_SESSION, SESSION_CLOSED, at_ns, lo,
                                     decisions_mod.CLOSED, at_ns])
     by_round = {}
     for e in events:
