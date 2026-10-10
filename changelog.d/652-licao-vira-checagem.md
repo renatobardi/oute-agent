@@ -1,0 +1,2 @@
+### Added
+- **Lint de diff para `rm` com variável e função de shell nova** (#652). `tests/lib/diff-lint.py`, rodado por `tests/diff-lint.test.sh`, reprova em linha ou função nova do diff `rm` com variável sem `${VAR:?}` e função de shell sem `local` no parâmetro posicional ou sem `return` no fim (as lições #539/#578 e #501/#585). O critério de quando a lição vira checagem está no `AGENTS.md`. Não precisa de release.
