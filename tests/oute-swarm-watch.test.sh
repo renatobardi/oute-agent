@@ -343,10 +343,21 @@ check "canal: pedido antigo sem o campo fica como era"    logged "[canal] pedido
 
 # 766. pendência parada (#766, da #767): PR aberto, CI vermelho ou sessão `done` sem PR, 30 minutos (OUTE_WATCH_STALL_S, padrão
 # 1800 s) sem mudar, saem numa linha `[pendencia]`; sem pendência, nada. O relógio é o arquivo OUTE_WATCH_CLOCK (epoch)
-pend_events() { log_events | grep -F '[pendencia]' || true; }
-clock() { echo "$1" > "$FAKE/clock"; }
+pend_events() {
+  log_events | grep -F '[pendencia]' || true
+  return 0
+}
+clock() {
+  local epoch="$1"
+  echo "$epoch" > "$FAKE/clock"
+  return 0
+}
 # hook <n> <epoch> [<comando extra>]: o gancho da passada <n> avança o relógio e, se pedido, muda o estado
-hook() { printf 'echo %s > "$FAKE/clock"\n%s\n' "$2" "${3:-:}" > "$FAKE/on-sleep-$1"; }
+hook() {
+  local n="$1" epoch="$2" extra="${3:-:}"
+  printf 'echo %s > "$FAKE/clock"\n%s\n' "$epoch" "$extra" > "$FAKE/on-sleep-$n"
+  return 0
+}
 T0=1800000000
 
 # PR aberto sem mudança: nada aos 28 min, uma linha aos 31, sem repetir aos 36, de novo aos 62 (a cada 30 min no máximo)
