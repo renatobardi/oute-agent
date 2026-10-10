@@ -21,8 +21,8 @@ nr="$(ls "$H/.oute/swarm" | grep -v '^swarm-test$' | head -1)"
 check "abertura: código 0"                               [ "$RC" -eq 0 -a -n "$nr" ]
 check "abertura: meta com o agente do dispatcher"      grep -qx 'agent=claude' "$H/.oute/swarm/$nr/meta"
 check "abertura: aviso com o dispatcher (#214)"          grep -qxF "dispatcher $nr · repo repo · max 2 · label bug" <<<"$OUT"
-check "abertura: prompt do dispatcher (#214)"            grep -qF "Você é o **dispatcher** da rodada \`$nr\`" "$FAKE/oute-task.last"
-check "abertura: limpeza reconhece os dois nomes (#214)" grep -q '"dispatcher da rodada `<id>`".*"coordenadora da rodada `<id>`"' "$FAKE/oute-task.last"
+check "abertura: prompt do dispatcher (#214)"            grep -qF "Você é o **dispatcher** da rodada \`$nr\`" "$FAKE/oute-task.all"
+check "abertura: limpeza reconhece os dois nomes (#214)" grep -q '"dispatcher da rodada `<id>`".*"coordenadora da rodada `<id>`"' "$FAKE/oute-task.all"
 check "abertura: linha no log"                           grep -q " abertura $nr (repo repo, max 2, label bug)$" "$H/.oute/swarm/$nr/log"
 check "abertura: oute.swarm.round.opened"                [ "$(ev '.name == "oute.swarm.round.opened"' | jq -c --arg r "$nr" 'select(.attrs["oute.swarm.round"] == $r and .attrs["oute.swarm.repo"] == "repo"
                                                               and .attrs["oute.swarm.max"] == "2" and .attrs["oute.swarm.label"] == "bug" and .attrs["oute.agent"] == "claude")' | grep -c .)" -eq 1 ]
@@ -82,7 +82,7 @@ agst working
 sw tell 8-bar "x"
 check "sem wait: ocupada recusa como antes (código 1)"   bash -c '[ "$1" -eq 1 ] && grep -q "ocupada (working); tente depois (o Bardi pode usar --force)" "$2"' _ "$RC" "$STATE/log"
 agst idle; unset OUTE_SWARM_TELL_POLL
-check "docs: ajuda, comandos.md e swarm.md citam --wait"  bash -c 'grep -qF -- "--wait [--timeout <s>]" "$1" && grep -qF -- "--wait [--timeout <s>]" "$2" && grep -qF "**\`--wait\`:**" "$3"' _ "$SWARM" "$ROOT/docker/comandos.md" "$ROOT/docker/swarm.md"
+check "docs: ajuda, comandos.md e swarm.md citam --wait"  bash -c 'grep -qF -- "--wait [--timeout <s>]" "$1" && grep -qF -- "--wait [--timeout <s>]" "$2" && grep -qF "**\`--wait\`:**" "$3"' _ "$SWARM" "$ROOT/docker/comandos.md" "$SWARM_MD_ALL"
 sw close 8-bar --yes
 check "close: linha com hora no log"                     grep -qE '^[0-9T:Z-]+ close 8-bar$' "$STATE/log"
 check "close: oute.swarm.session.closed"                 [ "$(n '.name == "oute.swarm.session.closed" and .attrs["oute.swarm.session"] == "8-bar"')" -eq 1 ]
@@ -208,7 +208,7 @@ check "ask só de marcas Unicode: vira vazio, erro e nada gravado" bash -c '[ "$
 rcv_stop
 # prompt do dispatcher, ajuda e comandos
 opn --max 2
-D="$FAKE/oute-task.last"
+D="$FAKE/oute-task.all"
 check "dispatcher: chama ask ao parar com opções numeradas (#386)" grep -qF 'toda vez que parar com opções numeradas para o Bardi' "$D"
 check "dispatcher: ask com pergunta curta, sem saída de host (#386)" grep -qF 'nunca saída de comando, de host ou de tela' "$D"
 check "dispatcher: answered ao receber a resposta (#386)" grep -qF 'o primeiro passo é `oute-swarm answered`' "$D"

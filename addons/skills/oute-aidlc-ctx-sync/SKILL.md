@@ -23,7 +23,7 @@ O ADR é o canônico; `CONTEXT.md`, `AGENTS.md` e `docker/agent-notes.md` (as no
    - Se o usuário pediu "todos", use todos os ADRs. Fim do passo: lista dos ADRs a conferir, dita ao usuário.
 2. **Conferir cada ADR.** Leia o ADR inteiro, adendos incluídos, e compare **status**, **decisões** e **adendos** com:
    - `CONTEXT.md`: seções "Decisões" e "Glossário";
-   - `AGENTS.md`: regras, mapa do repo e tabela do fluxo AI-DLC;
+   - `AGENTS.md` e `docs/mapa-repo.md`: regras, mapa do repo e tabela do fluxo AI-DLC;
    - `docker/agent-notes.md`.
 
    Procure: decisão que o resumo contradiz ou não menciona, ADR substituído ou revogado ainda citado como vigente, termo do glossário com sentido diferente, regra que o adendo mudou. Fim do passo: cada ADR da lista foi lido e comparado com os três arquivos (ou com os que existem).

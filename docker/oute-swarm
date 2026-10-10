@@ -276,6 +276,17 @@ herdr_space() {
   return 0
 }
 
+# renderiza um trecho do prompt do dispatcher (o núcleo swarm.md e cada etapa de swarm/, #753) com os valores da rodada.
+# Lê as variáveis do cmd_start que a chama (drop, keep, name, main, max, label, id, wtext, workers, nome_texto)
+render_prompt() {
+  local src="$1"
+  sed -e "s|@@$drop@@[^@]*@@/$drop@@||g" -e "s|@@/\?$keep@@||g" -e '/^- $/d' "$src" \
+    | sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
+        -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
+        -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|$nome_texto|g"
+  return $?
+}
+
 cmd_start() {
   [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>] [--subscription <assinatura>]"
   local repo max=3 label="" workers="" prefer="" subscr="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
@@ -300,6 +311,8 @@ cmd_start() {
   # (#761) todo dispatcher, Claude inclusive, tem a aba do watch --deliver: precisa do pane e do workspace do herdr
   [[ -n "${HERDR_PANE_ID:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "dispatcher $dagent precisa de HERDR_PANE_ID e HERDR_WORKSPACE_ID (rode no pane do herdr em que ele vai abrir)"
   command -v gh >/dev/null || die "gh não encontrado"
+  [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
+  [[ -d "$LIB/swarm" ]] || die "etapas do prompt ausentes: $LIB/swarm/"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
   id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
   space="$(herdr_space)"
@@ -312,17 +325,20 @@ cmd_start() {
   set_round_name_locked "$id"
   rname="$(meta_get "$STATE_ROOT/$id" name)"; rlabel="$(round_label "$STATE_ROOT/$id")"
   others="$(other_rounds "$main" "$id")"
-  [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   if [[ -n "$workers" ]]; then wtext="\`$workers\` (escolhido pelo Bardi na abertura, \`--agent $workers\`)"
   else wtext="seletor (a rodada abriu sem \`--agent\`: \`claude\`, com o modelo da fase de cada issue)"; fi
   # trechos do prompt que dependem do agente do dispatcher (@@CL@@…@@/CL@@ = Claude, @@CX@@…@@/CX@@ = o resto): fica
   # só o do agente dele; os marcadores saem, e o item que ficou vazio também. O do Claude é o texto de sempre, byte a byte
   if [[ "$dagent" == claude ]]; then drop=CX keep=CL; else drop=CL keep=CX; fi
-  prompt="$(sed -e "s|@@$drop@@[^@]*@@/$drop@@||g" -e "s|@@/\?$keep@@||g" -e '/^- $/d' "$LIB/swarm.md" \
-            | sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
-                -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
-                -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|${rname:+ (nome amigável **$rname**: o id é a chave em tudo, mas para o Bardi escreva sempre os dois, ex.: \`$rname ($id)\`)}|g")"
+  nome_texto="${rname:+ (nome amigável **$rname**: o id é a chave em tudo, mas para o Bardi escreva sempre os dois, ex.: \`$rname ($id)\`)}"
+  prompt="$(render_prompt "$LIB/swarm.md")"
   prompt="${prompt//'{{OUTRAS}}'/${others:-nenhuma}}"
+  # etapas (#753): o núcleo é o swarm.md; cada etapa é um arquivo de $LIB/swarm/, renderizado com os mesmos valores
+  # em $STATE_ROOT/$id/prompt/ e lido pelo dispatcher ao entrar nela (e de novo depois de um recomeço do contexto)
+  mkdir -p "$STATE_ROOT/$id/prompt"
+  for etapa in "$LIB"/swarm/*.md; do
+    render_prompt "$etapa" > "$STATE_ROOT/$id/prompt/$(basename "$etapa")"
+  done
   printf '%s' "$prompt" > "$STATE_ROOT/$id/prompt.md"   # o dispatcher recomeçado relê as instruções daqui (#752)
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id${rname:+ · $rname} (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
   echo "dispatcher $rlabel · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
@@ -1239,7 +1255,7 @@ w_renew() {
   fi
   rm -f "$W_STATE/reinicio.falhas"
   printf '%s\n' "$total" > "$W_STATE/reinicio.n"
-  w_ev contexto "contexto reiniciado depois de $((total - prev)) merge(s). Você é o dispatcher da rodada $(basename "$W_STATE"): releia $W_STATE/prompt.md (suas instruções) e $W_STATE/estado.md (o estado em disco, com a pergunta pendente) e siga dali"
+  w_ev contexto "contexto reiniciado depois de $((total - prev)) merge(s). Você é o dispatcher da rodada $(basename "$W_STATE"): releia $W_STATE/prompt.md (suas instruções, o núcleo), o trecho da etapa em que a rodada está (em $W_STATE/prompt/) e $W_STATE/estado.md (o estado em disco, com a pergunta pendente) e siga dali"
   return 0
 }
 

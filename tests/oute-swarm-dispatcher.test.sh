@@ -160,12 +160,12 @@ check "codex: oute-task abre o agente codex na fase plan" [ "$(tr '\n' ' ' < "$F
 check "codex: aba do watch criada com o label da rodada" grep -qF -- "tab create --workspace w1 --cwd $REPO --label watch $nr --no-focus" "$FAKE/herdr.log"
 check "codex: a aba roda o watch --deliver da rodada"    grep -qF "pane run w1:p2 OUTE_SWARM_ID=$nr oute-swarm watch --round $nr --deliver" "$FAKE/herdr.log"
 check "codex: o log registra a aba do watch"             grep -qF " watch --deliver aberto na aba w1:p2 (dispatcher codex, pane w1:p0)" "$H/.oute/swarm/$nr/log"
-check "codex: prompt com o watch fora do agente"         grep -qF 'já roda sozinho, fora de você, na aba `watch '"$nr"'` do herdr' "$FAKE/oute-task.last"
-check "codex: prompt sem a ferramenta Monitor"           bash -c '! grep -qF "Monitor" "$1"' _ "$FAKE/oute-task.last"
-check "codex: prompt sem run_in_background"              bash -c '! grep -qF "run_in_background" "$1"' _ "$FAKE/oute-task.last"
-check "codex: prompt com o tell --wait pelo shell"       grep -qF 'nohup oute-swarm tell <n>-<slug> "<mensagem>" --wait' "$FAKE/oute-task.last"
-check "codex: prompt com o passo sem ai-memory"          grep -qF '**Sem ai-memory:** se as ferramentas `memory_*` não existem na sua sessão' "$FAKE/oute-task.last"
-check "codex: sem marcador nem placeholder no prompt"    [ -z "$(grep -oE '@@/?(CL|CX)@@|\{\{[A-Z_]*\}\}' "$FAKE/oute-task.last")" ]
+check "codex: prompt com o watch fora do agente"         grep -qF 'já roda sozinho, fora de você, na aba `watch '"$nr"'` do herdr' "$FAKE/oute-task.all"
+check "codex: prompt sem a ferramenta Monitor"           bash -c '! grep -qF "Monitor" "$1"' _ "$FAKE/oute-task.all"
+check "codex: prompt sem run_in_background"              bash -c '! grep -qF "run_in_background" "$1"' _ "$FAKE/oute-task.all"
+check "codex: prompt com o tell --wait pelo shell"       grep -qF 'nohup oute-swarm tell <n>-<slug> "<mensagem>" --wait' "$FAKE/oute-task.all"
+check "codex: prompt com o passo sem ai-memory"          grep -qF '**Sem ai-memory:** se as ferramentas `memory_*` não existem na sua sessão' "$FAKE/oute-task.all"
+check "codex: sem marcador nem placeholder no prompt"    [ -z "$(grep -oE '@@/?(CL|CX)@@|\{\{[A-Z_]*\}\}' "$FAKE/oute-task.all")" ]
 check "codex: o watch fica de pé também sem workers (agent=codex só com --agent)" [ -n "$(grep -x 'agent=codex' "$M")" ]
 # 12b. sem HERDR_PANE_ID (fora do pane do herdr): recusa antes de criar a rodada
 CASE=ab-codex-sem-pane; round "$CASE"
@@ -194,10 +194,10 @@ for ag_args in "--agent claude" ""; do
   check "claude [${ag_args:-sem --agent}]: meta com dispatcher_pane, agent=claude" [ "$(grep -cxE 'agent=claude|dispatcher_pane=w1:p0' "$M")" -eq 2 ]
   check "claude [${ag_args:-sem --agent}]: o log registra a aba do watch" grep -qF " watch --deliver aberto na aba w1:p2 (dispatcher claude, pane w1:p0)" "$H/.oute/swarm/$nr/log"
   check "claude [${ag_args:-sem --agent}]: oute-task com claude" [ "$(tr '\n' ' ' < "$FAKE/oute-task.args")" == "--phase plan -r $REPO $nr claude " ]
-  check "claude [${ag_args:-sem --agent}]: prompt com o watch fora do agente" grep -qF 'já roda sozinho, fora de você, na aba `watch '"$nr"'` do herdr' "$FAKE/oute-task.last"
-  check "claude [${ag_args:-sem --agent}]: prompt sem a ferramenta Monitor" bash -c '! grep -qF "Monitor" "$1"' _ "$FAKE/oute-task.last"
-  check "claude [${ag_args:-sem --agent}]: prompt sem o trecho do Codex" bash -c '! grep -qF -e "Sem ai-memory" -e "nohup oute-swarm tell" "$1"' _ "$FAKE/oute-task.last"
-  check "claude [${ag_args:-sem --agent}]: sem marcador no prompt" [ -z "$(grep -oE '@@/?(CL|CX)@@' "$FAKE/oute-task.last")" ]
+  check "claude [${ag_args:-sem --agent}]: prompt com o watch fora do agente" grep -qF 'já roda sozinho, fora de você, na aba `watch '"$nr"'` do herdr' "$FAKE/oute-task.all"
+  check "claude [${ag_args:-sem --agent}]: prompt sem a ferramenta Monitor" bash -c '! grep -qF "Monitor" "$1"' _ "$FAKE/oute-task.all"
+  check "claude [${ag_args:-sem --agent}]: prompt sem o trecho do Codex" bash -c '! grep -qF -e "Sem ai-memory" -e "nohup oute-swarm tell" "$1"' _ "$FAKE/oute-task.all"
+  check "claude [${ag_args:-sem --agent}]: sem marcador no prompt" [ -z "$(grep -oE '@@/?(CL|CX)@@' "$FAKE/oute-task.all")" ]
 done
 # 12e. claude sem HERDR_PANE_ID: recusa antes de criar a rodada; tab create sem pane: o dispatcher não abre
 CASE=ab-claude-sem-pane; round "$CASE"
@@ -218,5 +218,31 @@ expected="$(sed -e '/^- @@CX@@/d' -e 's/@@CX@@[^@]*@@\/CX@@//g' -e 's/@@\/\?CL@@
   -e 's|{{NOME_TEXTO}}||g' -e "s|{{OUTRAS}}|swarm-test · space - · issues com sessão aberta: #7|g" \
   -e 's|{{WORKERS}}|seletor (a rodada abriu sem `--agent`: `claude`, com o modelo da fase de cada issue)|g' -e 's|{{SELECT_AGENT}}||g')"
 check "claude: o prompt = swarm.md sem os trechos do Codex" [ "$(cat "$FAKE/oute-task.last")" == "$expected" ]
+
+# ---------------------------------------------------------------- 13. as etapas do prompt (#753): renderizadas na pasta da rodada
+CASE=etapas-claude; round "$CASE"
+opn --max 2
+nr="$(nova)"; PD="$H/.oute/swarm/$nr/prompt"
+check "etapas: uma por arquivo de docker/swarm/, na pasta prompt/ da rodada" [ "$(ls "$PD")" == "$(ls "$ROOT/docker/swarm")" ]
+check "etapas: sem placeholder nem marcador de agente em nenhuma" bash -c '[ -z "$(cat "$1"/*.md | grep -oE "@@/?(CL|CX)@@|[{][{][A-Z_]+[}][}]")" ]' _ "$PD"
+check "etapas: o id da rodada entra no texto da etapa"  grep -qF "~/.oute/swarm/$nr/log" "$PD/acompanhamento.md"
+expected="$(sed -e '/^- @@CX@@/d' -e 's/@@CX@@[^@]*@@\/CX@@//g' -e 's/@@\/\?CL@@//g' "$ROOT/docker/swarm/pagina.md" | sed -e "s|{{ID}}|$nr|g")"
+check "etapas: claude, a etapa é o arquivo sem os trechos do Codex" [ "$(cat "$PD/pagina.md")" == "$expected" ]
+check "etapas: o prompt entregue é só o núcleo, sem texto de etapa" bash -c '! grep -qF "## 1. Triagem" "$1" && grep -qF "## Etapas: o texto é dividido em trechos" "$1"' _ "$FAKE/oute-task.last"
+check "etapas: o núcleo cita cada arquivo de etapa, e cada citado existe" bash -c 'for f in "$2"/*.md; do grep -qF "\`$(basename "$f")\`" "$1" || exit 1; done; for c in $(grep -o "\`[a-z]*\.md\`" "$1" | tr -d "\`" | sort -u); do [ "$c" == swarm.md ] || [ -e "$2/$c" ] || exit 1; done' _ "$ROOT/docker/swarm.md" "$ROOT/docker/swarm"
+check "etapas: a imagem copia docker/swarm/ para o lugar que o oute-swarm lê" grep -qxF 'COPY docker/swarm/ /usr/local/lib/oute/swarm/' "$ROOT/docker/Dockerfile"
+CASE=etapas-codex; round "$CASE"
+opn --max 2 --agent codex
+nr="$(nova)"; PD="$H/.oute/swarm/$nr/prompt"
+check "etapas: codex, a etapa tem o nohup do review e não o run_in_background" bash -c 'grep -qF "nohup oute-swarm step review" "$1/pagina.md" && ! grep -qF "run_in_background" "$1/pagina.md" "$1/acompanhamento.md"' _ "$PD"
+check "etapas: codex, o passo sem ai-memory está no fechamento" grep -qF '**Sem ai-memory:**' "$PD/fechamento.md"
+# 13b. sem a pasta das etapas na lib: recusa antes de criar a rodada
+CASE=etapas-ausentes; round "$CASE"
+LIBX="$TMP/libx"; mkdir -p "$LIBX"; cp "$ROOT/docker/swarm.md" "$ROOT/docker/swarm-worker.md" "$LIBX/"
+OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO -u OUTE_SWARM_MAX PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" OUTE_LIB="$LIBX" HERDR_ENV=1 \
+       HERDR_WORKSPACE_ID=w1 HERDR_PANE_ID=w1:p0 "$SWARM" "$REPO" 2>"$FAKE/err")"; RC=$?; ERR="$(cat "$FAKE/err")"
+check "sem etapas: recusa"                               [ "$RC" -ne 0 ]
+check "sem etapas: diz a causa"                          grep -qF 'etapas do prompt ausentes' <<<"$ERR"
+check "sem etapas: nenhum agente aberto"                 [ ! -e "$FAKE/oute-task.last" ]
 
 check_end
