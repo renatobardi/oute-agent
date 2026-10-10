@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # oute-regression — nível 1 de regressão dos agentes (#366, spike #52; poder de prova, #484): tarefas headless em Haiku
 # e em Sonnet, sob demanda, para conferir com o agente real que as instruções ainda produzem o efeito esperado depois de
-# uma release com mudança de imagem, de um upgrade dos CLIs ou de uma mudança nos prompts (`agent-notes.md`, `swarm.md`,
-# `swarm-worker.md`: a regra do `swarm-worker.md` obriga a rodar antes de abrir o PR). Nunca em CI; só você chama, no container.
+# uma release com mudança de imagem, de um upgrade dos CLIs ou de uma mudança nos prompts. Quem a exige, por arquivo (#755;
+# regra no `swarm-worker.md`): PR que muda `agent-notes.md` = a suíte inteira; só `swarm-worker.md` = só a tarefa 12
+# (`--task closes-refs`), nos dois modelos; só `swarm.md` = não exigida, porque nenhuma tarefa carrega o arquivo.
+# Nunca em CI; só você chama, no container.
 #
 # uso:  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
 #                       [--baseline <arquivo>] [--write-baseline] [--subscription claude|zai]
