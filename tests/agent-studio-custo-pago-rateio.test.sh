@@ -50,6 +50,16 @@ tok = dict(input=1000, output=100)
 def same(a, b):
     return a is not None and b is not None and abs(a - b) < 1e-9
 
+def same_tree(a, b):
+    # igualdade estrutural com tolerância só nos floats: o DuckDB soma em paralelo e a ordem da soma muda o último bit (0,0105 × 0,010499999999999999)
+    if isinstance(a, float) and isinstance(b, float):
+        return abs(a - b) < 1e-9
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(same_tree(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(same_tree(x, y) for x, y in zip(a, b))
+    return a == b
+
 # claude: US$ 30 por mês até o dia 15 e US$ 60 a partir do dia 16 (novembro tem 30 dias: US$ 1,00 e US$ 2,00 por dia); codex: plano de US$ 0; zai: sem plano
 db = StudioDB(tmp, "r")
 planos.append(db.st.con, "claude", "Max 5x", 30.0, "2025-10-01")
@@ -166,7 +176,7 @@ check("Dashboard, pago: a dica diz mensalidade rateada", "mensalidade do plano" 
 # ---- critério 8: a API, o tray e os alertas seguem com o custo de lista
 ul, ue = json.loads(get(app, "/v1/usage", Q)[1]), json.loads(get(app, "/v1/usage", QP)[1])
 check("GET /v1/usage: igual com e sem custo=pago, sem 'idle' e sem 'no_plan_calls' (custo de lista)",
-      ul == ue and "idle" not in ul and all("no_plan_calls" not in r["cost"] for r in ul["rows"]) and same(ul["totals"]["cost"]["real_usd"], 3.0 + 1.0 + 0.1 + 0.5 + 0.5))
+      same_tree(ul, ue) and "idle" not in ul and all("no_plan_calls" not in r["cost"] for r in ul["rows"]) and same(ul["totals"]["cost"]["real_usd"], 3.0 + 1.0 + 0.1 + 0.5 + 0.5))
 check("lista: o total é o custo de lista (informado 5,10 + calculado 0,0045 do codex e 0,0045 da zai)",
       same(usd(usage(paid=False)["totals"]["cost"]), 3.0 + 1.0 + 0.1 + 0.5 + 0.5 + 0.0045 + 0.0045) and "idle" not in usage(paid=False))
 PY
