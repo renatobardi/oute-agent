@@ -81,6 +81,33 @@ check "timeout não numérico: erro de uso, sem linha"     bash -c '[ "$1" -eq 1
 agst working
 sw tell 8-bar "x"
 check "sem wait: ocupada recusa como antes (código 1)"   bash -c '[ "$1" -eq 1 ] && grep -q "ocupada (working); tente depois (o Bardi pode usar --force)" "$2"' _ "$RC" "$STATE/log"
+# 8c. #786: o 2º tell à sessão que voltou ocupada, sem [sessao] parada no log depois, não vai (sem laço de reenvio)
+t0="$(tells)"; : > "$FAKE/herdr.log"
+sw tell 8-bar "x"
+check "laço: 2º tell sem evento → recusa própria (código 1)"  bash -c '[ "$1" -eq 1 ] && grep -qF "sessão #8 bar ainda ocupada (working) e o envio anterior já foi recusado; espere o evento [sessao]" "$2"' _ "$RC" "$STATE/log"
+check "laço: 2º tell recusado não digita nada"           bash -c '! grep -qE "send-(text|keys)" "$1"' _ "$FAKE/herdr.log"
+sw tell 8-bar "y"
+check "laço: o 3º segue recusado pela mesma regra"       grep -qF "$(printf 'ainda ocupada (working)')" <<<"$ERR"
+sw tell 8-bar "x" --force
+check "laço: --force segue valendo"                      bash -c '[ "$1" -eq 0 ] && grep -q "pane send-keys w1:p2 enter" "$2"' _ "$RC" "$FAKE/herdr.log"
+check "laço: o envio por --force zera a conta (ok no log)" bash -c '[ "$(grep -c " tell 8-bar ok (--force" "$1")" -eq 1 ]' _ "$STATE/log"
+sw tell 8-bar "z"
+check "laço: depois de um tell ok, a ocupada volta ao texto de antes" grep -q "ocupada (working); tente depois (o Bardi pode usar --force)" <<<"$ERR"
+sw tell 8-bar "w"
+printf '%s watch [sessao] #8 bar: working (voltou a trabalhar)\n' "$(date -u +%FT%TZ)" >> "$STATE/log"
+sw tell 8-bar "v"
+check "laço: evento working não libera"                  grep -q "ainda ocupada (working)" <<<"$ERR"
+printf '%s watch [sessao] #9 outra: idle (sem PR)\n' "$(date -u +%FT%TZ)" >> "$STATE/log"
+sw tell 8-bar "v"
+check "laço: evento de outra sessão não libera"          grep -q "ainda ocupada (working)" <<<"$ERR"
+printf '%s watch [sessao] #8 bar: idle (sem PR)\n' "$(date -u +%FT%TZ)" >> "$STATE/log"
+sw tell 8-bar "v"
+check "laço: com [sessao] parada depois, volta ao texto de antes" grep -q "ocupada (working); tente depois (o Bardi pode usar --force)" <<<"$ERR"
+check "laço: o envio com evento não leva a recusa própria" bash -c '! grep -q "ainda ocupada" <<<"$1"' _ "$ERR"
+FAKE_TELLWAIT=1 OUTE_SWARM_TELL_POLL=0.1 sw tell 8-bar "ok" --wait --timeout 1
+check "laço: --wait segue valendo (texto de timeout, não o do laço)" bash -c '[ "$1" -eq 3 ] && grep -q "depois de [0-9]* s de espera" <<<"$2"' _ "$RC" "$ERR"
+# as linhas de [sessao] escritas à mão acima não são eventos do receptor: saem do log antes da conta "uma linha = um evento"
+grep -vE ' watch \[sessao\] #[89] (bar|outra): ' "$STATE/log" > "$STATE/log.sem" || true; mv "$STATE/log.sem" "$STATE/log"
 agst idle; unset OUTE_SWARM_TELL_POLL
 check "docs: ajuda, comandos.md e swarm.md citam --wait"  bash -c 'grep -qF -- "--wait [--timeout <s>]" "$1" && grep -qF -- "--wait [--timeout <s>]" "$2" && grep -qF "**\`--wait\`:**" "$3"' _ "$SWARM" "$ROOT/docker/comandos.md" "$SWARM_MD_ALL"
 sw close 8-bar --yes
