@@ -2,8 +2,8 @@
 regra nova: lê do DuckDB os eventos que o `oute-swarm watch` e o `ask` já gravam e diz, por rodada que não fechou, o que está
 valendo agora.
 
-- `ci`: o último evento de CI do PR (`oute.swarm.watch.ci`) é `fail` e o PR não foi mergeado nem fechado depois dele. CI verde
-  depois, ou falha do head já substituído, tira o item.
+- `ci`: o último evento de CI do PR (`oute.swarm.watch.ci`) é `fail` e o PR não foi mergeado nem fechado depois dele. Só a linha de CI
+  verde do `watch` tira o item; qualquer outra linha `PR #n · …`, inclusive a falha de head já substituído, conta como falha.
 - `blocked`: o último evento da sessão (`oute.swarm.watch.sessao`) é `blocked`. Qualquer estado seguinte, ou o
   `oute.swarm.session.closed` da sessão, tira o item.
 - `question`: a pergunta pendente do dispatcher (`decisions.pending`); some quando o Bardi responde.
@@ -24,7 +24,9 @@ SESSION_CLOSED = "oute.swarm.session.closed"
 LIMIT = 50  # itens na resposta (os mais novos); `total` diz quantos há
 
 _PR = re.compile(r"^PR #(\d{1,9}) (aberto|mergeado|fechado sem merge)\b")
-_CI_GREEN = re.compile(r"^PR #(\d{1,9}) · verde\b")  # a única linha de CI verde do watch; qualquer outra `PR #n · …` é falha
+# a única linha de CI verde do watch (`verde`, o head de 7 caracteres opcional e `: <checks>`), que não termina em `: fail`;
+# qualquer outra `PR #n · …` é falha
+_CI_GREEN = re.compile(r"^PR #(\d{1,9}) · verde( \(head [0-9a-f]{7}\))?: ")
 _CI_LINE = re.compile(r"^PR #(\d{1,9}) · ")
 _SESSION = re.compile(r"^#(\d{1,9}) ([a-z0-9][a-z0-9-]{0,80}): (idle|done|blocked|working|sem agente)\b")
 
@@ -48,7 +50,7 @@ def _round_items(events, rnd, at_ns, name):
         if e["event_name"] == WATCH_PR and (m := _PR.match(body)):
             pr[m.group(1)] = (m.group(2), t)
         elif e["event_name"] == WATCH_CI:
-            if m := _CI_GREEN.match(body):
+            if (m := _CI_GREEN.match(body)) and not body.endswith(": fail"):
                 ci[m.group(1)] = (False, t)
             elif m := _CI_LINE.match(body):
                 ci[m.group(1)] = (True, t)

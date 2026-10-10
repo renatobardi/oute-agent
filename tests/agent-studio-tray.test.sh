@@ -389,6 +389,9 @@ out("avisos: check com ':' no nome é falha, não verde (#781)",
 out("avisos: falha de head já substituído não apaga a falha real (#781)",
     [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
                                             {"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail (head aaaaaaa, já substituído por bbbbbbb)", "t": 2, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: check de nome verde-lint ou verde, com falha, não é a linha de verde (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · verde-lint: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"]
+    and [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · verde: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
 out("avisos: só a linha de verde tira o CI reprovado (#781)",
     avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
                          {"event_name": avisos.WATCH_CI, "body": "PR #3 · verde (head abc1234): test", "t": 2, "slug": None}], "r", 3 * 10**9, None) == [])
