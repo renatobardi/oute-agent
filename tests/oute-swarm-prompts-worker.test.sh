@@ -156,11 +156,16 @@ check "worker: confere local em cada função nova (#585)" grep -qF 'todo parâm
 check "worker: confere return explícito em cada função nova (#585)" grep -qF 'deve haver um `return` explícito no fim' "$W"
 check "worker: informa a contagem e o resultado no corpo do PR (#585)" grep -qF 'No corpo do PR, informe: `Funções novas: N; todas com local e return.`' "$W"
 # 484. PR de prompt roda a regressão dos agentes antes de abrir; a recusa por cota vai no Falta
-check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` roda a regressão dos agentes antes de abrir (#484).** Rode `oute-regression` no container (13 tarefas, em Haiku e em Sonnet' "$W"
+check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir, por arquivo" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` roda a regressão dos agentes só onde ela testa o arquivo (#484, #755).**' "$W"
+check "755: worker: agent-notes.md, regressão completa" grep -qF '(a) muda `docker/agent-notes.md`, sozinho ou junto de outro: regressão completa' "$W"
+check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep -qF '(b) muda `docker/swarm-worker.md` e não o `docker/agent-notes.md`: só a tarefa 12, `oute-regression --task closes-refs`, em Haiku e em Sonnet' "$W"
+check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md`: regressão não exigida, porque nenhuma tarefa carrega o arquivo e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
+check "755: o nome da tarefa 12 na regra existe na pasta das tarefas" test -f "$ROOT/docker/regression/12-closes-refs.sh"
+check "755: oute-regression e AGENTS.md citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/AGENTS.md"
 check "484: worker: a saída inteira vai no corpo, na seção ## Regressão dos agentes" grep -qF 'na seção `## Regressão dos agentes`, com a linha `repetições:` que ela imprime' "$W"
 check "484: worker: saída 3 = trava de cota; não sobe o limite e declara no ## Falta" grep -qF 'Saída 3 é a trava de cota (`OUTE_REGRESSION_MAX_PCT`, padrão 60%): não suba o limite e não rode de outro jeito. Declare no `## Falta` do PR que a regressão não rodou' "$W"
 check "484: worker: o merge sem a regressão fica para o Bardi (decisão do Bardi)" grep -qF 'o merge fica para o Bardi decidir (a auditoria recomenda `decisão do Bardi`)' "$W"
-check "484: skill de auditoria: confere a saída da regressão e recomenda decisão do Bardi sem ela" bash -c 'grep -qF "**Regressão dos agentes (#484).**" "$1" && grep -qF "a ação recomendada é \`decisão do Bardi\`" "$1" && grep -qF -- "- \`decisão do Bardi\`: PR de prompt" "$1"' _ "$A"
+check "484: skill de auditoria: confere a saída da regressão e recomenda decisão do Bardi sem ela" bash -c 'grep -qF "**Regressão dos agentes (#484, #755).**" "$1" && grep -qF "a ação recomendada é \`decisão do Bardi\`" "$1" && grep -qF -- "- \`decisão do Bardi\`: PR de prompt" "$1"' _ "$A"
 check "484: skill de auditoria: a ação decisão do Bardi está no modelo do relatório" grep -qF 'perguntar ao autor | decisão do Bardi | não fazer merge' "$R"
 
 # 11z. bloco "Antes de abrir o PR" no topo das regras e a regra do rm no texto que o spawn acrescenta (#578)
