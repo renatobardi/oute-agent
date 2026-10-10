@@ -48,6 +48,7 @@ struct TrayMenu: View {
         if let snapshot = model.reading.snapshot {
             proposals(snapshot)
             decisions(snapshot)
+            attention(snapshot)
             steps(snapshot)
             summaries(snapshot)
             alerts(snapshot)
@@ -86,6 +87,19 @@ struct TrayMenu: View {
             row("Decisões pendentes do swarm: \(decisions.pending.count)", .decisions)
             ForEach(Array(decisions.pending.enumerated()), id: \.offset) { _, decision in
                 row(MenuText.decision(decision), .pendingDecision)
+            }
+            Divider()
+        }
+    }
+
+    /// O que pede atenção nas rodadas abertas (#776): cada linha abre a página da rodada. Sem item, não aparece.
+    @ViewBuilder
+    private func attention(_ snapshot: TraySnapshot) -> some View {
+        if let attention = snapshot.attention, !attention.rows.isEmpty {
+            row(MenuText.attentionHeader(attention), .attention)
+            ForEach(Array(attention.rows.enumerated()), id: \.offset) { _, item in
+                Button { model.openAttention(item) } label: { MenuLabel(MenuText.attention(item), .attentionItem) }
+                    .disabled(model.attentionURL(item) == nil)
             }
             Divider()
         }

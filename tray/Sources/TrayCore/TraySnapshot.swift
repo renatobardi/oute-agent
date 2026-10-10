@@ -121,6 +121,30 @@ public struct TraySnapshot: Decodable, Equatable {
         public let rows: [Step]
     }
 
+    /// O que pede atenção do Bardi numa rodada aberta (#776): CI reprovado, sessão `blocked`, pergunta pendente e PR
+    /// mergeado. O `title` é fixo por tipo e vem do agent-studio; o tray só mostra e abre a página da rodada.
+    public struct Attention: Decodable, Equatable {
+        public struct Item: Decodable, Equatable {
+            /// Por ocorrência (`rodada|tipo|chave|hora`): o fato que volta depois de resolvido tem outro `id`.
+            public let id: String
+            public let round: String
+            /// Nome amigável da rodada (#605); ausente em rodada antiga.
+            public let name: String?
+            /// `ci`, `blocked`, `question` ou `merged`.
+            public let kind: String
+            /// Número do PR (`ci`, `merged`) ou da issue da sessão (`blocked`); ausente na pergunta.
+            public let key: String?
+            public let title: String
+            public let at: String?
+            public let ageSeconds: Int?
+            /// Caminho da página da rodada, relativo ao endereço do agent-studio.
+            public let url: String?
+        }
+
+        public let total: Int?
+        public let rows: [Item]
+    }
+
     public let bar: Bar
     public let machines: [Machine]
     public let proposals: Proposals
@@ -131,6 +155,8 @@ public struct TraySnapshot: Decodable, Equatable {
     public let decisions: Decisions?
     /// Ausente em agent-studio anterior à #508.
     public let steps: Steps?
+    /// Ausente em agent-studio anterior à #776.
+    public let attention: Attention?
 
     public static func decode(_ data: Data) throws -> TraySnapshot {
         let decoder = JSONDecoder()

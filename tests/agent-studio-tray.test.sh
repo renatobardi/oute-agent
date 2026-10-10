@@ -59,6 +59,7 @@ def step(t, rnd, eid, kind, rev, review, key=None):
              "oute.swarm.step.reviewer": "claude-opus-5-5", "oute.swarm.step.refcheck": "ausente"}
     if key: attrs["oute.swarm.step.key"] = key
     return event(t, "oute.swarm.step.published", eid, attrs, text)
+watch = lambda t, eid, kind, rnd, body: event(t, f"oute.swarm.watch.{kind}", eid, {"oute.swarm.round": rnd, "oute.swarm.source": "watch"}, body)
 cx = lambda m, i=0, o=0, c=0: {"model": m, "codex.turn.token_usage.non_cached_input_tokens": i,
                                "codex.turn.token_usage.output_tokens": o, "codex.turn.token_usage.cached_input_tokens": c}
 # Claude no formato de produção (#157): o custo real vem no log api_request de mesmo request_id
@@ -100,7 +101,22 @@ logs = {"resourceLogs": [
     event(NOW - 2500, "oute.swarm.round.opened", "ev-tb-open", {"oute.swarm.round": "swarm-1004-0900", "oute.swarm.repo": "oute-agent", "oute.swarm.max": 3}),
     step(NOW - 2000, "swarm-1004-0900", "ev-tb-f", "fechamento", 1, "aprovado"),
     event(NOW - 1000, "oute.swarm.round.closed", "ev-tb-close", {"oute.swarm.round": "swarm-1004-0900"}),
-    step(NOW - 60, "swarm-1004-1100", "ev-tc-f", "fechamento", 1, "aprovado")]),
+    step(NOW - 60, "swarm-1004-1100", "ev-tc-f", "fechamento", 1, "aprovado"),
+    # o que pede atenção (#776), na rodada aberta TA; o que não vale mais ou é de rodada fechada (TB) não entra
+    watch(NOW - 800, "ev-w1", "pr", "swarm-1004-1000", "PR #12 mergeado (issue #7)"),
+    watch(NOW - 700, "ev-w2", "ci", "swarm-1004-1000", "PR #13 · test: fail"),
+    watch(NOW - 690, "ev-w3", "ci", "swarm-1004-1000", "PR #14 · test: fail"),
+    watch(NOW - 600, "ev-w4", "ci", "swarm-1004-1000", "PR #14 · verde (head abc1234): test"),
+    watch(NOW - 590, "ev-w5", "ci", "swarm-1004-1000", "PR #15 · test: fail"),
+    watch(NOW - 580, "ev-w6", "pr", "swarm-1004-1000", "PR #15 mergeado (issue #9)"),
+    watch(NOW - 570, "ev-w7", "sessao", "swarm-1004-1000", "#7 foo: blocked (sem PR)"),
+    watch(NOW - 560, "ev-w8", "sessao", "swarm-1004-1000", "#8 bar: blocked (PR #16 open)"),
+    watch(NOW - 550, "ev-w9", "sessao", "swarm-1004-1000", "#8 bar: working (voltou a trabalhar)"),
+    watch(NOW - 540, "ev-w10", "sessao", "swarm-1004-1000", "#9 baz: blocked (sem PR)"),
+    event(NOW - 530, "oute.swarm.session.closed", "ev-w11", {"oute.swarm.round": "swarm-1004-1000", "oute.swarm.session": "9-baz"}),
+    watch(NOW - 520, "ev-w12", "sessao", "swarm-1004-1000", "#10 <b>x: blocked (sem PR)"),
+    watch(NOW - 1500, "ev-wb", "ci", "swarm-1004-0900", "PR #20 · test: fail"),
+    event(NOW - 510, "oute.swarm.round.asked", "ev-w13", {"oute.swarm.round": "swarm-1004-1000"}, "Posso fazer merge do PR #13?")]),
   rl({"host.name": "oute-velho", "service.name": "oute"},
      [{"timeUnixNano": str((NOW - 3 * 86400) * 10**9), "severityNumber": 9, "body": {"stringValue": "atrasado"}}]),
 ]}
@@ -129,7 +145,8 @@ done
 
 # ---------------------------------------------------------------- 2. banco vazio: o menu inteiro, zerado
 E="$(tray)"
-check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$E"
+check "vazio: todos os blocos"                         jqe 'keys == ["alerts", "at", "attention", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$E"
+check "vazio: nenhum aviso de rodada"                  jqe '.attention == {total: 0, rows: []}' <<<"$E"
 check "vazio: nenhum pedido (a tabela ainda não existe no SurrealDB)" jqe '.proposals == {available: true, total: 0, pending: []} and .bar.pending == 0' <<<"$E"
 check "vazio: nenhuma etapa (a tabela ainda não existe no SurrealDB)" jqe '.steps == {available: true, total: 0, rows: []}' <<<"$E"
 check "vazio: custo nulo (nunca zero), sem agente"     jqe '.cost_today | .usd == null and .real_usd == null and .estimated_usd == null and .estimated == false and .unpriced_calls == 0 and .agents == []' <<<"$E"
@@ -143,7 +160,7 @@ check "ingestão: métricas = 200"                       test "$(post metrics "$
 # ---------------------------------------------------------------- 3. contrato da resposta (o que o #158 consome)
 R="$(tray)"
 echo "$R" > "$TMP/tray.json"
-check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$R"
+check "resposta: os blocos do menu"                    jqe 'keys == ["alerts", "at", "attention", "bar", "config", "cost_today", "decisions", "errors_last_hour", "machines", "proposals", "steps", "timezone"]' <<<"$R"
 check "at: a hora da resposta (UTC, ISO)"              jqe --argjson now "$NOW" '(.at | fromdateiso8601) as $t | $t >= $now and $t < $now + 300' <<<"$R"
 check "bar: só os dois contadores"                     jqe '.bar == {pending: 2, alerts: 3}' <<<"$R"
 check "bar: iguais ao tamanho dos blocos"              jqe '.bar.pending == .proposals.total and .bar.alerts == (.alerts | length)' <<<"$R"
@@ -173,6 +190,14 @@ check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r 
 check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep -q "systemctl" "$1"' _ "$TMP/tray.json"
 
 # etapas das rodadas abertas (#508)
+check "atenção: total e campos de cada item"           jqe '.attention | keys == ["rows", "total"] and .total == 5 and (.rows | length == 5) and (.rows | all(keys == ["age_seconds", "at", "id", "key", "kind", "name", "round", "title", "url"]))' <<<"$R"
+check "atenção: pergunta, sessão blocked, CI reprovado e merge; o resto não vale mais" jqe '[.attention.rows[] | .kind + ":" + (.key // "")] | sort == ["blocked:7", "ci:13", "merged:12", "merged:15", "question:"]' <<<"$R"
+check "atenção: títulos fixos por tipo"                jqe '[.attention.rows[].title] | sort == ["CI reprovado no PR #13", "PR #12 mergeado", "PR #15 mergeado", "Pergunta pendente do dispatcher", "Sessão #7 parada (blocked)"]' <<<"$R"
+check "atenção: nome amigável e link da página da rodada (só da rodada aberta)" jqe '.attention.rows | all(.round == "swarm-1004-1000" and .name == "Brave_Otter" and .url == "/rodada?id=swarm-1004-1000")' <<<"$R"
+check "atenção: id por ocorrência (rodada|tipo|chave|hora)" jqe '.attention.rows | all(.id | test("^swarm-1004-1000\\|(ci|blocked|question|merged)\\|[0-9]*\\|[0-9]+$"))' <<<"$R"
+check "atenção: idade em segundos do fato"             jqe '[.attention.rows[] | select(.kind == "ci") | .age_seconds][0] as $a | $a >= 700 and $a < 1000' <<<"$R"
+check "atenção: o texto do evento e o rótulo estranho nunca chegam" bash -c '! grep -qF -e "<b>" -e "baz" -e "verde" -e "PR #20" <<<"$1"' _ "$(jq -c .attention <<<"$R")"
+check "atenção: a pergunta vem como decisão pendente também" jqe '.decisions.total == 1 and .decisions.pending[0].round == "swarm-1004-1000"' <<<"$R"
 check "etapas: disponível, total e lista"              jqe '.steps | keys == ["available", "rows", "total"] and .available == true and .total == 4 and (.rows | length == 4)' <<<"$R"
 check "etapas: campos de cada uma, nenhum é o texto"   jqe '.steps.rows | all(keys == ["age_seconds", "key", "kind", "name", "published_at", "rev", "review", "round", "title", "url"])' <<<"$R"
 check "etapas: da mais nova para a mais antiga; a rodada fechada (TB) fica fora; a sem estado (TC) conta" jqe '[.steps.rows[] | .round + ":" + .kind + ":" + (.key // "")] == ["swarm-1004-1100:fechamento:", "swarm-1004-1000:merge:13", "swarm-1004-1000:merge:12", "swarm-1004-1000:triagem:"]' <<<"$R"
@@ -264,6 +289,8 @@ check "fixture: pedido local, de outro host e de id inválido" jqe '[.proposals.
 check "fixture: o id inválido vai codificado no link" jqe '.proposals.pending[0] | (.id | test("[<>& ]")) and (.url | test("^/pedido\\?id=[A-Za-z0-9%/._-]+$"))' < "$FIX/tray.json"
 check "fixture: custo de lista (não estimado) e chamada sem preço" jqe '.cost_today | .estimated == false and .listed_usd > 0 and .unpriced_calls > 0 and (.agents | any(.real_usd == null))' < "$FIX/tray.json"
 check "fixture: etapas das rodadas, com o merge do PR e o veredito do revisor (#508)" jqe '.steps | .available == true and .total == (.rows | length) and ([.rows[].review] | unique | length) > 1 and (.rows | any(.kind == "merge" and .key != null and (.url | test("^/rodada\\?id=[A-Za-z0-9%._-]+#etapa-merge-[0-9]+$")))) and (.rows | any(.key == null))' < "$FIX/tray.json"
+check "fixture: avisos das rodadas, um de cada tipo, com o caminho da página (#776)" jqe '.attention | .total == (.rows | length) and ([.rows[].kind] | sort == ["blocked", "ci", "merged", "question"]) and (.rows | all(.url | test("^/rodada\\?id=[A-Za-z0-9%._-]+$"))) and ([.rows[].id] | unique | length == 4)' < "$FIX/tray.json"
+check "fixture: sem o SurrealDB os avisos seguem (vêm do DuckDB)" jqe '.attention == {total: 0, rows: []}' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: sem o SurrealDB, etapas indisponíveis" jqe '.steps == {available: false, total: null, rows: []}' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: contador nulo só com o SurrealDB fora" jqe '.bar.pending == null and .proposals.available == false' < "$FIX/tray-sem-surrealdb.json"
 check "fixture: contadores da barra batem com os blocos" jqe '.bar == {pending: .proposals.total, alerts: (.alerts | length)}' < "$FIX/tray.json"
@@ -341,6 +368,36 @@ out("pedido: barra do id fica no link, o espaço é codificado", p["pending"][0]
 out("pedido sem hora e sem título: campos nulos, sem quebrar", p["pending"][1] == {"id": "sem-hora", "title": None, "as": None, "agent": None, "host": None, "instance": None, "proposed_at": None, "age_seconds": None, "url": "/pedido?id=sem-hora"})
 out("pedido proposto no futuro (relógio do host): idade zero, nunca negativa", proposals.age_seconds("2030-01-01T00:00:00Z", 0) == 0)
 out("nenhum pendente: total zero", tray.pending(Fake([], 0), 0) == {"available": True, "total": 0, "pending": []})
+
+# avisos das rodadas (#776): a leitura que falha cai em vazio, sem derrubar o menu
+from agent_studio import avisos
+def _boom(con, at_ns, cfg): raise RuntimeError("segredo-da-falha-dos-avisos")
+_ok = avisos.pending
+avisos.pending = _boom
+try:
+    caiu = tray._attention(None, 0, None)
+finally:
+    avisos.pending = _ok
+out("avisos: leitura que falha cai em vazio (o menu segue)", caiu == {"total": 0, "rows": []} == avisos.NONE)
+out("avisos: o texto de uma sessão fora do formato não vira item",
+    avisos._round_items([{"event_name": avisos.WATCH_SESSION, "body": "#7 Foo/../x: blocked", "t": 1, "slug": None}], "r", 2 * 10**9, None) == [])
+out("avisos: falha de CI depois do PR fechado sem merge não vale",
+    avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
+                         {"event_name": avisos.WATCH_PR, "body": "PR #3 fechado sem merge (issue #1)", "t": 2, "slug": None}], "r", 3 * 10**9, None) == [])
+out("avisos: check com ':' no nome é falha, não verde (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · build: unit: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: falha de head já substituído não apaga a falha real (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
+                                            {"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail (head aaaaaaa, já substituído por bbbbbbb)", "t": 2, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: check de nome verde-lint ou verde, com falha, não é a linha de verde (#781)",
+    [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · verde-lint: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"]
+    and [i["key"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · verde: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)] == ["3"])
+out("avisos: só a linha de verde tira o CI reprovado (#781)",
+    avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None},
+                         {"event_name": avisos.WATCH_CI, "body": "PR #3 · verde (head abc1234): test", "t": 2, "slug": None}], "r", 3 * 10**9, None) == [])
+out("avisos: nova falha depois do verde é outra ocorrência (id novo)",
+    [i["id"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 1, "slug": None}], "r", 3 * 10**9, None)]
+    != [i["id"] for i in avisos._round_items([{"event_name": avisos.WATCH_CI, "body": "PR #3 · test: fail", "t": 5, "slug": None}], "r", 6 * 10**9, None)])
 
 # o app com um SurrealDB que responde fora do formato, e sem SurrealDB
 class Snap:

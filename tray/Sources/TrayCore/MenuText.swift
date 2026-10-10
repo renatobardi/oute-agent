@@ -48,6 +48,20 @@ public enum MenuText {
         return join([step.title, roundLabel(step.round, name: step.name), review, step.ageSeconds.map(Age.text(seconds:))])
     }
 
+    public static func attentionHeader(_ attention: TraySnapshot.Attention) -> String {
+        "Avisos das rodadas: \(attention.total ?? attention.rows.count)"
+    }
+
+    /// "CI reprovado no PR #13 · Brave_Otter (swarm-1003-1211) · há 20 min": título fixo da API, rodada e idade.
+    public static func attention(_ item: TraySnapshot.Attention.Item) -> String {
+        join([item.title, roundLabel(item.round, name: item.name), item.ageSeconds.map(Age.text(seconds:))])
+    }
+
+    /// O corpo da notificação do macOS: o título do item já vai como título dela.
+    public static func attentionBody(_ item: TraySnapshot.Attention.Item) -> String {
+        join([roundLabel(item.round, name: item.name), item.ageSeconds.map(Age.text(seconds:))])
+    }
+
     public static func decision(_ decision: TraySnapshot.Decision) -> String {
         join([decision.round.map { roundLabel($0, name: decision.name) }, decision.question, decision.ageSeconds.map(Age.text(seconds:))])
     }
