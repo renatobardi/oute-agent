@@ -1,2 +1,0 @@
-### Changed
-- **Skill `oute-aidlc-qa-pr-audit` dividida em três arquivos** (#754). O `SKILL.md` fica só com o caminho de toda auditoria (passos 1 a 13, de 61.953 para 46.021 bytes); o passo 14 (fase de merge) vai para `merge.md` e o modelo do relatório (ordem, forma curta e forma completa) para `relatorio.md`, na mesma pasta, lidos só quando usados. As classes de achado e o que bloqueia o merge não mudam. Skill entra com `git pull` + `oute down/up`, sem release.

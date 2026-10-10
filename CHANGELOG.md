@@ -4,6 +4,17 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-09
+
+### Added
+- **Medição por sessão no agent-studio** (#751). A tela de Uso e o `GET /v1/usage` ganham o papel `reviewer` (o revisor das etapas, separado do dispatcher), as quebras papel × modelo (`by_role_model`) e papel × fase (`by_role_phase`), a parte do custo que é saída e a que é entrada + cache (`cost.output_usd`, `cost.input_cache_usd`, pelo preço de lista dos tokens) e as 20 sessões e conversas mais caras da janela (`top_sessions`, `top_conversations`) com chamadas, tokens, custo e o contexto por chamada (média e máximo de entrada + cache lido). Não muda preço nem rótulo de custo. **Precisa de release** (o agent-studio vai na imagem).
+- **`oute-swarm premerge`, `oute-swarm estado` e recomeço do contexto do dispatcher** (#752). `premerge <pr> --head <sha> --base <sha>` confere sem modelo, antes do merge, o estado do PR, o head auditado, a base ensaiada e o CI verde com o `SonarCloud Code Analysis` (uma linha e um código de saída); o `swarm.md` manda rodá-lo no lugar da comparação à mão. `estado` grava `~/.oute/swarm/<rodada>/estado.md` só do disco (sessões, merges, pergunta pendente, autorização permanente). O `watch --deliver` limpa a conversa do dispatcher a cada `OUTE_SWARM_RESTART_MERGES` merges (padrão 5, `0` desliga) e manda reler o `prompt.md` e o `estado.md`. O `swarm.md` ganha a regra de quando a conversa de acompanhamento é necessária e os canais do aviso sem modelo. **Precisa de release** (`docker/oute-swarm` e `docker/swarm.md` vão na imagem).
+
+### Changed
+- **Skill `oute-aidlc-qa-pr-audit` dividida em três arquivos** (#754). O `SKILL.md` fica só com o caminho de toda auditoria (passos 1 a 13, de 61.953 para 46.021 bytes); o passo 14 (fase de merge) vai para `merge.md` e o modelo do relatório (ordem, forma curta e forma completa) para `relatorio.md`, na mesma pasta, lidos só quando usados. As classes de achado e o que bloqueia o merge não mudam. Skill entra com `git pull` + `oute down/up`, sem release.
+- **`swarm.md` ensina o arquivo de fontes do revisor das etapas** (#771). Na triagem (§1) e no fechamento (§4.3, passo 3) o dispatcher grava um arquivo de fatos com a saída de cada comando local que o texto cita, usa SHAs de 12 caracteres e tira URLs de job do Actions das fontes, para o filtro de segredo do `step review` não recusar o arquivo. **Precisa de release** (`docker/swarm.md` vai na imagem).
+- **Auditoria delegada a subagente no `swarm.md`** (#772). No §3, o subagente de auditoria devolve o texto do relatório e o dispatcher o publica, com `oute-refcheck` antes; a recusa da ferramenta de escrita ao subagente não bloqueia a auditoria. **Precisa de release** (`docker/swarm.md` vai na imagem).
+
 ## [0.8.0] - 2026-10-09
 
 ### Added
