@@ -341,4 +341,89 @@ check "canal: sessão da rodada leva (da rodada)"          logged "[canal] pedid
 check "canal: sessão de fora leva (alheio)"               logged "[canal] pedido pendente b-alheio: ajuste do deploy (agente claude, user) (alheio) — aprovação no host: oute watch"
 check "canal: pedido antigo sem o campo fica como era"    logged "[canal] pedido pendente c-antigo: ajuste #7 sem o campo (agente claude, user) — aprovação no host: oute watch"
 
+# 766. pendência parada (#766, da #767): PR aberto, CI vermelho ou sessão `done` sem PR, 30 minutos (OUTE_WATCH_STALL_S, padrão
+# 1800 s) sem mudar, saem numa linha `[pendencia]`; sem pendência, nada. O relógio é o arquivo OUTE_WATCH_CLOCK (epoch)
+pend_events() {
+  log_events | grep -F '[pendencia]' || true
+  return 0
+}
+clock() {
+  local epoch="$1"
+  echo "$epoch" > "$FAKE/clock"
+  return 0
+}
+# hook <n> <epoch> [<comando extra>]: o gancho da passada <n> avança o relógio e, se pedido, muda o estado
+hook() {
+  local n="$1" epoch="$2" extra="${3:-:}"
+  printf 'echo %s > "$FAKE/clock"\n%s\n' "$epoch" "$extra" > "$FAKE/on-sleep-$n"
+  return 0
+}
+T0=1800000000
+
+# PR aberto sem mudança: nada aos 28 min, uma linha aos 31, sem repetir aos 36, de novo aos 62 (a cada 30 min no máximo)
+CASE=pendparada; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+hook 1 $((T0 + 1680)); hook 2 $((T0 + 1860)); hook 3 $((T0 + 2160)); hook 4 $((T0 + 3720))
+echo : > "$FAKE/on-sleep-5"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "pendência: código 0"                              [ "$RC" -eq 0 ]
+check "pendência: PR aberto parado sai duas vezes, 30 min depois da primeira" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto"$'\n'"[pendencia] 1 parada(s) há 62 min ou mais, sem mudança: PR #12 aberto" ]
+check "pendência: a linha vai ao stdout, igual ao log"    [ "$(log_events)" == "$(out_events)" ]
+clock $((T0 + 3800)); echo : > "$FAKE/on-sleep-1"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "pendência: reinício dentro dos 30 min não repete (estado em disco)" [ "$(pend_events | wc -l | tr -d ' ')" -eq 2 ]
+
+# mudança zera o relógio: o CI fica vermelho aos 33 min; só 30 min depois dessa mudança a pendência sai, com o check
+CASE=pendmuda; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+hook 1 $((T0 + 1700))
+hook 2 $((T0 + 2000)) "fake-pr $A OPEN '[{\"name\":\"lint\",\"conclusion\":\"FAILURE\",\"completedAt\":\"2026-06-01T00:05:00Z\"}]'"
+hook 3 $((T0 + 3000)) 'cp "$STATE/log" "$FAKE/log.p4" 2>/dev/null || : > "$FAKE/log.p4"'
+hook 4 $((T0 + 3900))
+echo : > "$FAKE/on-sleep-5"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "muda: nada antes de 30 min da última mudança"     [ -z "$(grep -F '[pendencia]' "$FAKE/log.p4")" ]
+check "muda: sai com o check vermelho, contado da mudança" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto, CI vermelho: lint" ]
+
+# sessão done sem PR sai; PR mergeado com a sessão done, e sessão working sem PR, não são pendência
+CASE=pendsessao; round "$CASE"
+clock "$T0"
+hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "sessão: done sem PR, parada, sai"                 [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: #7 foo: done sem PR" ]
+
+CASE=pendnada; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" MERGED
+clock "$T0"
+hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 9000)); hook 3 $((T0 + 20000))
+echo : > "$FAKE/on-sleep-4"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "sem pendência: PR mergeado e sessão done com PR, nada" [ -z "$(pend_events)" ]
+
+CASE=pendtrabalha; round "$CASE"
+clock "$T0"
+hook 1 $((T0 + 9000))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "sem pendência: sessão working sem PR, nada"        [ -z "$(pend_events)" ]
+
+# o prazo vem de OUTE_WATCH_STALL_S; valor inválido volta ao padrão de 1800
+CASE=pendprazo; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+hook 1 $((T0 + 700)); hook 2 $((T0 + 1000))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_STALL_S=600 OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "prazo: 600 s, sai aos 11 min"                     [ "$(pend_events)" == "[pendencia] 1 parada(s) há 11 min ou mais, sem mudança: PR #12 aberto" ]
+CASE=pendinvalido; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+hook 1 $((T0 + 1000))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_STALL_S=abc OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "prazo: valor inválido usa 1800 s, nada aos 16 min" [ -z "$(pend_events)" ]
+
 check_end

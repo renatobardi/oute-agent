@@ -1105,6 +1105,60 @@ w_check_merged_issues() {
   done
 }
 
+# pendência parada (#766, da #767): PR aberto, CI vermelho em PR aberto ou sessão `done` sem PR que ficam 30 minutos sem
+# mudar (OUTE_WATCH_STALL_S, em segundos, padrão 1800). Sem modelo: o dispatcher não acorda para conferir, e o `watch` entrega
+# uma linha só, `[pendencia]`, com tudo o que está parado. O estado de cada pendência é `pend|<id>` = `<estado>|<desde, epoch>`;
+# mudou o estado, o relógio recomeça. A linha se repete a cada STALL_S enquanto houver pendência parada (`pendemit`); a
+# 1ª passada da rodada não emite. Sem pendência, ou nenhuma parada o bastante, nada sai.
+# OUTE_WATCH_CLOCK (arquivo com um epoch): relógio dos testes
+w_now() {
+  local f="${OUTE_WATCH_CLOCK:-}" t=""
+  [[ -z "$f" || ! -s "$f" ]] || t="$(head -1 "$f")"
+  if [[ "$t" =~ ^[0-9]+$ ]]; then printf '%s' "$t"; else date +%s; fi
+  return 0
+}
+w_stalled() {
+  local quiet="$1" stall="${OUTE_WATCH_STALL_S:-1800}" now k id st old since last pr slug iid has desc="" n=0 oldest=0 age
+  local -A cur=()
+  [[ "$stall" =~ ^[0-9]+$ ]] || stall=1800
+  now="$(w_now)"
+  for k in "${!W_CUR[@]}"; do
+    case "$k" in
+      pr\|*)
+        [[ "${W_CUR[$k]}" == OPEN ]] || continue
+        pr="${k#pr|}"; pr="${pr%%|*}"; st="aberto"
+        for id in "${!W_CUR[@]}"; do
+          [[ "$id" == "ci|$pr|"* && "${W_CUR[$id]}" == fail ]] && st+=", CI vermelho: ${id#"ci|$pr|"}"
+        done
+        [[ "${W_CUR[merge|$pr]:-}" != conflict ]] || st+=", em conflito"
+        cur["pr|$pr"]="PR $(w_ref "$pr") $st" ;;
+      agent\|*)
+        [[ "${W_CUR[$k]}" == done && "${W_CUR[tab|${k#agent|}]:-}" == open ]] || continue
+        slug="${k#agent|}"; iid="${W_IID[$slug]:-${slug%%-*}}"; has=0
+        for id in "${!W_CUR[@]}"; do [[ "$id" == "pr|"*"|$iid" ]] && has=1; done
+        (( has )) || cur["sessao|$slug"]="$(w_label "$slug"): done sem PR" ;;
+    esac
+  done
+  last="${W_PREV[pendemit]:-0}"; [[ "$last" =~ ^[0-9]+$ ]] || last=0
+  W_CUR[pendemit]="$last"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    old="${W_PREV[pend|$id]:-}"; since="${old##*|}"; old="${old%|*}"
+    [[ -n "${W_PREV[pend|$id]:-}" && "$old" == "${cur[$id]}" && "$since" =~ ^[0-9]+$ ]] || since="$now"
+    W_CUR["pend|$id"]="${cur[$id]}|$since"
+    age=$(( now - since ))
+    if (( age >= stall )); then
+      desc+="${desc:+; }${cur[$id]}"; n=$((n + 1))
+      (( age <= oldest )) || oldest="$age"
+    fi
+  done < <(printf '%s\n' "${!cur[@]}" | sort)
+  if (( ! quiet && n > 0 && now - last >= stall )); then
+    w_ev pendencia "$n parada(s) há $((oldest / 60)) min ou mais, sem mudança: $desc"
+    W_CUR[pendemit]="$now"
+  fi
+  return 0
+}
+
 # entrega ao dispatcher (#213, watch --deliver): os eventos da fila (watch.queue) saem juntos, numa mensagem só, digitados
 # no campo do dispatcher (o pane do meta). Só com ele parado (idle/done), com o campo achado e vazio (nunca por cima do
 # que o Bardi está digitando, nem às cegas num diálogo). Qualquer outra situação adia: a fila fica e a próxima passada
@@ -1227,6 +1281,7 @@ cmd_watch() {
     fi
     w_snapshot "$W_STATE" "$main" "$since"
     (( first )) || { w_diff; w_check_merged_issues; }
+    w_stalled "$first"
     first=0
     # o recomeço do contexto só numa passada em que a fila já estava vazia: evento entregue agora deixa o dispatcher trabalhando (#752)
     hadq=0; [[ ! -s "$W_STATE/watch.queue" ]] || hadq=1
