@@ -21,6 +21,55 @@
       "idle_seconds": 5
     }
   ],
+  "attention": {
+    "total": 4,
+    "rows": [
+      {
+        "id": "swarm-1003-1211|question||1791035400000000000",
+        "round": "swarm-1003-1211",
+        "name": "Brave_Otter",
+        "kind": "question",
+        "key": null,
+        "title": "Pergunta pendente do dispatcher",
+        "at": "2026-10-03T13:50:00Z",
+        "age_seconds": 600,
+        "url": "/rodada?id=swarm-1003-1211"
+      },
+      {
+        "id": "swarm-1003-1211|blocked|7|1791035100000000000",
+        "round": "swarm-1003-1211",
+        "name": "Brave_Otter",
+        "kind": "blocked",
+        "key": "7",
+        "title": "Sessão #7 parada (blocked)",
+        "at": "2026-10-03T13:45:00Z",
+        "age_seconds": 900,
+        "url": "/rodada?id=swarm-1003-1211"
+      },
+      {
+        "id": "swarm-1003-1211|ci|13|1791034800000000000",
+        "round": "swarm-1003-1211",
+        "name": "Brave_Otter",
+        "kind": "ci",
+        "key": "13",
+        "title": "CI reprovado no PR #13",
+        "at": "2026-10-03T13:40:00Z",
+        "age_seconds": 1200,
+        "url": "/rodada?id=swarm-1003-1211"
+      },
+      {
+        "id": "swarm-1003-1211|merged|12|1791034200000000000",
+        "round": "swarm-1003-1211",
+        "name": null,
+        "kind": "merged",
+        "key": "12",
+        "title": "PR #12 mergeado",
+        "at": "2026-10-03T13:30:00Z",
+        "age_seconds": 1800,
+        "url": "/rodada?id=swarm-1003-1211"
+      }
+    ]
+  },
   "decisions": {
     "total": 1,
     "pending": [

@@ -18,6 +18,7 @@ final class TrayModel: ObservableObject {
     private let notifications = Notifications()
     private var seen = SeenProposals()
     private var seenSteps = SeenSteps()
+    private var seenAttention = SeenAttention()
     private var timer: Timer?
 
     init() {
@@ -67,6 +68,12 @@ final class TrayModel: ObservableObject {
         for step in seenSteps.newSteps(in: snapshot) {
             notifications.post(id: step.id, title: "Etapa nova na página da rodada", body: MenuText.step(step), kind: "etapa")
         }
+        let change = seenAttention.update(with: snapshot)
+        for item in change.fresh {
+            notifications.post(id: item.id, title: item.title, body: MenuText.attentionBody(item), kind: "aviso",
+                               url: attentionURL(item))
+        }
+        notifications.remove(ids: change.resolved, kind: "aviso")
     }
 
     // MARK: - o que o menu abre (o tray não decide nada)
@@ -81,6 +88,14 @@ final class TrayModel: ObservableObject {
 
     func stepURL(_ step: TraySnapshot.Step) -> URL? {
         config?.pageURL(path: step.url)
+    }
+
+    func attentionURL(_ item: TraySnapshot.Attention.Item) -> URL? {
+        config?.pageURL(path: item.url)
+    }
+
+    func openAttention(_ item: TraySnapshot.Attention.Item) {
+        if let url = attentionURL(item) { NSWorkspace.shared.open(url) }
     }
 
     func openStep(_ step: TraySnapshot.Step) {

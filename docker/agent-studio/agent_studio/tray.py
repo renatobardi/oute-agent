@@ -16,6 +16,9 @@
 - **Etapas da rodada** (`steps`, #508): as etapas publicadas (`etapas.tray_steps`) das rodadas que não fecharam, as mais novas,
   com o título fixo por tipo, o veredito do revisor e o caminho da página; nunca o texto da etapa. O tray avisa só da que
   ainda não viu. Do SurrealDB, junto dos pedidos, mas falha à parte: sem ele `steps.available` = `false`.
+- **Atenção das rodadas** (`attention`, #776): por rodada aberta, o que pede o Bardi agora (`avisos.pending`): CI reprovado de um PR,
+  sessão `blocked`, pergunta pendente e PR mergeado, dos eventos do `watch` e do `ask`; cada item com `id` por ocorrência, título
+  fixo por tipo e o caminho da página da rodada. Do DuckDB, junto das decisões, falha à parte (cai em vazio).
 - **Barra** (`bar`): nº de pedidos pendentes e nº de alertas (as decisões pendentes têm o `decisions.total`).
 
 `snapshot` lê o DuckDB (uma passada, sob a trava do `store`); `pending` lê o SurrealDB; `response` junta os dois.
@@ -24,7 +27,7 @@ palpite).
 """
 import logging
 
-from . import (alert_text, alerts as alerts_mod, decisions as decisions_mod, proposals as prop_mod, tz as tz_mod,
+from . import (alert_text, alerts as alerts_mod, avisos as avisos_mod, decisions as decisions_mod, proposals as prop_mod, tz as tz_mod,
                usage as usage_mod)
 
 log = logging.getLogger(__name__)
@@ -57,6 +60,16 @@ def _decisions(con, at_ns, cfg):
         return NO_DECISIONS
 
 
+def _attention(con, at_ns, cfg):
+    """O que pede atenção nas rodadas abertas (#776). Como as decisões: a falha não derruba o menu, cai em `NONE` e a causa
+    vai ao stderr."""
+    try:
+        return avisos_mod.pending(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — bloco acessório do tray
+        log.exception("tray: avisos das rodadas falhou, respondi sem eles")
+        return avisos_mod.NONE
+
+
 def snapshot(con, at_ns, prices, cfg, tz=tz_mod.UTC):
     """Os blocos que saem do DuckDB na hora `at_ns` (ns): máquinas, custo de hoje (o dia do fuso `tz`), erros na
     última hora e alertas."""
@@ -86,6 +99,7 @@ def snapshot(con, at_ns, prices, cfg, tz=tz_mod.UTC):
                              "total": sum(e["total"] for e in errors), "rows": errors},
         "alerts": alert_text.with_text(alerts_mod.evaluate(con, at_ns, cfg)["alerts"]),
         "decisions": _decisions(con, at_ns, cfg),
+        "attention": _attention(con, at_ns, cfg),
     }
 
 
@@ -114,6 +128,7 @@ def response(at_ns, snap, proposals, config_errors, tz=tz_mod.UTC, steps=None):
     proposals = proposals or UNAVAILABLE
     return {"at": alerts_mod.iso(at_ns), "timezone": tz.key,
             "bar": {"pending": proposals["total"], "alerts": len(snap["alerts"])},
-            "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS, "steps": steps or NO_STEPS, "cost_today": snap["cost_today"],
+            "machines": snap["machines"], "proposals": proposals, "decisions": snap.get("decisions") or NO_DECISIONS,
+            "attention": snap.get("attention") or avisos_mod.NONE, "steps": steps or NO_STEPS, "cost_today": snap["cost_today"],
             "errors_last_hour": snap["errors_last_hour"], "alerts": snap["alerts"],
             "config": {"errors": config_errors}}

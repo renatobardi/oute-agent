@@ -21,6 +21,10 @@
       "idle_seconds": 5
     }
   ],
+  "attention": {
+    "total": 0,
+    "rows": []
+  },
   "decisions": {
     "total": 0,
     "pending": []
