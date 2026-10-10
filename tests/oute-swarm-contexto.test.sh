@@ -68,6 +68,7 @@ check "5 merges: código 0"                               [ "$RC" -eq 0 ]
 check "5 merges: o /clear é a primeira digitação"        [ "$(typed | sed -n 1p)" == "/clear" ]
 check "5 merges: o [contexto] é a segunda, com o prefixo do watch" grep -qE '^\[watch swarm-test\] 1 evento\(s\): [0-9]{2}:[0-9]{2} \[contexto\] contexto reiniciado depois de 5 merge\(s\)' <<<"$(typed | sed -n 2p)"
 check "5 merges: manda reler o prompt.md e o estado.md"  bash -c 'l="$(sed -n 2p "$1")"; grep -qF "$2/prompt.md" <<<"$l" && grep -qF "$2/estado.md" <<<"$l"' _ "$FAKE/typed.log" "$STATE"
+check "5 merges: manda reler também o trecho da etapa, em prompt/ (#753)" bash -c 'grep -qF "$2/prompt/" <<<"$(sed -n 2p "$1")"' _ "$FAKE/typed.log" "$STATE"
 check "5 merges: duas digitações e dois Enter"           [ "$(texts)" -eq 2 -a "$(enters)" -eq 2 ]
 check "5 merges: o estado.md foi gravado"                 estl "# Estado da rodada swarm-test"
 check "5 merges: reinicio.n guarda a contagem"           [ "$(cat "$STATE/reinicio.n")" == 5 ]

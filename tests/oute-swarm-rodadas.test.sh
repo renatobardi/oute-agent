@@ -66,7 +66,7 @@ open_in "$REPO" --max 2; first="$(ids | tail -1)"
 open_in "$OTHER" --max 2; second="$(ids | tail -1)"
 check "id: repos diferentes no mesmo minuto, dois ids"              [ -n "$first" -a -n "$second" -a "$first" != "$second" ]
 check "id: cada uma com o repo dela"                                [ "$(meta_of "$first" repo)" == "$REPO" -a "$(meta_of "$second" repo)" == "$OTHER" ]
-check "id: o prompt de cada dispatcher cita o id dele"              grep -qF "da rodada \`$second\`" "$FAKE/oute-task.last"
+check "id: o prompt de cada dispatcher cita o id dele"              grep -qF "da rodada \`$second\`" "$FAKE/oute-task.all"
 
 # 3. reserva atômica: pasta que já existe não é reaproveitada nem recriada (o conteúdo dela fica)
 CASE=id-reserva; round "$CASE"
@@ -113,9 +113,9 @@ check "nome: o space do herdr vai ao meta"                          [ "$(meta_of
 check "nome: aviso da abertura com nome e id"                       grep -qxF "dispatcher $nm ($nr) · repo repo · max 2" <<<"$ERR"
 check "nome: linha de abertura do log com nome e id"                grep -qF " abertura $nr · $nm (repo repo, max 2)" "$H/.oute/swarm/$nr/log"
 check "nome: rótulo da aba do dispatcher com nome e id"             grep -qxF "w1:t0 $nm · $nr" "$FAKE/tab-rename.log"
-check "nome: o prompt traz o nome junto do id"                      grep -qF "da rodada \`$nr\` (nome amigável **$nm**" "$FAKE/oute-task.last"
+check "nome: o prompt traz o nome junto do id"                      grep -qF "da rodada \`$nr\` (nome amigável **$nm**" "$FAKE/oute-task.all"
 check "nome: o id segue sendo a chave (OUTE_SWARM_ID e worktree)"   [ "$(sed -n 5p "$FAKE/oute-task.args")" == "$nr" ]
-check "nome: sem marcador de prompt solto"                          bash -c '! grep -qE "[{][{](NOME|OUTRAS|NOME_TEXTO)[}][}]" "$1"' _ "$FAKE/oute-task.last"
+check "nome: sem marcador de prompt solto"                          bash -c '! grep -qE "[{][{](NOME|OUTRAS|NOME_TEXTO)[}][}]" "$1"' _ "$FAKE/oute-task.all"
 check "nome: evento oute.swarm.round.opened leva o nome"            [ "$(ev '.name == "oute.swarm.round.opened"' | jq -c --arg r "$nr" --arg n "$nm" 'select(.attrs["oute.swarm.round"] == $r and .attrs["oute.swarm.round.name"] == $n)' | grep -c .)" -eq 1 ]
 rcv_stop
 
@@ -237,17 +237,17 @@ nr="$(ids | grep -vE '^swarm-[ef]$' | tail -1)"
 check "outras: o aviso da abertura lista a rodada aberta do repo"   grep -qxF '  Brave_Otter (swarm-test) · space Frente-A · issues com sessão aberta: #7' <<<"$ERR"
 check "outras: cabeçalho da lista"                                  grep -qxF 'outras rodadas abertas no repo repo:' <<<"$ERR"
 check "outras: rodada de outro repo e rodada fechada não entram"    bash -c '! grep -qE "Calm_Fox|Wild_Wolf" <<<"$1"' _ "$ERR"
-check "outras: o prompt do dispatcher traz a mesma linha"           grep -qF 'Brave_Otter (swarm-test) · space Frente-A · issues com sessão aberta: #7' "$FAKE/oute-task.last"
+check "outras: o prompt do dispatcher traz a mesma linha"           grep -qF 'Brave_Otter (swarm-test) · space Frente-A · issues com sessão aberta: #7' "$FAKE/oute-task.all"
 check "outras: a própria rodada não se lista"                       bash -c '! grep -qF "($1) · space" "$2"' _ "$nr" "$FAKE/err"
 CASE=abertura-sozinha; round "$CASE"; rm -rf "${H:?}/.oute/swarm/swarm-test"
 open_in "$REPO" --max 2
-check "outras: sem outra rodada aberta, nada de lista e prompt diz nenhuma" bash -c '! grep -q "outras rodadas abertas" <<<"$1" && grep -qF "issues com sessão aberta): nenhuma" "$2"' _ "$ERR" "$FAKE/oute-task.last"
+check "outras: sem outra rodada aberta, nada de lista e prompt diz nenhuma" bash -c '! grep -q "outras rodadas abertas" <<<"$1" && grep -qF "issues com sessão aberta): nenhuma" "$2"' _ "$ERR" "$FAKE/oute-task.all"
 
 # 12. list mostra o nome junto do id; a triagem (swarm.md) manda usar o busy e não oferecer essas issues
 CASE=list-nome; round "$CASE"; printf 'name=Brave_Otter\n' >> "$STATE/meta"
 sw list
 check "list: rodada com nome aparece como Nome (id)"                grep -qxF '== Brave_Otter (swarm-test)' <<<"$OUT"
 check "list: as sessões seguem sob o cabeçalho"                     grep -qF '7-foo w1:p1 claude' <<<"$OUT"
-check "triagem: o prompt usa oute-swarm busy e não oferece a issue" bash -c 'grep -qF "oute-swarm busy" "$1" && grep -qF "Issue com sessão aberta em outra rodada não é oferecida" "$1" && grep -qF "em andamento na rodada <nome> (<id>)" "$1"' _ "$ROOT/docker/swarm.md"
+check "triagem: o prompt usa oute-swarm busy e não oferece a issue" bash -c 'grep -qF "oute-swarm busy" "$1" && grep -qF "Issue com sessão aberta em outra rodada não é oferecida" "$1" && grep -qF "em andamento na rodada <nome> (<id>)" "$1"' _ "$SWARM_MD_ALL"
 
 check_end

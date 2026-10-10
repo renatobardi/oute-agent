@@ -26,7 +26,7 @@ printf '%s\n' '`gh issue view <n> --repo a/b`. --json title,body,comments --jq .
 check "detector: pega o comando quebrado pela crase" bash -c 'grep -q -E "$1" "$2"' _ "$BADTICK" "$TMP/quebrado.md"
 check "detector: não pega o comando inteiro na crase" bash -c '! grep -q -E "$1" "$2"' _ "$BADTICK" "$TMP/novo.md"
 
-for f in docker/agent-notes.md docker/swarm.md docker/swarm-worker.md docs/agents/issue-tracker.md \
+for f in docker/agent-notes.md docker/swarm/auditoria.md docker/swarm-worker.md docs/agents/issue-tracker.md \
          addons/skills/oute-aidlc-qa-pr-audit/SKILL.md addons/skills/oute-aidlc-learn-insights/SKILL.md \
          addons/skills/oute-aidlc-ctx-setup/issue-tracker-github.md; do
   check "$f usa --json title,body,comments" grep -qF -e '--json title,body,comments' "$f"

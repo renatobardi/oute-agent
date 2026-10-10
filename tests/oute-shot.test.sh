@@ -133,7 +133,7 @@ check "Dockerfile: confere o sha256 antes de extrair, só por https" bash -c 'gr
 check "Dockerfile: poppler-utils" bash -c 'grep -qE "^ +.*[ ]poppler-utils( |$)" "$1"' _ "$DF"
 check "Dockerfile: oute-shot copiado e executável" bash -c 'grep -qxF "COPY docker/oute-shot /usr/local/bin/" "$1" && grep -qF "/usr/local/bin/oute-shot" "$1"' _ "$DF"
 check "Dockerfile: sem npm install novo para o navegador" bash -c '! grep -iE "playwright|puppeteer" "$1"' _ "$DF"
-check "AGENTS.md: oute-shot no mapa do repo" grep -qF '`oute-shot`' "$ROOT/AGENTS.md"
+check "mapa do repo: oute-shot" grep -qF '`oute-shot`' "$ROOT/docs/mapa-repo.md"
 check "comandos.md: oute-shot e poppler documentados" bash -c 'grep -q "oute-shot <url|arquivo>" "$1" && grep -q "pdftoppm" "$1"' _ "$ROOT/docker/comandos.md"
 check "pins: os sha256 de ARM64 e AMD64 são diferentes entre si" bash -c '[ "$(grep -E "^ARG FIREFOX_SHA256_" "$1" | cut -d= -f2 | sort -u | wc -l)" -eq 2 ]' _ "$DF"
 

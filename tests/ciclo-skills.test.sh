@@ -21,7 +21,7 @@ check "learn-insights: a revisão é a próxima depois da maior que existe na pa
 check "iter-roadmap: publica a r1 do ciclo novo; a learn escreve a seguinte" grep -qF 'ciclo.r1.md' "$ITER"
 check "os comandos que as skills citam existem no oute-swarm" bash -c '"$1" --help | grep -qF "oute-swarm step dir ciclo --cycle" && grep -qF "ciclo)" "$1"' _ "$SWARM"
 check "o guia (comandos.md) cita o step dir ciclo" grep -qF 'oute-swarm step dir ciclo --cycle' "$ROOT/docker/comandos.md"
-check "o dispatcher passa o ciclo da triagem no step publish (swarm.md)" grep -qF -e '--cycle <dono>/<repo>#<n>' "$ROOT/docker/swarm.md"
+check "o dispatcher passa o ciclo da triagem no step publish (swarm/triagem.md)" grep -qF -e '--cycle <dono>/<repo>#<n>' "$ROOT/docker/swarm/triagem.md"
 AUDIT="$ROOT/addons/skills/oute-aidlc-qa-pr-audit/SKILL.md"
 check "qa-pr-audit: guarda o caminho do AUD num arquivo e lê com cat num comando próprio (#582)" bash -c 'grep -qF "echo \"\$AUD\" > " "$1" && grep -qF "cat \"\$HOME/.oute-aud-<N>\"" "$1"' _ "$AUDIT"
 check "qa-pr-audit: o arquivo do caminho tem o número do PR e o nome fixo saiu (#684)" bash -c 'grep -qF "echo \"\$AUD\" > \"\$HOME/.oute-aud-<N>\"" "$1" && grep -qF "(o arquivo do PR auditado)" "$1" && ! grep -qF "oute-aud-path" "$1"' _ "$AUDIT"

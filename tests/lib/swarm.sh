@@ -59,6 +59,10 @@ cat > "$BIN/oute-task" <<'SH'
 [[ "${1:-}" == list ]] && echo "(worktrees falsas)"
 # o último argumento (prompt da rodada, na abertura) fica em $FAKE/oute-task.last; os anteriores, em oute-task.args
 [[ -z "${FAKE:-}" ]] || { printf '%s' "${@: -1}" > "$FAKE/oute-task.last"; printf '%s\n' "${@:1:$#-1}" > "$FAKE/oute-task.args"; }
+# $FAKE/oute-task.all (#753): o prompt entregue mais os trechos das etapas que o oute-swarm renderiza em <rodada>/prompt/
+# (a rodada mais recente); é nele que o teste procura texto de etapa, e em .last só o que é do núcleo
+[[ -z "${FAKE:-}" ]] || { d="$(ls -dt "$HOME"/.oute/swarm/*/prompt 2>/dev/null | head -n1)"
+  { cat "$FAKE/oute-task.last"; [[ -z "$d" ]] || { echo; cat "$d"/*.md; }; } > "$FAKE/oute-task.all"; }
 exit 0
 SH
 # sleep: só no watch (FAKE_WATCH=1) é o gancho entre passadas; nos outros comandos não faz nada
@@ -97,6 +101,10 @@ export OUTE_NAMES_PY="$TMP/sem-names.py"
 # carga do container (#623): sem o /proc/loadavg de quem roda o teste (o aviso do spawn dependeria da carga da máquina); o tema `carga` aponta para o arquivo dele
 export OUTE_SWARM_LOADAVG="$TMP/sem-loadavg"
 # a tabela de antes da `zai` (#677): estes testes provam o que o oute-swarm faz com a escolha do seletor, não o conteúdo da tabela do repo (a sessão `zai` entra em ticket próprio)
+# o prompt do dispatcher é o núcleo (docker/swarm.md) e as etapas (docker/swarm/*.md, #753): SWARM_MD_ALL é o texto cru dos
+# dois juntos, para o caso que procura uma regra sem importar em que arquivo ela ficou; SWARM_ST é a pasta das etapas
+SWARM_ST="$ROOT/docker/swarm"; SWARM_MD_ALL="$TMP/swarm-completo.md"; export SWARM_ST SWARM_MD_ALL
+cat "$ROOT/docker/swarm.md" "$SWARM_ST"/*.md > "$SWARM_MD_ALL"
 export TESTLIB="$ROOT/tests/lib" OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml"
 unset OUTE_SELECT_FILE OUTE_SELECT_GH_TIMEOUT
 # Jev (#257): sem a chave e o endereço da TypeSafe de verdade no ambiente; só a seção 11e sobe a falsa

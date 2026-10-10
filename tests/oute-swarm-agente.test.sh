@@ -20,10 +20,10 @@ opn --max 2 --agent codex
 nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
 check "--agent: código 0 e rodada nova"                  [ "$RC" -eq 0 -a -n "$nr" ]
 check "--agent: meta com workers=codex e agent=codex (#213)" [ "$(grep -cxE 'workers=codex|agent=codex' "$M")" -eq 2 ]
-check "--agent: prompt com o agente da rodada"           grep -qF 'Agente das sessões: `codex` (escolhido pelo Bardi na abertura, `--agent codex`).' "$FAKE/oute-task.last"
-check "--agent: prompt manda não passar --agent nem --model" grep -qF -- '- **Agente e modelo:** não passe `--agent` nem `--model` no `spawn`' "$FAKE/oute-task.last"
-check "--agent: triagem com o agente de cada sessão"     grep -qF 'área tocada, agente da sessão,' "$FAKE/oute-task.last"
-check "--agent: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.last")" ]
+check "--agent: prompt com o agente da rodada"           grep -qF 'Agente das sessões: `codex` (escolhido pelo Bardi na abertura, `--agent codex`).' "$FAKE/oute-task.all"
+check "--agent: prompt manda não passar --agent nem --model" grep -qF -- '- **Agente e modelo:** não passe `--agent` nem `--model` no `spawn`' "$FAKE/oute-task.all"
+check "--agent: triagem com o agente de cada sessão"     grep -qF 'área tocada, agente da sessão,' "$FAKE/oute-task.all"
+check "--agent: sem placeholder no prompt"               [ -z "$(grep -o '{{[A-Z_]*}}' "$FAKE/oute-task.all")" ]
 check "--agent: aviso com o agente"                      grep -qxF "dispatcher $nr · repo repo · max 2 · agente codex" <<<"$ERR"
 check "--agent: linha do log com o agente"               grep -q " abertura $nr (repo repo, max 2, agente codex)$" "$H/.oute/swarm/$nr/log"
 check "--agent: round.opened com oute.swarm.round.agent" [ "$(n '.name == "oute.swarm.round.opened" and .attrs["oute.swarm.round.agent"] == "codex" and .attrs["oute.agent"] == "codex"')" -eq 1 ]
@@ -34,7 +34,7 @@ opn --max 2
 nr="$(nova)"; M="$H/.oute/swarm/$nr/meta"
 check "sem --agent: código 0 e rodada nova"              [ "$RC" -eq 0 -a -n "$nr" ]
 check "sem --agent: meta sem workers="                   [ -z "$(grep '^workers' "$M")" -a "$(grep -cx 'agent=claude' "$M")" -eq 1 ]
-check "sem --agent: prompt com seletor"                  grep -qF 'Agente das sessões: seletor (a rodada abriu sem `--agent`' "$FAKE/oute-task.last"
+check "sem --agent: prompt com seletor"                  grep -qF 'Agente das sessões: seletor (a rodada abriu sem `--agent`' "$FAKE/oute-task.all"
 check "sem --agent: aviso e log como antes"              [ "$(grep -cxF "dispatcher $nr · repo repo · max 2" <<<"$ERR")" -eq 1 -a "$(grep -c " abertura $nr (repo repo, max 2)$" "$H/.oute/swarm/$nr/log")" -eq 1 ]
 check "sem --agent: round.opened sem round.agent"        [ "$(n '.name == "oute.swarm.round.opened"')" -eq 1 -a "$(n '.name == "oute.swarm.round.opened" and (.attrs | has("oute.swarm.round.agent"))')" -eq 0 ]
 sw spawn 8-bar "instrução"

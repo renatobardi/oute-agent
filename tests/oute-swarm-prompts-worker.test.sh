@@ -76,7 +76,7 @@ check "worker sem ação manual: rm com variável é caso mais comum (#373)" gre
 check "worker spike: escopo de teste em serviço compartilhado (#378)" grep -qF 'use um escopo de teste fixo, com `workspace` e `project` próprios e `oute.task.slug` identificável' "$P"
 check "worker sem ação manual: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 opn --max 2
-D="$FAKE/oute-task.last"
+D="$FAKE/oute-task.all"
 check "dispatcher: §4.1 aponta para regra que existe no swarm-worker (#451)" grep -qF "acrescentar o comando à regra de prompt de permissão do \`docker/swarm-worker.md\`" "$D"
 check "dispatcher: lê a tela da sessão blocked (#373)"   grep -qF '`herdr agent read <pane> --source visible`' "$D"
 check "dispatcher: gatilho tell recusado (#373)"         grep -qF 'ou um `tell` recusado com `o campo de entrada não contém exatamente a mensagem`, leia a tela da sessão' "$D"
@@ -162,7 +162,7 @@ check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep 
 check "755: worker: a tarefa 12 lê o swarm-worker.md da worktree (OUTE_REGRESSION_DIR)" grep -qF 'OUTE_REGRESSION_DIR="$PWD/docker/regression" oute-regression --task closes-refs --baseline "$PWD/docker/regression/baseline.json"' "$W"
 check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md`: regressão não exigida, porque nenhuma tarefa carrega o arquivo e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
 check "755: o nome da tarefa 12 na regra existe na pasta das tarefas" test -f "$ROOT/docker/regression/12-closes-refs.sh"
-check "755: oute-regression e AGENTS.md citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/AGENTS.md"
+check "755: oute-regression e o mapa do repo citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/docs/mapa-repo.md"
 check "484: worker: a saída inteira vai no corpo, na seção ## Regressão dos agentes" grep -qF 'na seção `## Regressão dos agentes`, com a linha `repetições:` que ela imprime' "$W"
 check "484: worker: saída 3 = trava de cota; não sobe o limite e declara no ## Falta" grep -qF 'Saída 3 é a trava de cota (`OUTE_REGRESSION_MAX_PCT`, padrão 60%): não suba o limite e não rode de outro jeito. Declare no `## Falta` do PR que a regressão não rodou' "$W"
 check "484: worker: o merge sem a regressão fica para o Bardi (decisão do Bardi)" grep -qF 'o merge fica para o Bardi decidir (a auditoria recomenda `decisão do Bardi`)' "$W"
