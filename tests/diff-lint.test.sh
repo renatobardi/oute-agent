@@ -32,21 +32,21 @@ diff_de() {
 
 # ---------------------------------------------------------------- 1. rm com variável
 diff_de t.sh 'echo a\n' "echo a\n$RM -rf \"\$d\"/x\n"
-check "rm com \$d em linha nova: reprova, com arquivo e linha"   has_line "t.sh:2: rm com variável sem \${VAR:?}: $RM -rf \"\$d\"/x"
-check "rm com \$d: sai 1"                                        test "$RC" = 1
+check "comando rm com \$d em linha nova: reprova, com arquivo e linha"   has_line "t.sh:2: rm com variável sem \${VAR:?}: $RM -rf \"\$d\"/x"
+check "comando rm com \$d: sai 1"                                        test "$RC" = 1
 diff_de t.sh '' "$RM -f \$f\n"
-check "rm com variável sem aspas: reprova"                       test "$RC" = 1
+check "comando rm com variável sem aspas: reprova"                       test "$RC" = 1
 diff_de t.sh '' "trap '$RM -rf \"\$TMP\"' EXIT\n"
-check "rm dentro de trap com aspas simples: reprova"             test "$RC" = 1
+check "comando rm dentro de trap com aspas simples: reprova"             test "$RC" = 1
 diff_de t.sh '' "[ -n x ] && $RM \"\$(pwd)/a\"\n"
-check "rm depois de && com \$(…): reprova"                       test "$RC" = 1
+check "comando rm depois de && com \$(…): reprova"                       test "$RC" = 1
 diff_de t.sh '' "sudo $RM -rf \"\$d\"\n"
-check "sudo rm com variável: reprova"                            test "$RC" = 1
+check "sudo e rm com variável: reprova"                            test "$RC" = 1
 diff_de scripts/oute '' "$RM -rf \"\$d\"\n"
 check "arquivo sem extensão em scripts/: vale"                   test "$RC" = 1
 
 diff_de t.sh '' "$RM -rf \"\${d:?}\"/x\n"
-check "rm com \${VAR:?}: passa"                                  test "$RC" = 0
+check "comando rm com \${VAR:?}: passa"                                  test "$RC" = 0
 diff_de t.sh '' "trap '$RM -rf \"\${TMP:?}\"' EXIT\n"
 check "trap com \${TMP:?}: passa"                                test "$RC" = 0
 diff_de t.sh '' "$RM -f /tmp/literal.json\n"
@@ -56,9 +56,9 @@ check "mktemp -d na própria linha: passa"                        test "$RC" = 0
 diff_de t.sh '' "$RM -f \"\$f\"  # rm-ok: caminho vem do mktemp acima\n"
 check "# rm-ok: <motivo> na linha: passa"                        test "$RC" = 0
 diff_de t.sh '' "echo $RM \$x\n"
-check "rm que não é comando (argumento do echo): passa"          test "$RC" = 0
+check "comando rm que não é comando (argumento do echo): passa"          test "$RC" = 0
 diff_de t.sh '' "# $RM -rf \$x\n"
-check "rm em comentário: passa"                                  test "$RC" = 0
+check "comando rm em comentário: passa"                                  test "$RC" = 0
 diff_de README.md '' "$RM -rf \"\$d\"\n"
 check "arquivo que não é shell: passa"                           test "$RC" = 0
 diff_de t.sh "$RM -rf \"\$d\"\necho a\n" "$RM -rf \"\$d\"\necho a\necho b\n"
