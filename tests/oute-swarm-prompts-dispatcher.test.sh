@@ -224,13 +224,14 @@ check "510: a marca não faz merge, close, clean, tell no host nem pedido pelo c
 check "510: a ação com pedido não tem marca (vale o estado do pedido)" grep -qF 'A ação com `pedido` não tem marca: o estado dela é o do pedido' "$D"
 check "484: §3: a autorização permanente de merge não cobre PR de prompt sem a regressão exigida" grep -qF '**Ressalva (#484, #755):** ela não cobre PR que muda `docker/agent-notes.md` sem a saída da regressão completa dos agentes (`oute-regression`) no corpo, nem PR que muda `docker/swarm-worker.md` (sem o `docker/agent-notes.md`) sem a saída da tarefa 12' "$D"
 check "755: §3: PR que muda só swarm.md não exige regressão e a ressalva não o alcança" grep -qF 'PR que muda só `docker/swarm.md` não exige regressão (nenhuma tarefa carrega o arquivo) e a ressalva não o alcança' "$D"
-check "484: §3: ressalva vale com a regressão exigida recusada por cota" grep -qF 'A ressalva vale também com a regressão exigida recusada por cota,' "$D"
+check "484: §3: ressalva vale com a regressão exigida recusada por cota" grep -qF 'A ressalva também vale com a regressão exigida recusada por cota e com tarefa que piorou' "$D"
 check "484: §3: esse merge segue pedido PR a PR" grep -qF 'esse merge segue pedido PR a PR, com a escolha do Bardi' "$D"
 check "484: skill de auditoria: a exceção da autorização permanente não cobre decisão do Bardi" grep -qF 'a ação `decisão do Bardi` do eixo Standards, PR de prompt sem a regressão exigida pela regra do `docker/swarm-worker.md`, não é coberta, #484, #755' "$A"
 # 755. kaizen em lote: uma issue e um PR por destino, e a regressão pelo conjunto de arquivos
 check "755: §4.2: as lições da rodada saem em uma issue e uma sessão por repo de destino" grep -qF '**Uma issue e um PR por rodada (#755).** As lições escolhidas da rodada saem juntas: **uma** issue kaizen e **uma** sessão (um `spawn`, um PR) por repo de destino, e não uma por lição.' "$D"
 check "755: §4.2: swarm, agentes e skill valem uma issue e um PR só" grep -qF 'Os níveis `swarm`, `agentes` e `skill` têm o mesmo destino, `renatobardi/oute-agent`, então valem uma issue e um PR só' "$D"
 check "755: §4.2: critério por lição e regressão pelo conjunto de arquivos" bash -c 'for t in "os critérios de aceite têm um item por lição" "pelo **conjunto** de arquivos que ele muda"; do grep -qF -e "$t" "$1" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "755: §4.2: lição só de issue fica fora dos critérios, numa seção própria" grep -qF 'numa seção `## Fora desta sessão`, fora dos critérios de aceite' "$D"
 check "755: §4.2: o resumo da rodada mostra a mesma issue para as lições do destino" grep -qF 'lição → issue kaizen (a mesma para as lições do mesmo destino, #755)' "$D"
 # 587. cota da reserva antes de abrir, SHA da base no merge, fontes do revisor
 check "587: §2: com reserve cota, confere o oute-quota do agente da reserva antes do spawn" grep -qF 'Antes do `spawn` dessa issue, confira a cota do agente da reserva: `oute-quota --json --agent <agente da reserva>`' "$D"

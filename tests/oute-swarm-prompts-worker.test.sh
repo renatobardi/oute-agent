@@ -158,7 +158,8 @@ check "worker: informa a contagem e o resultado no corpo do PR (#585)" grep -qF 
 # 484. PR de prompt roda a regressão dos agentes antes de abrir; a recusa por cota vai no Falta
 check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir, por arquivo" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` roda a regressão dos agentes só onde ela testa o arquivo (#484, #755).**' "$W"
 check "755: worker: agent-notes.md, regressão completa" grep -qF '(a) muda `docker/agent-notes.md`, sozinho ou junto de outro: regressão completa' "$W"
-check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep -qF '(b) muda `docker/swarm-worker.md` e não o `docker/agent-notes.md`: só a tarefa 12, `oute-regression --task closes-refs`, em Haiku e em Sonnet' "$W"
+check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep -qF '(b) muda `docker/swarm-worker.md` e não o `docker/agent-notes.md`: só a tarefa 12, em Haiku e em Sonnet, chamada com a pasta das tarefas do checkout' "$W"
+check "755: worker: a tarefa 12 lê o swarm-worker.md da worktree (OUTE_REGRESSION_DIR)" grep -qF 'OUTE_REGRESSION_DIR="$PWD/docker/regression" oute-regression --task closes-refs --baseline "$PWD/docker/regression/baseline.json"' "$W"
 check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md`: regressão não exigida, porque nenhuma tarefa carrega o arquivo e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
 check "755: o nome da tarefa 12 na regra existe na pasta das tarefas" test -f "$ROOT/docker/regression/12-closes-refs.sh"
 check "755: oute-regression e AGENTS.md citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/AGENTS.md"
