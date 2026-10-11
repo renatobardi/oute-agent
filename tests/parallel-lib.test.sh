@@ -182,6 +182,24 @@ check "otelcol_start: morre nas 3 tentativas: rc 1" test "$RC" -eq 1
 check "otelcol_start: 3 tentativas e o aviso final" bash -c '[ "$(grep -c "collector morreu antes do health" "$1")" -eq 2 ] && grep -qxF "# collector não subiu" "$2"' _ "$TMP/oc2.err" "$TMP/oc2.out"
 check "otelcol_start: o último processo não sobra" bash -c '! kill -0 "$1" 2>/dev/null' _ "$CPID"
 
+# porta de outro servidor (#696): o health responde antes do lançamento, e o processo lançado morre 1 s depois.
+# spawn_try não pode dar por boa a subida: não lança nela, tenta outra, e nunca devolve 0 com o lançado morto
+OP="$(orig_free_port)"; python3 "$TMP/server.py" "$OP" >/dev/null 2>&1 & HOLD_PIDS="$HOLD_PIDS $!"
+for i in $(seq 1 50); do curl -fsS --max-time 2 "127.0.0.1:$OP/" >/dev/null 2>&1 && break; sleep 0.1; done
+dies_later() { local port="$1"; echo "$port" >> "$TMP/launches"; ( exec python3 -c 'import time,sys; time.sleep(1); sys.exit(1)' ) & SPAWN_PID=$!; return 0; }
+other_health() { local port="$1"; curl -fsS --max-time 2 "127.0.0.1:$port/" >/dev/null; return $?; }
+: > "$TMP/launches"
+spawn_try 3 "$OP" dies_later other_health 2> "$TMP/sp.err"; RC=$?
+check "spawn_try: porta do outro servidor (health responde): rc 1, não 0" test "$RC" -eq 1
+check "spawn_try: o lançado nunca sobe na porta do outro servidor" bash -c '! grep -qxF "$2" "$1"' _ "$TMP/launches" "$OP"
+check "spawn_try: avisa que a porta já respondia ao health" grep -qF "subida falhou na porta $OP (tentativa 1 de 3)" "$TMP/sp.err"
+check "spawn_try: o último processo lançado não sobra" bash -c '! kill -0 "$1" 2>/dev/null' _ "$SPAWN_PID"
+# porta do outro em todas as tentativas (o free_port devolve a mesma): rc 1 e nada lançado
+printf '%s\n' "$OP" > "$TMP/portq"; : > "$TMP/launches"
+spawn_try 2 "$OP" dies_later other_health 2> "$TMP/sp2.err"; RC=$?
+check "spawn_try: porta do outro em todas as tentativas: rc 1 sem lançar nada" bash -c '[ "$1" -eq 1 ] && [ ! -s "$2" ]' _ "$RC" "$TMP/launches"
+: > "$TMP/portq"
+
 # ---------------------------------------------------------------- 5. trap antes de subir o serviço, em todo teste
 # o trap (ou a função que ele chama) que derruba cada serviço vem numa linha anterior à primeira que o sobe
 NO_TRAP=""

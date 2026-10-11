@@ -19,9 +19,10 @@
 # spawn_wait <pid> <saúde…>: espera o comando de saúde passar. Devolve 0 (saudável), 1 (o processo morreu antes do
 #   health) ou 2 (prazo estourado, ainda vivo).
 # spawn_try <tentativas> <primeira-porta> <lança> <saúde…>: `lança <porta>` sobe o servidor em segundo plano e define
-#   SPAWN_PID; `saúde… <porta>` é o comando de saúde. Se o processo morre antes do health (porta tomada por outro
-#   teste), tenta de novo com outra porta, até <tentativas>; <primeira-porta> vazia = free_port. Define SPAWN_PORT.
-#   Devolve 0, ou 1 com o processo já derrubado.
+#   SPAWN_PID; `saúde… <porta>` é o comando de saúde. Se a porta já responde ao health, é de outro servidor (#696): não
+#   lança nela e tenta outra. Se o processo morre antes do health (porta tomada por outro teste), também tenta de
+#   novo, até <tentativas>; <primeira-porta> vazia = free_port. Define SPAWN_PORT. Devolve 0, ou 1 com o processo
+#   já derrubado.
 PAR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STARTUP_TIMEOUT=60
 START_TRIES=3
@@ -73,6 +74,11 @@ spawn_try() {
   for ((n = 1; n <= tries; n++)); do
     [[ -n "$port" ]] || port="$(free_port)"
     SPAWN_PORT="$port"
+    # porta que já responde ao health é de outro servidor: o health dele passaria no spawn_wait com o nosso vivo
+    if "$@" "$port" >/dev/null 2>&1; then
+      echo "# subida falhou na porta $port (tentativa $n de $tries): a porta já responde ao health" >&2
+      port=""; continue
+    fi
     "$launch" "$port"
     spawn_wait "$SPAWN_PID" "$@" "$port"; rc=$?
     [[ "$rc" -ne 0 ]] || return 0
