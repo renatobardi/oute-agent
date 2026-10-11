@@ -12,7 +12,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 GIT_SHIM="${GIT_SHIM:-$ROOT/docker/shims/git}"
-TRUE_GIT="$(command -v git)" || die "precisa de git"
+# true_git: o primeiro git do PATH que não é shim do oute (#737). Mesma varredura de docker/shims/git, mas pula as cópias
+# instaladas do shim (o `command -v git` devolve a cópia instalada no container de agente, e o teste trava nela).
+true_git() {
+  local dirs d
+  IFS=: read -ra dirs <<<"$PATH"
+  for d in ${dirs[@]+"${dirs[@]}"}; do
+    [[ -n "$d" && -f "$d/git" && -x "$d/git" ]] || continue
+    grep -q OUTE_GIT_GUARD_ROOT "$d/git" && continue
+    echo "$d/git"; return 0
+  done
+  return 1
+}
+TRUE_GIT="$(true_git)" || die "precisa de git"
 TASK="$ROOT/docker/oute-task"
 
 SHIMS="$TMP/shims"; REAL="$TMP/real"; FAKE="$TMP/fake"; H="$TMP/home"; WS="$TMP/ws"; WT="$TMP/wt"; OUTSIDE="$TMP/fora"
