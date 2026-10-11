@@ -310,7 +310,7 @@ check "o status da zai é o --available do oute-quota"   grep -qxF -- "--availab
 # a zai indisponível: abre no claude
 export FAKE_AVAIL_RC_ZAI=1
 label_phase 50 aidlc:build
-check "execução, zai indisponível: claude, sonnet"      [ "$(sb)" == "claude/claude/claude-sonnet-5-5" ]
+check "execução, zai indisponível: claude, haiku 5.5"      [ "$(sb)" == "claude/claude/claude-haiku-5-5" ]
 check "execução, zai indisponível: reserve indisponivel, de zai" [ "$(rsv)" == "indisponivel>zai" ]
 check "execução, zai indisponível: aviso nomeia o comando" warnhas 'o Zai está indisponível (`oute-quota --available zai` falhou); abrindo no Claude (reserva)'
 q claude=99,10 codex=10,10 zai=10,10; sel --issue 50
@@ -318,7 +318,7 @@ check "zai fora e claude no teto: codex da linha"       bash -c '[ "$1" == "code
 unset FAKE_AVAIL_RC_ZAI
 # a zai no teto: abre no claude (cadeia por ordem, não pela cota livre: codex a 0% não passa na frente)
 q claude=60,10 codex=0,0 zai=98,10; sel --issue 50
-check "execução, zai em 98%: claude, mesmo com o codex mais livre" bash -c '[ "$1" == "claude/claude/claude-sonnet-5-5" ] && [ "$2" == "cota>zai" ]' _ "$(sb)" "$(rsv)"
+check "execução, zai em 98%: claude, mesmo com o codex mais livre" bash -c '[ "$1" == "claude/claude/claude-haiku-5-5" ] && [ "$2" == "cota>zai" ]' _ "$(sb)" "$(rsv)"
 check "execução, zai em 98%: aviso diz a cota da zai"   warnhas 'cota do Zai esgotada (5h em 98%'
 q claude=97,10 codex=50,10 zai=99,10; sel --issue 50
 check "execução, claude em 97% abaixo do teto: ainda claude" [ "$(ag)/$(rsv)" == "claude/cota>zai" ]
@@ -349,7 +349,7 @@ check "--subscription zai no teto: avisa da cota"       warnhas 'cota do Zai esg
 q claude=10,10 codex=10,10 zai=10,10; sel --issue 50 --subscription zai
 check "--subscription zai folgada: sem aviso"           [ -z "$ERR" ]
 sel --issue 50 --subscription claude
-check "--subscription claude numa fase de execução: claude, sonnet" [ "$(sb)" == "claude/claude/claude-sonnet-5-5" ]
+check "--subscription claude numa fase de execução: claude, haiku 5.5" [ "$(sb)" == "claude/claude/claude-haiku-5-5" ]
 sel --issue 50 --subscription codex
 check "--subscription codex: codex, com esforço"        bash -c '[ "$1" == "codex/codex/gpt-6.1-sol" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --subscription gemini
@@ -369,7 +369,7 @@ unset FAKE_AVAIL_RC_ZAI
 # --agent segue aceitando claude e codex, com a saída de hoje
 q claude=10,10 codex=10,10 zai=10,10
 sel --issue 50 --agent claude
-check "--agent claude em build: claude, sonnet, manual"  bash -c '[ "$1" == "claude/claude/claude-sonnet-5-5" ] && jq -e ".origin == \"manual\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
+check "--agent claude em build: claude, haiku 5.5, manual"  bash -c '[ "$1" == "claude/claude/claude-haiku-5-5" ] && jq -e ".origin == \"manual\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --agent codex
 check "--agent codex em build: codex, gpt-6.1-sol, high" bash -c '[ "$1" == "codex/codex/gpt-6.1-sol" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --agent zai

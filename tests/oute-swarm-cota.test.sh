@@ -160,7 +160,7 @@ nx() { local list="$1"; shift; env PATH="$BIN:$PATH" FAKE="$FAKE" "$ROOT/docker/
 qq 10 10 96 10
 j="$(nx zai --phase build)"
 check "next: cadeia da fase build, na ordem da tabela"     [ "$(jq -c .chain <<<"$j")" == '["zai","claude","codex"]' ]
-check "next: parada, ok, ok; a próxima é a claude, com agente e modelo" [ "$(jq -c '[.options[].status], .next, .next_agent, .next_model' <<<"$j" | tr '\n' ' ')" == '["parada","ok","ok"] "claude" "claude" "claude-sonnet-5-5" ' ]
+check "next: parada, ok, ok; a próxima é a claude, com agente e modelo" [ "$(jq -c '[.options[].status], .next, .next_agent, .next_model' <<<"$j" | tr '\n' ' ')" == '["parada","ok","ok"] "claude" "claude" "claude-haiku-5-5" ' ]
 check "next: a parada traz o reset da janela cheia"        [ "$(jq -r '.options[0] | "\(.resets_at) \(.resets_in_s)"' <<<"$j")" == "$ZRESET 400000" ]
 j="$(nx zai,claude --phase build)"
 check "next: com a claude também tentada, vai ao codex (esforço da linha)" [ "$(jq -r '[.next, .next_effort] | join(" ")' <<<"$j")" == "codex high" ]

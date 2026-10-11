@@ -1075,7 +1075,7 @@ check "zai sem OUTE_ZAI_API_KEY: recusa, sem worktree e sem agente" bash -c '[ "
 # 13e. zai indisponível: a issue build cai no claude (reserva), com a origem no evento
 rm -f "${FAKE:?}"/claude.*
 FAKE_AVAIL_RC_ZAI=1 tz 62-reserva claude "p"
-check "zai indisponível: abre no claude, sem variáveis nem --settings" [ -z "$(zvars claude)" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '--model\nclaude-sonnet-5-5\np')" ]
+check "zai indisponível: abre no claude, sem variáveis nem --settings" [ -z "$(zvars claude)" -a "$(cat "$FAKE/claude.args")" == "$(printf -- '--model\nclaude-haiku-5-5\np')" ]
 check "zai indisponível: opened com reserve indisponivel, reserve_from zai e assinatura claude" jqe '.attrs["oute.task.reserve"] == "indisponivel" and .attrs["oute.task.reserve_from"] == "zai"
                                                          and .attrs["oute.task.subscription"] == "claude" and .attrs["oute.task.agent"] == "claude"' <<<"$(last)"
 

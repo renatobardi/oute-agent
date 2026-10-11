@@ -130,6 +130,7 @@ cache_creation = 1.25
 # tokens, US$ 0,10 entrada / 0,50 saída; acima, 0,50 / 2,50). O config só tem um preço por modelo: vale o degrau até 100 mil
 # tokens, o das tarefas curtas; prompt acima disso fica subestimado na estimativa (o custo real vem do Claude Code, #747).
 [prices."claude-haiku-5-5"]
+fixed = true
 input = 0.10
 output = 0.50
 cache_read = 0.01
