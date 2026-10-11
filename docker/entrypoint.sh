@@ -258,6 +258,8 @@ case "$MODE" in
     oute-agents-install </dev/null >"$HOME/.oute/agents-install.log" 2>&1 &
 
     log "iniciando herdr server"
+    # sem SHELL o herdr abre o pane em /bin/sh (dash, sem readline: seta para cima vira ^[[A) (#428)
+    export SHELL=/bin/bash
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &
     log "iniciando sshd :2222"
     exec sudo /usr/sbin/sshd -D -e

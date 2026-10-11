@@ -243,4 +243,13 @@ for v in AGENT_STUDIO_INGEST_TOKEN AGENT_STUDIO_TOKEN AGENT_STUDIO_SURREAL_PASS 
 done
 check "compose: o agent só tem o AGENT_STUDIO_URL de leitura (sem token no environment)" bash -c '[ "$(grep -c "AGENT_STUDIO_" "$1")" -eq 1 ] && grep -q "AGENT_STUDIO_URL:" "$1"' _ "$AG"
 
+# ---------------------------------------------------------------- 8. herdr server com SHELL (#428)
+# sem SHELL no ambiente do servidor o herdr abre o pane em /bin/sh (dash, sem readline: seta para cima vira ^[[A)
+HB="$TMP/herdr-bin"; mkdir -p "$HB"
+printf '#!/bin/sh\nprintf "%%s" "${SHELL:-unset}" > "%s/herdr-shell"\n' "$TMP" > "$HB/herdr"; chmod +x "$HB/herdr"
+sed -n '/log "iniciando herdr server"/,/log "iniciando sshd/p' "$ENTRYPOINT_SRC" | sed '$d' > "$TMP/herdr-start.sh"
+check "herdr: trecho de subida do server achado"        test -s "$TMP/herdr-start.sh"
+env -u SHELL PATH="$HB:$PATH" bash -c 'log() { :; }; . "$1"; wait' _ "$TMP/herdr-start.sh"
+check "herdr: server sobe com SHELL=/bin/bash"          test "$(cat "$TMP/herdr-shell" 2>/dev/null)" = /bin/bash
+
 check_end
