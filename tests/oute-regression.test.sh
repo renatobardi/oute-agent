@@ -214,7 +214,7 @@ check "claude viu dublês de oute-propose e sudo, não os reais" bash -c 'grep "
 check "cada chamada num diretório próprio e descartável" bash -c '[ "$(grep "^cwd=" "$1" | sort -u | wc -l)" -eq 78 ] && ! grep "^cwd=" "$1" | grep -qF "$2"' _ "$LOG/claude.env" "$ROOT"
 check "diretórios descartáveis somem ao fim"             bash -c '! grep "^cwd=" "$1" | head -n1 | sed "s/^cwd=//" | xargs -I{} test -e {}' _ "$LOG/claude.env"
 check ".ai-memory.toml com regression/regression (só a tarefa memory troca o project)" bash -c 'a=$(grep -c "^memory=workspace = \"regression\" project = \"regression\" $" "$1"); b=$(grep -c "^memory=workspace = \"regression\" project = \"regression-escopo\" $" "$1"); [ "$a" -eq 48 ] && [ "$b" -eq 6 ]' _ "$LOG/claude.env"
-check "oute.task.id e slug do teste no resource"         bash -c 'grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-haiku-r1,oute.task.slug=regression-root$" "$1" && grep -q "oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-sonnet-r3,oute.task.slug=regression-root$" "$1"' _ "$LOG/claude.env"
+check "oute.task.id e slug do teste no resource"         bash -c 'grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-haiku-r1,oute.task.slug=regression-root\(,oute.task.repo=[A-Za-z0-9._-]*\)\{0,1\}$" "$1" && grep -q "oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-sonnet-r3,oute.task.slug=regression-root\(,oute.task.repo=[A-Za-z0-9._-]*\)\{0,1\}$" "$1"' _ "$LOG/claude.env"
 check "evento oute.regression.run uma vez ao fim"        [ "$(grep -c '^ARGS regression ' "$LOG/emit.calls")" -eq 1 ]
 ev="$(grep '^ARGS regression ' "$LOG/emit.calls")"
 check "evento: imagem, CLIs, rodadas, resultado, custo, chamadas" bash -c 'grep -q "image=9.9.9-test claude=2.1.9 codex=0.5.0 rounds=3 result=verde green=26 red=0 unverified=1 cost=1.5600" <<<"$1" && grep -q " calls=78 secs=[0-9]* " <<<"$1"' _ "$ev"
@@ -759,5 +759,39 @@ run --codex --task root --rounds 1 --model haiku
 cd "$ROOT" || die "sem a raiz do repo"
 check "notas com --codex: o relato diz que o codex lê as instaladas" has_line "  notas no codex: as instaladas em ~/.codex/AGENTS.md (a troca só vale para o claude)"
 check "notas: no fim a pasta ~/.claude segue igual, byte a byte" [ "$(snap "$HOME/.claude")" = "$SNAP0" ]
+
+# ---------------------------------------------------------------- 10. repositório das conversas (#783)
+# a conversa de cada tarefa leva oute.task.repo = o repositório principal do checkout de onde a suíte é chamada (a regra do
+# folder_repo do shim); fora de repositório, sem a marca; id e slug não mudam; a zai leva também
+mkdir -p "$TMP/repos/Meu Repo.783"; RP="$TMP/repos/Meu Repo.783"
+git -C "$RP" init -q; mkdir -p "$RP/docker/sub"; printf 'NOTAS-783\n' > "$RP/docker/agent-notes.md"
+git -C "$RP" add docker/agent-notes.md
+git -C "$RP" -c user.email=t@t -c user.name=t commit -q -m base
+git -C "$RP" worktree add -q "$TMP/wt-783" -b sessao/783 2>/dev/null
+cd "$RP/docker/sub" || die "sem o repositório de teste"
+run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "repo: chamada de dentro do repositório leva oute.task.repo (nome sem caracteres fora de A-Za-z0-9._-)" bash -c \
+  '[ "$1" -eq 0 ] && grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-haiku-r1,oute.task.slug=regression-root,oute.task.repo=Meu-Repo.783$" "$2"' _ "$RC" "$LOG/claude.env"
+cd "$TMP/wt-783" || die "sem a worktree de teste"
+run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "repo: de uma worktree vale o repositório principal, não a pasta da worktree" bash -c \
+  '[ "$1" -eq 0 ] && grep -q ",oute.task.slug=regression-root,oute.task.repo=Meu-Repo.783$" "$2" && ! grep -q "wt-783" "$2"' _ "$RC" "$LOG/claude.env"
+cd "$TMP" || die "sem a pasta temporária"
+run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "repo: fora de repositório roda como antes, sem oute.task.repo" bash -c \
+  '[ "$1" -eq 0 ] && grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-root-claude-haiku-r1,oute.task.slug=regression-root$" "$2" && ! grep -q "oute.task.repo" "$2"' _ "$RC" "$LOG/claude.env"
+cd "$RP" || die "sem o repositório de teste"
+OTEL_RESOURCE_ATTRIBUTES="host.name=teste,oute.task.repo=outro,oute.instance=teste" run --task root --rounds 1 --model haiku
+cd "$ROOT" || die "sem a raiz do repo"
+check "repo: um oute.task.repo herdado do ambiente sai; fica o do checkout, uma vez só" bash -c \
+  '[ "$1" -eq 0 ] && [ "$(grep -c "^ora=" "$2")" -eq 1 ] && grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=.*,oute.task.slug=regression-root,oute.task.repo=Meu-Repo.783$" "$2" && ! grep -q "oute.task.repo=outro" "$2"' _ "$RC" "$LOG/claude.env"
+cd "$RP" || die "sem o repositório de teste"
+OUTE_ZAI_API_KEY="$ZKEY" run --subscription zai --task select --rounds 1
+cd "$ROOT" || die "sem a raiz do repo"
+check "repo: com --subscription zai a conversa leva o repositório e a assinatura" bash -c \
+  '[ "$1" -eq 0 ] && grep -q "^ora=host.name=teste,oute.instance=teste,oute.task.id=regression-[0-9]*-[0-9]*-[0-9a-f]*-select-claude-zai-r1,oute.task.slug=regression-select,oute.task.repo=Meu-Repo.783,oute.subscription=zai$" "$2"' _ "$RC" "$LOG/claude.env"
 
 check_end
