@@ -161,6 +161,7 @@ check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de a
 check "755: worker: agent-notes.md, regressão completa" grep -qF '(a) muda `docker/agent-notes.md`, sozinho ou junto de outro: regressão completa' "$W"
 check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep -qF '(b) muda `docker/swarm-worker.md` e não o `docker/agent-notes.md`: só a tarefa 12, em Haiku e em Sonnet, chamada com a pasta das tarefas do checkout' "$W"
 check "755: worker: a tarefa 12 lê o swarm-worker.md da worktree (OUTE_REGRESSION_DIR)" grep -qF 'OUTE_REGRESSION_DIR="$PWD/docker/regression" oute-regression --task closes-refs --baseline "$PWD/docker/regression/baseline.json"' "$W"
+check "780: worker: OUTE_REGRESSION_DIR vale sempre que o PR muda swarm-worker.md, casos (a) e (b)" grep -qF '`OUTE_REGRESSION_DIR="$PWD/docker/regression"` vale sempre que o PR muda `docker/swarm-worker.md`, nos casos (a) e (b).' "$W"
 check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md` e/ou `docker/swarm/*.md`: regressão não exigida, porque nenhuma tarefa carrega esses arquivos e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
 check "755: o nome da tarefa 12 na regra existe na pasta das tarefas" test -f "$ROOT/docker/regression/12-closes-refs.sh"
 check "755: oute-regression e o mapa do repo citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/docs/mapa-repo.md"
