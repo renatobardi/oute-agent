@@ -6,12 +6,14 @@
 # (`--task closes-refs`), nos dois modelos; só `swarm.md` ou `swarm/*.md` (o dispatcher, #753) = não exigida, porque nenhuma tarefa carrega o arquivo.
 # Nunca em CI; só você chama, no container.
 #
-# uso:  oute-regression [--rounds N] [--model haiku|sonnet]… [--codex] [--task <nome>]… [--json]
+# uso:  oute-regression [--rounds N] [--model haiku|haiku5|sonnet]… [--codex] [--task <nome>]… [--json]
 #                       [--baseline <arquivo>] [--write-baseline] [--subscription claude|zai]
 #   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
 #                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
 #                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
 #   --model <m>  só o modelo <m> (haiku = id explícito de teste; sonnet = fase build da tabela do seletor); repetível. Sem a flag, os dois.
+#                `haiku5` (#734) = `claude-haiku-5-5`, só com a flag explícita (nunca no padrão); chaves `<tarefa>@haiku5` na linha de
+#                base, à parte do `haiku` (4.5), que continua a referência até a decisão do Bardi.
 #   --subscription <s>  a assinatura que roda as tarefas (#680, ADR-02): `claude` (o padrão: haiku e sonnet) ou `zai` (o claude
 #                na API da Z.ai, no glm-5.3 que o `oute-select --subscription zai` dá para a fase build; a chave vem de
 #                OUTE_ZAI_API_KEY, só do ambiente). Na `zai` as chaves da linha de base são `<tarefa>@zai`; `--model` e `--codex`
@@ -78,7 +80,7 @@ ROUNDS=3; CODEX=0; JSON=0; ONLY=(); ONLY_MODEL=(); KEEP=""; BASELINE_ARG=""; WRI
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --rounds) shift; [[ $# -gt 0 && "$1" =~ ^[1-9][0-9]?$ ]] || die2 "--rounds pede um inteiro de 1 a 99"; ROUNDS="$1" ;;
-    --model) shift; [[ $# -gt 0 && "$1" =~ ^(haiku|sonnet)$ ]] || die2 "--model pede haiku ou sonnet"; ONLY_MODEL+=("$1") ;;
+    --model) shift; [[ $# -gt 0 && "$1" =~ ^(haiku|haiku5|sonnet)$ ]] || die2 "--model pede haiku, haiku5 ou sonnet"; ONLY_MODEL+=("$1") ;;
     --keep) shift; [[ $# -gt 0 && "$1" == /* && "$1" != *..* ]] || die2 "--keep pede uma pasta absoluta, sem .."; KEEP="$1" ;;
     --codex) CODEX=1 ;;
     --task) shift; [[ $# -gt 0 && "$1" =~ ^[a-z][a-z0-9-]*$ ]] || die2 "--task pede o nome de uma tarefa"; ONLY+=("$1") ;;
@@ -203,6 +205,8 @@ fi
 # --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build` na assinatura claude (`--agent claude`: a `zai` é a padrão do `build`, #677); Codex da fase `ops`, só com --codex
 declare -A MODEL_ID; ALIASES=()
 PAIRS="haiku:ops sonnet:build"; [[ $SUB != zai ]] || PAIRS="zai:build"
+# haiku5 (#734): só quando pedido por --model; fora do padrão, para a suíte comum não gastar cota a mais
+for m in ${ONLY_MODEL[@]+"${ONLY_MODEL[@]}"}; do [[ "$m" != haiku5 ]] || PAIRS="$PAIRS haiku5:ops"; done
 for pair in $PAIRS; do
   al="${pair%%:*}"
   if [[ ${#ONLY_MODEL[@]} -gt 0 ]]; then
@@ -213,6 +217,8 @@ for pair in $PAIRS; do
     id="$(oute-select --json --phase "${pair#*:}" --subscription zai 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   elif [[ "$al" = haiku ]]; then
     id="$(oute-select --json --phase "${pair#*:}" --model claude-haiku-4-5-20251001 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
+  elif [[ "$al" = haiku5 ]]; then
+    id="$(oute-select --json --phase "${pair#*:}" --model claude-haiku-5-5 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   else
     id="$(oute-select --json --phase "${pair#*:}" --agent claude 2>/dev/null | jq -r '.model // empty' 2>/dev/null)"
   fi

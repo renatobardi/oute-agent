@@ -73,6 +73,7 @@ EXPECTED = {
     "claude-sonnet-5-5": ("anthropic", "anthropic/claude-sonnet-5.5"),
     "claude-sonnet-5": ("anthropic", "anthropic/claude-sonnet-5"),
     "claude-haiku-4-5-20251001": ("anthropic", "anthropic/claude-haiku-4.5"),
+    "claude-haiku-5-5": ("anthropic", "anthropic/claude-haiku-5.5"),   # #734
     "claude-fable-5-1": ("anthropic", "anthropic/claude-fable-5.1"),
     "gpt-5": ("openai", "openai/gpt-5"), "gpt-5-codex": ("openai", "openai/gpt-5-codex"),
     "gpt-5.1": ("openai", "openai/gpt-5.1"), "gpt-5.1-codex-mini": ("openai", "openai/gpt-5.1-codex-mini"),
