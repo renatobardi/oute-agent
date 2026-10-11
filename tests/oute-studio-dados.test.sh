@@ -43,9 +43,12 @@ studio_oute_up "$SHOW" "${CRED[@]}" CONTAINER_UID="$ME" OUTE_SURREALDB_DIR="dado
 check "caminho relativo: para"                                   test "$RC" != 0
 check "caminho relativo: diz a variável e o motivo"              has "OUTE_SURREALDB_DIR.*caminho absoluto"
 
-studio_oute_up "$SHOW" "${CRED[@]}" CONTAINER_UID=10001 OUTE_AGENT_STUDIO_DIR="$TMP/duck"
+# a pasta é do usuário do teste ($ME); o dono esperado tem de ser outro. Com 10001 fixo, no container (uid 10001)
+# o dono bate e a recusa não dispara (#739)
+OTHER=$((ME + 1))
+studio_oute_up "$SHOW" "${CRED[@]}" CONTAINER_UID="$OTHER" OUTE_AGENT_STUDIO_DIR="$TMP/duck"
 check "pasta de outro dono: para"                                test "$RC" != 0
-check "pasta de outro dono: diz a variável e o dono esperado"    has "OUTE_AGENT_STUDIO_DIR.*dono.*10001"
+check "pasta de outro dono: diz a variável e o dono esperado"    has "OUTE_AGENT_STUDIO_DIR.*dono.*$OTHER"
 
 studio_oute_up "$SHOW" CONTAINER_UID="$ME" OUTE_AGENT_STUDIO_DIR="$TMP/nao-existe"
 check "host sem agent-studio: a variável não é conferida"        test "$RC" = 0
