@@ -4,6 +4,23 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-11
+
+### Added
+- **Medida do Haiku 5.5** (#734). `oute-regression --model haiku5` roda as tarefas no `claude-haiku-5-5` (chaves `<tarefa>@haiku5`, à parte do `haiku` 4.5, que segue na linha de base); fora do padrão, só com a flag. O agent-studio ganha o preço do `claude-haiku-5-5` (degrau até 100 mil tokens) e o `scripts/models-check` confere o id no binário. A tabela do seletor e o ADR-02 não mudam: a proposta de papel vai no PR, para decisão do Bardi. **Precisa de release** (`docker/oute-regression` e `config/agent-studio/config.toml` vão na imagem).
+
+### Changed
+- **Reserva da execução em `claude-haiku-5-5`** (#734). Em `build` `ship`, `ops` `ctx` e nas exceções `kaizen` e `docs`, a coluna `claude` do seletor passa do Sonnet para o `claude-haiku-5-5`: com a `zai` no teto de cota, a sessão de execução abre no Haiku 5.5. Raciocínio, `spike` e `[default]` seguem no Sonnet; o autor `claude-haiku-5-5` é revisado pelo Opus. Decisão e medida no adendo de 2026-10-11 do ADR-02. O `docker/oute-regression` passa a tirar o `sonnet` da suíte da fase `qa` (a `build` agora dá o Haiku 5.5), e o preço do `claude-haiku-5-5` no `config/agent-studio/config.toml` ganha `fixed = true`, como todo modelo da tabela. **Precisa de release** por `docker/oute-regression` (o Dockerfile o copia para a imagem); `config/select/` e `config/agent-studio/` são bind mounts e entram com `git pull` + `oute down/up`. **Ordem: release antes de puxar a tabela**, ou junto; com a tabela nova e o `oute-regression` da imagem antiga, a suíte mediria o Haiku 5.5 sob o nome `sonnet`.
+- **Reserva do claude na imagem sobe de 2.1.285 para 2.1.296** (#734). A versão anterior não reconhecia o id `claude-haiku-5-5`, reserva da execução na tabela do seletor; `scripts/agent-pins` confere a versão e os sha256. **Precisa de release** (o `docker/Dockerfile` vai na imagem).
+- **Regra da regressão no `docker/swarm-worker.md`** (#780). `OUTE_REGRESSION_DIR="$PWD/docker/regression"` vale sempre que o PR muda `docker/swarm-worker.md`, nos casos (a) e (b), para a tarefa 12 ler o arquivo da worktree. **Precisa de release** (o arquivo vai na imagem).
+- **Spans internos do Codex ficam fora do agent-studio** (#792). O collector deixa de mandar ao agent-studio oito spans internos do Codex (`receiving`, `handle_responses`, `append_items`, `persist_rollout_items`, `realtime_conversation.running_state`, `fs.get_metadata`, `auth`, `fs.read_file`), que eram 91% dos spans do Codex e nenhuma tela lia. O bucket segue com tudo e o `oute studio replay` os traz de volta. Não precisa de release (`config/otel/agent-studio.yaml` entra com `git pull` + `oute down/up`).
+- **Regra da trava de cota no `docker/swarm-worker.md`** (#795). A saída 3 do `oute-regression` prevê a exceção: o limite `OUTE_REGRESSION_MAX_PCT` só sobe quando o Bardi pediu na issue ou na rodada, só para aquela execução, e o valor usado vai no `## Regressão dos agentes` do PR. **Precisa de release** (o arquivo vai na imagem).
+
+### Fixed
+- **Painel do herdr abre em bash, com histórico** (#428). O `herdr server` subia sem `SHELL` e o painel caía em `/bin/sh` (dash): seta para cima mostrava `^[[A` e não havia histórico nem edição de linha em nenhum comando. O entrypoint agora define `SHELL=/bin/bash` antes de subir o servidor. **Precisa de release** (`docker/entrypoint.sh` vai na imagem); painéis já abertos só voltam em bash depois do `oute down/up`.
+- **`tests/oute-refcheck.test.sh` deixa de falhar por acaso** (#734). O prefixo de 10 caracteres do hash do commit de teste podia sair só com dígitos (~1,8% por execução) e virava número puro, que o `oute-refcheck` não confere como SHA; o teste agora escolhe um prefixo com letra e dígito.
+- **Conversas do `oute-regression` saem com o repositório no agent-studio** (#783). Cada conversa de tarefa passa a levar `oute.task.repo` = o repositório principal do checkout de onde a suíte é chamada, pela mesma regra do `folder_repo` do shim (a pasta do `.git` comum, então uma worktree vale como o repositório dela); antes saíam só com `oute.task.id` e `oute.task.slug`, e o bloco "Chamadas por repositório" do Dashboard as contava como "sem repositório". Fora de um repositório a suíte roda como antes, sem a marca; `oute.task.id` e `oute.task.slug` não mudam, e `--subscription zai` também leva o repositório. Um `oute.task.repo` herdado do ambiente de quem chama é trocado pelo do checkout. Não reclassifica as conversas já gravadas. **Precisa de release** (`docker/oute-regression` vai na imagem).
+
 ## [0.8.2] - 2026-10-11
 
 ### Added
