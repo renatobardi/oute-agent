@@ -116,6 +116,13 @@ DIR="${OUTE_REGRESSION_DIR:-}"
 # --- notas (#712): as do checkout de onde a suíte é chamada; fora de um checkout, as que estão ao lado das tarefas
 NOTES_SRC=""; NOTES_FROM=""
 NOTES_TOP="$(git rev-parse --show-toplevel 2>/dev/null)" || NOTES_TOP=""
+# --- repositório das conversas (#783): o principal do checkout de onde a suíte é chamada, pela regra do folder_repo do
+# oute-agent-shim (a pasta do .git comum, então a worktree vale como o repositório dela); as tarefas rodam em pasta
+# temporária, fora de repositório, e sem a marca a conversa chegaria ao agent-studio como "sem repositório"
+TASK_REPO=""
+if GIT_COMMON="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [[ "$(basename "$GIT_COMMON")" == .git ]]; then
+  TASK_REPO="$(printf '%s' "$(basename "$(dirname "$GIT_COMMON")")" | tr -c 'A-Za-z0-9._-' '-')"
+fi
 if [[ -n "$NOTES_TOP" && -f "$NOTES_TOP/docker/agent-notes.md" ]]; then
   NOTES_SRC="$NOTES_TOP/docker/agent-notes.md"; NOTES_FROM=checkout
 elif [[ -f "$DIR/../agent-notes.md" ]]; then
@@ -338,7 +345,11 @@ attempt() {
     ! declare -F task_secrets >/dev/null || task_secrets > "$att/secrets" 2>/dev/null || true
     echo "$TASK_ID" > "$att/id"
     prompt="$(task_prompt)"
-    ora="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG"
+    base=""; IFS=, read -r -a ora_parts <<<"${OTEL_RESOURCE_ATTRIBUTES:-}" || true   # um oute.task.repo herdado sai: vale o do checkout (#783)
+    for part in ${ora_parts[@]+"${ora_parts[@]}"}; do
+      [[ -n "$part" && "${part%%=*}" != oute.task.repo ]] && base+="${base:+,}$part"
+    done
+    ora="${base:+$base,}oute.task.id=$TASK_ID,oute.task.slug=$SLUG${TASK_REPO:+,oute.task.repo=$TASK_REPO}"
     [[ $alias != zai ]] || ora+=",oute.subscription=zai"   # a conversa chega ao agent-studio com a assinatura (#678, #679)
     cd "$AGENT_CWD" || exit 1
     settings="$NOTES_SETTINGS"
