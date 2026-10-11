@@ -56,7 +56,7 @@
 # rodada aberta usa e gravado em `name=` do meta. O id segue sendo a chave em tudo; rodada antiga, sem nome, só tem o id.
 # spawn recusa (código 4) issue que já tem sessão aberta em outra rodada.
 # Trava semanal (#742, zai na #759): spawn recusa (código 5) quando a janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela
-# (config/select/models.toml; claude e zai = 85) ou acima, e grava a linha `guard` no log; --force vence; cota não lida só avisa.
+# (config/select/models.toml; claude = 95, zai = 85) ou acima, e grava a linha `guard` no log; --force vence; cota não lida só avisa.
 #
 # Repo: nome em /workspace (ex.: lab) ou caminho. Default --max 3; --label filtra issues por label.
 # --max = abas abertas ao mesmo tempo na rodada (kaizen fora): aba fechada com `oute-swarm close` libera a vaga.

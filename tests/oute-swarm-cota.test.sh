@@ -122,11 +122,11 @@ check "sem cota: diz a issue, e cada assinatura com o estado e o reset" bash -c 
 check "sem cota: nada fechado nem aberto, spawned igual"  [ "$(closes)" -eq "$close1" -a "$(grep -c "$TAB_CREATE" "$FAKE/herdr.log")" -eq "$tabs1" -a "$(cat "$STATE/spawned")" == "$before" ]
 check "sem cota: linha sem-cota no log"                   grep -qE '^[0-9T:Z-]+ troca 8-troca sem-cota codex$' "$STATE/log"
 
-# a trava semanal não deixa a troca cair numa assinatura quase esgotada: claude em 7d=90 (trava 85) conta como trava, não como opção
-CASE=switch-trava; round "$CASE"; qq 10 90 96 10; screen_429
+# a trava semanal não deixa a troca cair numa assinatura quase esgotada: claude em 7d=96 (trava 95) conta como trava, não como opção
+CASE=switch-trava; round "$CASE"; qq 10 96 96 10; screen_429
 printf '9-b w1:p1 claude 2026-01-01T00:00:01Z w1:t1 %s - zai\n' "$REPO" >> "$STATE/spawned"; FAKE="$FAKE" "$BIN/fake-tabs" "#9 b=idle"
 MAX=5 sw switch 9-b
-check "zai parada, claude com 7d=90 (trava 85): vai ao codex" [ "$RC" -eq 0 -a "$OUT" == "trocada: #9 zai → codex (cota esgotada; mesma worktree e branch)" ]
+check "zai parada, claude com 7d=96 (trava 95): vai ao codex" [ "$RC" -eq 0 -a "$OUT" == "trocada: #9 zai → codex (cota esgotada; mesma worktree e branch)" ]
 
 # erros de uso
 CASE=switch-uso; round "$CASE"
@@ -153,7 +153,7 @@ check "zai com 7d=84: assinatura zai no spawned"           [ "$(awk '$1 == "9-za
 qq 10 10 99 10
 MAX=5 sw spawn 10-zai "instrução" --force
 check "zai com 7d=99 e --force: abre"                      [ "$RC" -eq 0 ]
-check "a tabela do repo tem weekly_guard_pct = 85 na claude e na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 85, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
+check "a tabela do repo tem weekly_guard_pct = 95 na claude e 85 na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
 
 # ---------------------------------------------------------------- 4. oute-select --next-subscription
 CASE=select-next; round "$CASE"
@@ -168,8 +168,8 @@ check "next: com a claude também tentada, vai ao codex (esforço da linha)" [ "
 qq 99 90 96 99
 j="$(nx zai --phase build)"
 check "next: claude cheia (5h 99%) e codex cheia: sem próxima"  [ "$(jq -c '[.next, (.options|map(.status))]' <<<"$j")" == '["",["parada","cheia","cheia"]]' ]
-qq 10 90 96 10
-check "next: claude com 7d=90 (trava 85): status trava, com o reset de 7 dias" bash -c '[ "$(jq -r ".options[1] | \"\(.status) \(.resets_at)\"" <<<"$1")" == "trava 2030-01-05T00:00:00Z" ]' _ "$(nx zai --phase build)"
+qq 10 96 96 10
+check "next: claude com 7d=96 (trava 95): status trava, com o reset de 7 dias" bash -c '[ "$(jq -r ".options[1] | \"\(.status) \(.resets_at)\"" <<<"$1")" == "trava 2030-01-05T00:00:00Z" ]' _ "$(nx zai --phase build)"
 qq 10 10 96 10
 check "next: assinatura indisponível (status da tabela) não é candidata" bash -c 'env PATH="$1:$PATH" FAKE="$2" FAKE_CODEX_LOGIN_RC=1 "$3" --next-subscription zai,claude --phase build | jq -e ".next == \"\" and .options[2].status == \"indisponivel\"" >/dev/null' _ "$BIN" "$FAKE" "$ROOT/docker/oute-select"
 echo lixo > "$FAKE/quota.json"
