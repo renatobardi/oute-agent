@@ -170,26 +170,28 @@ bucket() {
       .resourceSpans[]? | (.resource.attributes // []) as $r
       | .scopeSpans[]?.spans[]? | (.attributes // []) as $a
       | {host: ($r | attr("host.name") // "?"), agent: ($a | attr("oute.agent") // ($r | attr("oute.agent")) // "?"),
-         spans: 1, span_err: (if (.status.code == 2 or .status.code == "STATUS_CODE_ERROR") then 1 else 0 end),
+         svc: ($r | attr("service.name") // "?"), spans: 1, span_err: (if (.status.code == 2 or .status.code == "STATUS_CODE_ERROR") then 1 else 0 end),
          cost: (($a | attr("oute.cost_usd")) // 0 | tonumber? // 0), logs: 0, log_err: 0}'
     find "$tmp/logs" -name '*.json.gz' -exec gunzip -c {} + 2>/dev/null | jq -c '
       def v: .value | (.stringValue // .intValue // .doubleValue // .boolValue);
       def attr($k): (map(select(.key == $k))[0] | v?) // null;
       .resourceLogs[]? | (.resource.attributes // []) as $r
       | .scopeLogs[]?.logRecords[]? | (.attributes // []) as $a | ($a | attr("event.name") // "") as $ev
-      | {host: ($r | attr("host.name") // "?"), agent: ($r | attr("oute.agent") // "?"), spans: 0, span_err: 0,
+      | {host: ($r | attr("host.name") // "?"), agent: ($r | attr("oute.agent") // "?"),
+         svc: ($r | attr("service.name") // "?"), spans: 0, span_err: 0,
          cost: (if $ev == "api_request" then (($a | attr("cost_usd")) // 0 | tonumber? // 0) else 0 end), logs: 1,
          log_err: (if ((.severityNumber // 0) >= 17 or ($ev | test("error"; "i"))) then 1 else 0 end)}'
-  } | jq -rs --arg exp "$(expected | paste -sd, -)" --arg me "${OUTE_HOST:-}" '
+  } | jq -rs --arg exp "$(expected | paste -sd, -)" --arg me "${OUTE_HOST:-}" --argjson nao_agente '["agent-studio"]' '
     group_by([.host, .agent])
     | map({host: .[0].host, agent: .[0].agent, spans: (map(.spans) | add), span_err: (map(.span_err) | add),
-           logs: (map(.logs) | add), log_err: (map(.log_err) | add), cost: (map(.cost) | add)}) as $g
+           logs: (map(.logs) | add), log_err: (map(.log_err) | add), cost: (map(.cost) | add),
+           svcs: (map(.svc) | unique)}) as $g
     | (["host","agente","spans","spans_erro","logs","logs_erro","custo_usd(lista)"] | @tsv),
       ($g[] | [.host, .agent, .spans, .span_err, .logs, .log_err, (.cost*10000|round/10000)] | @tsv),
       ($g[] | select(.log_err >= 5 and .log_err / .logs > 0.05)
             | ["ANOMALIA","erro-alto","\(.host)/\(.agent)","\(.log_err) de \(.logs) logs de erro"] | @tsv),
-      ($g[] | select(.agent == "?")
-            | ["ANOMALIA","sem-oute.agent","\(.host)","\(.spans + .logs) registros sem oute.agent (service.name fora do transform/agent?)"] | @tsv),
+      ($g[] | select(.agent == "?") | . + {faltam: (.svcs - $nao_agente)} | select(.faltam | length > 0)
+            | ["ANOMALIA","sem-oute.agent","\(.host)","\(.spans + .logs) registros sem oute.agent (service.name: \(.faltam | join(",")); fora do transform/agent?)"] | @tsv),
       (if $me != "" then ($exp | split(",") | map(select(. != ""))[]) as $a
          | select([$g[] | select(.host == $me) | .agent] | index($a) | not)
          | ["ANOMALIA","agente-sem-telemetria","\($me)/\($a)","em OUTE_AGENTS, sem registro no bucket nas últimas horas lidas (ocioso ou quebrado?)"] | @tsv
