@@ -327,6 +327,7 @@ Desenho e medida anterior: [comentário da #536](https://github.com/renatobardi/
   - **Limite conhecido:** num banco remontado pelo replay, o fato antigo sem repositório já entra com `oute-agent`, e o `repo_infer` não o reavalia. A conversa antiga que o `repo_infer` poria em outro repositório fica em `oute-agent` nesse banco.
   - **Desfazer:** o fato do acerto se reconhece (coluna `oute-agent`, hora antes do corte, JSON sem `oute.task.repo`), mas o que o `repo_infer` gravou como `oute-agent` tem a mesma forma.
   - Teste: `tests/agent-studio-repo-corte.test.sh` e a seção 11 do `tests/agent-studio-replay.test.sh`.
+- **Adendo #803, conversa da regressão:** fato sem repositório com `oute.task.id` começando por `regression-` fica com `oute-agent` em qualquer hora (`repo.is_regression`; `repo.legacy` na ingestão, com o `oute.task.id` do fato; `repo.apply_legacy` na subida, numa transação). Mesmas regras do #617: só a coluna `oute_repo`, fato com repositório não muda. Motivo: a suíte `oute-regression` roda em pasta temporária, que a inferência pela pasta não alcança. Teste: `tests/agent-studio-repo-regressao.test.sh`.
 - **Código:** `agent_studio/repo.py` (cláusula SQL e opções), `usage.aggregate(repo=)`, `dashboard.snapshot(repo=)`, `conversations.listing`/`sessions.listing(repo=)`. Teste: `tests/agent-studio-repo.test.sh`.
 
 ### Assinatura da conversa e custo estimado da `zai` (#679, ADR-02 adendo #629)

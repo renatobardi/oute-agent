@@ -82,8 +82,8 @@ def text(v):
 
 def fixed(rec, res, time_ns):
     out = {col: text(rec[key] if rec.get(key) is not None else res.get(key)) for col, key in FIXED.items()}
-    # repositório vazio = sem repositório (#528); sem repositório antes do corte = o acerto único do histórico (#617)
-    out["oute_repo"] = repo_mod.legacy(out["oute_repo"] or None, time_ns)
+    # repositório vazio = sem repositório (#528); sem repositório antes do corte ou da regressão = o acerto do histórico (#617, #803)
+    out["oute_repo"] = repo_mod.legacy(out["oute_repo"] or None, time_ns, out["oute_task_id"])
     out["oute_subscription"] = out["oute_subscription"] or None  # vazio = sem assinatura marcada
     return out
 
