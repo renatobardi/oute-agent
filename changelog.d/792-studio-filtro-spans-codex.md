@@ -1,0 +1,2 @@
+### Changed
+- **Spans internos do Codex ficam fora do agent-studio** (#792). O collector deixa de mandar ao agent-studio oito spans internos do Codex (`receiving`, `handle_responses`, `append_items`, `persist_rollout_items`, `realtime_conversation.running_state`, `fs.get_metadata`, `auth`, `fs.read_file`), que eram 91% dos spans do Codex e nenhuma tela lia. O bucket segue com tudo e o `oute studio replay` os traz de volta. Não precisa de release (`config/otel/agent-studio.yaml` entra com `git pull` + `oute down/up`).

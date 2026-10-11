@@ -11,7 +11,7 @@
 # os POSTs só esperavam na trava, estouravam o prazo e reenviavam o mesmo lote. Agora 2 consumidores por fila e prazo de
 # 60 s por envio, acima da espera por vaga de ingestão do agent-studio (20 s, depois 503 com Retry-After).
 processors:
-  # Spans internos do Codex: em 7 dias (até 2026-10-11) eram 1,13 milhão dos 1,24 milhão de spans do Codex (91%), para 61
+  # Spans internos do Codex (#792): em 7 dias (até 2026-10-11) eram 1,13 milhão dos 1,24 milhão de spans do Codex (91%), para 61
   # chamadas ao modelo, e nenhuma tela ou consulta do agent-studio os lê. Ficam só no bucket (tudo, ADR-04), de onde o
   # `oute studio replay` os traz de volta. Só o Codex (oute.agent, posto pelo transform/agent): o mesmo nome vindo de
   # outro agente passa. O handle_output_item_done fica sem o pai (handle_responses) na árvore.
