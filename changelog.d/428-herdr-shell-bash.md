@@ -1,0 +1,2 @@
+### Fixed
+- **Painel do herdr abre em bash, com histórico** (#428). O `herdr server` subia sem `SHELL` e o painel caía em `/bin/sh` (dash): seta para cima mostrava `^[[A` e não havia histórico nem edição de linha em nenhum comando. O entrypoint agora define `SHELL=/bin/bash` antes de subir o servidor. **Precisa de release** (`docker/entrypoint.sh` vai na imagem); painéis já abertos só voltam em bash depois do `oute down/up`.
