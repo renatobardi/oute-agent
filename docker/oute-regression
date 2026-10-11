@@ -202,9 +202,9 @@ else
   warn "sem oute-quota no PATH: cota não conferida; sigo"
 fi
 
-# --- modelos: Haiku explícito de teste (#615), Sonnet da fase `build` na assinatura claude (`--agent claude`: a `zai` é a padrão do `build`, #677); Codex da fase `ops`, só com --codex
+# --- modelos: Haiku explícito de teste (#615), Sonnet da fase `qa` na assinatura claude (`--agent claude`; não a `build`, cuja reserva `claude` é o Haiku 5.5 desde a #734; a `zai` é a padrão do `build`, #677); Codex da fase `ops`, só com --codex
 declare -A MODEL_ID; ALIASES=()
-PAIRS="haiku:ops sonnet:build"; [[ $SUB != zai ]] || PAIRS="zai:build"
+PAIRS="haiku:ops sonnet:qa"; [[ $SUB != zai ]] || PAIRS="zai:build"
 # haiku5 (#734): só quando pedido por --model; fora do padrão, para a suíte comum não gastar cota a mais
 for m in ${ONLY_MODEL[@]+"${ONLY_MODEL[@]}"}; do [[ "$m" != haiku5 ]] || PAIRS="$PAIRS haiku5:ops"; done
 for pair in $PAIRS; do
