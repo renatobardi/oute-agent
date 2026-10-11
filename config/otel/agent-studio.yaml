@@ -2,13 +2,25 @@
 # (#190): no oute-server (OUTE_AGENT_STUDIO=1) a rede docker "oute" (http://agent-studio:8430); nos outros (Mac) o
 # vhost https://agent-studio.oute.pro, só na tailnet (lab#244). Mesclado sobre collector.yaml só com a credencial de
 # ingestão do agent-studio no services.env (pasta oute-services do vault, #256; o `oute up` decide); sem ela entra o none.yaml e nada muda.
-# Sem filtro: o agent-studio guarda tudo, com conteúdo, como o bucket. Mesmos processors do bucket.
+# Mesmos processors do bucket e um filtro só, em traces: os spans internos do Codex (filter/codex_noise, abaixo). O resto
+# o agent-studio guarda inteiro, com conteúdo, como o bucket.
 # Sem perda como o bucket (#161, #152): fila em disco própria por exporter (arquivo próprio na mesma file_storage/queue),
 # retry sem prazo e lote formado na fila. O agent-studio só responde 2xx depois do commit e 503 (retentável) se a
 # gravação falha (#185). Teste: tests/otelcol-studio.test.sh.
 # Contrapressão (#570): o agent-studio tem um escritor só. Com os 10 consumidores padrão por fila, 3 sinais e cada host,
 # os POSTs só esperavam na trava, estouravam o prazo e reenviavam o mesmo lote. Agora 2 consumidores por fila e prazo de
 # 60 s por envio, acima da espera por vaga de ingestão do agent-studio (20 s, depois 503 com Retry-After).
+processors:
+  # Spans internos do Codex: em 7 dias (até 2026-10-11) eram 1,13 milhão dos 1,24 milhão de spans do Codex (91%), para 61
+  # chamadas ao modelo, e nenhuma tela ou consulta do agent-studio os lê. Ficam só no bucket (tudo, ADR-04), de onde o
+  # `oute studio replay` os traz de volta. Só o Codex (oute.agent, posto pelo transform/agent): o mesmo nome vindo de
+  # outro agente passa. O handle_output_item_done fica sem o pai (handle_responses) na árvore.
+  filter/codex_noise:
+    error_mode: ignore
+    traces:
+      span:
+        - resource.attributes["oute.agent"] == "codex" and IsMatch(name, "^(receiving|handle_responses|append_items|persist_rollout_items|realtime_conversation\\.running_state|fs\\.get_metadata|auth|fs\\.read_file)$")
+
 exporters:
   otlp_http/studio_traces:
     endpoint: ${env:AGENT_STUDIO_URL}
@@ -66,7 +78,7 @@ service:
   pipelines:
     traces/studio:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource]
+      processors: [memory_limiter, transform/agent, resource, filter/codex_noise]
       exporters: [otlp_http/studio_traces]
     metrics/studio:
       receivers: [otlp]
