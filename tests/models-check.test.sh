@@ -18,7 +18,7 @@ MC="$ROOT/scripts/models-check"; TABLE="$ROOT/config/select/models.toml"
 
 BIN="$TMP/bin"; FAKE="$TMP/fake"; SHIMS="$TMP/shims"; RES="$TMP/reserva"; EMPTY="$TMP/vazio"
 mkdir -p "$BIN" "$FAKE" "$SHIMS" "$RES" "$EMPTY" "$TMP/codex"
-SONNET=claude-sonnet-5-5; OPUS=claude-opus-5-5; HAIKU=claude-haiku-4-5-20251001
+SONNET=claude-sonnet-5-5; OPUS=claude-opus-5-5; HAIKU=claude-haiku-4-5-20251001; HAIKU5=claude-haiku-5-5
 
 # "binário" do claude: os ids como texto dentro de um script que só registra a execução (ninguém pode executá-lo)
 claude_bin() {   # <arquivo> <id…>
@@ -153,6 +153,13 @@ check "estrutura: o gh lista os labels uma vez"         [ "$(grep -c '^label lis
 mc; REPO_OUT="$OUT"; REPO_RC="$RC"
 mc --table "$TABLE"
 check "sem --table: lê a tabela do repo"                bash -c '[ -n "$1" ] && [ "$1" = "$2" ] && [ "$3" -eq "$4" ]' _ "$OUT" "$REPO_OUT" "$RC" "$REPO_RC"
+# #734: o id do Haiku 5.5 (sem data) é aceito como qualquer outro id Claude: ok no binário que o tem, FALTA no que não o tem
+claude_bin "$TMP/claude-h5" "$OPUS" "$SONNET" "$HAIKU" "$HAIKU5"
+table -e "s/$HAIKU/$HAIKU5/"
+OUTE_MODELS_CLAUDE_BIN="$TMP/claude-h5" mc --table "$TMP/table.toml"
+check "haiku 5.5 na tabela e no binário: ok, código 0"   bash -c '[ "$1" -eq 0 ] && grep -qxF "ok $3 (claude)" <<<"$2"' _ "$RC" "$OUT" "$HAIKU5"
+mc --table "$TMP/table.toml"
+check "haiku 5.5 na tabela e fora do binário: FALTA"     bash -c '[ "$1" -eq 1 ] && grep -qxF "FALTA $3 (claude)" <<<"$2"' _ "$RC" "$OUT" "$HAIKU5"
 
 # ---------------------------------------------------------------- 2. id inexistente
 table -e 's/claude-opus-5-5/claude-opus-9-9/' -e 's/gpt-6-astra/gpt-9-nada/'

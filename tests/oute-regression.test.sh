@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Testes do `oute-regression` (#366, #484): regressão dos agentes, 13 tarefas em Haiku e Sonnet. Nenhum teste chama modelo:
 # `claude` e `codex` são falsos no PATH (agem pelo texto do prompt, bem ou mal conforme
-# FAKE_BAD="<tarefa>:<rodada> <tarefa>@<haiku|sonnet>:<rodada> …") e o `oute-emit`,
+# FAKE_BAD="<tarefa>:<rodada> <tarefa>@<haiku|haiku5|sonnet>:<rodada> …") e o `oute-emit`,
 # o `oute-quota` e o agent-studio também (o agent-studio é um servidor HTTP local de teste). O `oute-select` é o de
 # verdade, com a tabela do repo. Só comportamento externo: saída, código e o que os falsos receberam.
 # Uso: tests/oute-regression.test.sh   (sai != 0 se algo falhar)
@@ -51,7 +51,7 @@ for ((i = 1; i <= $#; i++)); do
   [[ "${!i}" = --settings ]] && { j=$((i + 1)); settings="${!j}"; }
 done
 cat "$mcp" >> "$FAKE_LOG/mcp.json" 2>/dev/null
-case "$model" in *haiku*) al=haiku ;; *sonnet*) al=sonnet ;; glm-*) al=zai ;; *) al=outro ;; esac
+case "$model" in *haiku-5-5*) al=haiku5 ;; *haiku*) al=haiku ;; *sonnet*) al=sonnet ;; glm-*) al=zai ;; *) al=outro ;; esac
 case "$OTEL_RESOURCE_ATTRIBUTES" in *oute.task.slug=regression-*) task="${OTEL_RESOURCE_ATTRIBUTES##*oute.task.slug=regression-}" ;; esac
 task="${task%%,*}"   # na zai o resource ainda leva oute.subscription depois do slug
 [[ "$OTEL_RESOURCE_ATTRIBUTES" =~ oute.task.id=[^,]*-r([0-9]+) ]] && round="${BASH_REMATCH[1]}"
@@ -294,7 +294,7 @@ check "tarefa desconhecida: saída 2"                     [ "$RC" -eq 2 ]
 run --rounds 0
 check "--rounds 0: saída 2"                              [ "$RC" -eq 2 ]
 run --model opus
-check "--model fora de haiku/sonnet: saída 2"            [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
+check "--model fora de haiku/haiku5/sonnet: saída 2"            [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
 OUTE_REGRESSION_PARALLEL=0 run
 check "OUTE_REGRESSION_PARALLEL=0: saída 2"              [ "$RC" -eq 2 ]
 run --task select --rounds 2
@@ -303,6 +303,12 @@ run --task select --rounds 2 --model sonnet
 check "--model sonnet: só o Sonnet da tabela"            bash -c '[ "$1" -eq 0 ] && [ "$(grep -c -- "--model claude-sonnet-5-5 " "$2")" -eq 2 ] && ! grep -q haiku "$2"' _ "$RC" "$LOG/claude.argv"
 run --task select --rounds 2 --model sonnet --model haiku
 check "--model repetido: os dois"                        [ "$RC" -eq 0 -a "$(nclaude)" -eq 4 ]
+run --task select --rounds 2 --model haiku5
+check "--model haiku5: só o claude-haiku-5-5, chave @haiku5, sem o 4.5" bash -c '[ "$1" -eq 0 ] && [ "$(grep -c -- "--model claude-haiku-5-5 " "$2")" -eq 2 ] && ! grep -q -- "--model claude-haiku-4-5" "$2" && ! grep -q -- "--model claude-sonnet" "$2" && [ "$3" = verde ] && [ -z "$4" ]' _ "$RC" "$LOG/claude.argv" "$(verdict select@haiku5)" "$(verdict select@haiku)"
+run --task select --rounds 1 --model haiku --model haiku5
+check "--model haiku --model haiku5: os dois Haiku, linha de base à parte" bash -c '[ "$1" -eq 0 ] && [ "$2" -eq 2 ] && [ "$3" = verde ] && [ "$4" = verde ]' _ "$RC" "$(nclaude)" "$(verdict select@haiku)" "$(verdict select@haiku5)"
+FAKE_BAD="select@haiku5:1 select@haiku5:2 select@haiku5:3" run --task select --model haiku --model haiku5
+check "haiku5 vermelho não contamina o haiku (4.5)"      [ "$RC" -eq 1 -a "$(verdict select@haiku5)" = vermelho -a "$(verdict select@haiku)" = verde ]
 run --json --task select --rounds 1
 check "--json: modelos, repetições, chamadas e custo por modelo" bash -c 'jq -e ".models == [\"$2\", \"$3\"] and .calls == 2 and .rounds == 1 and (.repetitions | test(\"limite|permitir|afirmar\")) and .per_model.haiku.calls == 1 and .per_model.sonnet.cost_usd == 0.02 and .per_model.sonnet.turns == 3 and .tasks[\"select@haiku\"] == \"verde\"" <<<"$1" >/dev/null' _ "$STDOUT" "$HAIKU" "$SONNET"
 FAKE_SLEEP=0.3 OUTE_REGRESSION_PARALLEL=2 run --task root --task select --task worktree --rounds 1
