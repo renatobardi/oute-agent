@@ -42,15 +42,19 @@ for x in traces:314572800 metrics:104857600 logs:629145600; do
   check "$e: retry sem prazo"                            jqp --arg e "$e" '.exporters[$e].retry_on_failure | .enabled and .max_elapsed_time == 0'
   check "$e: lote na fila com flush_timeout entre 5 e 30 s" jqp --arg e "$e" \
     '.exporters[$e].sending_queue.batch.flush_timeout | . >= 5000000000 and . <= 30000000000'
-  check "$s/studio: só o $e, mesmos processors do bucket" jqp --arg p "$s/studio" --arg a "$s/archive" --arg e "$e" \
+  # traces: os processors do bucket e, no fim, o filtro dos spans internos do Codex (o bucket segue com tudo)
+  extra='[]'; [[ "$s" != traces ]] || extra='["filter/codex_noise"]'
+  check "$s/studio: só o $e, processors do bucket + $extra" jqp --arg p "$s/studio" --arg a "$s/archive" --arg e "$e" --argjson x "$extra" \
     '.service.pipelines[$p].receivers == ["otlp"] and .service.pipelines[$p].exporters == [$e]
-     and .service.pipelines[$p].processors == .service.pipelines[$a].processors'
+     and .service.pipelines[$p].processors == .service.pipelines[$a].processors + $x'
 done
 # #570: com 256 MiB o collector do oute-server batia no limite e recusava dado a cada poucos minutos
 check "memory_limiter: 512 MiB, com 128 de folga para pico" jqp '.processors.memory_limiter | .limit_mib == 512 and .spike_limit_mib == 128'
-check "sem filtro nem batch em memória no agent-studio" jqp \
+check "sem batch em memória no agent-studio; filtro só o do Codex, só em traces" jqp \
   '[.service.pipelines | to_entries[] | select(.key | endswith("/studio")) | .value.processors[]]
-   | all(.[]; (startswith("filter") or startswith("batch")) | not)'
+   | all(.[]; startswith("batch") | not) and map(select(startswith("filter"))) == ["filter/codex_noise"]'
+check "bucket sem filtro (tudo, ADR-04)"                jqp \
+  '[.service.pipelines | to_entries[] | select(.key | endswith("/archive")) | .value.processors[]] | all(.[]; startswith("filter") | not)'
 check "bucket continua igual (três pipelines archive)"  jqp '[.service.pipelines | keys[] | select(endswith("/archive"))] | length == 3'
 # o print-config não mostra o sizer: confere na fonte (bytes nas filas e no lote, que é âncora única)
 check "sizer: bytes nas três filas"                     [ "$(grep -c '^      sizer: bytes$' "$STUDIO")" -eq 3 ]
@@ -190,6 +194,42 @@ for _ in $(seq 1 80); do agent_of "$OLD_SVC" >/dev/null 2>&1 && agent_of claude-
 check "oute.agent: claude-code vira claude (resource e span)" test "$(agent_of claude-code)" = "claude claude"
 check "oute.agent: codex_exec vira codex"                test "$(agent_of codex_exec)" = "codex codex"
 check "oute.agent: service.name do roteador não é mais marcado (#218)" test "$(agent_of "$OLD_SVC")" = "- -"
+
+# ---------------------------------------------------------------- 3c. spans internos do Codex ficam fora do agent-studio
+# em produção (7 dias até 2026-10-11) eram 91% dos spans do Codex e nenhuma tela os lê; o bucket segue com tudo.
+# Só o Codex: o mesmo nome vindo do Claude passa. session_task.turn (a chamada ao modelo) e o resto do Codex passam.
+NOISE="receiving handle_responses append_items persist_rollout_items realtime_conversation.running_state fs.get_metadata auth fs.read_file"
+# send_span <service.name> <nome> <n>: um span com ids próprios
+send_span() {
+  local svc="$1" name="$2" n="$3"
+  curl -fs -o /dev/null -H 'Content-Type: application/json' "127.0.0.1:$HTTP/v1/traces" -d '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"'"$svc"'"}}]},"scopeSpans":[{"spans":[{"traceId":"'"$(printf '%032x' "$n")"'","spanId":"'"$(printf '%016x' "$n")"'","name":"'"$name"'","startTimeUnixNano":"1759000000000000000","endTimeUnixNano":"1759000001000000000"}]}]}]}'
+  return $?
+}
+i=100
+for name in $NOISE; do i=$((i + 1)); send_span codex_exec "$name" "$i" || bad "collector recusou o span $name do Codex"; done
+send_span claude-code receiving 200 || bad "collector recusou o span receiving do Claude"
+send_span codex_exec handle_tool_call_with_source 201 || bad "collector recusou o span de ferramenta do Codex"
+send_span codex_exec session_task.turn 202 || bad "collector recusou o session_task.turn"   # por último: é o que a espera procura
+# names_of <service.name>: nomes dos spans daquele serviço que chegaram ao receptor, em ordem, numa linha
+names_of() {
+  local svc="$1"
+  python3 - "$RCV" "$svc" <<'PY'
+import glob, gzip, json, sys
+names = set()
+for f in glob.glob(sys.argv[1] + "/*.json"):
+    raw = open(f, "rb").read(); j = json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+    for r in j.get("resourceSpans", []):
+        a = {x["key"]: list(x["value"].values())[0] for x in r.get("resource", {}).get("attributes", [])}
+        if a.get("service.name") == sys.argv[2]:
+            names.update(x.get("name") for s in r.get("scopeSpans", []) for x in s.get("spans", []))
+print(" ".join(sorted(n for n in names if not n.startswith("marca-"))))
+PY
+  return $?
+}
+for _ in $(seq 1 80); do grep -q 'session_task.turn' <<<"$(names_of codex_exec)" && break; sleep 0.5; done
+check "Codex: spans internos não chegam ao agent-studio; chamada ao modelo e ferramenta chegam" \
+  test "$(names_of codex_exec)" = "handle_tool_call_with_source session_task.turn"
+check "Claude: span de mesmo nome passa (o filtro é só do Codex)" test "$(names_of claude-code)" = "receiving"
 
 # ---------------------------------------------------------------- 4. kill -9 com lote pendente
 otelcol_kill9 40 receptor
