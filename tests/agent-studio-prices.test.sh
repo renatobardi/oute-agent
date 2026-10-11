@@ -93,7 +93,7 @@ cfg_models = set(tomllib.load(open(f"{root}/config/agent-studio/config.toml", "r
 check("mapeamento: todo modelo da tabela do seletor e do config.toml do repo tem id nas duas fontes",
       all(set(S.source_ids(m)) == {S.MODELS_DEV, S.OPENROUTER} for m in sel | cfg_models))
 check("seletor: a tabela do repo dá os ids Claude, zai e Codex esperados (#677)",
-      sel == {"claude-sonnet-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "gpt-6-luna", "glm-5.3"})
+      sel == {"claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6.1-sol", "claude-opus-5-5", "gpt-6-astra", "gpt-6-luna", "glm-5.3"})
 # o preço do glm-5.3 do config.toml (#679) é o que as duas fontes confirmam: a conferência o acha igual, não "sem fonte"
 glm = CF.load(f"{root}/config/agent-studio/config.toml").prices.lookup("glm-5.3")
 glm_src = {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_creation": 0.0}

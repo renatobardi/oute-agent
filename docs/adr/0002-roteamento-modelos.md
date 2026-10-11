@@ -202,6 +202,27 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 **Regras:** as mesmas do #257 e #313: primitivo `choice`, só `https://`, teto de 3 s, só o texto (cortado em 16 mil caracteres) e as 12 fases, chave só no cabeçalho (`AGENT_STUDIO_JEV_KEY`, a `OUTE_TYPESAFE_API_KEY` posta como segredo de serviço), confiança mínima 0,6; abaixo disso, ou erro, a fase fica com a marca "baixa confiança". **Risco:** o primeiro pedido de uma conversa avulsa é texto livre do Bardi e pode ter dado que o texto da tarefa não tem; ele sai para a TypeSafe e não passa por filtro de segredo (a ausência do filtro é uma lacuna apontada pelo autor, sem decisão do Bardi; que o último passo use o Jev é decisão dele, [#749](https://github.com/renatobardi/oute-agent/issues/749)). Só a conversa que chega ao último passo sai.
 **Consumo:** o agent-studio emite `agent_studio.jev.calls` e `agent_studio.jev.duration` (ADR-08 §11). **Fora:** trocar o Jev por outro classificador ([#565](https://github.com/renatobardi/oute-agent/issues/565)).
 
+### Adendo 2026-10-11 — `claude-haiku-5-5` é a reserva da execução, no lugar do Sonnet (decisão do Bardi, #734)
+**Decisão** (o Bardi escolheu o papel 1 da [#734](https://github.com/renatobardi/oute-agent/issues/734), na rodada `swarm-1011-0911`): nas linhas de execução (`build` `ship`, `ops` `ctx`, e as exceções `kaizen` e `docs`), a coluna `claude` passa de `claude-sonnet-5-5` para `claude-haiku-5-5`. Com a `zai` no teto de cota, a sessão de execução abre no Haiku 5.5. A cadeia (`zai` → `claude` → `codex`), a coluna `zai` (`glm-5.3`) e a coluna `codex` não mudam. Mudança em `config/select/models.toml`, sem release.
+**Substitui:** a frase "`ship` e `iter` ficam no Sonnet" (tabela fase → modelo, acima) e o adendo #615 (Sonnet no lugar do Haiku automático), só na coluna `claude` das fases de execução. Em `ship`, a coluna `claude` deixa de ser Sonnet; `iter` e as demais fases não mudam.
+**Alcance:** a coluna `claude` vale para toda abertura na assinatura `claude` numa fase de execução, não só para a reserva por teto da `zai`: `--agent claude`, `--subscription claude`, `--prefer claude` e o `oute-swarm switch` de `zai` para `claude` também abrem no Haiku 5.5 (conferido com `oute-select`; o caso `--agent claude em build` está em `tests/oute-select-reservas.test.sh`).
+**O que não muda:** as linhas de raciocínio (`strat` `intent` `arch` `spec`, `design` `plan` `qa` `iter`, `learn`) e a exceção `spike` seguem em Opus e Sonnet. O `[default]` segue em Sonnet. O Haiku 4.5 segue só como modelo explícito de teste da regressão (adendo #615). O `glm-5.3-flash` continua fora (o par do Haiku na `zai` seria ele, mas a `zai` é a padrão da linha e fica em `glm-5.3`). Autor `claude-haiku-5-5` entra na lista de revisão do Opus (`[[reviewer]]`).
+**Medida** ([PR #791](https://github.com/renatobardi/oute-agent/pull/791), 2026-10-11, imagem 0.8.2, claude 2.1.296, 3 rodadas, `OUTE_REGRESSION_MAX_PCT=95` só nessa execução):
+
+| | Haiku 5.5 | `glm-5.3` (`zai`) | Sonnet | Haiku 4.5 |
+|---|---|---|---|---|
+| Origem | medido em 2026-10-11 | linha de base de 2026-10-08 | linha de base de 2026-10-08 | linha de base de 2026-10-08 |
+| Tarefas verdes (de 13) | 13 | 13 | 13 | 13 |
+| Tempo por chamada | 26 s (39 chamadas) | não medido | não medido | não medido |
+| Custo equivalente na API | US$ 0,5479 | não medido | não medido | não medido |
+| Cota do Claude (7 dias) | 81% antes e depois, no JSON do `oute-quota` do corpo do #791 (a tabela do mesmo corpo diz 80% → 81%; ressalva abaixo) | não medido | não medido | não medido |
+
+- **A `ptbr` ficou em 2 de 3.** Uma repetição falhou (`poucas palavras em pt-BR (2)`). A tarefa fica verde pela regra do `oute-regression` (vermelho = mais de 1 falha em 3), mas é a tarefa do texto em pt-BR e o limite de aprovação dela é menor que o das outras 12. Nas fases de execução o texto para o Bardi segue a regra da #481 (redação final por subagente Sonnet em sessão Haiku).
+- **O que 3 rodadas permitem afirmar:** o Haiku 5.5 fechou as 13 tarefas e o estúdio verdes sob a regra da ferramenta. Não permitem afirmar taxa de aprovação alta: com 0 falhas em 3 repetições o limite inferior a 95% é 36,8%.
+- **Não medido:** tempo por tarefa; tempo, custo e cota do Sonnet e da `zai` na data; Haiku 5.5 e Sonnet lado a lado no mesmo dia; ajustes até a auditoria passar em ticket real de `build` (fora do escopo da #734); o Haiku 5.5 no Mac (Claude Code 2.1.290 não conhecia o id em 2026-10-08, não reverificado); cota da assinatura por modelo. A diferença de cota (80% para 81%) **não é atribuível só a essa execução**: outras sessões do container usam a mesma assinatura. Preço de tabela menor (US$ 0,10 contra US$ 2,00 do Sonnet por 1 milhão de tokens de entrada, `config/agent-studio/config.toml`) não prova cota menor.
+- As colunas `zai`, Sonnet e Haiku 4.5 vêm de `docker/regression/baseline.json` (`measured_at` 2026-10-08), que guarda só verde ou vermelho por tarefa. As chaves `@haiku5` não entram na linha de base nesta decisão.
+**Risco registrado:** a reserva passa de um modelo medido em uso (Sonnet) para um medido só em 3 rodadas da regressão. **Como se confere:** pelos ajustes até a auditoria passar e pelo agent-studio (a medida da #409), nas sessões que abrirem no Haiku 5.5; volta ao Sonnet com uma linha na tabela se a medida piorar.
+
 ## Histórico
 
 ### Roteamento Jev + OpenRouter (2026-09-23 a 2026-09-30)

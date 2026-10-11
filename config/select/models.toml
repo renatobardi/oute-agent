@@ -76,11 +76,11 @@ zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
 
-# Execução:
+# Execução (reserva no claude-haiku-5-5 e não no Sonnet, #734, ADR-02 adendo 2026-10-11; a zai segue na frente):
 [[line]]
 phases = ["build", "ship"]
 chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
+claude = "claude-haiku-5-5"
 zai = "glm-5.3"
 codex = "gpt-6.1-sol"
 effort = "high"
@@ -88,7 +88,7 @@ effort = "high"
 [[line]]
 phases = ["ops", "ctx"]
 chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
+claude = "claude-haiku-5-5"
 zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
@@ -107,7 +107,7 @@ effort = "high"
 label = "kaizen"
 unless_phases = ["build", "qa", "design", "plan", "ship", "iter"]
 chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
+claude = "claude-haiku-5-5"
 zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
@@ -115,7 +115,7 @@ effort = "medium"
 [[exception]]
 label = "docs"
 chain = ["zai", "claude", "codex"]
-claude = "claude-sonnet-5-5"
+claude = "claude-haiku-5-5"
 zai = "glm-5.3"
 codex = "gpt-6-luna"
 effort = "medium"
@@ -127,7 +127,7 @@ effort = "medium"
 # fica na linha por forma e não é usado). Autor sem linha aqui, ou linha com agente que não é o claude, = etapa `sem-revisor`.
 # Quem escreve em Sonnet (ou em `glm-5.3`, da `zai`, #677) é revisado por Opus, e o inverso (recomendação do autor da proposta da #489).
 [[reviewer]]
-writers = ["claude-sonnet-5-5", "gpt-6.1-sol", "glm-5.3"]
+writers = ["claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6.1-sol", "glm-5.3"]
 agent = "claude"
 model = "claude-opus-5-5"
 effort = "high"
