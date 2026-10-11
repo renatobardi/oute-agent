@@ -44,10 +44,20 @@ printf '10\n20\n' > "$FAKE/issues"; printf '555 10\n' > "$FAKE/comments"
 git -C "$REPO" init -q -b main
 printf 'a\nb\nc\n' > "$REPO/um.txt"; mkdir "$REPO/docker"; printf 'x\ny\n' > "$REPO/docker/oute-x"
 git -C "$REPO" add -A; git -C "$REPO" -c user.name=t -c user.email=t@t commit -qm um
-SHA1="$(git -C "$REPO" rev-parse HEAD)"; S1="${SHA1:0:10}"
+# prefixo do hash que o oute-refcheck reconhece como SHA: 10+ caracteres com letra e dígito. Um prefixo só de dígitos
+# (~0,9% por commit) seria "número puro" e o teste falharia por acaso (#734).
+sha_prefix() {
+  local full="$1" n
+  for n in $(seq 10 40); do
+    [[ "${full:0:n}" =~ [a-f] && "${full:0:n}" =~ [0-9] ]] && { echo "${full:0:n}"; return 0; }
+  done
+  echo "$full"
+  return 0
+}
+SHA1="$(git -C "$REPO" rev-parse HEAD)"; S1="$(sha_prefix "$SHA1")"
 printf 'd\ne\n' >> "$REPO/um.txt"
 git -C "$REPO" -c user.name=t -c user.email=t@t commit -qam dois
-SHA2="$(git -C "$REPO" rev-parse HEAD)"; S2="${SHA2:0:10}"
+SHA2="$(git -C "$REPO" rev-parse HEAD)"; S2="$(sha_prefix "$SHA2")"
 # sentinela hex sem ser commit: 12 caracteres com letra e dígito
 FAKESHA="deadbeef1234"
 
