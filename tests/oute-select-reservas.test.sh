@@ -7,6 +7,7 @@
 # da #598 (os valores esperados foram gerados pelo `docker/oute-select` da `main` antes da mudança). $OUTE_SELECT_BIN troca o
 # seletor testado (para rodar os casos contra outro código).
 # Uso: tests/oute-select-reservas.test.sh   (sai != 0 se algo falhar)
+ZG='zai/claude/glm-5.3'
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -292,10 +293,10 @@ for f in build ship ops ctx; do
 done
 for e in kaizen docs; do
   label_phase 51 "$e"
-  check "exceção $e: zai, agente claude, glm-5.3" [ "$(sb)" == "zai/claude/glm-5.3" ]
+  check "exceção $e: zai, agente claude, glm-5.3" [ "$(sb)" == "$ZG" ]
 done
 label_phase 52 kaizen aidlc:build
-check "kaizen com fase de código vale a fase (build): zai" [ "$(sb)" == "zai/claude/glm-5.3" ]
+check "kaizen com fase de código vale a fase (build): zai" [ "$(sb)" == "$ZG" ]
 # raciocínio: claude e o modelo de hoje
 for f in strat:claude-opus-5-5 intent:claude-opus-5-5 arch:claude-opus-5-5 spec:claude-opus-5-5 design:claude-sonnet-5-5 \
          plan:claude-sonnet-5-5 qa:claude-sonnet-5-5 iter:claude-sonnet-5-5 learn:claude-sonnet-5-5; do
@@ -305,7 +306,7 @@ done
 label_phase 54 spike aidlc:build
 check "exceção spike: claude, claude-sonnet-5-5"        [ "$(sb)" == "claude/claude/claude-sonnet-5-5" ]
 sel --phase build
-check "--phase build: zai (a fase fixa também tem cadeia)" [ "$(sb)" == "zai/claude/glm-5.3" ]
+check "--phase build: zai (a fase fixa também tem cadeia)" [ "$(sb)" == "$ZG" ]
 check "o status da zai é o --available do oute-quota"   grep -qxF -- "--available zai" "$FAKE/quota.args"
 # a zai indisponível: abre no claude
 export FAKE_AVAIL_RC_ZAI=1
@@ -355,7 +356,7 @@ check "--subscription codex: codex, com esforço"        bash -c '[ "$1" == "cod
 sel --issue 50 --subscription gemini
 check "--subscription fora da tabela: código 2 e a lista" bash -c '[ "$1" -eq 2 ] && grep -qF "use claude ou zai ou codex" <<<"$2"' _ "$RC" "$ERR"
 sel --issue 50 --agent claude --subscription zai
-check "--agent claude com --subscription zai: vale a zai" [ "$(sb)" == "zai/claude/glm-5.3" ]
+check "--agent claude com --subscription zai: vale a zai" [ "$(sb)" == "$ZG" ]
 sel --issue 50 --agent codex --subscription zai
 check "--agent codex com --subscription zai: código 2, não combinam" bash -c '[ "$1" -eq 2 ] && grep -qF "não combinam" <<<"$2"' _ "$RC" "$ERR"
 # --prefer zai: abre na zai numa fase de raciocínio; no teto, volta ao claude
@@ -375,7 +376,7 @@ check "--agent codex em build: codex, gpt-6.1-sol, high" bash -c '[ "$1" == "cod
 sel --issue 50 --agent zai
 check "--agent zai: código 2 (zai é assinatura, não agente)" bash -c '[ "$1" -eq 2 ] && grep -qF "use claude ou codex" <<<"$2"' _ "$RC" "$ERR"
 sel --model glm-5.3
-check "--model glm-5.3 sem --agent: a assinatura é a zai"  [ "$(sb)" == "zai/claude/glm-5.3" ]
+check "--model glm-5.3 sem --agent: a assinatura é a zai"  [ "$(sb)" == "$ZG" ]
 # sessão sem fase (linha padrão, sem chain): a padrão da tabela, como antes
 sel --task sem-issue
 check "sem fase: claude, sonnet, sem reserva (linha sem chain)" bash -c '[ "$1" == "claude/claude/claude-sonnet-5-5" ] && [ "$2" == ">-" ]' _ "$(sb)" "$(rsv)"

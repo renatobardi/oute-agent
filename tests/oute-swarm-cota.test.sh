@@ -4,6 +4,7 @@
 # `spawn` aplica a trava semanal também à zai. Mais o contrato do `oute-select --next-subscription`.
 # Bash puro, sem herdr, gh nem rede de verdade (dublês e apoio em tests/lib/swarm.sh; `oute-quota` falso com $FAKE/quota.json).
 # Uso: tests/oute-swarm-cota.test.sh   (sai != 0 se algum caso falhar)
+PANE_SEP='──────────────────'; TAB_CREATE='tab create'
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,11 +28,11 @@ qq() {
 }
 # tela do pane com o erro de cota da zai (a da sessão da #747) e uma sem erro
 screen_429() {
-  printf '%s\n' '● Feito o ajuste no teste.' '  ⎿  API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"
+  printf '%s\n' '● Feito o ajuste no teste.' '  ⎿  API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted' "$PANE_SEP" '❯ ' "$PANE_SEP" > "$FAKE/pane-style"
   return 0
 }
 screen_ok() {
-  printf '%s\n' '● Aguardando o CI do PR.' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"
+  printf '%s\n' '● Aguardando o CI do PR.' "$PANE_SEP" '❯ ' "$PANE_SEP" > "$FAKE/pane-style"
   return 0
 }
 # a sessão 7-foo com assinatura (8º campo do spawned): 1 = a assinatura, 2 = o agente
@@ -64,7 +65,7 @@ check "idle sem erro na tela: segue a [sessao] idle"     logged "[sessao] #7 foo
 
 # a frase em texto comum numa tela parada (auditoria do PR): não é o erro do fornecedor, nenhuma troca
 CASE=watch-prosa; round "$CASE"; qq 10 10 92 10; set_sub zai claude
-printf '%s\n' '● Expliquei que o plano tem um usage limit semanal e que o erro 429 aparece quando o limit reached é atingido.' '  Veja também a doc: Request rejected (429) quando o limite acaba.' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"
+printf '%s\n' '● Expliquei que o plano tem um usage limit semanal e que o erro 429 aparece quando o limit reached é atingido.' '  Veja também a doc: Request rejected (429) quando o limite acaba.' "$PANE_SEP" '❯ ' "$PANE_SEP" > "$FAKE/pane-style"
 echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
 watch
 check "frase de cota em texto comum (idle): sem [cota]"  bash -c '! grep -q "\[cota\]" <<<"$1"' _ "$(log_events)"
@@ -78,7 +79,7 @@ check "working com o erro ainda na tela: sem [cota]"     bash -c '! grep -q "\[c
 
 # linha antiga do spawned (sem assinatura): vale o agente; Codex com a mensagem dele; sem leitura da cota o reset sai como desconhecido
 CASE=watch-codex; round "$CASE"; printf '7-foo w1:p1 codex 2026-01-01T00:00:01Z w1:t1\n' > "$STATE/spawned"
-printf '%s\n' "■ You've hit your usage limit. Try again later." '──────────────────' '› ' > "$FAKE/pane-style"
+printf '%s\n' "■ You've hit your usage limit. Try again later." "$PANE_SEP" '› ' > "$FAKE/pane-style"
 echo lixo > "$FAKE/quota.json"
 echo 'fake-tabs blocked' > "$FAKE/on-sleep-1"
 watch
@@ -91,11 +92,11 @@ INSTR="instrução original da issue 8"
 MAX=5 sw spawn 8-troca "$INSTR"
 check "setup: a sessão abre na zai"                      [ "$RC" -eq 0 -a "$(awk '$1 == "8-troca" {print $8}' "$STATE/spawned")" == zai ]
 qq 10 10 96 10; screen_429; FAKE="$FAKE" "$BIN/fake-tabs" "#8 troca=idle"
-tabs0="$(grep -c 'tab create' "$FAKE/herdr.log")"; close0="$(closes)"
+tabs0="$(grep -c "$TAB_CREATE" "$FAKE/herdr.log")"; close0="$(closes)"
 MAX=1 sw switch 8-troca
 check "switch zai → claude: código 0"                    [ "$RC" -eq 0 ]
 check "switch: uma linha dizendo de onde e para onde"    [ "$OUT" == "trocada: #8 zai → claude (cota esgotada; mesma worktree e branch)" ]
-check "switch: fecha a aba da sessão parada e abre outra" [ "$(closes)" -eq $((close0 + 1)) -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq $((tabs0 + 1)) ]
+check "switch: fecha a aba da sessão parada e abre outra" [ "$(closes)" -eq $((close0 + 1)) -a "$(grep -c "$TAB_CREATE" "$FAKE/herdr.log")" -eq $((tabs0 + 1)) ]
 check "switch: a mesma sessão no oute-task (mesmo slug, mesma worktree)" bash -c 'tail -1 "$1" | grep -qF -- "oute-task -r $2 8-troca claude"' _ "$FAKE/herdr.log" "$REPO"
 check "switch: o spawned segue com uma linha só, já no claude" bash -c '[ "$(grep -c "^8-troca " "$1")" -eq 1 ] && [ "$(awk "\$1 == \"8-troca\" {print \$3, \$8}" "$1")" == "claude claude" ]' _ "$STATE/spawned"
 check "switch: a escolha entregue ao oute-task é a claude" [ "$(sel 8-troca subscription) $(sel 8-troca agent)" == "claude claude" ]
@@ -114,11 +115,11 @@ check "switch: tentadas = zai e claude"                   [ "$(tr '\n' ' ' < "$S
 
 # nenhuma assinatura com cota: nada muda, resets de cada uma, código 6
 qq 99 10 20 99
-before="$(cat "$STATE/spawned")"; tabs1="$(grep -c 'tab create' "$FAKE/herdr.log")"; close1="$(closes)"
+before="$(cat "$STATE/spawned")"; tabs1="$(grep -c "$TAB_CREATE" "$FAKE/herdr.log")"; close1="$(closes)"
 MAX=5 sw switch 8-troca
 check "sem cota em nenhuma: código 6"                     [ "$RC" -eq 6 ]
 check "sem cota: diz a issue, e cada assinatura com o estado e o reset" bash -c 'for t in "sem cota em nenhuma assinatura da cadeia para #8" "zai parada" "claude parada" "codex parada" "7d em 20%"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$OUT"
-check "sem cota: nada fechado nem aberto, spawned igual"  [ "$(closes)" -eq "$close1" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs1" -a "$(cat "$STATE/spawned")" == "$before" ]
+check "sem cota: nada fechado nem aberto, spawned igual"  [ "$(closes)" -eq "$close1" -a "$(grep -c "$TAB_CREATE" "$FAKE/herdr.log")" -eq "$tabs1" -a "$(cat "$STATE/spawned")" == "$before" ]
 check "sem cota: linha sem-cota no log"                   grep -qE '^[0-9T:Z-]+ troca 8-troca sem-cota codex$' "$STATE/log"
 
 # a trava semanal não deixa a troca cair numa assinatura quase esgotada: claude em 7d=90 (trava 85) conta como trava, não como opção
@@ -139,11 +140,11 @@ check "switch de sessão fechada: recusa"                   bash -c '[ "$1" -ne 
 
 # ---------------------------------------------------------------- 3. spawn: a trava semanal vale para a zai
 CASE=trava-zai; round "$CASE"; qq 10 10 92 10
-before="$(cat "$STATE/spawned")"; tabs2="$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)"
+before="$(cat "$STATE/spawned")"; tabs2="$(grep -c "$TAB_CREATE" "$FAKE/herdr.log" 2>/dev/null || true)"
 MAX=5 sw spawn 8-zai "instrução"
 check "zai com 7d=92 (trava 85): código 5"                 [ "$RC" -eq 5 ]
 check "zai: diz a assinatura, os números e as opções"       bash -c 'for t in "trava semanal" "assinatura zai" "92% da janela de 7 dias" "trava de 85%" "reseta em cerca de 111 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
-check "zai: nada aberto nem registrado"                    [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs2" ]
+check "zai: nada aberto nem registrado"                    [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c "$TAB_CREATE" "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs2" ]
 check "zai: linha guard no log"                            grep -qE '^[0-9T:Z-]+ guard 8-zai zai 7d=92% trava=85%$' "$STATE/log"
 qq 10 10 84 10
 MAX=5 sw spawn 9-zai "instrução"

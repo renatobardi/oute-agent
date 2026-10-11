@@ -20,13 +20,15 @@ TASK="$ROOT/docker/oute-task"
 
 # ---------------------------------------------------------------- fakes e ambiente
 # O dublê grava o ambiente: nenhuma credencial real pode chegar aos agentes falsos.
-export OUTE_TASK_TEST_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
-TEST_OCI_KEY_PEM="fake-oci-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
-TEST_GCP_SA_JSON="{\"type\":\"service_account\",\"private_key\":\"fake-gcp-$(python3 -c 'import secrets; print(secrets.token_hex(16))')\"}"
+TOKEN_PY='import secrets; print(secrets.token_hex(16))'
+export OUTE_TASK_TEST_TOKEN="$(python3 -c "$TOKEN_PY")"
+TEST_OCI_KEY_PEM="fake-oci-$(python3 -c "$TOKEN_PY")"
+TEST_GCP_SA_JSON="{\"type\":\"service_account\",\"private_key\":\"fake-gcp-$(python3 -c "$TOKEN_PY")\"}"
 export OCI_KEY_PEM="$TEST_OCI_KEY_PEM" GCP_SA_JSON="$TEST_GCP_SA_JSON"
 for task_env_key in $(compgen -e); do
   case "$task_env_key" in
     *TOKEN*|*SECRET*|*PASSWORD*|*API_KEY*|OCI_S3_*|OCI_KEY_PEM|GCP_SA_JSON|AWS_ACCESS_KEY_ID|AGENT_STUDIO_*) unset "$task_env_key" ;;
+    *) ;;
   esac
 done
 
@@ -359,7 +361,7 @@ live="$OTEL_EXPORTER_OTLP_ENDPOINT"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
 t0=$(date +%s); down="$(ciclo ciclo-fora)"
 check "coletor fora do ar: mesma saída, mesmo exec, mesmos códigos" [ "$down" == "$up" ]
-[ "$down" == "$up" ] || { echo "--- diferença (coletor no ar × fora do ar):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$down"); } >&2
+[[ "$down" == "$up" ]] || { echo "--- diferença (coletor no ar × fora do ar):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$down"); } >&2
 check "coletor fora do ar: rápido"                     [ $(( $(date +%s) - t0 )) -le 20 ]
 check "coletor fora do ar: os três eventos ficam no spool" [ "$(ls "$HOME/.oute/emit/spool"/*.json 2>/dev/null | wc -l)" -eq 3 ]
 export OTEL_EXPORTER_OTLP_ENDPOINT="$live"
@@ -367,7 +369,7 @@ oute-emit flush
 check "coletor de volta: o spool entrega o ciclo"      [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-fora"' | jq -r .name | tr '\n' ' ')" == "oute.task.opened oute.task.reopened oute.task.removed " ]
 noemit="$(PATH="$NOEMIT:/usr/bin:/bin"; ciclo ciclo-sem)"
 check "sem oute-emit: mesma saída, mesmo exec, mesmos códigos" [ "$noemit" == "$up" ]
-[ "$noemit" == "$up" ] || { echo "--- diferença (coletor no ar × sem oute-emit):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$noemit"); } >&2
+[[ "$noemit" == "$up" ]] || { echo "--- diferença (coletor no ar × sem oute-emit):"; diff <(printf '%s\n' "$up") <(printf '%s\n' "$noemit"); } >&2
 check "sem oute-emit: nada emitido"                    [ "$(task_ev '.attrs["oute.task.slug"] == "ciclo-sem"' | grep -c .)" -eq 0 ]
 check "sem oute-emit: a marca nas conversas não depende dele" grep -qE "^$ORIGIN,oute.task.id=proj-ciclo-sem-[0-9]{14},oute.task.repo=proj,oute.task.slug=ciclo-sem,oute.subscription=codex$" <<<"$(aenv codex OTEL_RESOURCE_ATTRIBUTES)"
 
@@ -1008,7 +1010,7 @@ fi
 # a sessão da zai é o `claude` com as variáveis da Z.ai só no processo que abre, --settings negando o Read de imagem, a
 # assinatura na marca, na conversa e no evento; a chave (gerada na hora) nunca aparece em argv, tela, marca nem evento
 rcv_stop; rcv_start "$TMP/r13"
-ZKEY="zai-$(python3 -c 'import secrets; print(secrets.token_hex(16))')"
+ZKEY="zai-$(python3 -c "$TOKEN_PY")"
 ZTABLE="$ROOT/config/select/models.toml"   # a tabela de verdade: build abre na zai (cadeia zai → claude → codex)
 ZSET='{"permissions":{"deny":["Read(**/*.png)","Read(**/*.jpg)","Read(**/*.jpeg)","Read(**/*.gif)","Read(**/*.webp)","Read(**/*.bmp)"]}}'
 ZURL="https://api.z.ai/api/anthropic"
