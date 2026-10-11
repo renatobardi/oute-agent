@@ -1,0 +1,2 @@
+### Changed
+- **`swarm.md` e `swarm-worker.md` enxutos, com os tetos de `docs/prompts-teto.md` baixados** (#753, fatia 2). O que as regras mandam não muda: a regra do `rm` com variável e a da função de shell nova foram fundidas com as suas repetições, e a regra de regressão dos agentes passa a citar `docker/swarm/*.md` (não exigida, como o `docker/swarm.md`). **Precisa de release** (os dois arquivos vão na imagem).
