@@ -24,26 +24,26 @@ SPEC="aidlc:spec"   # fase com a cadeia claude → zai → codex: o claude é a 
 INSTR="instrução"
 
 CASE=trava; round "$CASE"; labels 8 "$SPEC"; labels 9 "$SPEC"; labels 10 "$SPEC"; labels 11 "$SPEC"; labels 12 "$SPEC"; labels 13 "$SPEC"
-check "a tabela do repo tem weekly_guard_pct = 85 na claude e na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 85, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
+check "a tabela do repo tem weekly_guard_pct = 95 na claude e 85 na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
 
 # acima da trava: recusa com código 5, sem abrir aba nem registrar a sessão
-q7 90
+q7 95
 before="$(cat "$STATE/spawned")"; tabs="$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)"
 OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 8-alta "$INSTR"
-check "7d=90 (trava 85): código 5"                      [ "$RC" -eq 5 ]
-check "7d=90: diz a assinatura, os números e as opções"  bash -c 'for t in "trava semanal" "assinatura claude" "90% da janela de 7 dias" "trava de 85%" "reseta em cerca de 25 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
-check "7d=90: nada aberto nem registrado"               [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs" ]
-check "7d=90: linha guard no log da rodada"             grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z guard 8-alta claude 7d=90% trava=85%$' "$STATE/log"
-check "7d=90: stdout vazio (a sessão não abriu)"        [ -z "$OUT" ]
+check "7d=95 (trava 95): código 5"                      [ "$RC" -eq 5 ]
+check "7d=95: diz a assinatura, os números e as opções"  bash -c 'for t in "trava semanal" "assinatura claude" "95% da janela de 7 dias" "trava de 95%" "reseta em cerca de 25 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
+check "7d=95: nada aberto nem registrado"               [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs" ]
+check "7d=95: linha guard no log da rodada"             grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z guard 8-alta claude 7d=95% trava=95%$' "$STATE/log"
+check "7d=95: stdout vazio (a sessão não abriu)"        [ -z "$OUT" ]
 
 # no valor exato: trava (igual ou acima); logo abaixo: abre
-q7 85
+q7 95
 OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-igual "$INSTR"
-check "7d=85 (igual à trava): código 5"                 [ "$RC" -eq 5 ]
-q7 84
+check "7d=95 (igual à trava): código 5"                 [ "$RC" -eq 5 ]
+q7 94
 OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 10-abaixo "$INSTR"
-check "7d=84 (abaixo): abre, sem aviso, no claude"      [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 10-abaixo)" == claude ]
-check "7d=84: sem linha guard"                          bash -c '! grep -q " guard 10-abaixo " "$1"' _ "$STATE/log"
+check "7d=94 (abaixo): abre, sem aviso, no claude"      [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 10-abaixo)" == claude ]
+check "7d=94: sem linha guard"                          bash -c '! grep -q " guard 10-abaixo " "$1"' _ "$STATE/log"
 
 # --force vence (só o Bardi)
 q7 95
@@ -70,15 +70,15 @@ OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-cx "$INSTR" --agent codex
 check "codex (sem weekly_guard_pct) com 7d=97: abre"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-cx)" == codex ]
 
 # oute-select --weekly-guard: o contrato que o spawn e o oute-task usam
-CASE=trava-select; round "$CASE"; q7 90
+CASE=trava-select; round "$CASE"; q7 95
 wg() { local sub="$1"; env PATH="$BIN:$PATH" FAKE="$FAKE" OUTE_SELECT_TABLE="$TABLE" "$ROOT/docker/oute-select" --weekly-guard "$sub"; return $?; }
-check "--weekly-guard claude (90): over, com os números" bash -c '[ "$(jq -c "[.status,.guard_pct,.used_pct,.resets_in_s]" <<<"$1")" == "[\"over\",85,90,90000]" ]' _ "$(wg claude)"
+check "--weekly-guard claude (95): over, com os números" bash -c '[ "$(jq -c "[.status,.guard_pct,.used_pct,.resets_in_s]" <<<"$1")" == "[\"over\",95,95,90000]" ]' _ "$(wg claude)"
 check "--weekly-guard codex: none"                      bash -c '[ "$(jq -r .status <<<"$1")" == none ]' _ "$(wg codex)"
 check "--weekly-guard assinatura fora da tabela: none"  bash -c '[ "$(jq -r .status <<<"$1")" == none ]' _ "$(wg zzz)"
 q7 40; check "--weekly-guard claude (40): ok"           bash -c '[ "$(jq -r .status <<<"$1")" == ok ]' _ "$(wg claude)"
 q7 40 error; check "--weekly-guard com cota não lida: unknown" bash -c '[ "$(jq -r .status <<<"$1")" == unknown ]' _ "$(wg claude)"
 check "--weekly-guard sem valor: código 2"              bash -c 'env PATH="$1:$PATH" FAKE="$2" "$3" --weekly-guard >/dev/null 2>&1; [ $? -eq 2 ]' _ "$BIN" "$FAKE" "$ROOT/docker/oute-select"
 # valor inválido na tabela: tabela recusada (aviso), a sessão abre com o padrão do agente e a trava não se aplica
-BADT="$TMP/$CASE/bad.toml"; sed 's/^weekly_guard_pct = 85/weekly_guard_pct = 150/' "$TABLE" > "$BADT"
+BADT="$TMP/$CASE/bad.toml"; sed 's/^weekly_guard_pct = 95/weekly_guard_pct = 150/' "$TABLE" > "$BADT"
 check "weekly_guard_pct fora de 1 a 100: tabela inválida, aviso" bash -c 'env PATH="$1:$PATH" FAKE="$2" OUTE_SELECT_TABLE="$3" "$4" --weekly-guard claude 2>&1 | grep -qF "weekly_guard_pct fora de 1 a 100"' _ "$BIN" "$FAKE" "$BADT" "$ROOT/docker/oute-select"
 check_end

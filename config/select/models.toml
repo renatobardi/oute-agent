@@ -19,7 +19,7 @@
 [[subscription]]
 name = "claude"
 default = true
-weekly_guard_pct = 85
+weekly_guard_pct = 95
 status = ["claude", "auth", "status"]
 
 [[subscription]]
