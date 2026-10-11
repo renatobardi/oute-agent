@@ -928,7 +928,12 @@ t0=$(date +%s); FAKE_AI_MEMORY_SLEEP=40 OUTE_HANDOFFS_TIMEOUT=1 t clean --yes --
 check "ai-memory sem resposta: avisa, segue e remove, dentro do prazo" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: não consegui listar os handoffs do ai-memory (default/proj); nada listado" <<<"$2" && [ ! -e "$3" ] && [ $(( $(date +%s) - $4 )) -le 25 ]' _ "$RC" "$OUT" "$SP/proj-err1" "$t0"
 t abs1 claude
 NOAM="$TMP/bin-noam"; mkdir -p "$NOAM"
-for d in "$BIN" ${PATH//:/ }; do for f in "$d"/*; do [[ -x "$f" && "${f##*/}" != ai-memory ]] && ln -s "$f" "$NOAM/${f##*/}" 2>/dev/null; done; done
+for d in "$BIN" ${PATH//:/ }; do for f in "$d"/*; do
+  [[ -x "$f" && "${f##*/}" != ai-memory ]] || continue
+  # o shim do git do oute (#651, instalado no container antes do git real) não entra: o link dele faria o git sumir (ele se acha no PATH)
+  [[ "${f##*/}" == git ]] && grep -q OUTE_GIT_GUARD_ROOT "$f" && continue
+  ln -s "$f" "$NOAM/${f##*/}" 2>/dev/null
+done; done
 OUT="$(cd "$WS/proj" && PATH="$NOAM" "$TASK" clean --yes 2>"$TMP/err" </dev/null)"; RC=$?
 check "ai-memory ausente: avisa numa linha, código 0, remove" bash -c '[ "$1" -eq 0 ] && grep -qxF "aviso: ai-memory ou jq ausente; handoffs de proj não listados" <<<"$2" && [ ! -e "$3" ]' _ "$RC" "$OUT" "$SP/proj-abs1"
 unset FAKE_AI_MEMORY_LOG FAKE_AI_MEMORY_HANDOFFS
