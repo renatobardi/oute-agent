@@ -99,7 +99,7 @@ cache_creation = 0.125
 # Claude (#157, #747): os modelos da tabela do ADR-02 e os que aparecem nas sessões. Fonte oficial:
 # https://platform.claude.com/docs/en/about-claude/pricing (API, lida em 2026-10-08); `cache_creation` = escrita de
 # cache de 5 min (1,25 × `input`); a de 1 h custa 2 × `input` e fica subestimada aqui. A leitura de cache do Opus 5.5 e do
-# Sonnet 5.5 é 0,05 × `input` (e não 0,1 ×). Só os dois modelos da tabela do seletor são `fixed`; os outros seguem as fontes.
+# Sonnet 5.5 é 0,05 × `input` (e não 0,1 ×). Todo modelo da tabela do seletor é `fixed`; os outros seguem as fontes.
 [prices."claude-opus-5-5"]
 fixed = true
 input = 4.0

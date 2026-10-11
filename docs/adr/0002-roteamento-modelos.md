@@ -204,6 +204,8 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 
 ### Adendo 2026-10-11 — `claude-haiku-5-5` é a reserva da execução, no lugar do Sonnet (decisão do Bardi, #734)
 **Decisão** (o Bardi escolheu o papel 1 da [#734](https://github.com/renatobardi/oute-agent/issues/734), na rodada `swarm-1011-0911`): nas linhas de execução (`build` `ship`, `ops` `ctx`, e as exceções `kaizen` e `docs`), a coluna `claude` passa de `claude-sonnet-5-5` para `claude-haiku-5-5`. Com a `zai` no teto de cota, a sessão de execução abre no Haiku 5.5. A cadeia (`zai` → `claude` → `codex`), a coluna `zai` (`glm-5.3`) e a coluna `codex` não mudam. Mudança em `config/select/models.toml`, sem release.
+**Substitui:** a frase "`ship` e `iter` ficam no Sonnet" (tabela fase → modelo, acima) e o adendo #615 (Sonnet no lugar do Haiku automático), só na coluna `claude` das fases de execução. Em `ship`, a coluna `claude` deixa de ser Sonnet; `iter` e as demais fases não mudam.
+**Alcance:** a coluna `claude` vale para toda abertura na assinatura `claude` numa fase de execução, não só para a reserva por teto da `zai`: `--agent claude`, `--subscription claude`, `--prefer claude` e o `oute-swarm switch` de `zai` para `claude` também abrem no Haiku 5.5 (conferido com `oute-select`; o caso `--agent claude em build` está em `tests/oute-select-reservas.test.sh`).
 **O que não muda:** as linhas de raciocínio (`strat` `intent` `arch` `spec`, `design` `plan` `qa` `iter`, `learn`) e a exceção `spike` seguem em Opus e Sonnet. O `[default]` segue em Sonnet. O Haiku 4.5 segue só como modelo explícito de teste da regressão (adendo #615). O `glm-5.3-flash` continua fora (o par do Haiku na `zai` seria ele, mas a `zai` é a padrão da linha e fica em `glm-5.3`). Autor `claude-haiku-5-5` entra na lista de revisão do Opus (`[[reviewer]]`).
 **Medida** ([PR #791](https://github.com/renatobardi/oute-agent/pull/791), 2026-10-11, imagem 0.8.2, claude 2.1.296, 3 rodadas, `OUTE_REGRESSION_MAX_PCT=95` só nessa execução):
 
@@ -213,7 +215,7 @@ Junto: #212 (`--agent` da rodada), #214 (dispatcher), #220 (check dos ids da tab
 | Tarefas verdes (de 13) | 13 | 13 | 13 | 13 |
 | Tempo por chamada | 26 s (39 chamadas) | não medido | não medido | não medido |
 | Custo equivalente na API | US$ 0,5479 | não medido | não medido | não medido |
-| Cota do Claude (7 dias) | 80% → 81% (ressalva abaixo) | não medido | não medido | não medido |
+| Cota do Claude (7 dias) | 81% antes e depois, no JSON do `oute-quota` do corpo do #791 (a tabela do mesmo corpo diz 80% → 81%; ressalva abaixo) | não medido | não medido | não medido |
 
 - **A `ptbr` ficou em 2 de 3.** Uma repetição falhou (`poucas palavras em pt-BR (2)`). A tarefa fica verde pela regra do `oute-regression` (vermelho = mais de 1 falha em 3), mas é a tarefa do texto em pt-BR e o limite de aprovação dela é menor que o das outras 12. Nas fases de execução o texto para o Bardi segue a regra da #481 (redação final por subagente Sonnet em sessão Haiku).
 - **O que 3 rodadas permitem afirmar:** o Haiku 5.5 fechou as 13 tarefas e o estúdio verdes sob a regra da ferramenta. Não permitem afirmar taxa de aprovação alta: com 0 falhas em 3 repetições o limite inferior a 95% é 36,8%.

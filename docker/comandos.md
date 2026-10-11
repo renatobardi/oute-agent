@@ -242,7 +242,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-regression [--rounds N] [--model haiku|haiku5|sonnet]… [--codex] [--task <nome>]… [--keep <pasta>] [--json]
                     [--baseline <arquivo>] [--write-baseline] [--subscription claude|zai]
                                     regressão dos agentes: 13 tarefas headless do claude (docker/regression/), cada uma em
-                                    Haiku (id explícito de teste, #615) e em Sonnet (fase build da tabela do seletor), num diretório descartável
+                                    Haiku (id explícito de teste, #615) e em Sonnet (fase qa da tabela do seletor), num diretório descartável
                                     (`--model haiku5` = `claude-haiku-5-5`, só com a flag, chaves `<tarefa>@haiku5`, #734),
                                     com oute-propose/oute-inbox/sudo/ssh/gh e a memória (ai-memory) trocados por dublês (nada
                                     chega ao canal, ao host, ao GitHub nem à memória). Tarefas: root, select, worktree, emit,

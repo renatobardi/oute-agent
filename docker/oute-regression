@@ -11,7 +11,7 @@
 #   --rounds N   quantas vezes cada tarefa roda, em cada modelo (padrão 3). Vermelha só se falhar em mais de uma rodada
 #                (com --rounds 1, se falhar a única); uma falha isolada é variância do modelo e fica anotada como verde.
 #                O relato diz o que N repetições permitem afirmar e quantas seriam precisas para separar duas variantes.
-#   --model <m>  só o modelo <m> (haiku = id explícito de teste; sonnet = fase build da tabela do seletor); repetível. Sem a flag, os dois.
+#   --model <m>  só o modelo <m> (haiku = id explícito de teste; sonnet = fase qa da tabela do seletor); repetível. Sem a flag, os dois.
 #                `haiku5` (#734) = `claude-haiku-5-5`, só com a flag explícita (nunca no padrão); chaves `<tarefa>@haiku5` na linha de
 #                base, à parte do `haiku` (4.5), que continua a referência até a decisão do Bardi.
 #   --subscription <s>  a assinatura que roda as tarefas (#680, ADR-02): `claude` (o padrão: haiku e sonnet) ou `zai` (o claude
