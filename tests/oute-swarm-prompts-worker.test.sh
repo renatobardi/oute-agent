@@ -49,10 +49,10 @@ CASE=rm-var; round "$CASE"
 sw spawn 358-rmvar "$WORKER_INSTR"
 P="$STATE/358-rmvar.prompt"
 check "worker rm var: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
-check "worker rm var: regra sobre rm com variável (#358)" grep -qF -- '- **Em teste e script, `rm` com variável usa `"${VAR:?}"/…` ou caminho literal**' "$P"
-check "worker rm var: motivo da regra: não dispara prompt (#358)" grep -qF 'para não disparar o prompt de permissão' "$P"
+check "worker rm var: regra sobre rm com variável em teste, script e aba (#358, #539)" grep -qF -- '`rm` com variável, em teste, em script e no comando que você roda na aba (#358, #539): só `"${VAR:?}"/…`, caminho literal ou `mktemp -d` novo' "$P"
+check "worker rm var: nunca rm -rf com variável solta (#358)" grep -qF 'nunca `rm -rf $VAR/*`' "$P"
 check "worker rm var: exemplo rm -f com variável protegida (#358)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
-check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o Claude Code pede permissão e, sem resposta, nega o comando em ~1 min 35 s' "$P"
+check "worker rm var: comportamento do prompt de permissão (#358)" grep -qF 'o prompt nega sozinho em cerca de 1 min 35 s' "$P"
 check "worker rm var: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 539. regra do rm com variável aparece na lista de conferência antes de rodar comando
@@ -60,8 +60,9 @@ CASE=539-rmvariavel; round "$CASE"
 sw spawn 539-rmvariavel "$WORKER_INSTR"
 P="$STATE/539-rmvariavel.prompt"
 check "worker 539: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
-check "worker 539: regra do rm antes de rodar comando (#539)" grep -qF 'Antes de rodar um comando que use `rm` com variável, confira a regra do `rm` com variável, acima' "$P"
-check "worker 539: regra vale também na aba (#539)" grep -qF 'A regra vale também para comando que você roda na aba, não só para o que vai no arquivo de teste.' "$P"
+check "worker 539: regra do rm vale no comando da aba (#539)" grep -qF 'e no comando que você roda na aba (#358, #539)' "$P"
+check "worker 539: confere antes de rodar o comando, não só antes do PR (#539)" grep -qF 'Confira antes de rodar o comando, não só antes do PR, para não disparar o prompt de permissão.' "$P"
+check "worker 539: o exemplo do rm protegido está na regra (#539)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
 check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # 11i. sessão sem ação manual do Bardi (#373): diálogo de pergunta, esc do dispatcher, blocked na retrospectiva
@@ -156,11 +157,11 @@ check "worker: confere local em cada função nova (#585)" grep -qF 'todo parâm
 check "worker: confere return explícito em cada função nova (#585)" grep -qF 'deve haver um `return` explícito no fim' "$W"
 check "worker: informa a contagem e o resultado no corpo do PR (#585)" grep -qF 'No corpo do PR, informe: `Funções novas: N; todas com local e return.`' "$W"
 # 484. PR de prompt roda a regressão dos agentes antes de abrir; a recusa por cota vai no Falta
-check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir, por arquivo" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md` ou `docker/swarm-worker.md` roda a regressão dos agentes só onde ela testa o arquivo (#484, #755).**' "$W"
+check "484: worker: PR que muda um dos 3 prompts roda oute-regression antes de abrir, por arquivo" grep -qF -- '- **PR que muda `docker/agent-notes.md`, `docker/swarm.md`, `docker/swarm/*.md` ou `docker/swarm-worker.md` roda a regressão dos agentes só onde ela testa o arquivo (#484, #755).**' "$W"
 check "755: worker: agent-notes.md, regressão completa" grep -qF '(a) muda `docker/agent-notes.md`, sozinho ou junto de outro: regressão completa' "$W"
 check "755: worker: só swarm-worker.md, só a tarefa 12 nos dois modelos" grep -qF '(b) muda `docker/swarm-worker.md` e não o `docker/agent-notes.md`: só a tarefa 12, em Haiku e em Sonnet, chamada com a pasta das tarefas do checkout' "$W"
 check "755: worker: a tarefa 12 lê o swarm-worker.md da worktree (OUTE_REGRESSION_DIR)" grep -qF 'OUTE_REGRESSION_DIR="$PWD/docker/regression" oute-regression --task closes-refs --baseline "$PWD/docker/regression/baseline.json"' "$W"
-check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md`: regressão não exigida, porque nenhuma tarefa carrega o arquivo e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
+check "755: worker: só swarm.md, não exigida, com o motivo" grep -qF '(c) muda só `docker/swarm.md` e/ou `docker/swarm/*.md`: regressão não exigida, porque nenhuma tarefa carrega esses arquivos e a suíte dá o mesmo resultado com ou sem a mudança' "$W"
 check "755: o nome da tarefa 12 na regra existe na pasta das tarefas" test -f "$ROOT/docker/regression/12-closes-refs.sh"
 check "755: oute-regression e o mapa do repo citam a regra por arquivo" bash -c 'grep -qF "só a tarefa 12" "$1" && grep -qF "só a tarefa 12 (\`--task closes-refs\`)" "$2"' _ "$ROOT/docker/oute-regression" "$ROOT/docs/mapa-repo.md"
 check "484: worker: a saída inteira vai no corpo, na seção ## Regressão dos agentes" grep -qF 'na seção `## Regressão dos agentes`, com a linha `repetições:` que ela imprime' "$W"

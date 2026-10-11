@@ -6,8 +6,8 @@ Todo turno de toda sessão paga o texto destes arquivos, então eles não cresce
 |---|---|---|
 | `AGENTS.md` | 12000 | toda sessão no repo |
 | `docker/agent-notes.md` | 11700 | toda sessão (notas globais) |
-| `docker/swarm-worker.md` | 15400 | todo worker do swarm |
-| `docker/swarm.md` | 7400 | dispatcher, núcleo |
+| `docker/swarm-worker.md` | 14900 | todo worker do swarm |
+| `docker/swarm.md` | 7200 | dispatcher, núcleo |
 | `docker/swarm/abertura.md` | 6400 | dispatcher, ao abrir sessões |
 | `docker/swarm/acompanhamento.md` | 16300 | dispatcher, o tempo todo |
 | `docker/swarm/auditoria.md` | 7400 | dispatcher, ao auditar e pedir merge |
