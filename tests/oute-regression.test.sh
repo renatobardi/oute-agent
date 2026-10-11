@@ -294,7 +294,7 @@ check "tarefa desconhecida: saída 2"                     [ "$RC" -eq 2 ]
 run --rounds 0
 check "--rounds 0: saída 2"                              [ "$RC" -eq 2 ]
 run --model opus
-check "--model fora de haiku/haiku5/sonnet: saída 2"            [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
+check "--model fora de haiku/haiku5/sonnet: saída 2"    [ "$RC" -eq 2 -a "$(nclaude)" -eq 0 ]
 OUTE_REGRESSION_PARALLEL=0 run
 check "OUTE_REGRESSION_PARALLEL=0: saída 2"              [ "$RC" -eq 2 ]
 run --task select --rounds 2
