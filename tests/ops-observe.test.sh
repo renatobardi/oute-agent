@@ -76,6 +76,12 @@ printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$A
 cat > "$BIN/rclone" <<'SH'
 #!/usr/bin/env bash
 [[ "${F_RCLONE_FAIL:-}" == 1 ]] && { echo "2026/01/01 00:00:00 ERROR : falha de teste" >&2; exit 1; }
+# copy: devolve os lotes de $F_COPY/<sinal> (se houver) na pasta de destino
+if [[ "$1" == copy && -n "${F_COPY:-}" ]]; then
+  for a in "$@"; do :; done; dst="$a"; sig="$(basename "$(printf '%s\n' "$@" | grep '/$' | head -1)")"
+  [[ -d "$F_COPY/$sig" ]] && { mkdir -p "$dst"; cp -r "$F_COPY/$sig/." "$dst/"; }
+  exit 0
+fi
 [[ "$1" == lsjson && "$*" == */traces/ ]] && cat "$F_LS" || { [[ "$1" == lsjson ]] && echo '[]'; }
 exit 0
 SH
@@ -202,6 +208,20 @@ check "72 h: gasto igual ao da base e pouco acima não disparam, o pico dispara 
 run studio --hours 6
 check "janela menor que 24 h conta como um dia (2 em 6 h contra 2/dia não dispara)" test "$(alto)" = "$PICO_24"
 studio_stop
+
+# ---------------------------------------------------------------- sem-oute.agent: nomeia o service.name; agent-studio não é agente
+mkdir -p "$TMP/copy/logs"
+python3 - "$TMP/copy/logs/lote.json" <<'PY'
+import json, sys
+def rec(svc): return {"resource": {"attributes": [{"key": "host.name", "value": {"stringValue": "h1"}},
+                                                  {"key": "service.name", "value": {"stringValue": svc}}]},
+                      "scopeLogs": [{"logRecords": [{"severityNumber": 9, "body": {"stringValue": "x"}}]}]}
+json.dump({"resourceLogs": [rec("agent-studio"), rec("servico-novo"), rec("servico-novo")]}, open(sys.argv[1], "w"))
+PY
+gzip -f "$TMP/copy/logs/lote.json"
+run F_COPY="$TMP/copy" bucket --content-hours 6
+check "bucket: sem oute.agent nomeia o service.name do registro" has "^ANOMALIA	sem-oute.agent	h1	3 registros sem oute.agent (service.name: servico-novo; "
+check "bucket: o agent-studio (serviço, não agente) não conta como sem oute.agent" bash -c '! grep -q "agent-studio;" <<<"$0"' "$OUT"
 
 # ---------------------------------------------------------------- compose: o agent sabe onde ler
 AGENT="$(compose_service agent)"
