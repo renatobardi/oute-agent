@@ -67,9 +67,9 @@ RUN --mount=type=cache,target=/root/.npm \
 #   partir desta cópia (`claude install`).
 # - CODEX_INSTALLER_SHA256: `digest` do asset install.sh da release rust-v<versão> do openai/codex. O oute-agents-install
 #   baixa esse instalador e confere antes de rodar.
-ARG CLAUDE_CODE_VERSION=2.1.285
-ARG CLAUDE_CODE_SHA256_ARM64=24fac77749bed3d91365d6b6915aa4b824e14318ecb6bc17adbc192f01c9173d
-ARG CLAUDE_CODE_SHA256_AMD64=33dad1ec615a2e08cc78b494f05c110e49916de2c79d78ec8799ebf46b233d29
+ARG CLAUDE_CODE_VERSION=2.1.296
+ARG CLAUDE_CODE_SHA256_ARM64=f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa
+ARG CLAUDE_CODE_SHA256_AMD64=24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de
 ARG CODEX_VERSION=0.159.2
 ARG CODEX_INSTALLER_SHA256=150e3cf675682efeaac115aa3747add3f27887896d04ce6d0b56478d8b428bf6
 RUN --mount=type=cache,target=/root/.npm \
