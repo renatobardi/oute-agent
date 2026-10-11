@@ -1108,10 +1108,10 @@ before="$(n true)"; oute-emit task opened human repo=a slug=b "subscription=Z!"
 check "oute-emit task: assinatura inválida não emite"   [ "$(n true)" -eq "$before" ]
 # 14. trava semanal (#742): sessão aberta à mão só avisa em stderr, nunca recusa; sessão do swarm não repete o aviso
 labels 63 aidlc:spec; labels 64 aidlc:spec; labels 65 aidlc:spec
-jq -n '{schema: 1, max_pct: 98, agents: {claude: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: 90, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
+jq -n '{schema: 1, max_pct: 98, agents: {claude: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: 95, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
 rm -f "${FAKE:?}"/claude.*
 FAKE_RC=3 tn 63-trava claude "faça a 63"
-check "trava semanal: 7d=90 (trava 85): abre mesmo assim, com o aviso em stderr" bash -c '[ "$1" -eq 3 ] && [ -s "$2" ] && grep -qF "aviso: trava semanal: a assinatura claude está em 90% da janela de 7 dias (trava em 85%)" <<<"$3"' _ "$RC" "$FAKE/claude.args" "$ERR"
+check "trava semanal: 7d=95 (trava 95): abre mesmo assim, com o aviso em stderr" bash -c '[ "$1" -eq 3 ] && [ -s "$2" ] && grep -qF "aviso: trava semanal: a assinatura claude está em 95% da janela de 7 dias (trava em 95%)" <<<"$3"' _ "$RC" "$FAKE/claude.args" "$ERR"
 rm -f "${FAKE:?}"/claude.*
 FAKE_RC=3 OUTE_SWARM_WORKER=1 tn 64-trava claude "faça a 64"
 check "trava semanal: sessão do swarm (OUTE_SWARM_WORKER): sem o aviso repetido" bash -c '[ "$1" -eq 3 ] && ! grep -qF "trava semanal" <<<"$2"' _ "$RC" "$ERR"
