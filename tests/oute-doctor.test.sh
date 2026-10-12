@@ -165,7 +165,8 @@ doc "$H" --help; check "--help: rc 0 e o uso"              bash -c '[ "$1" -eq 0
 # ---------------------------------------------------------------- 4. arquivo local apagado continua contado; a linha gravada vira a base
 doc "$H" --json --no-emit      # grava: 16 vistos, 9 capturadas
 check "gravou a 2ª linha de cada agente"                   test "$(hist "$H")" -eq 4
-rm -f "${H:?}/.claude/projects/-workspace-a/$(uid 7).jsonl" "${H:?}/.claude/projects/-workspace-a/$(uid 8).jsonl"
+rm -f "${H:?}/.claude/projects/-workspace-a/00000000-0000-4000-8000-000000000007.jsonl"
+rm -f "${H:?}/.claude/projects/-workspace-a/00000000-0000-4000-8000-000000000008.jsonl"
 doc "$H" --json --no-emit --no-save
 check "sessão local apagada do disco segue contada (10 novas)" ag claude '.local == 10 and .local_on_disk == 14 and .seen == 16 and .missing_pct == 80'
 captured '{"default/a": {"claude-code": 14, "codex": 1}, "default/b": {"claude-code": 3}}'   # as 8 que faltavam chegaram
