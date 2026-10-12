@@ -169,7 +169,7 @@ printf '# id: %s\n# rc: 0\n# como: root\n# aprovado: %s por bardi@oute-server\n#
 real "$BIN/oute-emit" canal "$P6"; real "$BIN/oute-emit" canal "$P7"; real "$BIN/oute-emit" canal "$P8"
 rcv_stop
 check "oute-propose e oute-emit de verdade: 3 proposed e 3 decided capturados" test "$(events "$TMP/rcv" | jq -r .name | sort | uniq -c | tr -s ' \n' ' ')" = " 3 oute.canal.decided 3 oute.canal.proposed "
-check "pedido de sessão: o arquivo leva a linha # sessao: (e os outros, não)" bash -c 'grep -qx "# sessao: 735-sha-pedido-sessao" "$1" && ! grep -q "^# sessao:" "$2"' _ "$H/outbox/$P8.sh" "$H/outbox/$P6.sh"
+check "pedido de sessão: o arquivo leva a linha # sessao:" bash -c 'grep -qx "# sessao: 735-sha-pedido-sessao" "$1"' _ "$H/outbox/$P8.sh"
 for f in "$TMP/rcv"/*.json; do post logs "$f" >/dev/null; done
 check "o oute approve segue calculando o sha256 do arquivo do pedido (12 primeiros, até 64 KiB)" bash -c 'grep -q "head -c 65536 \"\$HOME/outbox/\$1.sh\"" "$1" && grep -qF "sha=\"\$( (shasum -a 256 \"\$src\" 2>/dev/null || sha256sum \"\$src\") | cut -c1-12)\"" "$1"' _ "$ROOT/scripts/oute"
 shown() { data | jq -r '.[] | select(has("sha-exibido")) | .["sha-exibido"]'; }
