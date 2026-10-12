@@ -1165,12 +1165,12 @@ perguntas_abertas() {
   return 0
 }
 # w_pergunta_cita <perguntas abertas> <referência do item, #n ou repo#n>: 0 se alguma cita o número do item como número
-# inteiro (#12 não casa com #120), 1 se não (#821, L4)
+# inteiro (#12 não casa com #120; #12 não casa com outro#12, que é outro repo), 1 se não (#821, L4)
 w_pergunta_cita() {
   local ask="$1" ref="$2" re
   [[ -n "$ask" && -n "$ref" ]] || return 1
   re="${ref//./\\.}"
-  grep -qE -- "${re}([^0-9]|\$)" <<<"$ask"
+  grep -qE -- "(^|[^A-Za-z0-9._-])${re}([^0-9]|\$)" <<<"$ask"
   return $?
 }
 w_stalled() {

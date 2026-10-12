@@ -450,6 +450,16 @@ echo : > "$FAKE/on-sleep-2"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "L4 pergunta sobre #120 não segura o PR #12"        [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
 
+# #821 (achado 6 da auditoria do #823): o número sem borda à esquerda casava com outro repo ("outro#12" calava o #12)
+CASE=pendoutrorepo; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta outro#12: mesma coisa? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta sobre outro#12 não segura o #12 deste repo" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
+
 CASE=pendrespondida; round "$CASE"
 FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
 clock "$T0"
