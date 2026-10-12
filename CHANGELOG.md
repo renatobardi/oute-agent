@@ -4,6 +4,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-12
+
+### Changed
+- **ADR-08 documenta a divergência de sha256 com o corpo mascarado** (#816). Quando o `transform/redact` mascara o script do `oute.canal.proposed`, o sha256 que a página do pedido mostra diverge do que o `oute approve` imprime, sem adulteração; o texto diz como conferir (`[redigido]` no script exibido). Só documentação, sem código. Não precisa de release.
+- **Filtro de segurança sobre texto de comando nasce como lista de permitidos** (#821). A auditoria trata lista de barrados como BLOCKING por padrão (`oute-aidlc-build-implement` e `oute-aidlc-qa-pr-audit`).
+
+### Fixed
+- **Pedido pendente sem arquivo sai da lista** (#815). O tray e a tela de pedidos mostravam como pendentes os pedidos que nunca chegaram à outbox do host (os de teste, que o `oute-emit` mandava ao agent-studio de produção), e o número da barra não batia com o `oute-inbox`. Agora o `oute approve` manda a lista da outbox ao agent-studio (`oute.canal.snapshot`) e o agent-studio tira do pendente o que a lista não tem; nenhum dado é apagado. **Precisa de release** (o `docker/oute-emit` e o `docker/agent-studio` vão na imagem); o `scripts/oute` entra com `git pull`, depois da release do agent-studio.
+- **Watch religado no boot do container** (#821). Reinício do container derrubava o `watch` das rodadas abertas e ninguém o religava; o boot agora põe um watch em cada rodada aberta com sessão (sem `--deliver`) e pula a rodada que já tem watch vivo. **Precisa de release** (`docker/entrypoint.sh` e `docker/oute-swarm` vão na imagem).
+- **Alerta `[pendencia]` não repete para item com pergunta ao Bardi sem resposta** (#821). O item que espera o Bardi sai do alerta até a pergunta ter resposta; o relógio segue contando. **Precisa de release** (`docker/oute-swarm`).
+- **Auditoria isola o stdin e não imprime o ambiente** (#821). Gates de `oute-aidlc-qa-pr-audit` rodam com `</dev/null`, e o prompt de subagente proíbe imprimir o ambiente do processo e ler `~/.oute_env` e `agent.env`.
+
 ## [0.8.4] - 2026-10-12
 
 ### Added
