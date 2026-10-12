@@ -252,4 +252,17 @@ check "herdr: trecho de subida do server achado"        test -s "$TMP/herdr-star
 env -u SHELL PATH="$HB:$PATH" bash -c 'log() { :; }; . "$1"; wait' _ "$TMP/herdr-start.sh"
 check "herdr: server sobe com SHELL=/bin/bash"          test "$(cat "$TMP/herdr-shell" 2>/dev/null)" = /bin/bash
 
+# ---------------------------------------------------------------- 9. plugin herdr oute.rodada (#722)
+# a subida liga o plugin com `herdr plugin link` (idempotente, com ou sem servidor) antes de subir o server; falha só avisa
+LB="$TMP/link-bin"; mkdir -p "$LB"
+printf '#!/bin/sh\necho "$*" >> "%s/herdr-link.calls"\nexit "${FAKE_LINK_RC:-0}"\n' "$TMP" > "$LB/herdr"; chmod +x "$LB/herdr"
+sed -n '/log "ligando plugin herdr oute.rodada"/,/log "iniciando herdr server"/p' "$ENTRYPOINT_SRC" | sed '$d' > "$TMP/herdr-link.sh"
+check "plugin: trecho do link achado"                   test -s "$TMP/herdr-link.sh"
+LINK_LOG="$TMP/link.log" PATH="$LB:$PATH" bash -c 'log() { echo "$*" >> "$LINK_LOG"; return 0; }; . "$1"' _ "$TMP/herdr-link.sh"
+check "plugin: liga o diretório da imagem"              grep -qxF 'plugin link /usr/local/lib/oute/herdr-plugins/oute.rodada' "$TMP/herdr-link.calls"
+check "plugin: link ok não avisa"                       bash -c '! grep -q AVISO "$1"' _ "$TMP/link.log"
+FAKE_LINK_RC=1 LINK_LOG="$TMP/link.log" PATH="$LB:$PATH" bash -c 'log() { echo "$*" >> "$LINK_LOG"; return 0; }; . "$1"' _ "$TMP/herdr-link.sh"
+check "plugin: link que falha só avisa (a subida segue)" grep -q 'AVISO: herdr plugin link oute.rodada falhou' "$TMP/link.log"
+check "plugin: o Dockerfile copia a pasta dos plugins"  grep -qF 'COPY docker/herdr-plugins/ /usr/local/lib/oute/herdr-plugins/' "$ROOT/docker/Dockerfile"
+
 check_end

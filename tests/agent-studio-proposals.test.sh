@@ -152,16 +152,24 @@ check "pedido sem id: 400"                             test "$(code "${C[@]}" "$
 H="$TMP/home"; BIN="$TMP/bin"; mkdir -p "$H/inbox" "$BIN"; ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 rcv_start "$TMP/rcv"
 # fora de qualquer repositório: numa worktree do oute-task o oute-propose gravaria a linha `# sessao:` e o sha256 não bateria
-real() ( cd "$TMP" && env -u CLAUDECODE -u CODEX_THREAD_ID PATH="$BIN:$PATH" HOME="$H" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" "$@" )
+real() {
+  ( cd "$TMP" && env -u CLAUDECODE -u CODEX_THREAD_ID PATH="$BIN:$PATH" HOME="$H" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" "$@" )
+  return $?
+}
 approve_sha() { (shasum -a 256 "$1" 2>/dev/null || sha256sum "$1") | cut -c1-12; }
 P6="$(real env OUTE_PROPOSE_AGENT=claude "$ROOT/docker/oute-propose" "Ver disco <b>&" --root <<<$'set -euo pipefail\ndf -h  # é só leitura\n' 2>/dev/null)"
 P7="$(real "$ROOT/docker/oute-propose" "Sem agente" <<<'true' 2>/dev/null)"
-SHA6="$(approve_sha "$H/outbox/$P6.sh")"; SHA7="$(approve_sha "$H/outbox/$P7.sh")"
+# pedido de uma worktree de sessão (#735): o oute-propose põe `# sessao:` no arquivo (marca `oute-task` no git-dir do repo)
+SES="$TMP/sessao"; git init -q "$SES" && printf 'slug=735-sha-pedido-sessao\n' > "$SES/.git/oute-task"
+P8="$(cd "$SES" && env -u CLAUDECODE -u CODEX_THREAD_ID PATH="$BIN:$PATH" HOME="$H" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-server,oute.instance=oute-agent" OUTE_PROPOSE_AGENT=claude "$ROOT/docker/oute-propose" "Disco na sessão" --root <<<$'set -euo pipefail\ndf -h  # sessão\n' 2>/dev/null)"
+SHA6="$(approve_sha "$H/outbox/$P6.sh")"; SHA7="$(approve_sha "$H/outbox/$P7.sh")"; SHA8="$(approve_sha "$H/outbox/$P8.sh")"
 printf '# id: %s\n# rc: 0\n# como: root\n# aprovado: %s por bardi@oute-server\n# sha256: %s\n# duracao: 2 s\n# saida: 10 bytes\n\nSAIDA\n' "$P6" "$(date -u +%FT%TZ)" "$SHA6" > "$H/inbox/$P6.out"
 printf '# id: %s\n# rc: 126\n# recusado: %s por bardi@oute-server\n# sha256: %s\n\nrecusado\n' "$P7" "$(date -u +%FT%TZ)" "$SHA7" > "$H/inbox/$P7.out"
-real "$BIN/oute-emit" canal "$P6"; real "$BIN/oute-emit" canal "$P7"
+printf '# id: %s\n# rc: 0\n# como: root\n# aprovado: %s por bardi@oute-server\n# sha256: %s\n# duracao: 1 s\n# saida: 4 bytes\n\nfeito\n' "$P8" "$(date -u +%FT%TZ)" "$SHA8" > "$H/inbox/$P8.out"
+real "$BIN/oute-emit" canal "$P6"; real "$BIN/oute-emit" canal "$P7"; real "$BIN/oute-emit" canal "$P8"
 rcv_stop
-check "oute-propose e oute-emit de verdade: 2 proposed e 2 decided capturados" test "$(events "$TMP/rcv" | jq -r .name | sort | uniq -c | tr -s ' \n' ' ')" = " 2 oute.canal.decided 2 oute.canal.proposed "
+check "oute-propose e oute-emit de verdade: 3 proposed e 3 decided capturados" test "$(events "$TMP/rcv" | jq -r .name | sort | uniq -c | tr -s ' \n' ' ')" = " 3 oute.canal.decided 3 oute.canal.proposed "
+check "pedido de sessão: o arquivo leva a linha # sessao:" bash -c 'grep -qx "# sessao: 735-sha-pedido-sessao" "$1"' _ "$H/outbox/$P8.sh"
 for f in "$TMP/rcv"/*.json; do post logs "$f" >/dev/null; done
 check "o oute approve segue calculando o sha256 do arquivo do pedido (12 primeiros, até 64 KiB)" bash -c 'grep -q "head -c 65536 \"\$HOME/outbox/\$1.sh\"" "$1" && grep -qF "sha=\"\$( (shasum -a 256 \"\$src\" 2>/dev/null || sha256sum \"\$src\") | cut -c1-12)\"" "$1"' _ "$ROOT/scripts/oute"
 shown() { data | jq -r '.[] | select(has("sha-exibido")) | .["sha-exibido"]'; }
@@ -169,6 +177,9 @@ page "/pedido?id=$P6" > "$TMP/p6.html"
 check "sha256 do script exibido = o que o oute approve imprime" test "$(shown < "$TMP/p6.html")" = "$SHA6"
 check "decidido com o mesmo sha256: dito na página, sem aviso" bash -c 'grep -q "<code>$2</code> (igual ao do script exibido)" "$1" && ! grep -q "data-sha-diferente\|data-versoes" "$1"' _ "$TMP/p6.html" "$SHA6"
 check "pedido sem agente (desconhecido no arquivo): o sha256 também bate" test "$(page "/pedido?id=$P7" | shown)" = "$SHA7"
+page "/pedido?id=$P8" > "$TMP/p8.html"
+check "pedido de sessão (linha # sessao: no arquivo): o sha256 exibido = o do oute approve" test "$(shown < "$TMP/p8.html")" = "$SHA8"
+check "pedido de sessão decidido com o mesmo sha256: dito na página, sem aviso" bash -c 'grep -q "<code>$2</code> (igual ao do script exibido)" "$1" && ! grep -q "data-sha-diferente\|data-versoes" "$1"' _ "$TMP/p8.html" "$SHA8"
 check "pendente: sha256 do exibido (12 hex), sem aviso" bash -c 'grep -qE "^[0-9a-f]{12}$" <<<"$2" && ! grep -q "data-sha-diferente\|data-versoes" "$1"' _ "$TMP/p1.html" "$(shown < "$TMP/p1.html")"
 check "decidido com outro sha256: aviso com os dois valores" jqe --arg s "$(shown < "$TMP/p2.html")" '[.[] | select(has("sha-diferente"))] | length == 1 and (.[0].text | test("não é o que foi decidido no host: o sha256 do exibido é " + $s + " e o do oute approve foi abcdef012345")) and $s != "abcdef012345"' <<<"$(data < "$TMP/p2.html")"
 check "sem o script (só o decided): sem sha256 e sem aviso" bash -c '! grep -q "data-sha-exibido\|data-sha-diferente\|data-versoes" "$1"' _ "$TMP/p4.html"
@@ -333,7 +344,7 @@ studio_stop
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não voltou"; }
 SURREAL_URL="$SURREAL_URL" SURREAL_TEST_PASS="$SURREAL_TEST_PASS" PYTHONPATH="$ROOT/docker/agent-studio:$ROOT/tests/lib" \
   "$STUDIO_PY" - "$TMP/s/db.duckdb" "$TMP/p1.sh" > "$TMP/py.out" 2>&1 <<'PY'
-import os, re, sys
+import hashlib, os, re, sys
 import duckdb
 from agent_studio import alert_text, alerts, proposals, tabela, web
 from agent_studio.app import create_app
@@ -370,6 +381,11 @@ check("pedido com os dois: script, sha256 do exibido e versões são só do even
       proposals.merged(P1, ev, {"script": "x", "shown_sha256": "y", "versions": 9})
       == proposals.merged(P1, ev, None) and ev["versions"] == 2 and m["shown_sha256"] == ev["shown_sha256"])
 big = {"time_unix_nano": 0, "agent": "claude", "title": "t", "as": "user", "script": "a" * 70000}
+ses = {"time_unix_nano": 0, "agent": "claude", "title": "t", "as": "user", "script": "echo oi"}
+arq = "# oute-propose\n# titulo: t\n# como: user\n# agente: claude\n# criado: 1970-01-01T00:00:00Z\n# sessao: s-1\n\necho oi"
+check("sha256 do exibido: a linha # sessao: do evento entra no arquivo refeito (#735); sem ela, o de antes",
+      proposals.approve_sha({**ses, "sessao": "s-1"}) == hashlib.sha256(arq.encode()).hexdigest()[:12]
+      and proposals.approve_sha({**ses, "sessao": None}) == proposals.approve_sha(ses) != proposals.approve_sha({**ses, "sessao": "s-1"}))
 check("sha256 do exibido: sem script = None; como o oute approve, só os primeiros 64 KiB do arquivo contam",
       proposals.approve_sha({"script": None}) is None and len(proposals.approve_sha(big)) == 12
       and proposals.approve_sha(big) == proposals.approve_sha({**big, "script": "a" * 69999 + "b"})
@@ -501,7 +517,7 @@ check("alertas sem regra duplicada: a tela não lê métrica nem limite (só o a
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^AttributeError\|^$\|tela: .* falhou' "$TMP/py.out" || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 43 casos rodaram"          test "$((n_ok + n_fail))" = 43
+check "lógica em Python: os 44 casos rodaram"          test "$((n_ok + n_fail))" = 44
 
 # ---------------------------------------------------------------- 10. imagem
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"

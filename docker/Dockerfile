@@ -183,6 +183,8 @@ COPY docker/oute-regression /usr/local/bin/
 COPY docker/regression/ /usr/local/lib/oute/regression/
 # sessões paralelas coordenadas (oute-swarm; prompts do dispatcher e das sessões)
 COPY docker/oute-swarm /usr/local/bin/
+# plugin herdr oute.rodada (#722, protótipo): ligado pelo entrypoint com `herdr plugin link`; lê o disco da rodada, o oute-quota e o agent-studio
+COPY docker/herdr-plugins/ /usr/local/lib/oute/herdr-plugins/
 COPY docker/swarm.md docker/swarm-worker.md docker/step-review.md /usr/local/lib/oute/
 COPY docker/swarm/ /usr/local/lib/oute/swarm/
 # guia de comandos: `oute help` no container (o mesmo arquivo que o `oute help` do host)

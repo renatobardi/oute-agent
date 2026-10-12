@@ -10,6 +10,8 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
                                      escolha do seletor (#219): phase, origin, model, effort
   oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366, #484): run, image, claude, codex, models, calls, secs,
                                      rounds, result, green, red, unverified, cost, tasks, agent (quem causou)
+  oute-emit sidebar chave=valor…     uma atualização do sidebar do herdr pelo plugin oute.rodada (#722): trigger, result, panes,
+                                     workspaces, rounds, ms, quota, studio. Só contagens e nomes fixos, nunca texto de sessão
   oute-emit quota <spawn|close|open> snapshot da cota das assinaturas (#347): lê `oute-quota --json` (teto de 8 s) e manda
                                      oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
                                      /v1/metrics) e, para agente sem leitura, o evento oute.quota.unknown com o motivo
@@ -497,6 +499,7 @@ def canal_proposed(pid, path):
         "oute.canal.title": h.get("titulo"),
         "oute.canal.as": "root" if h.get("como") == "root" else "user",
         "oute.canal.size": len(body.encode()),
+        "oute.canal.sessao": h.get("sessao"),  # a linha `# sessao:` do arquivo (#735): o approve_sha a refaz
     }, body, scope=f"canal/{pid}")
 
 
@@ -887,6 +890,42 @@ def cmd_regression(pairs):
         caller = "unknown"
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return [event("oute.regression.run", caller, ts, attrs, scope=f"regression/{f['run']}")]
+
+# ---------------------------------------------------------------- sidebar do herdr (#722)
+SIDEBAR_RESULTS = ("ok", "parcial", "erro")
+SIDEBAR_SOURCES = ("ok", "unknown", "erro", "off")
+SIDEBAR_COUNTS = ("panes", "workspaces", "rounds", "ms")
+
+
+def cmd_sidebar(pairs):
+    """oute.herdr.sidebar.sync: uma atualização do sidebar pelo plugin oute.rodada. Só contagens, duração e nomes
+    fixos (o evento do herdr que disparou, o resultado, o estado de cada fonte): nunca nome de sessão nem texto.
+    `oute.agent` = unknown (o plugin não é agente; ADR-04, "quem causou"). Hora do fato = agora; o id leva o gatilho,
+    então duas atualizações no mesmo segundo com o mesmo gatilho são uma"""
+    f = {}
+    for p in pairs:
+        k, sep, v = p.partition("=")
+        if not sep or k not in ("trigger", "result", "quota", "studio", *SIDEBAR_COUNTS):
+            raise Skip(f"campo do sidebar inválido: {p}")
+        f[k] = v
+    if f.get("result") not in SIDEBAR_RESULTS:
+        raise Skip(f"resultado do sidebar inválido: {f.get('result')}")
+    if not re.fullmatch(r"[a-z0-9_.]{1,48}", f.get("trigger", "")):
+        raise Skip("sidebar sem trigger válido")
+    attrs = {"oute.herdr.sidebar.result": f["result"], "oute.herdr.sidebar.trigger": f["trigger"]}
+    for k in ("quota", "studio"):
+        if k in f:
+            if f[k] not in SIDEBAR_SOURCES:
+                raise Skip(f"estado de fonte inválido em {k}")
+            attrs[f"oute.herdr.sidebar.{k}"] = f[k]
+    for k in SIDEBAR_COUNTS:
+        if k in f:
+            if not re.fullmatch(r"[0-9]{1,7}", f[k]):
+                raise Skip(f"número inválido em {k}")
+            attrs[f"oute.herdr.sidebar.{k}"] = int(f[k])
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [event("oute.herdr.sidebar.sync", "unknown", ts, attrs, scope="sidebar", key=f["trigger"])]
+
 # ---------------------------------------------------------------- cota das assinaturas (#347)
 QUOTA_MOMENTS = ("spawn", "close", "open")
 QUOTA_AGENTS = ("claude", "codex")
@@ -1305,7 +1344,7 @@ def main(argv):
             return
     if verb == "backfill":
         bad = False
-    elif verb == "regression":
+    elif verb in ("regression", "sidebar"):
         bad = len(argv) < 2
     elif verb == "task":
         bad = len(argv) < 3
@@ -1347,6 +1386,8 @@ def main(argv):
         send(cmd_task(argv[1], argv[2], argv[3:]), deadline, drained)
     elif verb == "regression":
         send(cmd_regression(argv[1:]), deadline, drained)
+    elif verb == "sidebar":
+        send(cmd_sidebar(argv[1:]), deadline, drained)
     elif verb == "quota":
         events, rms = cmd_quota(argv[1], quota, time.time_ns())
         if rms:
