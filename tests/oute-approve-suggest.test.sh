@@ -93,9 +93,14 @@ check "ordem: mais pedidos primeiro; no empate, o uso mais recente" test "$(grep
 check "diz que nada foi aplicado" has "^nada foi aplicado: a lista é só sugestão"
 
 # --- 2. nada é aplicado: não chama docker, não roda o comando do pedido, não muda arquivo do host
-check "não chama docker" test ! -e "$F_DOCKER"
-check "não roda comando de pedido (o touch do histórico não rodou)" test ! -e "$F_RAN"
-check "não cria nem altera arquivo em \$HOME do host" test "$before" = "$(state)"
+# cada caso exige também que a lista tenha saído (o `touch` listado): sem o comando, "não fez nada" não prova nada
+listed() { [[ "$RC" = 0 ]] && row 2 0 2026-10-04T09:00:02Z escrita 'touch "$F_RAN"'; return $?; }
+no_docker() { listed && [[ ! -e "$F_DOCKER" ]]; return $?; }
+not_run() { listed && [[ ! -e "$F_RAN" ]]; return $?; }
+unchanged() { listed && [[ "$before" = "$(state)" ]]; return $?; }
+check "lista sem chamar docker" no_docker
+check "lista o touch do histórico sem rodá-lo" not_run
+check "lista sem criar nem alterar arquivo em \$HOME do host" unchanged
 
 # --- 3. --min
 run_suggest --min 1
