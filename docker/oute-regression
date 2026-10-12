@@ -331,6 +331,14 @@ STUB
     '{mcpServers: {"ai-memory": {command: "sh", args: ["-c", "cd \"$1\" && exec python3 \"$2\"", "sh", $rec, $py]}}}' > "$rec/mcp.json"
 }
 
+limpa_ambiente() { # tira da tarefa o que a sessão exporta para o claude (ANTHROPIC_*, timeout e tráfego; #736)
+  local v
+  for v in $(compgen -e | grep -E '^(ANTHROPIC_|API_TIMEOUT_MS$|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC$)' || true); do
+    unset "$v"
+  done
+  return 0
+}
+
 # --- uma chamada ao agente (task, round, agent, alias): resultado em $TMP/<chave>/{status,reason,cost,secs,turns,id}
 #     status: ok | fail (o grader reprovou) | error (o agente não rodou)
 attempt() {
@@ -360,6 +368,7 @@ attempt() {
     cd "$AGENT_CWD" || exit 1
     settings="$NOTES_SETTINGS"
     [[ $agent != claude ]] || cp "$TMP/notes.md" "$att/CLAUDE.md" || exit 1   # a pasta acima do diretório da chamada (#712)
+    limpa_ambiente   # o ambiente da tarefa é o do oute-regression, não o da sessão (#736); o ramo zai exporta o seu abaixo
     if [[ $alias = zai ]]; then   # só neste subshell (o processo desta tarefa): as variáveis da Z.ai e a chave, que nunca vai a argv
       export ANTHROPIC_BASE_URL="$ZAI_BASE_URL" ANTHROPIC_DEFAULT_OPUS_MODEL="${MODEL_ID[zai]}" ANTHROPIC_DEFAULT_SONNET_MODEL="${MODEL_ID[zai]}" \
         ANTHROPIC_DEFAULT_HAIKU_MODEL="${MODEL_ID[zai]}" API_TIMEOUT_MS=3000000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \

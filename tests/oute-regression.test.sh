@@ -43,6 +43,7 @@ printf 'cwd=%s\nora=%s\nmemory=%s\npropose=%s\nsudo=%s\n--\n' "$PWD" "${OTEL_RES
   "$(tr '\n' ' ' < .ai-memory.toml 2>/dev/null)" "$(command -v oute-propose)" "$(command -v sudo)" >> "$FAKE_LOG/claude.env"
 printf '%s|%s|%s|%s|%s\n' "${ANTHROPIC_BASE_URL:-}" "${ANTHROPIC_AUTH_TOKEN:-}" "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" "${ANTHROPIC_API_KEY:-}" \
   "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" >> "$FAKE_LOG/claude.zai"
+env | grep -E '^(ANTHROPIC_|API_TIMEOUT_MS=|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=)' | cut -d= -f1 >> "$FAKE_LOG/claude.envnames"   # só os nomes (#736)
 [[ -z "${FAKE_CLAUDE_FAIL:-}" ]] || { echo "sem login" >&2; exit 1; }
 prompt="$2"; task=""; round=""; model=""; mcp=""; settings='{}'
 for ((i = 1; i <= $#; i++)); do
@@ -655,6 +656,10 @@ check "zai: a chave não aparece em argv, relato, saída json nem evento" bash -
 check "zai: o evento diz o modelo glm-5.3 e 13 tarefas @zai"    bash -c 'ev="$(grep "^ARGS regression " "$1")"; grep -q "models=glm-5.3 " <<<"$ev" && grep -q "tasks=root@zai=verde" <<<"$ev" && grep -q "calls=13 " <<<"$ev"' _ "$LOG/emit.calls"
 OUTE_ZAI_API_KEY="$ZKEY" run --task select --rounds 1
 check "sem --subscription: a chave da zai não vai ao processo (claude, haiku e sonnet)" bash -c '[ "$(sort -u "$1")" = "||||" ] && ! grep -q -- "permissions\|glm-" "$2"' _ "$LOG/claude.zai" "$LOG/claude.argv"
+# o ambiente da tarefa é o do oute-regression, não o da sessão (#736): a sessão zai exporta estas variáveis, e o claude de cada tarefa não as herda
+ANTHROPIC_BASE_URL="$ZURL" ANTHROPIC_AUTH_TOKEN="$ZKEY" ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.3 ANTHROPIC_API_KEY="$ZKEY" \
+  API_TIMEOUT_MS=3000000 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 run --task select --rounds 1
+check "sessão zai: o claude de cada tarefa não recebe ANTHROPIC_* nem API_TIMEOUT_MS (só os nomes são conferidos, #736)" bash -c '[ "$1" -eq 2 ] && [ ! -s "$2" ]' _ "$(nclaude)" "$LOG/claude.envnames"
 # padrões próprios da zai (#730): sem OUTE_REGRESSION_TIMEOUT, o prazo por chamada é 600 s na zai e 180 s no claude
 unset OUTE_REGRESSION_TIMEOUT
 OUTE_ZAI_API_KEY="$ZKEY" OUTE_ZAI_BASE_URL="$ZURL" run --subscription zai --task select --task memory --rounds 1
