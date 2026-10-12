@@ -13,6 +13,8 @@ DOC="$ROOT/docs/studio-banco.md"
 [[ -r "$DOC" ]] || die "doc ausente: $DOC"
 
 check "doc: traz o python do venv da imagem"            grep -qF '/opt/agent-studio/venv/bin/python' "$DOC"
+check "doc: o docker exec leva -i (o heredoc chega ao python)" grep -qF 'docker exec -i oute-agent-studio ' "$DOC"
+check "doc: nenhum docker exec sem -i"                  bash -c '! grep -q "docker exec oute-agent-studio" "$1"' _ "$DOC"
 check "doc: filtra pela hora do fato (time_unix_nano)"  grep -qF 'time_unix_nano >= ?' "$DOC"
 check "doc: a consulta abre o DuckDB só para leitura"   grep -qF 'read_only=True' "$DOC"
 check "doc: a janela vem de datas UTC em nanossegundos (inteiro)" grep -qF 'timestamp()) * 10**9' "$DOC"

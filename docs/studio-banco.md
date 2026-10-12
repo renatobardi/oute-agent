@@ -26,7 +26,7 @@ set -euo pipefail
 # RESUMO
 # Faz: conta os logs do agent-studio por host num dia (UTC). Host: oute-server. Altera: nada (leitura). Não toca: o DuckDB nem o serviço. Reinicia: nada.
 echo "1/1: conta os logs de 2026-10-11 (UTC) por host"
-docker exec oute-agent-studio /opt/agent-studio/venv/bin/python - <<'PY'
+docker exec -i oute-agent-studio /opt/agent-studio/venv/bin/python - <<'PY'
 import duckdb
 from datetime import datetime, timezone
 ini = int(datetime(2026, 10, 11, tzinfo=timezone.utc).timestamp()) * 10**9
