@@ -117,6 +117,18 @@ assert set(alert_text.TITLES) >= set(alerts.TYPES)
 cfg, errs = alerts.AlertConfig.parse({\"memory_capture_max_missing_pct\": 0, \"memory_capture_days\": \"x\"})
 assert len(errs) == 2 and cfg.memory_capture_max_missing_pct == 20 and cfg.memory_capture_days == 7, (errs, cfg)
 "' _ "$ROOT"
+# ack (#537): o alvo leva o agente, então reconhecer o alerta de um agente não cobre o do outro no mesmo host e instância
+check "ack: claude e codex do mesmo host têm alvos diferentes, nos dois tipos" bash -c 'PYTHONPATH="$1/docker/agent-studio" python3 -c "
+from agent_studio import acks
+def a(kind, agent, host=\"oute-server\"):
+    return {\"type\": kind, \"host\": host, \"instance\": \"oute-agent\", \"unit\": \"pct\", \"limit\": 20, \"since\": \"2026-10-06T12:00:00Z\", \"evidence\": {\"agent\": agent, \"at\": \"x\"}}
+for kind in (\"memory_capture\", \"memory_hooks_untrusted\"):
+    c, x = acks.alert_item(a(kind, \"claude\")), acks.alert_item(a(kind, \"codex\"))
+    assert c[\"target\"] != x[\"target\"], kind
+    assert c[\"rule\"] == x[\"rule\"] and c[\"identity\"] == \"[\\\"alerta\\\",\\\"\" + kind + \"\\\",\\\"oute-server\\\",\\\"oute-agent\\\",\\\"claude\\\"]\", c
+    assert acks.alert_item(a(kind, \"claude\"))[\"target\"] == c[\"target\"]            # o mesmo alerta, o mesmo alvo
+    assert acks.alert_item(a(kind, \"claude\", \"oute-mac\"))[\"target\"] != c[\"target\"]  # outro host, outro alvo
+"' _ "$ROOT"
 check "o limite do oute-doctor e o da config do repo são o mesmo (20)" bash -c 'grep -qx "memory_capture_max_missing_pct = 20" "$1/config/agent-studio/config.toml" && grep -q "OUTE_DOCTOR_MAX_MISSING_PCT\") or \"20\"" "$1/docker/oute-doctor"' _ "$ROOT"
 
 check_end
