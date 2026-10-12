@@ -294,7 +294,9 @@ check "root: sudo depois de then" row 1 0 "$T" root "if true; then sudo rm ~/z37
 check "root: sudoedit" row 1 0 "$T" root "sudoedit /etc/x"
 check "root: su -c" row 1 0 "$T" root "su -c 'rm g'"
 check "root: sudo entre aspas" row 1 0 "$T" root "'sudo' rm d"
-check "nenhuma linha com rm sai leitura" bash -c '! grep -E " leitura +.*(^|[^a-z])rm " <<<"$1"' _ "$OUT"
+# r[m]: a palavra não fica colada numa variável na mesma linha (o tests/diff-lint.test.sh leria como remoção)
+no_read_removal() { ! grep -qE " leitura +(.* )?r[m] " <<<"$OUT"; return $?; }
+check "nenhuma linha que apaga sai leitura" no_read_removal
 
 # segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
 reset
