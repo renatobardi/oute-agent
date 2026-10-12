@@ -64,6 +64,23 @@ if [[ "$1 ${2:-}" == "tab list" ]]; then   # abas vivas: $FAKE/tabs (JSON do her
   [[ -f "$FAKE/tabs" ]] || { echo "herdr fora do ar" >&2; exit 1; }
   cat "$FAKE/tabs"; exit 0
 fi
+# abertura de aba (#825): `tab create` anota a chamada em $FAKE/herdr.log e devolve aba e pane novos (w1:t<n>, w1:p<n>);
+# $FAKE/tab-create.fail: falha; $FAKE/tab-create.nopane: sem pane na saída. `pane run` anota o comando em $FAKE/pane-cmd,
+# falha com $FAKE/pane-run.fail e, com $FAKE/pane-exec, roda o comando (o pane da aba, sem terminal, como o teste precisa)
+if [[ "$1 ${2:-}" == "tab create" ]]; then
+  echo "$*" >> "$FAKE/herdr.log"
+  [[ ! -e "$FAKE/tab-create.fail" ]] || { echo "herdr falso: tab create pedido a falhar" >&2; exit 1; }
+  n=$(( $(cat "$FAKE/tabs.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE/tabs.n"
+  if [[ -e "$FAKE/tab-create.nopane" ]]; then echo "{\"result\":{\"tab\":{\"tab_id\":\"w1:t$n\"}}}"
+  else echo "{\"result\":{\"root_pane\":{\"pane_id\":\"w1:p$n\"},\"tab\":{\"tab_id\":\"w1:t$n\"}}}"; fi
+  exit 0
+fi
+if [[ "$1 ${2:-}" == "pane run" ]]; then
+  echo "pane run $3" >> "$FAKE/herdr.log"; printf '%s\n' "$4" >> "$FAKE/pane-cmd"
+  [[ ! -e "$FAKE/pane-run.fail" ]] || { echo "herdr falso: pane run pedido a falhar" >&2; exit 1; }
+  [[ ! -e "$FAKE/pane-exec" ]] || bash -c "$4"
+  exit 0
+fi
 [[ "$1 ${2:-}" == "workspace get" ]] || { echo "herdr falso: sem suporte a '$*'" >&2; exit 1; }
 l="$(awk -v id="${3:-}" '$1 == id {sub(/^[^ ]* /, ""); print; exit}' "$FAKE/spaces" 2>/dev/null)"
 [[ -n "$l" ]] || { echo "workspace not found" >&2; exit 1; }
@@ -97,7 +114,7 @@ git init -q -b main "$TMP/seed" && git -C "$TMP/seed" commit -q --allow-empty -m
 # Os avisos do seletor (#219: slug sem issue abre no padrão, com aviso) saem do $ERR e ficam em $SELW: as seções 1 a 9
 # conferem o resto do stderr, e a seção 10 confere os avisos.
 t() {
-  OUT="$(cd "$WS/proj" && "$TASK" "$@" 2>"$TMP/err" </dev/null)"; RC=$?
+  OUT="$(cd "$WS/proj" && "$TASK" --here "$@" 2>"$TMP/err" </dev/null)"; RC=$?
   ERR="$(grep -v '^oute-select: aviso: ' "$TMP/err")"; SELW="$(grep '^oute-select: aviso: ' "$TMP/err")"
 }
 MS="--model claude-sonnet-5-5"   # o que o seletor põe na frente dos argumentos do claude, no padrão
@@ -1125,6 +1142,91 @@ jq -n '{schema: 1, max_pct: 98, agents: {claude: {status: "ok", windows: {"5h": 
 FAKE_RC=3 tn 65-trava claude "faça a 65"
 check "trava semanal: 7d=40: sem aviso" bash -c '[ "$1" -eq 3 ] && ! grep -qF "trava semanal" <<<"$2"' _ "$RC" "$ERR"
 rm -f "${FAKE:?}/quota.json"
+
+# 15. abertura sem terminal (#825): aba do herdr, recusa dentro de rodada e para agente sem herdr, --here, com terminal
+# sa <ambiente…> -- <args…>: o oute-task sem terminal e sem --here, no checkout principal; OUT, ERR, RC
+sa() {
+  local -a todos=("$@") e=() args=()
+  local i=0
+  while [[ "${todos[$i]}" != -- ]]; do e+=("${todos[$i]}"); i=$((i + 1)); done
+  args=("${todos[@]:$((i + 1))}")
+  OUT="$(cd "$WS/proj" && env ${e[@]+"${e[@]}"} "$TASK" ${args[@]+"${args[@]}"} 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+  return 0
+}
+rm -f "${FAKE:?}"/herdr.log "${FAKE:?}"/pane-cmd "${FAKE:?}"/tabs "${FAKE:?}"/tabs.n "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*
+HJ=(HERDR_ENV=1 HERDR_WORKSPACE_ID=w1)
+P="faça \"a\" \$(echo x)
+segunda linha"
+# a aba roda o oute-task no pane (pane-exec: o teste roda o comando do pane), com o mesmo argumento, sem abrir outra aba
+touch "$FAKE/pane-exec"
+sa "${HJ[@]}" CLAUDECODE=1 -- 40-aba claude "$P"
+check "aba: sem terminal e com herdr, volta com 0 e diz a aba e o pane" bash -c '[ "$1" -eq 0 ] && grep -qxF "aberta na aba: #40 aba · tab w1:t1 · pane w1:p1" <<<"$2"' _ "$RC" "$OUT"
+check "aba: a aba leva o rótulo do spawn (#<n> <resto>)" grep -qxF "tab create --workspace w1 --cwd $WS/proj --label #40 aba --no-focus" "$FAKE/herdr.log"
+check "aba: o pane recebe o oute-task por arquivo, sem a instrução na linha de comando" bash -c '! grep -qF "segunda linha" "$1" && grep -q "argv-file" "$1"' _ "$FAKE/pane-cmd"
+check "aba: uma só aba (o oute-task do pane não abre outra)" [ "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq 1 ]
+check "aba: o agente recebe a instrução exata (aspas, \$( ) e quebra de linha)" bash -c 'n="$(printf "%s\n" "$2" | wc -c)"; printf "%s\n" "$2" | cmp -s - <(tail -c "$n" "$1")' _ "$FAKE/claude.args" "$P"
+check "aba: a worktree é criada pelo pane (no space que o herdr devolve)" bash -c 'ls -d "$1"/*/proj-40-aba >/dev/null 2>&1' _ "$WT"
+check "aba: o evento diz abertura=aba e quem chamou (o agente que pediu a aba)" jqe '.name == "oute.task.opened" and .attrs["oute.task.abertura"] == "aba" and .attrs["oute.agent"] == "claude"' <<<"$(last)"
+check "aba: o arquivo com os argumentos some depois de lido" [ -z "$(ls -A "$HOME/.oute/task" 2>/dev/null)" ]
+check "aba: o list não marca a sessão de aba" bash -c '! "$1" list | grep -F "proj-40-aba" | grep -qF "[sem aba]"' _ "$TASK"
+rm -f "${FAKE:?}/pane-exec"
+# rodada: refusa, sem aba nem worktree, com o código 7; a worktree do dispatcher (branch sessao/swarm-<id>) também
+sa "${HJ[@]}" OUTE_SWARM_ID=swarm-x -- 41-rodada claude "x"
+check "rodada: sem terminal dentro de uma rodada recusa com código 7" [ "$RC" -eq 7 ]
+check "rodada: a mensagem manda usar oute-swarm spawn" grep -q 'oute-swarm spawn' <<<"$ERR"
+check "rodada: nenhuma aba nova nem worktree" bash -c '[ "$(grep -c "tab create" "$1")" -eq 1 ] && ! ls -d "$2"/*/proj-41-rodada >/dev/null 2>&1' _ "$FAKE/herdr.log" "$WT"
+git -C "$WS/proj" checkout -q -b sessao/swarm-zz-1
+sa "${HJ[@]}" -- 49-disp claude "x"; RCD=$RC
+git -C "$WS/proj" checkout -q main
+check "rodada: a worktree do dispatcher (branch sessao/swarm-<id>) também recusa com código 7" [ "$RCD" -eq 7 ]
+# sem herdr: agente recusa com código 8 (sem onde abrir a aba); sem agente, abre aqui com abertura sem-tela
+sa CLAUDECODE=1 -- 42-agente claude "x"
+check "agente sem herdr: recusa com código 8" [ "$RC" -eq 8 ]
+check "agente sem herdr: a mensagem diz o herdr e --here" bash -c 'grep -q "herdr" <<<"$1" && grep -q -- "--here" <<<"$1"' _ "$ERR"
+check "agente sem herdr: nada criado" [ ! -e "$WT/_sem-space/proj-42-agente" ]
+rm -f "${FAKE:?}"/claude.*
+sa -- 43-semtela claude "x"
+check "sem herdr e sem agente: abre aqui (código 0, o agente roda)" bash -c '[ "$1" -eq 0 ] && [ -e "$2/claude.args" ]' _ "$RC" "$FAKE"
+check "sem herdr e sem agente: abertura=sem-tela" jqe '.attrs["oute.task.abertura"] == "sem-tela"' <<<"$(last)"
+check "list: a sessão sem aba sai marcada [sem aba]" bash -c '"$1" list | grep -F "proj-43-semtela" | grep -qF "[sem aba]"' _ "$TASK"
+rm -f "${FAKE:?}"/claude.*
+sa "${HJ[@]}" -- --here 44-aqui claude "x"
+check "--here com herdr: roda aqui, sem aba (o tab create não sobe)" bash -c '[ "$(grep -c "tab create" "$1")" -eq 1 ] && [ -e "$2/claude.args" ]' _ "$FAKE/herdr.log" "$FAKE"
+rm -f "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*
+touch "$FAKE/pane-exec"
+sa "${HJ[@]}" -- 45-cod codex "faça"
+check "codex: a aba abre o codex, com o rótulo da sessão" bash -c '[ "$1" -eq 0 ] && [ -e "$2/codex.args" ] && grep -q "label #45 cod" "$3"' _ "$RC" "$FAKE" "$FAKE/herdr.log"
+rm -f "${FAKE:?}/pane-exec"
+# rótulo já aberto: aviso, a antiga fica; falha do herdr: nada roda e o erro sai com 1
+printf '%s\n' '{"result":{"tabs":[{"label":"#46 col","tab_id":"w1:t9"}]}}' > "$FAKE/tabs"
+sa "${HJ[@]}" -- 46-col claude "x"
+check "rótulo repetido: avisa e abre a aba nova" bash -c '[ "$1" -eq 0 ] && grep -qF "aviso: já há uma aba com o rótulo \"#46 col\"" <<<"$2"' _ "$RC" "$ERR"
+rm -f "${FAKE:?}/tabs"
+touch "$FAKE/tab-create.fail"; before="$(grep -c 'pane run' "$FAKE/herdr.log")"
+sa "${HJ[@]}" -- 47-falha claude "x"
+check "tab create falha: sai com 1 e não roda o pane" bash -c '[ "$1" -eq 1 ] && grep -q "herdr tab create falhou" <<<"$2" && [ "$(grep -c "pane run" "$3")" -eq "$4" ]' _ "$RC" "$ERR" "$FAKE/herdr.log" "$before"
+rm -f "${FAKE:?}/tab-create.fail"
+touch "$FAKE/tab-create.nopane"
+sa "${HJ[@]}" -- 47-semp claude "x"
+check "tab create sem pane: sai com 1 e diz que a aba não ficou" bash -c '[ "$1" -eq 1 ] && grep -q "não achei o pane" <<<"$2"' _ "$RC" "$ERR"
+rm -f "${FAKE:?}/tab-create.nopane"
+touch "$FAKE/pane-run.fail"; rm -f "${HOME:?}/.oute/task"/*
+sa "${HJ[@]}" -- 48-prun claude "x"
+check "pane run falha: sai com 1 e não deixa arquivo de argumentos" bash -c '[ "$1" -eq 1 ] && grep -q "herdr pane run falhou" <<<"$2" && [ -z "$(ls -A "$HOME/.oute/task")" ]' _ "$RC" "$ERR"
+rm -f "${FAKE:?}/pane-run.fail"
+check "--argv-file sem arquivo: sai com 1" bash -c 'cd "$1" && "$2" --argv-file "$3/nao-existe" 2>/dev/null; [ "$?" -eq 1 ]' _ "$WS/proj" "$TASK" "$TMP"
+# com terminal: a decisão é pelo stdin, não pela saída (o pipe para o cat não muda nada) e a sessão abre aqui
+if ! has_pty; then
+  echo "skip aba com terminal: sem script(1) do util-linux"
+else
+  rm -f "${FAKE:?}/herdr.log" "${FAKE:?}"/claude.*
+  HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 script -qec "cd $WS/proj && $TASK 50-tty claude x | cat" /dev/null >/dev/null 2>&1
+  check "com terminal dentro do herdr: nenhuma aba (a decisão é pelo stdin)" [ ! -s "$FAKE/herdr.log" ]
+  check "com terminal: a sessão abre aqui, com abertura=aba (o pane de herdr)" bash -c '[ -e "$1/claude.args" ] && jq -e ".attrs[\"oute.task.abertura\"] == \"aba\"" <<<"$2" >/dev/null' _ "$FAKE" "$(last)"
+fi
+# oute-emit: abertura fora da lista não entra no bucket
+before="$(n true)"; oute-emit task opened human repo=a slug=b "abertura=xxx"
+check "oute-emit task: abertura inválida não emite" [ "$(n true)" -eq "$before" ]
 
 rcv_stop
 

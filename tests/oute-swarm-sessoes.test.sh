@@ -274,6 +274,28 @@ check "407: close com | head -1 registra a baixa"       grep -qxF '8-baz' "$STAT
 MAX=3 sw spawn 10-test "instrução"
 check "407: novo spawn passa (vaga liberada)"           [ "$RC" -eq 0 ]
 check "407: spawned tem 7-foo, 9-qux e 10-test"         [ "$(awk 'NR <= 1 || $1 ~ /(7-foo|9-qux|10-test)/ { print $1 }' "$STATE/spawned" | grep -c .)" -eq 3 ]
+
+# ---------------------------------------------------------------- #825: sessão sem issue (spawn <slug>, sem número)
+# abre com aba e linha no spawned, com o slug como rótulo; conta no --max; o worker sabe que não há issue; o close a alcança
+CASE=sem-issue; round "$CASE"
+MAX=3 sw spawn tell-nao-apaga "instrução sem issue"
+check "sem issue: spawn com código 0"                    [ "$RC" -eq 0 ]
+check "sem issue: uma aba só, com o slug como rótulo"    bash -c '[ "$(grep -c "tab create" "$1")" -eq 1 ] && grep -qF -- "--label tell-nao-apaga --no-focus" "$1"' _ "$FAKE/herdr.log"
+check "sem issue: linha no spawned"                      grep -q '^tell-nao-apaga ' "$STATE/spawned"
+check "sem issue: oute-task na worktree do repo, com o slug"  ran tell-nao-apaga claude
+check "sem issue: o prompt diz que não há número de issue" grep -qF 'Sessão sem issue (#825)' "$STATE/tell-nao-apaga.prompt"
+check "sem issue: o seletor recebe o slug (sem --issue)"  [ -n "$(sel tell-nao-apaga agent)" ]
+check "sem issue: a saída diz o nome da sessão, sem #"   bash -c 'grep -q "^aberta: tell-nao-apaga → pane w1:p2 · worktree repo-tell-nao-apaga · agente claude" <<<"$1"' _ "$OUT"
+MAX=2 sw spawn 8-y "instrução"
+check "sem issue: conta no --max (a sessão sem issue ocupa vaga)" bash -c '[ "$1" -ne 0 ] && grep -q "limite da rodada atingido (2/2 abertas)" <<<"$2"' _ "$RC" "$ERR"
+sw spawn tell-nao-apaga "de novo"
+check "sem issue: mesmo slug na rodada: recusa"          bash -c '[ "$1" -ne 0 ] && grep -q "tell-nao-apaga já foi aberta nesta rodada" <<<"$2"' _ "$RC" "$ERR"
+sw spawn "!!!" "instrução"
+check "slug vazio: recusa com a regra nova"              bash -c '[ "$1" -ne 0 ] && grep -q "ou <slug> sem issue" <<<"$2"' _ "$RC" "$ERR"
+sw switch tell-nao-apaga
+check "switch: só troca a assinatura de sessão com issue" bash -c '[ "$1" -ne 0 ] && grep -q "switch só troca" <<<"$2"' _ "$RC" "$ERR"
+sw close tell-nao-apaga --yes
+check "sem issue: close a alcança (baixa no closed)"     grep -qxF 'tell-nao-apaga' "$STATE/closed"
 guarda_check
 guarda_stop
 check_end

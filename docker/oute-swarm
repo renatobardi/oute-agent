@@ -11,6 +11,7 @@
 #                                                   da Z.ai, sem leitura de imagem), escolha explícita: não volta para a padrão.
 #                                                   O dispatcher segue no claude. O do `spawn` vence o da rodada
 #   oute-swarm spawn <n>-<slug> "<instrução>"       (usado pelo dispatcher) abre uma aba do herdr com
+#              (ou <slug> sem número: sessão sem issue, #825)
 #              [--agent claude|codex] [--force]     oute-task + agente na worktree da issue. --agent: sobrepõe o da
 #              [--model <id>] [--repo <repo>]       rodada. --model: modelo da sessão (sem ele: o da fase da issue,
 #              [--kaizen]                           pelo oute-select). --repo: outro repo (padrão: o da rodada);
@@ -77,6 +78,18 @@ LIB="${OUTE_LIB:-/usr/local/lib/oute}"
 STATE_ROOT="${HOME}/.oute/swarm"
 die() { printf 'oute-swarm: %s\n' "$*" >&2; exit 1; }
 slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-' | sed 's/^-//; s/-$//' | cut -c1-40; }
+# sessão (#825): `<n>-<slug>` tem a issue <n>; `<slug>` sem número é sessão sem issue. num_de: o número, ou nada;
+# slab: o rótulo da aba, do watch e do tell (`#<n> <resto>`; sem número, o próprio slug)
+num_de() {
+  local s="$1"
+  if [[ "$s" =~ ^([0-9]+)-.+$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
+  return 0
+}
+slab() {
+  local s="$1"
+  if [[ "$s" =~ ^([0-9]+)-(.+)$ ]]; then printf '#%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"; else printf '%s' "$s"; fi
+  return 0
+}
 # log da rodada = linha do tempo completa; cada linha gravada vira também um evento operacional (ADR-04, #124):
 # oute-emit best-effort (timeout curto, sempre 0, sem stdout); sem ele na imagem, só o log
 slog() {
@@ -86,7 +99,7 @@ slog() {
 # trava semanal (#742, ADR-02 adendo): a assinatura escolhida tem `weekly_guard_pct` na tabela e a janela de 7 dias dela está no valor
 # ou acima -> o spawn não abre (código 5), com a linha `guard` no log da rodada. Cota não lida = só aviso. Sem `weekly_guard_pct`
 # na assinatura, ou sem oute-select, nada acontece. O `oute-select --weekly-guard` lê a tabela e a cota; o seletor em si não recusa.
-# $1 = assinatura, $2 = slug, $3 = pasta de estado da rodada, $4 = número da issue
+# $1 = assinatura, $2 = slug, $3 = pasta de estado da rodada, $4 = #<n> da issue (vazio: sem issue, a mensagem usa o slug)
 weekly_guard() {
   local sub="$1" slug="$2" sdir="$3" num="$4" js st g u rs h
   command -v oute-select >/dev/null 2>&1 || return 0
@@ -97,8 +110,8 @@ weekly_guard() {
     over)
       slog "$sdir" "$(date -u +%FT%TZ) guard $slug $sub 7d=${u}% trava=${g}%"
       h=""; [[ ! "$rs" =~ ^[0-9]+(\.[0-9]+)?$ ]] || h=" (reseta em cerca de $(awk -v s="$rs" 'BEGIN {printf "%d h", s / 3600 + 0.5}'))"
-      printf 'oute-swarm: trava semanal: a assinatura %s está em %s%% da janela de 7 dias, na trava de %s%%%s; #%s não abre (código 5). O Bardi decide: esperar o reset, subir weekly_guard_pct em config/select/models.toml ou abrir com --force\n' \
-        "$sub" "$u" "$g" "$h" "$num" >&2
+      printf 'oute-swarm: trava semanal: a assinatura %s está em %s%% da janela de 7 dias, na trava de %s%%%s; %s não abre (código 5). O Bardi decide: esperar o reset, subir weekly_guard_pct em config/select/models.toml ou abrir com --force\n' \
+        "$sub" "$u" "$g" "$h" "${num:-$slug}" >&2
       exit 5 ;;
   esac
   return 0
@@ -370,7 +383,7 @@ cmd_start() {
   printf -v wcmd 'OUTE_SWARM_ID=%q oute-swarm watch --round %q --deliver' "$id" "$id"
   herdr pane run "$wpane" "$wcmd" >/dev/null || die "herdr pane run falhou na aba do watch ($wpane)"
   slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch --deliver aberto na aba $wpane (dispatcher $dagent, pane $HERDR_PANE_ID)"
-  OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
+  OUTE_TASK_HERE=1 OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
     exec oute-task --phase plan -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
 }
 
@@ -388,7 +401,7 @@ load_warn() {
 }
 
 cmd_spawn() {
-  local agent="" force=0 kaizen=0 switch=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t
+  local agent="" force=0 kaizen=0 switch=0 repo="" task="" instr="" main slug n state pane tab out label cmd pfile count round max rrepo old old_ok now new why t ref
   local oldtab busy bslug brid model="" prefer="" subscr="" agent_cli="" sel="" sfile="" sargs=() src=0 s_agent s_model s_effort s_phase s_origin s_reserve s_sub
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -407,8 +420,9 @@ cmd_spawn() {
   [[ -n "$task" && -n "$instr" ]] || die 'uso: oute-swarm spawn <n>-<slug> "<instrução>" [--agent claude|codex] [--model <id>]'
   [[ -z "$agent" ]] || check_agent "$agent"
   [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]] || die "rode dentro do herdr"
-  slug="$(slugify "$task")"; [[ "$slug" =~ ^[0-9]+-[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert), veio: $task"
-  n="${slug%%-*}"
+  # sessão sem issue (#825): <slug> sem número; com número, a issue <n> (as regras de sempre: busy, rótulo, seletor)
+  slug="$(slugify "$task")"; [[ "$slug" =~ ^([0-9]+-)?[a-z0-9-]+$ ]] || die "tarefa deve ser <n>-<slug> (ex.: 185-backup-alert) ou <slug> sem issue, veio: $task"
+  n="$(num_de "$slug")"
   # rodada assumida pela worktree (sem OUTE_SWARM_ID): o max e o repo vêm do meta dela, não do ambiente
   round="$(round_id || true)"; max="${OUTE_SWARM_MAX:-}"; rrepo="${OUTE_SWARM_REPO:-}"
   if [[ -z "$round" ]]; then round=avulso
@@ -438,7 +452,7 @@ cmd_spawn() {
   [[ "$main" != *[[:space:]]* ]] || die "caminho de repo com espaço não suportado: $main"
   # a mesma issue não abre em duas rodadas (#605): sessão aberta em outra rodada do repo recusa, com código 4 e o nome e o id
   # da outra; sessão fechada não bloqueia. Kaizen é retrospectiva, não trabalho da issue: fica fora
-  if (( ! kaizen )); then
+  if (( ! kaizen )) && [[ -n "$n" ]]; then   # sem issue (#825), não há outra sessão da mesma issue para conferir
     busy="$(busy_lines "$main" "$round" | awk -F'\t' -v n="$n" '$1 == n {print; exit}')"
     if [[ -n "$busy" ]]; then
       IFS=$'\t' read -r _ bslug brid <<<"$busy"
@@ -464,7 +478,8 @@ cmd_spawn() {
     [[ -z "$model" ]] || sargs+=(--model "$model")
     [[ -n "$agent" || -n "$model" || -z "$prefer" ]] || sargs+=(--prefer "$prefer")
     [[ -z "$subscr" ]] || sargs+=(--subscription "$subscr")
-    sel="$(printf '%s' "$instr" | oute-select --json --repo "$main" --issue "$n" --text-file - ${sargs[@]+"${sargs[@]}"})" || src=$?
+    if [[ -n "$n" ]]; then sargs+=(--issue "$n"); else sargs+=(--task "$slug"); fi   # sem issue (#825): o seletor tira o número do slug
+    sel="$(printf '%s' "$instr" | oute-select --json --repo "$main" --text-file - ${sargs[@]+"${sargs[@]}"})" || src=$?
     (( src != 2 )) || die "seletor recusou a sessão $slug (acima)"
     IFS='|' read -r s_agent s_model s_effort s_phase s_origin s_reserve s_sub < <(jq -r '[.agent, .model, .effort, .phase, .origin, .reserve, .subscription] | map(. // "" | tostring) | join("|")' <<<"$sel" 2>/dev/null) || true
     if (( src != 0 )) || [[ ! "${s_agent:-}" =~ ^(claude|codex)$ ]]; then
@@ -474,16 +489,18 @@ cmd_spawn() {
   fi
   agent="${agent:-claude}"
   # trava semanal (#742): depois do seletor, antes de qualquer aba; --force (só o Bardi) vence; kaizen também passa pela trava
-  (( force )) || [[ -z "${s_sub:-}" ]] || weekly_guard "$s_sub" "$slug" "$state" "$n"
+  (( force )) || [[ -z "${s_sub:-}" ]] || weekly_guard "$s_sub" "$slug" "$state" "${n:+#$n}"
   pfile="$state/$slug.prompt"
   (( switch )) || printf '%s\n' "$instr" > "$state/$slug.instr"   # a instrução original, para a troca de assinatura (#759)
   [[ -z "$sel" ]] || { sfile="$state/$slug.select"; printf '%s\n' "$sel" > "$sfile"; }
   {
     printf '%s\n\n' "$instr"
-    sed -e "s|{{N}}|$n|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
+    # sem issue (#825): o nome da sessão faz o papel do número nas regras do worker, e a instrução acima é o escopo
+    [[ -n "$n" ]] || printf 'Sessão sem issue (#825): `%s` é o nome da sessão, não número de issue. Onde as regras abaixo falam em issue (`gh issue view`, `Closes`, `Refs`, `#`), use a instrução acima como escopo e não invente número.\n\n' "$slug"
+    sed -e "s|{{N}}|${n:-$slug}|g" -e "s|{{SLUG}}|$slug|g" -e "s|{{ID}}|$round|g" "$LIB/swarm-worker.md"
   } > "$pfile"
   load_warn "$slug"
-  label="#$n ${slug#*-}"
+  label="$(slab "$slug")"
   # troca de assinatura (#759): a aba da sessão parada fecha antes da nova abrir (mesmo label, mesma worktree: o oute-task reabre a
   # pasta e o branch dela, com as alterações). Sem fechar, as duas sessões mexeriam na mesma worktree
   if (( switch )); then
@@ -537,7 +554,8 @@ cmd_spawn() {
     "$( (( kaizen )) && echo kaizen || echo -)" "${s_sub:--}" >> "$state/spawned"
   slog "$state" "$(date -u +%FT%TZ) $( (( switch )) && echo troca || echo spawn) $slug $agent$( (( kaizen )) && echo ' kaizen')$( (( switch )) && echo " ${s_sub:--}")"
   quota_snapshot spawn
-  echo "aberta: #$n → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$([[ ! "${s_reserve:-}" =~ ^(indisponivel|cota)$ ]] || printf ' · reserva: %s' "$s_reserve")$([[ -z "${s_sub:-}" || "$s_sub" == "$agent" ]] || printf ' · assinatura %s' "$s_sub")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
+  ref="${n:+#$n}"   # sem issue (#825), o nome da sessão
+  echo "aberta: ${ref:-$slug} → pane $pane · worktree $(basename "$main")-$slug · agente $agent$([[ -z "$sel" || -z "$s_model" ]] || printf ' · modelo %s (fase %s, %s)' "$s_model" "${s_phase:--}" "${s_origin:--}")$([[ ! "${s_reserve:-}" =~ ^(indisponivel|cota)$ ]] || printf ' · reserva: %s' "$s_reserve")$([[ -z "${s_sub:-}" || "$s_sub" == "$agent" ]] || printf ' · assinatura %s' "$s_sub")$( (( kaizen )) && echo ' · kaizen (fora do --max)')"
 }
 
 # troca de assinatura (#759): a sessão <n>-<slug> parou por cota esgotada (linha `[cota]` do watch). Lê a próxima assinatura da
@@ -556,7 +574,8 @@ cmd_switch() {
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   ! is_closed "$state" "$want" || die "$want já foi fechada (oute-swarm close); abra de novo com spawn se for o caso"
   read -r slug _ cur _ _ main _ nxt <<<"$line"
-  n="${slug%%-*}"
+  n="$(num_de "$slug")"
+  [[ -n "$n" ]] || die "switch só troca a assinatura de sessão com issue (<n>-<slug>); $slug é sessão sem issue (#825)"
   [[ -n "$main" ]] || main="${OUTE_SWARM_REPO:-$(sed -n 's/^repo=//p' "$state/meta" | head -1)}"
   # a assinatura em que parou: a gravada no spawn; linha antiga, a da escolha do seletor, ou o agente
   [[ -n "$nxt" && "$nxt" != - ]] || nxt="$(jq -r '.subscription // empty' "$state/$slug.select" 2>/dev/null || true)"
@@ -735,7 +754,7 @@ cmd_tell() {
   state="$(round_dir)"
   line="$(awk -v s="$want" '$1==s' "$state/spawned" | tail -1)"; [[ -n "$line" ]] || die "$want não é desta rodada ($(basename "$state"))"
   read -r slug spane _ _ tab _ <<<"$line"
-  label="#${slug%%-*} ${slug#*-}"
+  label="$(slab "$slug")"
   # a partir daqui toda recusa fica no log da rodada; a mensagem vai depois de um TAB (ela nunca tem TAB)
   # rc: código de saída da recusa (3 = timeout da espera do --wait, como o oute-inbox)
   refuse() { slog "$state" "$(date -u +%FT%TZ) tell $slug recusado: ${1//[$'\n\t']/ }"$'\t'"$msg"; printf 'oute-swarm: %s; %s\n' "$1" "${2:-nada enviado}" >&2; exit "$rc"; }
@@ -844,7 +863,7 @@ cmd_close() {
     [[ -n "$slug" ]] || continue
     (( all )) || [[ "$slug" == "$want" ]] || continue
     found=1
-    label="#${slug%%-*} ${slug#*-}"
+    label="$(slab "$slug")"
     if is_closed "$state" "$slug"; then (( all )) || echo "já fechada: $label"; continue; fi
     # label primeiro; o id gravado no spawn só vale se ainda existir (senão é stale)
     id="$(tab_by_label "$label")"
@@ -900,7 +919,7 @@ w_ev() {
   return 0
 }
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
-w_label() { printf '#%s %s' "${1%%-*}" "${1#*-}"; }
+w_label() { local s="$1"; slab "$s"; return 0; }
 # PR/issue de outro repo que o da rodada vêm como <repo>#<n> (sem colisão de número); os da rodada, só <n>
 w_pfx() { [[ "$1" == "$2" ]] || printf '%s#' "$(basename "$1")"; }
 w_ref() { if [[ "$1" == *"#"* ]]; then printf '%s' "$1"; else printf '#%s' "$1"; fi; }

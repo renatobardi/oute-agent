@@ -88,6 +88,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     cria/reabre /workspace/.worktrees/<space>/<repo>-<slug>, branch sessao/<slug>
                                     (<space> = label do space do herdr em nome de pasta; fora do herdr: _sem-space)
   oute-task -r <repo> <slug> …      idem, de fora do repo
+  oute-task --here <slug> …         roda no terminal atual, sem aba (testes, scripts). Sem terminal e sem --here (#825): abre
+                                    uma aba do herdr (volta com 0, com a aba e o pane); dentro de rodada recusa (código 7: use
+                                    oute-swarm spawn); agente sem herdr recusa (código 8)
   oute-task --agent claude|codex --model <id> <slug> …
   oute-task --prefer <assinatura> <slug> …   pede uma reserva sem ser escolha explícita (#621): com ela no teto, volta para a padrão
   oute-task --subscription <assinatura> <slug> …   escolhe a assinatura (#678): `zai` = o claude na API da Z.ai (glm-5.3, só `OUTE_ZAI_API_KEY` do ambiente),
@@ -144,6 +147,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen] [--prefer <assinatura>] [--subscription <assinatura>]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).
+      Sem issue (#825): `oute-swarm spawn <slug> "instrução"`, sem número; a aba leva o slug como rótulo, e a sessão conta no --max.
       --agent: sobrepõe o agente da rodada (sem ele: o da rodada; spawn avulso: claude)
       --model: modelo da sessão (sem ele: o da fase da issue, pelo oute-select)
       --repo: issue de outro repo (nome em /workspace ou caminho); --kaizen: sessão kaizen, fora do --max

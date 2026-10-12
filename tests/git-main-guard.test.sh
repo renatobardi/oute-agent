@@ -231,7 +231,7 @@ g -C "$MAIN" reset -q --hard "$H1"
 # clean --yes avança o checkout principal com merge --ff-only
 task() {
   OUT="$(cd "$MAIN" && env -i HOME="$H" FAKE="$FAKE" PATH="$SHIMS:$REAL:/usr/bin:/bin" OUTE_GIT_GUARD_ROOT="$WS" \
-    OUTE_WORKSPACE="$WS" OUTE_WORKTREES="$WT" GIT_CONFIG_NOSYSTEM=1 "$TASK" "$@" 2>&1 </dev/null)"; RC=$?
+    OUTE_WORKSPACE="$WS" OUTE_WORKTREES="$WT" GIT_CONFIG_NOSYSTEM=1 "$TASK" --here "$@" 2>&1 </dev/null)"; RC=$?
   return 0
 }
 if [[ -x "$TASK" ]]; then
