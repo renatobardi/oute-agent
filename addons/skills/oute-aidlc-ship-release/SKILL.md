@@ -160,12 +160,13 @@ Se o Bardi pedir a release pelo canal de aprovação, o pedido leva o sha da `ma
 ```bash
 set -euo pipefail
 # RESUMO
-# Faz: confere que o origin/main do host é o sha conferido, e só então roda scripts/release, publica a main e a tag v<x.y.z>.
-# Host: o checkout principal da main no host (oute-server ou Mac). Altera: VERSION, CHANGELOG.md, o commit de release, a tag v<x.y.z> e o remoto (push da main e da tag).
+# Faz: confere que o origin/main do host é o sha conferido e que scripts/release existe; só então roda scripts/release e publica a main e a tag v<x.y.z>. Para antes de qualquer alteração se faltar algo disso ou se a árvore estiver suja.
+# Host: o checkout principal da main no host (oute-server ou Mac). Altera: antes da conferência do sha, só as refs do remoto (git fetch); depois dela, a branch main local (switch e merge --ff-only), VERSION, CHANGELOG.md, o commit de release, a tag v<x.y.z> e o remoto (push da main e da tag).
 # Não toca: as worktrees de sessão, os outros branches e os hosts (o deploy é do Bardi, com oute update).
 # Reinicia: nada.
 SHA_CONFERIDO="<sha conferido>"
 VERSAO="<x.y.z>"
+[[ -x scripts/release ]] || { echo "scripts/release ausente neste diretório: nada alterado" >&2; exit 1; }
 echo "1/4: confere o origin/main com o sha do relatório"
 git fetch --quiet --tags origin
 atual="$(git rev-parse origin/main)"

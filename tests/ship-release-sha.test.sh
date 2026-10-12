@@ -52,6 +52,15 @@ check "sha igual: scripts/release recebeu a versão"          grep -qx "0.9.0" "
 check "sha igual: a tag foi para o origin"                   git -C "$ORIG" rev-parse -q --verify refs/tags/v0.9.0
 check "sha igual: a main do origin é a do host"              [ "$(git -C "$ORIG" rev-parse main)" = "$(git -C "$HOST" rev-parse HEAD)" ]
 
+# 1b. scripts/release ausente no checkout: para antes de qualquer passo, sem tag nem release
+mv "$HOST/scripts/release" "$TMP/release.guardado"
+rm -f "${RELEASE_LOG:?}"
+pedido "$(git -C "$ORIG" rev-parse main)" 0.9.3 "$TMP/sem-release.sh"
+mv "$TMP/release.guardado" "$HOST/scripts/release"
+check "sem scripts/release: código 1"                        [ "$RC" -eq 1 ]
+check "sem scripts/release: a saída diz que está ausente"    grep -qF "scripts/release ausente" "$TMP/saida.txt"
+check "sem scripts/release: nenhuma tag 0.9.3 no origin"     bash -c '! git -C "$1" rev-parse -q --verify refs/tags/v0.9.3' _ "$ORIG"
+
 # 2. a origin avançou depois da conferência: para no passo 1, sem release, sem tag e sem push
 git -C "$HOST" commit -q --allow-empty -m "entrou depois"
 git -C "$HOST" push -q origin main
