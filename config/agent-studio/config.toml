@@ -214,6 +214,17 @@ output = 4.4
 cache_read = 0.26
 cache_creation = 0.0
 
+# `zai` (#826): o `glm-5.3-flash` é o modelo leve da mesma família. Fonte oficial: Z.ai (https://docs.z.ai/guides/overview/pricing),
+# linha "GLM-5.3-Flash", lida em 2026-10-12 (entrada 0,15; saída 0,5; entrada em cache 0,03; armazenamento de cache "limited-time free").
+# Mesmo caso do `glm-5.3` (#733): o OpenRouter (`z-ai/glm-5.3-flash`) traz outros valores (entrada 0,0232; saída 1,2), então
+# `fixed = true` trava o preço da página oficial. A escrita em cache é de graça (`cache_creation = 0.0`).
+[prices."glm-5.3-flash"]
+fixed = true
+input = 0.15
+output = 0.5
+cache_read = 0.03
+cache_creation = 0.0
+
 # Planos de assinatura (#746): a semente do cadastro (`/planos`, `GET /v1/plans`). Entra na subida, só para a assinatura que ainda não
 # tem linha nenhuma; depois o cadastro é da tela (credencial de marcação) e editar aqui não muda nada. `start` = dia em que passa a
 # valer (AAAA-MM-DD). Assinatura sem linha aparece como "sem plano", nunca como US$ 0; o `codex` gratuito é US$ 0 de fato.

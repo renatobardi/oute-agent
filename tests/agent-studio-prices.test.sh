@@ -80,6 +80,7 @@ EXPECTED = {
     "gpt-5-nano": ("openai", "openai/gpt-5-nano"), "gpt-6-astra": ("openai", "openai/gpt-6-astra"),
     "gpt-6.1-sol": ("openai", "openai/gpt-6.1-sol"), "gpt-6-luna": ("openai", "openai/gpt-6-luna"),
     "glm-5.3": ("zai", "z-ai/glm-5.3"),  # a assinatura `zai` (#679): provedor `zai` no models.dev, `z-ai` no OpenRouter
+    "glm-5.3-flash": ("zai", "z-ai/glm-5.3-flash"),  # #826: o preço travado (`fixed`) é o da Z.ai; a família `glm-` dá o mesmo mapeamento
 }
 for model, (provider, or_id) in EXPECTED.items():
     ids = S.source_ids(model)
@@ -100,6 +101,16 @@ glm_src = {"input": 1.4, "output": 4.4, "cache_read": 0.26, "cache_creation": 0.
 check("glm-5.3: tem preço no config.toml e a conferência o acha igual ao das fontes (não aparece como sem preço nem sem fonte)",
       glm is not None and P.decide(glm, False, {S.MODELS_DEV: dict(glm_src), S.OPENROUTER: dict(glm_src)})[0] == P.EQUAL)
 check("glm-5.3: as fontes divergindo não trocam o preço (diverge)", P.decide(glm, False, {S.MODELS_DEV: dict(glm_src), S.OPENROUTER: {**glm_src, "input": 0.07}})[::2] == (P.DIVERGE, None))
+# o glm-5.3-flash (#826) é travado no preço da Z.ai: fontes que divergem (OpenRouter 0,0232 / 1,2) não trocam nem alertam
+flash_cfg = CF.load(f"{root}/config/agent-studio/config.toml")
+flash = flash_cfg.prices.lookup("glm-5.3-flash")
+flash_src = {"input": 0.15, "output": 0.5, "cache_read": 0.03, "cache_creation": 0.0}
+check("glm-5.3-flash: preço travado (fixed) com os valores da Z.ai (0,15 / 0,5 / 0,03 / 0)",
+      flash is not None and flash.input == 0.15 and flash.output == 0.5 and flash.cache_read == 0.03 and flash.cache_creation == 0.0
+      and "glm-5.3-flash" in flash_cfg.fixed)
+check("glm-5.3-flash: a conferência o acha igual ao da Z.ai, e o OpenRouter divergindo não troca (diverge)",
+      P.decide(flash, True, {S.MODELS_DEV: dict(flash_src), S.OPENROUTER: {**flash_src, "input": 0.0232, "output": 1.2}})[::2] == (P.DIVERGE, None)
+      and P.decide(flash, False, {S.MODELS_DEV: dict(flash_src), S.OPENROUTER: dict(flash_src)})[0] == P.EQUAL)
 check("seletor: arquivo ausente = conjunto vazio com o motivo", P.select_models(f"{tmp}/nao-existe.toml") == (set(), "FileNotFoundError"))
 
 # ---------------------------------------------------------------- leitura e validação do JSON de terceiro
