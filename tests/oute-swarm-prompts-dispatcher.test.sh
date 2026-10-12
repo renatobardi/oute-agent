@@ -7,8 +7,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/oute-swarm-prompts.sh"
 
@@ -295,4 +298,6 @@ check "766: §3: ação coberta por regra do prompt se executa sem pergunta" bas
 check "767: §3: o registro da espera diz o que, de quem e desde quando, no log da rodada" bash -c 'l="$(grep -F "**Registro da espera (#766, #767).**" "$1")"; for t in "o que espera, de quem e desde quando" ">> ~/.oute/swarm/" "espera: " "sem registrar isso" "nasce desse registro"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: a conferência periódica é do watch, sem modelo, a cada 30 minutos" bash -c 'l="$(grep -F "**Pendência parada (#766, #767):**" "$1")"; for t in "é do \`oute-swarm watch\`, sem modelo" "30 minutos sem mudar" "[pendencia]" "Sem pendência parada, ele não emite nada" "não acorda sozinha para conferir"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[aviso]`, `[pendencia]` (abaixo)' "$D"
+guarda_check
+guarda_stop
 check_end
