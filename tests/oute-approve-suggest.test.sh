@@ -11,7 +11,7 @@ for v in $(compgen -e | grep -E '^(OCI_|GH_TOKEN$|GITHUB_TOKEN$|AGENT_STUDIO_|BW
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTE="$ROOT/scripts/oute"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=40   # o bad mostra o fim da saída
 
@@ -26,7 +26,7 @@ export PATH="$BIN:$PATH" OUTE_HOST=teste OUTE_INSTANCE=teste F_DOCKER="$TMP/dock
 AP="$TMP/host/.oute/approve"
 
 reset() {
-  rm -rf "$TMP/host" "$F_DOCKER" "$F_RAN"; mkdir -p "$AP/runs"
+  rm -rf "${TMP:?}/host" "${TMP:?}/docker.calls" "${TMP:?}/ran"; mkdir -p "$AP/runs"
   return 0
 }
 # pedido no histórico: $1=id $2=como (user|root) $3=decisão (exec|recusado) $4=data do log; stdin=corpo do script
@@ -180,7 +180,7 @@ check "sem approve.log: não cria a pasta de runs" test ! -e "$AP/runs"
 reset
 hist 20261001-100000-com-script user exec 2026-10-01T10:00:00Z <<<'uptime'
 hist 20261002-100000-sem-script user exec 2026-10-02T10:00:00Z <<<'uptime'
-rm -f "$AP/runs/20261002-100000-sem-script.sh"
+rm -f "${AP:?}/runs/20261002-100000-sem-script.sh"
 printf 'linha solta sem tab\n' >> "$AP/approve.log"
 printf '2026-10-03T10:00:00Z\tteste\t../../fora\tabc\texec\trc=0\ttitulo\n' >> "$AP/approve.log"
 printf '2026-10-03T10:00:00Z\tteste\t20261003-100000-outra-decisao\tabc\tadiado\t-\ttitulo\n' >> "$AP/approve.log"

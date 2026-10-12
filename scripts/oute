@@ -1190,9 +1190,8 @@ approve_one() {
 # Risco: root (pedido --root ou linha com sudo), leitura (todo trecho da linha é de uma lista fixa de comandos
 # que só leem, sem redirecionar para arquivo e sem substituição de comando) ou escrita (todo o resto).
 # awk sem extensão do gawk nem intervalo em regex ({n}): roda no awk do macOS.
-approve_suggest_awk() {
-  local log="$1" runs="$2" min="$3"
-  LC_ALL=C awk -F '\t' -v runs="$runs" -v min="$min" '
+# o programa fica fora da função: os campos do awk ($1, $3…) não são parâmetro posicional do shell
+APPROVE_SUGGEST_AWK='
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function norm(s) {
   gsub(/\t/, " ", s); gsub(/  +/, " ", s); s = trim(s)
@@ -1288,7 +1287,10 @@ BEGIN {
 END {
   printf "S\t%d\t%d\t%d\t%d\n", nexec, nrej, noscript, bad
   for (key in keys) if (cnt[key] >= min) printf "R\t%d\t%d\t%s\t%s\n", cnt[key], rej[key], last[key], key
-}' "$log"
+}'
+approve_suggest_awk() {
+  local log="$1" runs="$2" min="$3"
+  LC_ALL=C awk -F '\t' -v runs="$runs" -v min="$min" "$APPROVE_SUGGEST_AWK" "$log"
   return $?
 }
 approve_suggest_usage() {
@@ -1331,7 +1333,7 @@ approve_suggest() {
   } | show_safe /dev/stdin
   return 0
 }
-approve_usage() { echo "uso: oute approve [--watch | <id> | suggest [--min N]]   (id: AAAAMMDD-HHMMSS-slug, como o oute-propose imprime)" >&2; }
+approve_usage() { echo "uso: oute approve [--watch | <id> | suggest [--min N]]   (id: AAAAMMDD-HHMMSS-slug, como o oute-propose imprime)" >&2; return 0; }
 approve() {
   # argumentos conferidos antes de tocar o container. #158: `oute approve <id>` decide só aquele pedido (o tray do
   # Mac abre o Terminal nele); id fora do formato do oute-propose = rc 2, sem docker exec nenhum
