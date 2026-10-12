@@ -24,6 +24,7 @@ SH
 chmod +x "$BIN/docker"
 export PATH="$BIN:$PATH" OUTE_HOST=teste OUTE_INSTANCE=teste F_DOCKER="$TMP/docker.calls" F_RAN="$TMP/ran"
 AP="$TMP/host/.oute/approve"
+CAT_HOSTS="cat /etc/hosts"; UP=uptime
 
 reset() {
   rm -rf "${TMP:?}/host" "${TMP:?}/docker.calls" "${TMP:?}/ran"; mkdir -p "$AP/runs"
@@ -44,10 +45,11 @@ run_suggest() {
 # linha da tabela, campo a campo: $1=pedidos $2=recusas $3=último uso $4=risco $5=comando (texto exato até o fim)
 row() {
   local n="$1" rej="$2" last="$3" risk="$4" cmd="$5"
-  awk -v n="$n" -v rej="$rej" -v last="$last" -v risk="$risk" -v cmd="$cmd" '
+  # o comando vai pelo ambiente: o -v do awk interpretaria as barras invertidas dele
+  WANT_CMD="$cmd" awk -v n="$n" -v rej="$rej" -v last="$last" -v risk="$risk" '
     { line = $0; sub(/^ +/, "", line)
       want = n " +" rej " +" last " +" risk " +"
-      if (match(line, "^" want) && substr(line, RLENGTH + 1) == cmd) found = 1 }
+      if (match(line, "^" want) && substr(line, RLENGTH + 1) == ENVIRON["WANT_CMD"]) found = 1 }
     END { exit !found }' <<<"$OUT"
   return $?
 }
@@ -160,16 +162,73 @@ check "fi sozinho não entra na lista" bash -c '! grep -qE " fi$" <<<"$1"' _ "$O
 
 # pedido --root: todo comando dele é root, mesmo o de leitura; o mesmo comando sem root fica em outra linha
 reset
-hist 20261001-100000-como-root root exec 2026-10-01T10:00:00Z <<<'cat /etc/hosts'
-hist 20261002-100000-como-user user exec 2026-10-02T10:00:00Z <<<'cat /etc/hosts'
+hist 20261001-100000-como-root root exec 2026-10-01T10:00:00Z <<<"$CAT_HOSTS"
+hist 20261002-100000-como-user user exec 2026-10-02T10:00:00Z <<<"$CAT_HOSTS"
 run_suggest --min 1
-check "pedido --root: comando de leitura sai como root" row 1 0 2026-10-01T10:00:00Z root "cat /etc/hosts"
-check "mesmo comando em pedido sem root: linha própria, leitura" row 1 0 2026-10-02T10:00:00Z leitura "cat /etc/hosts"
+check "pedido --root: comando de leitura sai como root" row 1 0 2026-10-01T10:00:00Z root "$CAT_HOSTS"
+check "mesmo comando em pedido sem root: linha própria, leitura" row 1 0 2026-10-02T10:00:00Z leitura "$CAT_HOSTS"
 # `# como: root` escrito no corpo não muda o pedido: vale o primeiro, do cabeçalho (como no approve_one)
 reset
-hist 20261001-100000-falso-root user exec 2026-10-01T10:00:00Z <<<$'# como: root\ncat /etc/hosts'
+hist 20261001-100000-falso-root user exec 2026-10-01T10:00:00Z <<<"# como: root"$'\n'"$CAT_HOSTS"
 run_suggest --min 1
-check "'# como: root' no corpo não vira root" row 1 0 2026-10-01T10:00:00Z leitura "cat /etc/hosts"
+check "'# como: root' no corpo não vira root" row 1 0 2026-10-01T10:00:00Z leitura "$CAT_HOSTS"
+
+# --- 4b. auditoria do PR #814: na dúvida, escrita (linha que executa, apaga ou grava sem `>` não sai leitura)
+reset
+LONG="ls /srv/$(printf 'z%.0s' $(seq 1 210)) ; rm -rf ~/w"
+{ cat <<'SH'
+command rm -rf ~/zz
+command -v nginx
+cat <(rm ~/zz2)
+sed -n 'w /tmp/out' /etc/hosts
+git log --output=/tmp/o2
+uniq /etc/hosts /tmp/o3
+sort /etc/hosts | uniq -c
+GIT_EXTERNAL_DIFF=rm git diff
+echo "it's" ; rm -rf ~/x ; echo "it's"
+echo \" ; rm -rf ~/y ; echo \"
+docker compose config -o /tmp/c.yaml
+ss -K dst 10.0.0.1
+grep 'a\.b' /etc/hosts
+cat "/etc/hosts
+SH
+  printf '%s\n' "$LONG"; } | hist 20261001-100000-auditoria user exec 2026-10-01T10:00:00Z
+run_suggest --min 1
+check "escrita: command <comando> executa o comando" row 1 0 "$T" escrita "command rm -rf ~/zz"
+check "leitura: command -v só consulta" row 1 0 "$T" leitura "command -v nginx"
+check "escrita: substituição de processo <( )" row 1 0 "$T" escrita "cat <(rm ~/zz2)"
+check "escrita: sed (o comando w grava sem >)" row 1 0 "$T" escrita "sed -n 'w /tmp/out' /etc/hosts"
+check "escrita: git log --output=" row 1 0 "$T" escrita "git log --output=/tmp/o2"
+check "escrita: uniq com arquivo de saída" row 1 0 "$T" escrita "uniq /etc/hosts /tmp/o3"
+check "leitura: uniq só com opção, no pipe" row 1 0 "$T" leitura "sort /etc/hosts | uniq -c"
+check "escrita: variável de ambiente na frente do comando" row 1 0 "$T" escrita "GIT_EXTERNAL_DIFF=rm git diff"
+check "escrita: rm entre duas strings com apóstrofo" row 1 0 "$T" escrita "echo \"it's\" ; rm -rf ~/x ; echo \"it's\""
+check "escrita: rm entre aspas escapadas" row 1 0 "$T" escrita 'echo \" ; rm -rf ~/y ; echo \"'
+check "escrita: docker compose config -o grava arquivo" row 1 0 "$T" escrita "docker compose config -o /tmp/c.yaml"
+check "escrita: ss saiu da lista de leitura (-K derruba conexão)" row 1 0 "$T" escrita "ss -K dst 10.0.0.1"
+check "leitura: \\ dentro de aspas simples não muda a classe" row 1 0 "$T" leitura "grep 'a\.b' /etc/hosts"
+check "escrita: aspas sem fechar" row 1 0 "$T" escrita 'cat "/etc/hosts'
+check "escrita: o risco vem da linha inteira, não dos 200 caracteres exibidos" row 1 0 "$T" escrita "${LONG:0:200}…"
+
+# segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
+reset
+SEG="$(od -An -N20 -tx1 /dev/urandom | tr -d ' \n' | tr '0-9a-f' 'g-v')"
+hist 20261001-100000-segredo user exec 2026-10-01T10:00:00Z <<SH
+curl -sS -H "Authorization: Bearer $SEG" https://exemplo.invalid/x
+export API_TOKEN=$SEG
+export OUTRO_TOKEN="\$VAR_DO_AMBIENTE"
+ferramenta --password "$SEG" --host exemplo.invalid
+git clone https://usuario:$SEG@exemplo.invalid/r.git
+ferramenta ghp_$SEG
+SH
+run_suggest --min 1
+check "segredo: o valor sorteado não aparece em lugar nenhum da saída" hasnt_str "$SEG"
+check "segredo: Bearer" row 1 0 "$T" escrita 'curl -sS -H "Authorization: Bearer {segredo}" https://exemplo.invalid/x'
+check "segredo: TOKEN=valor" row 1 0 "$T" escrita "export API_TOKEN={segredo}"
+check "segredo: TOKEN=\"\$VAR\" é variável e fica como está" row 1 0 "$T" escrita 'export OUTRO_TOKEN="$VAR_DO_AMBIENTE"'
+check "segredo: --password valor" row 1 0 "$T" escrita 'ferramenta --password "{segredo}" --host exemplo.invalid'
+check "segredo: usuário:senha@ em URL" row 1 0 "$T" escrita "git clone https://{segredo}@exemplo.invalid/r.git"
+check "segredo: token com prefixo conhecido (ghp_)" row 1 0 "$T" escrita "ferramenta {segredo}"
 
 # --- 5. ramos de erro e de estado
 reset; rmdir "$AP/runs"
@@ -178,16 +237,16 @@ check "sem approve.log: avisa e sai com 0" bash -c '[[ "$1" = 0 ]] && grep -qF "
 check "sem approve.log: não cria a pasta de runs" test ! -e "$AP/runs"
 
 reset
-hist 20261001-100000-com-script user exec 2026-10-01T10:00:00Z <<<'uptime'
-hist 20261002-100000-sem-script user exec 2026-10-02T10:00:00Z <<<'uptime'
+hist 20261001-100000-com-script user exec 2026-10-01T10:00:00Z <<<"$UP"
+hist 20261002-100000-sem-script user exec 2026-10-02T10:00:00Z <<<"$UP"
 rm -f "${AP:?}/runs/20261002-100000-sem-script.sh"
 printf 'linha solta sem tab\n' >> "$AP/approve.log"
 printf '2026-10-03T10:00:00Z\tteste\t../../fora\tabc\texec\trc=0\ttitulo\n' >> "$AP/approve.log"
 printf '2026-10-03T10:00:00Z\tteste\t20261003-100000-outra-decisao\tabc\tadiado\t-\ttitulo\n' >> "$AP/approve.log"
-echo 'uptime' > "$TMP/host/fora.sh"
+echo "$UP" > "$TMP/host/fora.sh"
 run_suggest --min 1
 check "script que sumiu de runs/: aviso com a contagem" has_line "aviso: 1 pedido(s) sem o script guardado em $AP/runs (ficam fora da contagem)"
-check "script que sumiu: o pedido não entra na contagem do comando" row 1 0 2026-10-01T10:00:00Z leitura "uptime"
+check "script que sumiu: o pedido não entra na contagem do comando" row 1 0 2026-10-01T10:00:00Z leitura "$UP"
 check "linha do log fora do formato (sem tab, id com ../, decisão desconhecida): 3 ignoradas" has_line "aviso: 3 linha(s) do log fora do formato (ignoradas)"
 
 reset
@@ -202,11 +261,11 @@ check "log vazio: 0 pedidos, nenhum comando, sai com 0" bash -c '[[ "$1" = 0 ]] 
 
 # --- 6. argumentos: erro de uso = rc 2, sem ler o histórico e sem docker
 reset
-hist 20261001-100000-uso user exec 2026-10-01T10:00:00Z <<<'uptime'
+hist 20261001-100000-uso user exec 2026-10-01T10:00:00Z <<<"$UP"
 for args in "--min" "--min 0" "--min abc" "--min=" "--aplicar" "--min 2 sobra"; do
   # shellcheck disable=SC2086
   run_suggest $args
-  check "uso: 'suggest $args' sai com 2 e mostra o uso" bash -c '[[ "$1" = 2 ]] && grep -q "^uso: oute approve suggest" <<<"$2" && ! grep -q uptime <<<"$2"' _ "$RC" "$OUT"
+  check "uso: 'suggest $args' sai com 2 e mostra o uso" bash -c '[[ "$1" = 2 ]] && grep -q "^uso: oute approve suggest" <<<"$2" && ! grep -q "$3" <<<"$2"' _ "$RC" "$OUT" "$UP"
 done
 check "erro de uso também não chama docker" test ! -e "$F_DOCKER"
 OUT="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --nada 2>&1)"; RC=$?
