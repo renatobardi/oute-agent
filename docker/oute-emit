@@ -13,6 +13,9 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
   oute-emit quota <spawn|close|open> snapshot da cota das assinaturas (#347): lê `oute-quota --json` (teto de 8 s) e manda
                                      oute.quota.used_pct e oute.quota.reset_in_seconds por agente e janela (métricas, OTLP
                                      /v1/metrics) e, para agente sem leitura, o evento oute.quota.unknown com o motivo
+  oute-emit doctor                   captura do ai-memory (#725): lê o ~/.oute/doctor/last.json que o `oute-doctor` acabou de gravar
+                                     e manda, por agente, oute.memory.capture.missing_pct, .local e .captured e, do Codex,
+                                     oute.memory.capture.hooks_untrusted (métricas, OTLP /v1/metrics, na hora da conferência)
   oute-emit backfill                 os mesmos leitores sobre o que é anterior ao corte (~/.oute/emit/since); uma vez
   oute-emit backfill --from <ISO> [--to <ISO>] [--dry-run]
                                      os mesmos leitores sobre a janela [from, to) pela hora do fato (#261), sem olhar o
@@ -959,6 +962,55 @@ def cmd_quota(moment, data, now_ns):
     return events, rms
 
 
+# ---------------------------------------------------------------- captura do ai-memory (#725)
+DOCTOR_LAST = os.path.join(HOME, ".oute", "doctor", "last.json")
+DOCTOR_AGENTS = ("claude", "codex")
+DOCTOR_BASIS = ("delta", "total")
+
+
+def read_doctor():
+    """o relatório que o `oute-doctor` gravou, ou None (ausente ou fora do formato)"""
+    try:
+        with open(DOCTOR_LAST, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        debug(f"oute-doctor: sem relatório ({e})")
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("agents"), list) and whole(data.get("at")) else None
+
+
+def whole(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def cmd_doctor(data):
+    """-> resourceMetrics. Por agente com veredito (não `amostra` nem `indeterminado`): oute.memory.capture.missing_pct
+    (%, 0–100), .local e .captured (as duas contagens comparadas), com o atributo oute.memory.capture.basis (`delta` ou
+    `total`). Do Codex, com a conferência feita: oute.memory.capture.hooks_untrusted (hooks do ai-memory sem trusted_hash).
+    Sem veredito não há ponto (zero seria mentira). A hora do ponto é a da conferência"""
+    t_ns, rms = str(data["at"] * 10**9), []
+    untrusted = (data.get("codex_hooks") or {}).get("untrusted") if isinstance(data.get("codex_hooks"), dict) else None
+    for agent in DOCTOR_AGENTS:
+        row = next((r for r in data["agents"] if isinstance(r, dict) and r.get("agent") == agent), {})
+        pct, metrics = row.get("missing_pct"), []
+        if not isinstance(pct, bool) and isinstance(pct, (int, float)) and 0 <= pct <= 100 \
+                and whole(row.get("local")) and whole(row.get("captured")) and row.get("basis") in DOCTOR_BASIS:
+            attrs = kvs({"oute.memory.capture.basis": row["basis"]})
+            metrics += [gauge("oute.memory.capture.missing_pct", "%",
+                              [{"attributes": attrs, "timeUnixNano": t_ns, "asDouble": float(pct)}]),
+                        gauge("oute.memory.capture.local", "{session}",
+                              [{"attributes": attrs, "timeUnixNano": t_ns, "asInt": str(row["local"])}]),
+                        gauge("oute.memory.capture.captured", "{session}",
+                              [{"attributes": attrs, "timeUnixNano": t_ns, "asInt": str(row["captured"])}])]
+        if agent == "codex" and whole(untrusted):
+            metrics.append(gauge("oute.memory.capture.hooks_untrusted", "{hook}",
+                                 [{"timeUnixNano": t_ns, "asInt": str(untrusted)}]))
+        if metrics:
+            rms.append({"resource": quota_resource(agent),
+                        "scopeMetrics": [{"scope": {"name": "oute-emit"}, "metrics": metrics}]})
+    return rms
+
+
 # ---------------------------------------------------------------- reconciliação (#167)
 def cmd_reconcile(deadline, drained):
     """na subida: decided de todo .out sem marca em decided/ e com a decisão a partir do corte (o anterior é do
@@ -1243,7 +1295,7 @@ def main(argv):
         return
     if verb == "run":  # único verbo que não é best-effort: roda o comando de quem chamou e devolve o código dele
         sys.exit(cmd_run(argv[1:]))
-    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2}
+    valid = {"canal": 2, "swarm": 3, "backfill": 1, "flush": 1, "reconcile": 1, "quota": 2, "doctor": 1}
     window = None
     if verb == "backfill" and len(argv) > 1:
         try:
@@ -1271,6 +1323,11 @@ def main(argv):
         if quota is None:
             return
         deadline = time.monotonic() + TIMEOUT  # a leitura tem o teto dela; o envio, o de sempre
+    doctor = None
+    if verb == "doctor":
+        doctor = read_doctor()
+        if doctor is None:
+            return
     drained = drain(deadline)  # toda chamada: primeiro o que ficou para trás
     if verb == "canal":
         events = cmd_canal(argv[1])
@@ -1295,6 +1352,10 @@ def main(argv):
         if rms:
             post_json(metrics_endpoint(), {"resourceMetrics": rms}, deadline - time.monotonic())
         send(events, deadline, drained)
+    elif verb == "doctor":
+        rms = cmd_doctor(doctor)
+        if rms:
+            post_json(metrics_endpoint(), {"resourceMetrics": rms}, deadline - time.monotonic())
     elif verb == "backfill":
         cmd_backfill_window(*window) if window else cmd_backfill()
 

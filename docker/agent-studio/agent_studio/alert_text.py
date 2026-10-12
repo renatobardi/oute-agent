@@ -11,6 +11,8 @@ TITLES = {alerts_mod.QUEUE: "Fila do collector acima do limite", alerts_mod.REFU
           alerts_mod.QUOTA: "Cota da assinatura",
           alerts_mod.ROUND_STALLED: "Rodada parada", alerts_mod.ROUND_OLD: "Rodada antiga sem fechamento",
           alerts_mod.LLM_PROXY: "Proxy do LLM do ai-memory fora (ai-memory sem LLM)",
+          alerts_mod.MEMORY_CAPTURE: "Captura parcial do ai-memory",
+          alerts_mod.MEMORY_HOOKS: "Hook do Codex sem trusted_hash (sessão sem captura)",
           # preços (#339): critérios em `price_alerts.py`
           "price_changed": "Preço trocado", "price_sources_diverge": "Fontes de preço divergem",
           "price_source_down": "Fonte de preço fora do ar", "price_model_unpriced": "Modelo em uso sem preço",
@@ -58,6 +60,12 @@ def text(alert):
         if alert["type"] == alerts_mod.COST_TYPES[0]:
             return f"{ev['note']} ({br(f'{v:+g}')}%, limite {br(f'{limit:g}')}%)"
         return ev["note"]
+    if alert["type"] == alerts_mod.MEMORY_CAPTURE:  # captura do ai-memory (#725): o agente e as duas contagens
+        pair = "" if ev.get("local") is None or ev.get("captured") is None \
+            else f"{num(ev['local'])} sessões locais, {num(ev['captured'])} capturadas; "
+        return f"{ev['agent']}: {pair}{br(f'{v:g}')}% sem captura (limite {br(f'{limit:g}')}%)"
+    if alert["type"] == alerts_mod.MEMORY_HOOKS:
+        return f"{ev['agent']}: {num(round(v))} {'hook' if v == 1 else 'hooks'} do ai-memory sem trusted_hash no config.toml"
     if unit == "ratio":
         return f"{br(f'{v * 100:.0f}')}% da fila (limite {br(f'{limit * 100:.0f}')}%)"
     if unit == "pct":

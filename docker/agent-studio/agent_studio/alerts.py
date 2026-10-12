@@ -31,6 +31,16 @@ liga quando o dado mostra o problema e desliga sozinho quando o dado seguinte n�
   heartbeat no período (proxy não ligado, ou parado há mais de `lookback_hours`) não alerta; desliga sozinho quando o
   heartbeat volta.
 
+- **Captura parcial do ai-memory** (`memory_capture`, #725): o `oute-doctor` compara, por agente (claude, codex), as
+  sessões locais com as capturadas no servidor do ai-memory e manda `oute.memory.capture.missing_pct` (com `.local` e
+  `.captured`, as duas contagens). O último ponto de um host, instância e agente nos últimos `memory_capture_days` acima
+  de `memory_capture_max_missing_pct` liga o alerta. Sem coleta periódica: o ponto é o da última conferência
+  (`oute doctor`), e some depois de `memory_capture_days`.
+- **Hook do Codex sem `trusted_hash`** (`memory_hooks_untrusted`, #725): último ponto de
+  `oute.memory.capture.hooks_untrusted` (hooks do ai-memory no `hooks.json` do Codex sem `trusted_hash`) acima de zero,
+  na mesma janela. Com isso o Codex não roda o hook e a sessão não é capturada. Falha destes dois cálculos não derruba
+  os outros.
+
 **Host parado** = sem nenhum registro há mais de `no_data_minutes`. Host parado não liga fila, recusa, spool nem cota
 (o último valor dele é velho): o Mac fechado não alerta; o host sempre ligado parado alerta só "host sem dado".
 
@@ -50,7 +60,8 @@ MIN_NS = 60 * 1_000_000_000
 QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA = "queue", "destination_refusing", "host_no_data", "spool", "quota"
 ROUND_STALLED, ROUND_OLD = "round_stalled", "round_old"
 LLM_PROXY = "llm_proxy_down"
-TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD, LLM_PROXY)
+MEMORY_CAPTURE, MEMORY_HOOKS = "memory_capture", "memory_hooks_untrusted"
+TYPES = (QUEUE, REFUSING, NO_DATA, SPOOL, QUOTA, ROUND_STALLED, ROUND_OLD, LLM_PROXY, MEMORY_CAPTURE, MEMORY_HOOKS)
 # alertas de preço (#339): critérios e texto em `price_alerts.py`; aqui só os tipos, na ordem de exibição
 PRICE_TYPES = ("price_changed", "price_sources_diverge", "price_source_down", "price_model_unpriced",
                "price_fixed_differs")
@@ -90,6 +101,8 @@ class AlertConfig:
     round_stalled_minutes: float = 30
     llm_proxy_stale_minutes: float = 5
     band_recent_hours: float = 2
+    memory_capture_max_missing_pct: float = 20  # #725: % de sessões locais sem captura que liga o alerta
+    memory_capture_days: float = 7  # #725: até quando o ponto da última conferência do oute-doctor vale
     claude_cost_diff_pct: float = 10  # #747: diferença (%) entre o custo informado do claude e a tabela que liga o alerta
 
     @classmethod
@@ -460,6 +473,50 @@ def _llm_proxy(con, lo, at, cfg):
             for r in rows if at - r["t"] > limit * 1_000_000_000]
 
 
+CAPTURE_PCT, CAPTURE_LOCAL, CAPTURE_CAPTURED = (
+    "oute.memory.capture.missing_pct", "oute.memory.capture.local", "oute.memory.capture.captured")
+CAPTURE_HOOKS = "oute.memory.capture.hooks_untrusted"
+DAY_NS = 24 * 60 * MIN_NS
+
+
+def _capture_points(con, metric, at, cfg):
+    """{(host, instância, agente): pontos em ordem de hora} de uma métrica do oute-doctor na janela dela"""
+    rows = _rows(con, """
+        SELECT host_name AS host, oute_instance AS instance, oute_agent AS agent, time_unix_nano AS t, value
+        FROM metrics WHERE metric_name = ? AND time_unix_nano BETWEEN ? AND ?
+        ORDER BY host, instance, agent, t""", [metric, max(0, at - int(cfg.memory_capture_days * DAY_NS)), at])
+    return _series(rows, ("host", "instance", "agent"))
+
+
+def _memory_capture(con, at, cfg):
+    limit = cfg.memory_capture_max_missing_pct
+    counts = {name: {k: {p["t"]: p["value"] for p in pts} for k, pts in _capture_points(con, metric, at, cfg).items()}
+              for name, metric in (("local", CAPTURE_LOCAL), ("captured", CAPTURE_CAPTURED))}
+
+    def over(p):
+        return p["value"] is not None and p["value"] > limit
+
+    out = []
+    for k, pts in _capture_points(con, CAPTURE_PCT, at, cfg).items():
+        last = pts[-1]
+        if not over(last):
+            continue
+        pair = {name: by_key.get(k, {}).get(last["t"]) for name, by_key in counts.items()}
+        out.append(_alert(MEMORY_CAPTURE, k[0], k[1], last["value"], "pct", limit, _run_start(pts, over),
+                          {"attribute": CAPTURE_PCT, "agent": k[2], "at": iso(last["t"]),
+                           **{name: None if v is None else int(v) for name, v in pair.items()}}))
+    return out
+
+
+def _memory_hooks(con, at, cfg):
+    def bad(p):
+        return p["value"] is not None and p["value"] > 0
+
+    return [_alert(MEMORY_HOOKS, k[0], k[1], int(pts[-1]["value"]), "hooks", 0, _run_start(pts, bad),
+                   {"attribute": CAPTURE_HOOKS, "agent": k[2], "at": iso(pts[-1]["t"])})
+            for k, pts in _capture_points(con, CAPTURE_HOOKS, at, cfg).items() if bad(pts[-1])]
+
+
 def enabled(cfg):
     return {t: (cfg.quota_enabled if t == QUOTA else True) for t in ALL_TYPES}
 
@@ -478,6 +535,10 @@ def evaluate(con, at_ns, cfg):
         logging.getLogger(__name__).exception("alerta de rodada parada falhou; os outros seguem")
     from . import cost_alerts, price_alerts  # aqui e não no topo: eles importam este módulo
     alerts += _llm_proxy(con, lo, at_ns, cfg)
+    try:
+        alerts += _memory_capture(con, at_ns, cfg) + _memory_hooks(con, at_ns, cfg)
+    except Exception:  # noqa: BLE001 — a conferência da captura não derruba os outros alertas (#725)
+        logging.getLogger(__name__).exception("alertas de captura do ai-memory falharam; os outros seguem")
     alerts += price_alerts.evaluate(con, at_ns)
     try:
         alerts += cost_alerts.evaluate(con, at_ns, cfg)

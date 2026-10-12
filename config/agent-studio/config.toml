@@ -173,6 +173,13 @@ lookback_hours = 24
 # Proxy do LLM do ai-memory (#459): o oute-llm-proxy manda um heartbeat (oute.llm_proxy.up) por minuto; sem ele por tantos
 # minutos o alerta liga (o ai-memory fica sem LLM, no modo por regra). Só host que mandou heartbeat em lookback_hours.
 llm_proxy_stale_minutes = 5
+# Captura parcial do ai-memory (#725): o oute-doctor (`oute doctor`) compara, por agente, as sessões locais com as capturadas
+# e manda oute.memory.capture.missing_pct. Acima deste % de sessões locais sem captura o alerta `memory_capture` liga. O
+# mesmo limite existe no próprio oute-doctor (--max-missing-pct, padrão 20): os dois mudam juntos.
+memory_capture_max_missing_pct = 20
+# Sem coleta periódica: o ponto da última conferência vale por tantos dias (também para `memory_hooks_untrusted`, o hook
+# do ai-memory do Codex sem trusted_hash); depois o alerta some até a próxima conferência.
+memory_capture_days = 7
 # Faixas da tela (#524): rodada parada, rodada antiga, alerta de preço e decisão pendente com mais de tantas horas saem da
 # faixa e entram no contador "antigos" (abre por clique). Fila, destino recusando, host sem dado, spool e cota nunca recolhem.
 # Só a tela: o `GET /v1/alerts` e o `GET /v1/tray` não mudam.

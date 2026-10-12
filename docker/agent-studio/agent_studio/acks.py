@@ -6,7 +6,7 @@ ativos voltam à faixa sem reconhecimento. O `ack` do SurrealDB é derivado daqu
 `rebuild-state` o remonta sem renovar a validade (a linha já traz `expires_unix_nano`).
 
 - **Alvo** (`target`): os 32 primeiros hex do sha256 da identidade (`identity`, JSON). Alerta = tipo, host, instância e as
-  dimensões da regra (`DIMS`: exporter, atributo do spool, agente e série da cota, rodada, modelo, fonte). Decisão = host,
+  dimensões da regra (`DIMS`: exporter, atributo do spool, agente e série da cota, agente da captura do ai-memory, rodada, modelo, fonte). Decisão = host,
   instância e rodada. O valor do alerta e a idade não entram: oscilar dentro da mesma condição não muda o alvo.
 - **Versão** da ocorrência: `rule` (unidade e limite da regra) e `since` (alerta: o `since` do `GET /v1/alerts`; decisão:
   a hora da pergunta, `asked_at`).
@@ -35,7 +35,9 @@ SINCE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z", re.ASCII)
 # as dimensões da regra de cada tipo de alerta (chaves do `evidence`); tipo fora daqui = só tipo, host e instância
 DIMS = {
     alerts_mod.QUEUE: ("exporter",), alerts_mod.REFUSING: ("exporter",), alerts_mod.SPOOL: ("attribute",),
-    alerts_mod.QUOTA: ("agent", "attributes"), alerts_mod.ROUND_STALLED: ("round",), alerts_mod.ROUND_OLD: ("round",),
+    alerts_mod.QUOTA: ("agent", "attributes"),
+    alerts_mod.MEMORY_CAPTURE: ("agent",), alerts_mod.MEMORY_HOOKS: ("agent",),  # #725: claude e codex do mesmo host são alvos diferentes
+    alerts_mod.ROUND_STALLED: ("round",), alerts_mod.ROUND_OLD: ("round",),
     "price_changed": ("model", "field", "changed_at"), "price_sources_diverge": ("model",), "price_source_down": ("source",),
     "price_model_unpriced": ("model",), "price_fixed_differs": ("model",),
     "cost_claude_diff": ("model",), "cost_subscription_unpriced": ("model",),

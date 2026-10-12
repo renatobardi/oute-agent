@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""oute-doctor — captura parcial do ai-memory (#725): sessões locais × capturadas, por agente, e a confiança dos hooks do Codex.
+
+  oute-doctor [--json] [--since-days N] [--max-missing-pct P] [--min-sessions N] [--no-save] [--no-emit]
+
+O `ai-memory doctor` só avisa com zero captura e conta a sessão local pela pasta exata (com worktree, cada pasta é um
+projeto local diferente). Aqui a conta é do container inteiro, por agente (claude, codex):
+
+- **local**: os arquivos de sessão do agente no home (`~/.claude/projects/*/<id>.jsonl`; `~/.codex/sessions/**/rollout-*-<id>.jsonl`).
+  Cada id visto entra em `~/.oute/doctor/seen-<agente>` e fica lá mesmo depois que o agente apaga o arquivo.
+- **capturada**: as sessões do agente no servidor do ai-memory, somadas por projeto (`GET /admin/projects` e
+  `GET /admin/sessions/by-agent`, os dois só leitura; os mesmos que o `ai-memory doctor` chama).
+- **comparação**: o servidor só dá o total, sem janela. Por isso cada execução grava uma linha em
+  `~/.oute/doctor/history.jsonl` (hora, ids vistos, capturadas) e a seguinte compara o que **cresceu** desde a linha mais
+  antiga dentro de `--since-days` (ou, sem linha na janela, desde a última): `base = delta`. Na primeira execução não
+  há linha: compara os arquivos em disco com o total do servidor (`base = total`).
+- **sem captura (%)** = (locais novas − capturadas novas) ÷ locais novas, nunca negativa. Acima de `--max-missing-pct`
+  vira aviso. Com menos de `--min-sessions` locais novas não há veredito (`amostra`): poucas sessões não medem nada.
+- **Codex, hooks**: todo hook do ai-memory no `~/.codex/hooks.json` precisa de uma entrada `[hooks.state."<arquivo>:<evento>:<i>:<j>"]`
+  com `trusted_hash` no `~/.codex/config.toml`; sem ela o Codex não roda o hook e a sessão não é capturada. Confere a
+  presença da entrada, não o valor do hash (a conta do hash é do Codex).
+
+Padrões: `--since-days 7` (OUTE_DOCTOR_SINCE_DAYS), `--max-missing-pct 20` (OUTE_DOCTOR_MAX_MISSING_PCT), `--min-sessions 5`
+(OUTE_DOCTOR_MIN_SESSIONS). Só lê o home dos agentes e o servidor; só escreve em `~/.oute/doctor/` (`--no-save` nem isso).
+No fim grava `~/.oute/doctor/last.json` e chama `oute-emit doctor`, que manda as métricas `oute.memory.capture.*`
+(ADR-04; `--no-emit` não chama). Não recupera sessão perdida e não muda nada no ai-memory.
+
+Saída: 0 = nenhum aviso; 1 = algum aviso (sem captura acima do limite, hook sem `trusted_hash`, ou servidor sem
+resposta: `indeterminado`); 2 = uso.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HOME = os.path.expanduser("~")
+STATE = os.path.join(HOME, ".oute", "doctor")
+HISTORY = os.path.join(STATE, "history.jsonl")
+LAST = os.path.join(STATE, "last.json")
+DAY = 86400
+HISTORY_KEEP_DAYS = 90  # o histórico guarda pelo menos isto, para uma janela maior numa execução seguinte
+HTTP_TIMEOUT = float(os.environ.get("OUTE_DOCTOR_HTTP_TIMEOUT") or 5)  # a variável só existe para os testes
+# agente do oute (`oute.agent`) -> nome dele no servidor do ai-memory
+AGENTS = {"claude": "claude-code", "codex": "codex"}
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+OK, WARN, SAMPLE, UNKNOWN = "ok", "aviso", "amostra", "indeterminado"
+
+
+def server_url():
+    """o servidor do ai-memory na rede do compose (o mesmo padrão do entrypoint), montado de partes"""
+    return (os.environ.get("AI_MEMORY_SERVER_URL") or "http" + "://ai-memory:49374").rstrip("/")
+
+
+def local_ids(agent):
+    """ids das sessões do agente que têm arquivo no home agora"""
+    if agent == "claude":
+        files = glob.glob(os.path.join(HOME, ".claude", "projects", "*", "*.jsonl"))
+    else:
+        files = glob.glob(os.path.join(HOME, ".codex", "sessions", "**", "rollout-*.jsonl"), recursive=True)
+    ids = set()
+    for f in files:
+        m = UUID_RE.findall(os.path.basename(f))
+        if m:
+            ids.add(m[-1])
+    return ids
+
+
+def read_seen(agent):
+    try:
+        with open(os.path.join(STATE, f"seen-{agent}"), encoding="utf-8") as fh:
+            return {line.strip() for line in fh if UUID_RE.fullmatch(line.strip())}
+    except OSError:
+        return set()
+
+
+def read_history():
+    """linhas válidas do histórico, em ordem de hora; linha estragada é pulada"""
+    rows = []
+    try:
+        with open(HISTORY, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(r, dict) and r.get("agent") in AGENTS and all(
+                        isinstance(r.get(k), int) and not isinstance(r.get(k), bool) for k in ("t", "seen", "captured")):
+                    rows.append(r)
+    except OSError:
+        pass
+    return sorted(rows, key=lambda r: r["t"])
+
+
+def baseline(history, agent, now, since_days):
+    """a linha mais antiga do agente dentro da janela; sem nenhuma na janela, a última antes dela; sem histórico, None"""
+    mine = [r for r in history if r["agent"] == agent and r["t"] <= now]
+    inside = [r for r in mine if r["t"] >= now - since_days * DAY]
+    if inside:
+        return inside[0]
+    return mine[-1] if mine else None
+
+
+def get_json(path):
+    """GET só leitura no servidor do ai-memory; o token, se houver, vai no cabeçalho e nunca em mensagem"""
+    req = urllib.request.Request(server_url() + path, headers={"Accept": "application/json"})
+    token = os.environ.get("AI_MEMORY_AUTH_TOKEN")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 — endereço do compose, não do usuário
+        return json.loads(resp.read(4 * 2**20))
+
+
+def captured_by_agent():
+    """-> ({nome no servidor: sessões}, None) somando todos os projetos, ou (None, motivo curto)"""
+    try:
+        projects = get_json("/admin/projects").get("projects")
+        if not isinstance(projects, list):
+            return None, "resposta sem a lista de projetos"
+        total = {}
+        for p in projects:
+            q = urllib.parse.urlencode({"workspace": p["workspace_name"], "project": p["project_name"]})
+            for row in get_json("/admin/sessions/by-agent?" + q)["by_agent"]:
+                n = row["sessions"]
+                if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+                    return None, "contagem de sessões inválida"
+                total[row["agent"]] = total.get(row["agent"], 0) + n
+        return total, None
+    except urllib.error.HTTPError as e:
+        return None, f"o servidor respondeu {e.code}"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        return None, f"sem resposta do servidor ({type(e).__name__})"
+
+
+def check_agent(agent, captured, why, history, now, opts):
+    """o veredito de um agente; `captured` = total no servidor, ou None com o motivo em `why`"""
+    on_disk = local_ids(agent)
+    seen = read_seen(agent) | on_disk
+    out = {"agent": agent, "local_on_disk": len(on_disk), "seen": len(seen), "captured_total": captured,
+           "basis": None, "since": None, "local": None, "captured": None, "missing": None, "missing_pct": None,
+           "status": UNKNOWN, "note": why}
+    if captured is None:
+        return out, seen
+    base = baseline(history, agent, now, opts.since_days)
+    if base is None:
+        out.update(basis="total", local=len(on_disk), captured=captured)
+    else:
+        out.update(basis="delta", since=base["t"], local=max(0, len(seen) - base["seen"]),
+                   captured=max(0, captured - base["captured"]))
+    out["missing"] = max(0, out["local"] - out["captured"])
+    if out["local"] < opts.min_sessions:
+        out.update(status=SAMPLE, note=f"menos de {opts.min_sessions} sessões locais para comparar")
+        return out, seen
+    out["missing_pct"] = round(100 * out["missing"] / out["local"], 1)
+    out["status"] = WARN if out["missing_pct"] > opts.max_missing_pct else OK
+    out["note"] = None
+    return out, seen
+
+
+def snake(event):
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+
+
+def memory_hook_keys(events, hooks_file):
+    """a chave do `hooks.state` de cada hook do ai-memory do hooks.json: `<arquivo>:<evento>:<grupo>:<hook>`"""
+    keys = []
+    for event, groups in events.items() if isinstance(events, dict) else []:
+        for i, group in enumerate(groups if isinstance(groups, list) else []):
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            for j, hook in enumerate(hooks if isinstance(hooks, list) else []):
+                if isinstance(hook, dict) and "ai-memory" in str(hook.get("command", "")):
+                    keys.append(f"{hooks_file}:{snake(event)}:{i}:{j}")
+    return keys
+
+
+def check_codex_hooks():
+    """hooks do ai-memory do Codex sem `trusted_hash` no config.toml. `status`: ok, aviso, indeterminado (arquivo que
+    não se lê) ou None (sem ~/.codex: Codex não instalado)"""
+    codex = os.path.join(HOME, ".codex")
+    hooks_file = os.path.join(codex, "hooks.json")
+    out = {"status": None, "hooks": 0, "untrusted": None, "missing": [], "note": None}
+    if not os.path.isdir(codex):
+        out["note"] = "sem ~/.codex (Codex não instalado)"
+        return out
+    try:
+        with open(hooks_file, encoding="utf-8") as fh:
+            events = json.load(fh).get("hooks") or {}
+    except FileNotFoundError:
+        out.update(status=WARN, untrusted=0, note="sem ~/.codex/hooks.json: o Codex não tem hook do ai-memory")
+        return out
+    except (OSError, ValueError, AttributeError) as e:
+        out.update(status=UNKNOWN, note=f"~/.codex/hooks.json não se lê ({type(e).__name__})")
+        return out
+    try:
+        with open(os.path.join(codex, "config.toml"), "rb") as fh:
+            state = (tomllib.load(fh).get("hooks") or {}).get("state") or {}
+    except FileNotFoundError:
+        state = {}
+    except (OSError, ValueError, AttributeError) as e:
+        out.update(status=UNKNOWN, note=f"~/.codex/config.toml não se lê ({type(e).__name__})")
+        return out
+    wanted = memory_hook_keys(events, hooks_file)
+    out["hooks"] = len(wanted)
+    if not wanted:
+        out.update(status=WARN, untrusted=0, note="o ~/.codex/hooks.json não tem hook do ai-memory")
+        return out
+    for key in wanted:
+        entry = state.get(key) if isinstance(state, dict) else None
+        if not (isinstance(entry, dict) and isinstance(entry.get("trusted_hash"), str) and entry["trusted_hash"]):
+            out["missing"].append(key[len(hooks_file) + 1:])
+    out["untrusted"] = len(out["missing"])
+    out["status"] = WARN if out["missing"] else OK
+    return out
+
+
+def save(seen_by_agent, rows, history, now, since_days):
+    """grava os ids vistos e acrescenta uma linha por agente com total lido; do histórico fica o que tem até
+    HISTORY_KEEP_DAYS (ou duas janelas, se for mais) e a última linha de cada agente"""
+    os.makedirs(STATE, exist_ok=True)
+    for agent, seen in seen_by_agent.items():
+        write_atomic(os.path.join(STATE, f"seen-{agent}"), "".join(s + "\n" for s in sorted(seen)))
+    new = [{"t": now, "agent": r["agent"], "seen": r["seen"], "captured": r["captured_total"]}
+           for r in rows if r["captured_total"] is not None]
+    keep = [r for r in history if r["t"] >= now - max(2 * since_days, HISTORY_KEEP_DAYS) * DAY]
+    for agent in AGENTS:
+        old = [r for r in history if r["agent"] == agent]
+        if old and old[-1] not in keep:
+            keep.append(old[-1])
+    keep = sorted(keep, key=lambda r: r["t"]) + new
+    write_atomic(HISTORY, "".join(json.dumps(r, sort_keys=True) + "\n" for r in keep))
+
+
+def write_atomic(path, text):
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def when(t):
+    return time.strftime("%Y-%m-%d %H:%M", time.gmtime(t)) + " UTC"
+
+
+def render(report):
+    lines = [f"Captura do ai-memory ({report['server']}), limite {report['max_missing_pct']:g}% sem captura"]
+    marks = {OK: "✓", WARN: "✗", SAMPLE: "·", UNKNOWN: "?"}
+    for r in report["agents"]:
+        head = f"  {marks[r['status']]} {r['agent']:<6}"
+        if r["status"] == UNKNOWN:
+            lines.append(f"{head} indeterminado: {r['note']}")
+            continue
+        basis = f"desde {when(r['since'])}" if r["basis"] == "delta" else "total em disco × total no servidor (1ª execução)"
+        body = f"{r['local']} locais × {r['captured']} capturadas ({basis})"
+        if r["status"] == SAMPLE:
+            lines.append(f"{head} {body}: {r['note']}, sem veredito")
+        else:
+            lines.append(f"{head} {body}: {r['missing_pct']:g}% sem captura")
+    h = report["codex_hooks"]
+    if h["status"] == OK:
+        lines.append(f"  ✓ codex  hooks: os {h['hooks']} hooks do ai-memory têm trusted_hash")
+    elif h["status"] == WARN and h["missing"]:
+        lines.append(f"  ✗ codex  hooks: {h['untrusted']} de {h['hooks']} hooks do ai-memory sem trusted_hash "
+                     f"({', '.join(h['missing'])}): o Codex não os roda")
+    elif h["status"] in (WARN, UNKNOWN):
+        lines.append(f"  {marks[h['status']]} codex  hooks: {h['note']}")
+    else:
+        lines.append(f"  · codex  hooks: {h['note']}")
+    lines.append("Resultado: " + ("algum aviso acima." if report["warnings"] else "nenhum aviso."))
+    return "\n".join(lines)
+
+
+def positive(kind):
+    def parse(text):
+        v = kind(text)
+        if v <= 0:
+            raise argparse.ArgumentTypeError("precisa ser maior que zero")
+        return v
+    return parse
+
+
+def options(argv):
+    env = os.environ.get
+    p = argparse.ArgumentParser(prog="oute-doctor", add_help=False)
+    p.add_argument("-h", "--help", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--no-save", action="store_true")
+    p.add_argument("--no-emit", action="store_true")
+    p.add_argument("--since-days", type=positive(float), default=positive(float)(env("OUTE_DOCTOR_SINCE_DAYS") or "7"))
+    p.add_argument("--max-missing-pct", type=positive(float),
+                   default=positive(float)(env("OUTE_DOCTOR_MAX_MISSING_PCT") or "20"))
+    p.add_argument("--min-sessions", type=positive(int), default=positive(int)(env("OUTE_DOCTOR_MIN_SESSIONS") or "5"))
+    return p.parse_args(argv)
+
+
+def main(argv):
+    try:
+        opts = options(argv)
+    except (ValueError, argparse.ArgumentTypeError) as e:
+        print(f"oute-doctor: variável OUTE_DOCTOR_* inválida: {e}", file=sys.stderr)
+        return 2
+    if opts.help:
+        print(__doc__.strip())
+        return 0
+    now = int(time.time())
+    history = read_history()
+    captured, why = captured_by_agent()
+    rows, seen_by_agent = [], {}
+    for agent, name in AGENTS.items():
+        row, seen = check_agent(agent, None if captured is None else captured.get(name, 0), why, history, now, opts)
+        rows.append(row)
+        seen_by_agent[agent] = seen
+    hooks = check_codex_hooks()
+    report = {"at": now, "server": server_url(), "since_days": opts.since_days,
+              "max_missing_pct": opts.max_missing_pct, "min_sessions": opts.min_sessions,
+              "agents": rows, "codex_hooks": hooks,
+              "warnings": any(r["status"] in (WARN, UNKNOWN) for r in rows) or hooks["status"] in (WARN, UNKNOWN)}
+    if not opts.no_save:
+        try:
+            save(seen_by_agent, rows, history, now, opts.since_days)
+            write_atomic(LAST, json.dumps(report, sort_keys=True) + "\n")
+        except OSError as e:
+            print(f"oute-doctor: não gravou em {STATE} ({type(e).__name__}); a próxima execução compara sem esta",
+                  file=sys.stderr)
+        else:
+            emit = None if opts.no_emit else shutil.which("oute-emit")
+            if emit:  # best-effort: o oute-emit sempre sai com 0 e nunca escreve no stdout
+                try:
+                    subprocess.run([emit, "doctor"], stdin=subprocess.DEVNULL, check=False, timeout=15)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+    print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) if opts.json else render(report))
+    return 1 if report["warnings"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
