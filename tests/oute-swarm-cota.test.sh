@@ -142,13 +142,13 @@ MAX=5 sw switch 7-foo
 check "switch de sessão fechada: recusa"                   bash -c '[ "$1" -ne 0 ] && grep -qF "já foi fechada" <<<"$2"' _ "$RC" "$ERR"
 
 # ---------------------------------------------------------------- 3. spawn: a trava semanal vale para a zai
-CASE=trava-zai; round "$CASE"; qq 10 10 92 10
+CASE=trava-zai; round "$CASE"; qq 10 10 96 10
 before="$(cat "$STATE/spawned")"; tabs2="$(grep -c "$TAB_CREATE" "$FAKE/herdr.log" 2>/dev/null || true)"
 MAX=5 sw spawn 8-zai "instrução"
-check "zai com 7d=92 (trava 85): código 5"                 [ "$RC" -eq 5 ]
-check "zai: diz a assinatura, os números e as opções"       bash -c 'for t in "trava semanal" "assinatura zai" "92% da janela de 7 dias" "trava de 85%" "reseta em cerca de 111 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
+check "zai com 7d=96 (trava 95): código 5"                 [ "$RC" -eq 5 ]
+check "zai: diz a assinatura, os números e as opções"       bash -c 'for t in "trava semanal" "assinatura zai" "96% da janela de 7 dias" "trava de 95%" "reseta em cerca de 111 h" "#8 não abre (código 5)" "--force"; do grep -qF -- "$t" <<<"$1" || exit 1; done' _ "$ERR"
 check "zai: nada aberto nem registrado"                    [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c "$TAB_CREATE" "$FAKE/herdr.log" 2>/dev/null || true)" == "$tabs2" ]
-check "zai: linha guard no log"                            grep -qE '^[0-9T:Z-]+ guard 8-zai zai 7d=92% trava=85%$' "$STATE/log"
+check "zai: linha guard no log"                            grep -qE '^[0-9T:Z-]+ guard 8-zai zai 7d=96% trava=95%$' "$STATE/log"
 qq 10 10 84 10
 MAX=5 sw spawn 9-zai "instrução"
 check "zai com 7d=84: abre, no agente claude"              [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-zai)" == claude ]
@@ -156,7 +156,7 @@ check "zai com 7d=84: assinatura zai no spawned"           [ "$(awk '$1 == "9-za
 qq 10 10 99 10
 MAX=5 sw spawn 10-zai "instrução" --force
 check "zai com 7d=99 e --force: abre"                      [ "$RC" -eq 0 ]
-check "a tabela do repo tem weekly_guard_pct = 95 na claude e 85 na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
+check "a tabela do repo tem weekly_guard_pct = 95 em claude, zai e codex" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 95, '"'"'codex'"'"': 95}"' _ "$TABLE"
 
 # ---------------------------------------------------------------- 4. oute-select --next-subscription
 CASE=select-next; round "$CASE"
