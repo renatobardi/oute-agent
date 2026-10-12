@@ -1358,10 +1358,16 @@ cmd_watch() {
 # watch --deliver também morreram, então os eventos vão só ao log da rodada (e ao bucket, pelo oute-emit). Chamado pelo
 # docker/entrypoint.sh depois do herdr server. A saída de cada watch vai para <rodada>/watch.out.
 cmd_religar() {
-  local d id
+  local d id pid cmd
   for d in "$STATE_ROOT"/*/; do
     d="${d%/}"; id="$(basename "$d")"
     round_open "$d" && [[ -s "$d/spawned" ]] || continue
+    # watch vivo da rodada (watch.pid aponta para um `watch --round <id>` em execução): não troca por um sem --deliver (#821, achado 2)
+    pid="$(cat "$d/watch.pid" 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+      cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+      if [[ "$cmd" == *"watch --round $id"* ]]; then echo "watch já ativo, sem religar: $id"; continue; fi
+    fi
     "$0" watch --round "$id" </dev/null >>"$d/watch.out" 2>&1 &
     echo "watch religado: $id"
   done

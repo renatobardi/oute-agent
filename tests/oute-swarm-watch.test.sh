@@ -496,6 +496,28 @@ check "religar: rodada sem sessão não ganha watch"        [ ! -e "$SEMSESS/wat
 # o boot chama o religar depois do herdr server (sem ele, o watch sobe antes do herdr e falha na primeira passada)
 check "religar: o entrypoint chama religar depois do herdr server" bash -c 'l="$(grep -n "herdr server start" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; r="$(grep -n "oute-swarm religar" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; [[ -n "$l" && -n "$r" && "$r" -gt "$l" ]]' _ "$ROOT"
 
+# #821 (achado 2 da auditoria do #823): o religar não troca um watch vivo da rodada; com watch.pid de processo morto, religa
+# rel_religar: roda o religar do caso (saída em $OUT, sem o watch em segundo plano preso na captura)
+rel_religar() {
+  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
+         OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" "$SWARM" religar 2>"$FAKE/err")"; RC=$?
+  return 0
+}
+CASE=religarvivo; round "$CASE"
+bash -c 'sleep 60; :' oute-swarm watch --round swarm-test </dev/null >/dev/null 2>&1 & LIVE=$!
+echo "$LIVE" > "$STATE/watch.pid"
+rel_religar
+check "religar: watch vivo não é trocado (aviso na saída)" [ "$OUT" == "watch já ativo, sem religar: swarm-test" ]
+check "religar: watch vivo não ganha um segundo watch"    [ ! -e "$STATE/watch.out" ]
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
+
+CASE=religarmorto; round "$CASE"
+bash -c 'exit 0' & DEAD=$!; wait "$DEAD" 2>/dev/null || true
+echo "$DEAD" > "$STATE/watch.pid"
+rel_religar
+check "religar: watch.pid de processo morto religa a rodada" [ "$OUT" == "watch religado: swarm-test" ]
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
+
 guarda_check
 guarda_stop
 check_end
