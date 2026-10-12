@@ -86,7 +86,7 @@ check "sessão working com texto: campo intacto"          [ "$(cat "$FAKE/field"
 CASE=rascunho-codex; round "$CASE"; sessao 'rascunho do Bardi a meio'
 ag idle codex w1:p1; : > "$FAKE/pane-codex"
 sw tell 7-foo "$MSG"
-rm -f "$FAKE/pane-codex"
+rm -f "${FAKE:?}/pane-codex"
 check "campo do Codex com texto: código 7, nada digitado" [ "$RC" -eq 7 -a "$(texts)" -eq 0 -a "$(teclas)" -eq 0 ]
 
 # ---------------------------------------------------------------- #713: field_text com placeholder e sugestão
@@ -95,11 +95,11 @@ check "campo do Codex com texto: código 7, nada digitado" [ "$RC" -eq 7 -a "$(t
 # fundo do Codex vêm em cor 38/48;2;r;g;b. Sem esconder isso, o campo vazio seria lido como texto e todo `tell` recusaria.
 . <(sed -n '/^field_text() {/,/^}/p' "$SWARM")
 RUL='\033[0m\033[38;2;136;136;136m──────────\033[0m'
-tela() { printf "$1\n" > "$FAKE/pane-style"; return 0; }
-herdr() { FAKE="$FAKE" "$BIN/herdr" "$@"; }   # o field_text chama o herdr do PATH; aqui, o dublê
+tela() { local linhas="$1"; printf "$linhas\n" > "$FAKE/pane-style"; return 0; }
+herdr() { FAKE="$FAKE" "$BIN/herdr" "$@"; return $?; }   # o field_text chama o herdr do PATH; aqui, o dublê
 # lê o campo; leitura que falha (campo não achado) não passa por campo vazio
-campo() { field_text w1:p1 "$1" 2>/dev/null; return 0; }
-campo_vazio() { local out; out="$(field_text w1:p1 "$1" 2>/dev/null)" || return 1; [[ -z "$out" ]]; }
+campo() { local agent="$1"; field_text w1:p1 "$agent" 2>/dev/null; return 0; }
+campo_vazio() { local agent="$1" out; out="$(field_text w1:p1 "$agent" 2>/dev/null)" || return 1; [[ -z "$out" ]]; return $?; }
 
 tela "$RUL"'\n❯\xc2\xa0\033[0m\033[2mTry "how does oute-swarm.test.sh work?"\033[0m\n'"$RUL"
 check "field_text: placeholder do Claude Code (conversa nova) não é texto"   campo_vazio claude
