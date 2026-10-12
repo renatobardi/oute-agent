@@ -1187,10 +1187,11 @@ approve_one() {
 # imprime: não fala com o container, não roda comando de pedido, não escreve em arquivo nenhum. O script vem do
 # container = não confiável: nada dele é executado e os caracteres de controle saem neutralizados (show_safe).
 # Comando normalizado = a linha do script sem espaço repetido, com id de pedido, data e hash trocados por marca.
-# Risco: root (pedido --root ou linha com sudo), leitura (todo trecho da linha é de uma lista fixa de comandos
-# que só leem, sem redirecionar para arquivo, sem substituição de comando ou de processo e sem variável de
-# ambiente na frente) ou escrita (todo o resto: na dúvida, escrita). Segredo literal em forma conhecida (Bearer,
-# TOKEN=, --password, ghp_…, usuário:senha@ em URL) sai como {segredo}; é por padrão de texto, não garante.
+# Uma linha do script é um comando: heredoc, continuação com \ e bloco não são interpretados.
+# Risco: root (pedido --root ou linha com sudo), leitura (linha simples: comando de uma lista fixa de comandos
+# que só leem e nenhum de $ crase \ < > ( ) ; & |, nem variável de ambiente na frente) ou escrita (todo o resto:
+# na dúvida, escrita). Segredo literal em forma conhecida (Bearer, TOKEN=, --password, ghp_…, usuário:senha@ em
+# URL) sai como {segredo}; é por padrão de texto, não garante.
 # awk sem extensão do gawk nem intervalo em regex ({n}): roda no awk do macOS.
 # o programa fica fora da função: os campos do awk ($1, $3…) não são parâmetro posicional do shell
 APPROVE_SUGGEST_AWK='
@@ -1228,32 +1229,15 @@ function short(s) {
   s = substr(s, 1, 200); sub(/[\300-\367][\200-\277]*$/, "", s)
   return s "…"
 }
-# tira o que está entre aspas (vira Q) e o caractere escapado fora delas (vira E), para os separadores de dentro
-# de uma string não contarem; aspas sem fechar = "" (quem chama trata como escrita)
-function unquote(s,    i, n, ch, q, out) {
-  n = length(s); q = ""; out = ""
-  for (i = 1; i <= n; i++) {
-    ch = substr(s, i, 1)
-    if (q == SQ) { if (ch == SQ) { q = ""; out = out "Q" } continue }
-    if (ch == "\\") { i++; if (q == "") out = out "E"; continue }
-    if (q == DQ) { if (ch == DQ) { q = ""; out = out "Q" } continue }
-    if (ch == SQ || ch == DQ) { q = ch; continue }
-    out = out ch
-  }
-  return (q == "") ? out : ""
-}
 function readonly(p,    w, n, k, c, a, b) {
   n = split(p, w, " "); k = 1
-  while (k <= n && (w[k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/ || w[k] ~ /^(if|then|else|elif|while|until|do|!)$/)) k++
-  if (k > n) return (p !~ /=/)
-  if (p ~ /(^| )[A-Za-z_][A-Za-z0-9_]*=/ || p ~ / --output/) return 0
+  if (p ~ /(^| )[A-Za-z_][A-Za-z0-9_]*=/ || p ~ / --ou/) return 0
   c = w[k]; a = w[k + 1]; b = w[k + 2]
   if (c in R1) return 1
   if (c == "command") return (a == "-v" || a == "-V")
   if (c == "uniq") { for (k++; k <= n; k++) if (w[k] !~ /^-/) return 0; return 1 }
-  if (c == "fi" || c == "done") return (k == n)
   if (c == "find") return (p !~ / -(delete|exec|execdir|ok|okdir|fprint|fprintf|fls)/)
-  if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --(output|compress)/)
+  if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --/)
   if (c == "date") return (p !~ / -[A-Za-z]*s/ && p !~ / --set/)
   if (c == "hostname") return (k == n)
   if (c == "journalctl") return (p !~ / --(vacuum|rotate|flush|sync|relinquish|setup-keys|update-catalog)/)
@@ -1272,20 +1256,15 @@ function readonly(p,    w, n, k, c, a, b) {
   if (c == "oute") return (a in O1)
   return 0
 }
-function risk(s, root,    t, n, i, seg, p) {
-  if (root || s ~ /(^|[^A-Za-z0-9_-])sudo( |$)/) return "root"
-  if (index(s, "$(") || index(s, "`") || index(s, "<(") || index(s, "$" SQ)) return "escrita"
-  t = unquote(s)
-  if (t == "") return "escrita"
-  gsub(/[0-9]*>&[0-9]+/, "", t); gsub(/&?[0-9]*> ?\/dev\/null/, "", t)
-  if (index(t, ">")) return "escrita"
-  gsub(/&&|\|\||;|&/, "|", t)
-  n = split(t, seg, "|")
-  for (i = 1; i <= n; i++) {
-    p = trim(seg[i])
-    if (p != "" && !readonly(p)) return "escrita"
-  }
-  return "leitura"
+# leitura só para linha simples: sem nenhum caractere que o shell usa para compor, expandir, redirecionar ou
+# escapar ($ crase \ < > ( ) ; & |) e com o comando na lista de leitura. As aspas saem antes de conferir o
+# comando e as opções (sort "-o" é sort -o). Todo o resto é escrita; com sudo (ou su, doas, pkexec), root.
+function risk(s, root,    t) {
+  t = s; gsub("[" DQ SQ "]", "", t)
+  if (root || t ~ /(^|[^A-Za-z0-9_-])(sudo|sudoedit|su|doas|pkexec)( |$)/) return "root"
+  if (s ~ /[$`\\<>();&|]/) return "escrita"
+  if (gsub(DQ, DQ, s) % 2 || gsub(SQ, SQ, s) % 2) return "escrita"
+  return readonly(t) ? "leitura" : "escrita"
 }
 function set(arr, list,    n, i, w) { n = split(list, w, " "); for (i = 1; i <= n; i++) arr[w[i]] = 1 }
 BEGIN {
@@ -1304,33 +1283,20 @@ BEGIN {
   if (NF < 7 || ($5 != "exec" && $5 != "recusado") || $3 !~ /^[0-9]+-[0-9]+-[a-z0-9-]+$/ || $1 !~ /^[0-9]+-[0-9]+-[0-9]+T[0-9:]+Z$/) { bad++; next }
   id = $3; ts = $1; ex = ($5 == "exec"); f = runs "/" id ".sh"
   if (ex) nexec++; else nrej++
-  root = 0; as = 0; got = 0; cont = ""; here = ""; nl = 0
+  root = 0; as = 0; got = 0; nl = 0
   while ((getline line < f) > 0) {
     got = 1
     if (!as && line ~ /^# como: /) { root = (line == "# como: root"); as = 1 }
-    if (here != "") {
-      # corpo de heredoc com delimitador sem aspas é expandido pelo shell: $( ) ou crase ali executa
-      if (trim(line) == here) here = ""
-      else if (!hq && (index(line, "$(") || index(line, "`"))) force[hidx] = 1
-      continue
-    }
-    if (line ~ /\\$/) { cont = cont substr(line, 1, length(line) - 1) " "; continue }
-    line = cont line; cont = ""
     c = norm(line)
     if (c == "" || c ~ /^#/ || c ~ /^set [-+]/ || c ~ /^(fi|done|then|else|do|esac|[{]|[}]|;;)$/) continue
-    cmd[++nl] = c; force[nl] = 0
-    # heredoc: a here-string (<<<) não abre um, nem o << de dentro de uma string
-    h = line; gsub(/<<</, "", h)
-    if (unquote(h) ~ /<<-?[ ]*[QEA-Za-z_]/ && match(h, /<<-?[ ]*["\047\\]?[A-Za-z_][A-Za-z0-9_]*/)) {
-      here = substr(h, RSTART, RLENGTH); hq = (here ~ /["\047\\]/); hidx = nl
-      sub(/^<<-?[ ]*["\047\\]?/, "", here)
-    }
+    cmd[++nl] = c
+    # o risco sai da linha como está no script, antes da máscara e das marcas (a máscara não esconde nada dele)
+    raw[nl] = line; gsub(/\t/, " ", raw[nl]); gsub(/  +/, " ", raw[nl]); raw[nl] = trim(raw[nl])
   }
   close(f)
   if (!got) { noscript++; next }
   for (i = 1; i <= nl; i++) {
-    r = risk(cmd[i], root)
-    if (force[i] && r == "leitura") r = "escrita"
+    r = risk(raw[i], root)
     if (r == "leitura" && cmd[i] ~ /^(echo|printf)( |$)/) continue
     key = r "\t" short(cmd[i])
     if ((id, key) in seen) continue
@@ -1380,8 +1346,8 @@ approve_suggest() {
       printf '\npedidos  recusas  último uso            risco    comando\n'
       awk -F '\t' '{ printf "%7d  %7d  %-20s  %-7s  %s\n", $1, $2, $3, $4, $5 }' <<<"$rows"
       printf '\npedidos = pedidos executados que têm o comando; recusas = pedidos recusados que têm o comando.\n'
-      printf 'risco: root = pedido --root ou linha com sudo; leitura = só comando da lista de leitura, sem gravar em arquivo;\n'
-      printf '       escrita = todo o resto (inclui o que a lista não conhece). A classificação é por texto: leia o comando.\n'
+      printf 'risco: root = pedido --root ou linha com sudo; leitura = linha simples, só com comando da lista de leitura;\n'
+      printf '       escrita = todo o resto (pipe, redirecionamento, $, ;, comando que a lista não conhece). É por texto: leia o comando.\n'
     fi
     printf 'nada foi aplicado: a lista é só sugestão. Allowlist do sudoers do oute-ops muda pelo repo lab.\n'
   } | show_safe /dev/stdin

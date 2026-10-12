@@ -86,7 +86,7 @@ check "suggest: sai com 0" test "$RC" = 0
 check "cabeçalho: 4 executados e 1 recusado, com o caminho do log" has_line "oute approve suggest: 4 pedido(s) executado(s) e 1 recusado(s) em $AP/approve.log"
 check "root: nginx -t em 2 pedidos (espaço repetido é o mesmo comando), último uso do 2º" row 2 0 2026-10-03T11:00:07Z root "nginx -t"
 check "leitura: docker logs em 2 executados e 1 recusado, último uso só dos executados" row 2 1 2026-10-04T09:00:02Z leitura "docker logs --tail 50 oute-agent"
-check "normaliza o id de pedido dentro do comando: dois ids, um grupo" row 2 0 2026-10-04T09:00:02Z leitura "cat ~/.oute/approve/runs/{id}.out | tail -n 5"
+check "normaliza o id de pedido dentro do comando: dois ids, um grupo (com pipe = escrita)" row 2 0 2026-10-04T09:00:02Z escrita "cat ~/.oute/approve/runs/{id}.out | tail -n 5"
 check "escrita: touch em 2 pedidos" row 2 0 2026-10-04T09:00:02Z escrita 'touch "$F_RAN"'
 check "padrão --min 2: comando de 1 pedido só fica fora" hasnt_str "systemctl reload nginx"
 check "comando só de pedido recusado fica fora" hasnt_str "rm -rf"
@@ -140,9 +140,9 @@ journalctl -u nginx \
 SH
 run_suggest --min 1
 T=2026-10-01T10:00:00Z
-check "leitura: pipe de leitura, com | dentro de aspas" row 1 0 "$T" leitura "grep -E 'a|b' /etc/hosts | wc -l"
+check "escrita: pipe, mesmo só com comando de leitura" row 1 0 "$T" escrita "grep -E 'a|b' /etc/hosts | wc -l"
 check "escrita: leitura redirecionada para arquivo" row 1 0 "$T" escrita "df -h > /tmp/df.txt"
-check "leitura: 2>/dev/null e || true não viram escrita" row 1 0 "$T" leitura "ls /tmp 2>/dev/null || true"
+check "escrita: redirecionamento para /dev/null e || true" row 1 0 "$T" escrita "ls /tmp 2>/dev/null || true"
 check "root: linha com sudo em pedido sem --root" row 1 0 "$T" root "sudo nft list ruleset"
 check "escrita: substituição de comando" row 1 0 "$T" escrita 'x="$(cat /etc/hostname)"'
 check "leitura: docker compose ps" row 1 0 "$T" leitura "docker compose ps"
@@ -155,9 +155,12 @@ check "leitura: git -C <dir> status" row 1 0 "$T" leitura "git -C /srv/repo stat
 check "escrita: git -C <dir> pull" row 1 0 "$T" escrita "git -C /srv/repo pull --ff-only"
 check "root: sudo depois do pipe" row 1 0 "$T" root "cat arquivo | sudo tee /etc/x"
 check "normaliza hash longo" row 1 0 "$T" leitura "sha256sum /opt/pkg-{hash}.tar"
-check "corpo de heredoc não vira comando" hasnt_str "dentro-do-heredoc"
-check "leitura: condição de if com comando de leitura" row 1 0 "$T" leitura "if systemctl is-active nginx; then"
-check "linha continuada com \\ é um comando só" row 1 0 "$T" leitura "journalctl -u nginx --since today"
+check "heredoc não é interpretado: a abertura é escrita" row 1 0 "$T" escrita "cat <<'TXT' | wc -l"
+check "heredoc não é interpretado: a linha do corpo sai como linha própria" row 1 0 "$T" escrita "rm -rf /dentro-do-heredoc"
+check "escrita: linha de if (tem ;)" row 1 0 "$T" escrita "if systemctl is-active nginx; then"
+check "continuação com \\ não é juntada: a linha com a barra é escrita" row 1 0 "$T" escrita 'journalctl -u nginx \'
+check "continuação com \\ não é juntada: o resto é linha própria, escrita" row 1 0 "$T" escrita "--since today"
+check "leitura: comando simples dentro de bloco (uptime)" row 1 0 "$T" leitura "$UP"
 check "fi sozinho não entra na lista" bash -c '! grep -qE " fi$" <<<"$1"' _ "$OUT"
 
 # pedido --root: todo comando dele é root, mesmo o de leitura; o mesmo comando sem root fica em outra linha
@@ -200,57 +203,98 @@ check "escrita: substituição de processo <( )" row 1 0 "$T" escrita "cat <(rm 
 check "escrita: sed (o comando w grava sem >)" row 1 0 "$T" escrita "sed -n 'w /tmp/out' /etc/hosts"
 check "escrita: git log --output=" row 1 0 "$T" escrita "git log --output=/tmp/o2"
 check "escrita: uniq com arquivo de saída" row 1 0 "$T" escrita "uniq /etc/hosts /tmp/o3"
-check "leitura: uniq só com opção, no pipe" row 1 0 "$T" leitura "sort /etc/hosts | uniq -c"
+check "escrita: uniq no pipe" row 1 0 "$T" escrita "sort /etc/hosts | uniq -c"
 check "escrita: variável de ambiente na frente do comando" row 1 0 "$T" escrita "GIT_EXTERNAL_DIFF=rm git diff"
 check "escrita: rm entre duas strings com apóstrofo" row 1 0 "$T" escrita "echo \"it's\" ; rm -rf ~/x ; echo \"it's\""
 check "escrita: rm entre aspas escapadas" row 1 0 "$T" escrita 'echo \" ; rm -rf ~/y ; echo \"'
 check "escrita: docker compose config -o grava arquivo" row 1 0 "$T" escrita "docker compose config -o /tmp/c.yaml"
 check "escrita: ss saiu da lista de leitura (-K derruba conexão)" row 1 0 "$T" escrita "ss -K dst 10.0.0.1"
-check "leitura: \\ dentro de aspas simples não muda a classe" row 1 0 "$T" leitura "grep 'a\.b' /etc/hosts"
+check "escrita: barra invertida, mesmo dentro de aspas simples" row 1 0 "$T" escrita "grep 'a\.b' /etc/hosts"
 check "escrita: aspas sem fechar" row 1 0 "$T" escrita 'cat "/etc/hosts'
 check "escrita: o risco vem da linha inteira, não dos 200 caracteres exibidos" row 1 0 "$T" escrita "${LONG:0:200}…"
 
-# --- 4c. reauditoria do PR #814: heredoc que executa, sudo em qualquer posição, here-string, sort que executa
+# --- 4c. decisão do Bardi no PR #814: leitura só para linha simples; heredoc, continuação, <<< e bloco não são
+# interpretados e caem em escrita (casos das três auditorias)
 reset
-hist 20261001-100000-reauditoria user exec 2026-10-01T10:00:00Z <<'SH'
+hist 20261001-100000-linha-simples user exec 2026-10-01T10:00:00Z <<'SH'
+ls -la /srv
+grep -c nginx /etc/nginx/nginx.conf
+docker ps
+systemctl is-active nginx
+tail -n 20 "/var/log/meu arquivo.log"
+sort -u /etc/hosts
+uniq -c /etc/hosts
+journalctl -u nginx --since today
+ls $HOME
+ls `pwd`
+ls a\ b
+cat < /etc/hosts
+ls > /tmp/x
+ls (x
+ls x)
+ls /a ; ls /b
+ls /c &
+ls /d | cat
+sort "-o" saida /etc/hosts
+sort --comp=rm /etc/hosts
+sort --out=arquivo /etc/hosts
+sort --o arquivo /etc/hosts
+git log --outp=/tmp/o4
 cat <<EOF
 $(rm ~/z31)
 EOF
-tr a b <<-FIM
-	`rm ~/z32`
-	FIM
 cat <<'ASPAS'
-$(rm ~/z33)
+texto do corpo
 ASPAS
-cat <<\BARRA
-$(rm ~/z34)
-BARRA
-cat <<TEXTO
-só texto, sem substituição
-TEXTO
+cat <<EOF-1
+$\
+(rm ~/z20)
+EOF-1
+ls depois-hifen
+cat <<'A' <<B
+echo $\
+(rm ~/z22)
 cat <<< "x"
 rm ~/depois-da-here-string
-grep "a << b" /etc/hosts
-rm ~/depois-do-menor-menor-entre-aspas
 echo x | xargs sudo rm ~/z35
 env sudo rm ~/z36
 if true; then sudo rm ~/z37; fi
-sort --compress-program=rm /etc/hosts
+sudoedit /etc/x
+su -c 'rm g'
+'sudo' rm d
 SH
 run_suggest --min 1
-check "escrita: heredoc sem aspas com \$( ) no corpo" row 1 0 "$T" escrita "cat <<EOF"
-check "escrita: heredoc <<- sem aspas com crase no corpo" row 1 0 "$T" escrita "tr a b <<-FIM"
-check "leitura: heredoc com delimitador entre aspas não expande o corpo" row 1 0 "$T" leitura "cat <<'ASPAS'"
-check "leitura: heredoc com delimitador escapado (\\) não expande o corpo" row 1 0 "$T" leitura 'cat <<\BARRA'
-check "leitura: heredoc sem aspas e sem substituição no corpo" row 1 0 "$T" leitura "cat <<TEXTO"
-check "corpo de heredoc segue fora da lista" bash -c '! grep -qE "z3[1-4]|só texto" <<<"$1"' _ "$OUT"
-check "here-string (<<<) não abre heredoc: a própria linha fica" row 1 0 "$T" leitura 'cat <<< "x"'
-check "here-string (<<<) não abre heredoc: a linha seguinte fica" row 1 0 "$T" escrita "rm ~/depois-da-here-string"
-check "<< dentro de aspas não abre heredoc" row 1 0 "$T" escrita "rm ~/depois-do-menor-menor-entre-aspas"
+for c in "ls -la /srv" "grep -c nginx /etc/nginx/nginx.conf" "docker ps" "systemctl is-active nginx" \
+    'tail -n 20 "/var/log/meu arquivo.log"' "sort -u /etc/hosts" "journalctl -u nginx --since today" "ls depois-hifen"; do
+  check "leitura: linha simples '$c'" row 1 0 "$T" leitura "$c"
+done
+check "escrita: uniq com operando" row 1 0 "$T" escrita "uniq -c /etc/hosts"
+for c in 'ls $HOME' 'ls `pwd`' 'ls a\ b' "cat < /etc/hosts" "ls > /tmp/x" "ls (x" "ls x)" "ls /a ; ls /b" "ls /c &" "ls /d | cat"; do
+  check "escrita: caractere de shell em '$c'" row 1 0 "$T" escrita "$c"
+done
+check "escrita: opção de gravação entre aspas (sort \"-o\")" row 1 0 "$T" escrita 'sort "-o" saida /etc/hosts'
+check "escrita: sort --comp= (abreviação de --compress-program)" row 1 0 "$T" escrita "sort --comp=rm /etc/hosts"
+check "escrita: sort --out= (abreviação de --output)" row 1 0 "$T" escrita "sort --out=arquivo /etc/hosts"
+check "escrita: sort --o (abreviação de --output)" row 1 0 "$T" escrita "sort --o arquivo /etc/hosts"
+check "escrita: git log --outp= (abreviação de --output)" row 1 0 "$T" escrita "git log --outp=/tmp/o4"
+check "escrita: abertura de heredoc sem aspas" row 1 0 "$T" escrita "cat <<EOF"
+check "escrita: abertura de heredoc com aspas (não é interpretado)" row 1 0 "$T" escrita "cat <<'ASPAS'"
+check "escrita: abertura de heredoc com hífen no delimitador" row 1 0 "$T" escrita "cat <<EOF-1"
+check "escrita: dois heredocs na linha" row 1 0 "$T" escrita "cat <<'A' <<B"
+check "escrita: \$( ) do corpo do heredoc aparece como linha" row 1 0 "$T" escrita '$(rm ~/z31)'
+check "escrita: \$\\ + ( ) em duas linhas (3ª auditoria): a 1ª linha" row 1 0 "$T" escrita '$\'
+check "escrita: \$\\ + ( ) em duas linhas: a 2ª linha, do heredoc" row 1 0 "$T" escrita "(rm ~/z20)"
+check "escrita: echo \$\\ não some da lista" row 1 0 "$T" escrita 'echo $\'
+check "escrita: \$\\ + ( ) em duas linhas: a 2ª linha, do echo" row 1 0 "$T" escrita "(rm ~/z22)"
+check "escrita: here-string" row 1 0 "$T" escrita 'cat <<< "x"'
+check "linha depois da here-string fica na lista" row 1 0 "$T" escrita "rm ~/depois-da-here-string"
 check "root: sudo depois de xargs" row 1 0 "$T" root "echo x | xargs sudo rm ~/z35"
 check "root: sudo depois de env" row 1 0 "$T" root "env sudo rm ~/z36"
 check "root: sudo depois de then" row 1 0 "$T" root "if true; then sudo rm ~/z37; fi"
-check "escrita: sort --compress-program executa programa" row 1 0 "$T" escrita "sort --compress-program=rm /etc/hosts"
+check "root: sudoedit" row 1 0 "$T" root "sudoedit /etc/x"
+check "root: su -c" row 1 0 "$T" root "su -c 'rm g'"
+check "root: sudo entre aspas" row 1 0 "$T" root "'sudo' rm d"
+check "nenhuma linha com rm sai leitura" bash -c '! grep -E " leitura +.*(^|[^a-z])rm " <<<"$1"' _ "$OUT"
 
 # segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
 reset
