@@ -44,6 +44,8 @@ check "spawn com --agent codex: assinatura codex no evento" jq -e '.attrs["oute.
 FAKE="$FAKE" "$BIN/fake-tabs" "#7 foo=working" "#8 bar=idle"
 echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
 echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
+# o campo esvazia no Enter, como no Claude Code (#713: um campo com texto recusa o tell); sem isso a mensagem anterior fica nele
+: > "$FAKE/enter-clears"
 sw tell 8-bar "pode seguir, Bardi aprovou"
 check "tell ok: evento com o texto"                      [ "$RC" -eq 0 -a "$(n '.name == "oute.swarm.tell" and .attrs["oute.swarm.session"] == "8-bar" and .attrs["oute.swarm.tell.result"] == "ok"
                                                               and .attrs["oute.swarm.tell.forced"] == false and .body == "pode seguir, Bardi aprovou"')" -eq 1 ]

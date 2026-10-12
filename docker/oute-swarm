@@ -656,10 +656,13 @@ field_text() {
 
 # digita <texto> no campo do pane, confere o campo e só então dá Enter (tell e a entrega do watch). <st> = estado do
 # agente. Retorno: 0 enviado; 1 send-text falhou; 2 Enter falhou (texto digitado); 3 o campo não ficou com o texto
-# exato (SF_GOT = o que ele tinha). Não bateu: limpa com ctrl+c (só com a sessão idle/done) e tenta uma vez
+# exato (SF_GOT = o que ele tinha); 4 o campo já tinha texto (o Bardi digitando): nada digitado, nada limpo (#713).
+# Não bateu: limpa com ctrl+c (só com a sessão idle/done, e só o que foi digitado aqui) e tenta uma vez
 send_field() {
-  local pane="$1" agent="$2" text="$3" st="$4" try
+  local pane="$1" agent="$2" text="$3" st="$4" try pre
   SF_GOT=""
+  pre="$(field_text "$pane" "$agent" 2>/dev/null)" || pre=""
+  [[ -z "$(tr -d '[:space:]' <<<"$pre")" ]] || { SF_GOT="$pre"; return 4; }
   for try in 1 2; do
     herdr pane send-text "$pane" "$text" >/dev/null || return 1
     sleep 0.5
@@ -777,6 +780,7 @@ cmd_tell() {
        return 0 ;;
     1) refuse "send-text falhou em $pane" ;;
     2) refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter" ;;
+    4) rc=7; refuse "o campo de entrada de $label tem texto (o Bardi digitando?)" "nada digitado; a mensagem NÃO foi entregue, não reenvie em laço" ;;
   esac
   printf 'oute-swarm: campo de %s ficou assim (esperado a mensagem exata):\n%s\n' "$label" "$SF_GOT" >&2
   refuse "o campo de entrada não contém exatamente a mensagem" "sem Enter; confira o pane $pane"
@@ -1264,6 +1268,7 @@ w_deliver() {
        W_DLV_WHY="" ;;
     1) w_dlv_wait "send-text falhou em $pane" ;;
     2) w_dlv_wait "send-keys enter falhou em $pane (texto digitado, sem Enter)" ;;
+    4) w_dlv_wait "campo do dispatcher com texto (o Bardi digitando?)" ;;
     *) w_dlv_wait "o campo do dispatcher não ficou com a mensagem exata, sem Enter" ;;
   esac
   return 0
