@@ -7,17 +7,17 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$(mktemp -d)"; trap 'rm -rf "${OUT:?}"' EXIT
+RUNALL_OUT="$(mktemp -d)"; trap 'rm -rf "${RUNALL_OUT:?}"' EXIT
 JOBS="${OUTE_TEST_JOBS:-$(nproc 2>/dev/null || echo 1)}"
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || JOBS=1
-export OUT
+export RUNALL_OUT
 
 # agora: segundos com fração (python3, que os testes já exigem; `date +%N` não existe no Mac)
 agora() { python3 -c 'import time; print(time.time())'; return $?; }
-# uma <arquivo>: roda o teste e grava em $OUT/r.<n> o código, a duração e o arquivo; o log vai para r.<n>.log
+# uma <arquivo>: roda o teste e grava em $RUNALL_OUT/r.<n> o código, a duração e o arquivo; o log vai para r.<n>.log
 uma() {
   local t="$1" res t0 t1 rc
-  res="$(mktemp "$OUT/r.XXXXXX")"
+  res="$(mktemp "$RUNALL_OUT/r.XXXXXX")"
   t0="$(agora)"
   bash "$t" > "$res.log" 2>&1; rc=$?
   t1="$(agora)"
@@ -34,16 +34,16 @@ printf '%s\0' "$@" | xargs -0 -P "$JOBS" -n1 bash -c 'uma "$1"' _
 total="$(awk -v a="$start" -v b="$(agora)" 'BEGIN {printf "%.1f", b - a}')"
 
 fail=0
-for res in "$OUT"/r.*; do
+for res in "$RUNALL_OUT"/r.*; do
   [[ "$res" != *.log ]] || continue
   read -r rc secs t < "$res"
   st=ok
   [[ "$rc" == 0 ]] || { st=FALHOU; fail=$((fail + 1)); }
-  printf '%-7s %7ss  %s\n' "$st" "$secs" "$t" >> "$OUT/lista.txt"
+  printf '%-7s %7ss  %s\n' "$st" "$secs" "$t" >> "$RUNALL_OUT/lista.txt"
 done
-[[ -e "$OUT/lista.txt" ]] || : > "$OUT/lista.txt"
-sort -k3 "$OUT/lista.txt"
-for res in "$OUT"/r.*; do
+[[ -e "$RUNALL_OUT/lista.txt" ]] || : > "$RUNALL_OUT/lista.txt"
+sort -k3 "$RUNALL_OUT/lista.txt"
+for res in "$RUNALL_OUT"/r.*; do
   [[ "$res" != *.log ]] || continue
   read -r rc secs t < "$res"
   [[ "$rc" == 0 ]] && continue
@@ -52,6 +52,6 @@ for res in "$OUT"/r.*; do
   echo "::endgroup::"
 done
 echo "--- 5 mais lentos:"
-sort -k2 -rn "$OUT/lista.txt" | head -n 5
-echo "--- $(wc -l < "$OUT/lista.txt" | tr -d ' ') testes, $fail falharam, $total s no total (JOBS=$JOBS)"
+sort -k2 -rn "$RUNALL_OUT/lista.txt" | head -n 5
+echo "--- $(wc -l < "$RUNALL_OUT/lista.txt" | tr -d ' ') testes, $fail falharam, $total s no total (JOBS=$JOBS)"
 [[ "$fail" -eq 0 ]]

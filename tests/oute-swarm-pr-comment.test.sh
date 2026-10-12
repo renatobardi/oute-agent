@@ -36,6 +36,8 @@ esac
 SH
 chmod +x "$BIN/gh"
 
+TEXTO_OK='Ver #5.'
+URL_OK='https://github.com/o/r/pull/12#issuecomment-4242'
 # pc <caso> <texto>: uma rodada limpa, com as issues 5 e 7 abertas, e o texto no arquivo $TMP/<caso>/texto.md
 pc() {
   local caso="$1" texto="$2"
@@ -51,12 +53,13 @@ publicado() { local caso="$1" pr="$2"; cmp -s "$FAKE/comentado-$pr.md" "$TMP/$ca
 CASE=ok; pc "$CASE" 'Ver #5 e #7.'
 sw pr-comment 12 --body-file "$TMP/$CASE/texto.md"
 check "ok: código 0"                                         [ "$RC" -eq 0 ]
-check "ok: imprime a URL do comentário"                      grep -qxF 'https://github.com/o/r/pull/12#issuecomment-4242' <<<"$OUT"
+check "ok: o stdout é só a URL do comentário"              [ "$OUT" = "$URL_OK" ]
+check "ok: o relatório do refcheck vai ao stderr"          grep -qF '2 referências: 2 ok' <<<"$ERR"
 check "ok: o gh recebeu pr comment 12 --body-file"           grep -qF 'pr comment 12 --body-file' "$FAKE/gh.log"
 check "ok: o corpo publicado é o do arquivo"                 publicado "$CASE" 12
 
 # 2. número de PR com # na frente, aceito
-CASE=hash; pc "$CASE" 'Ver #5.'
+CASE=hash; pc "$CASE" "$TEXTO_OK"
 sw pr-comment '#12' --body-file "$TMP/$CASE/texto.md"
 check "aceita #12: código 0 e publica no 12"                 bash -c '[ "$1" -eq 0 ] && [ -e "$2/comentado-12.md" ]' _ "$RC" "$FAKE"
 
@@ -66,29 +69,31 @@ sw pr-comment 12 --body-file "$TMP/$CASE/texto.md"
 check "quebrada: código 1"                                   [ "$RC" -eq 1 ]
 check "quebrada: nada foi comentado"                         [ ! -e "$FAKE/comentado-12.md" ]
 check "quebrada: o gh não recebeu pr comment"                bash -c '! grep -qF "pr comment" "$1"' _ "$FAKE/gh.log"
-check "quebrada: a saída do refcheck marca a referência"     grep -qF 'quebrada' <<<"$OUT"
+check "quebrada: o relatório do refcheck vai ao stderr"         grep -qF 'quebrada' <<<"$ERR"
+check "quebrada: o stdout fica vazio"                          [ -z "$OUT" ]
 check "quebrada: o stderr diz que não comentou"              grep -qF 'não comentou: referência quebrada ou que não abre' <<<"$ERR"
 
 # 4. referência que não abre (caminho de /tmp): não publica, código 1
 CASE=naoabre; pc "$CASE" 'Ver o relatório em /tmp/relatorio.md.'
 sw pr-comment 12 --body-file "$TMP/$CASE/texto.md"
 check "nao-abre: código 1 e nada comentado"                  bash -c '[ "$1" -eq 1 ] && [ ! -e "$2/comentado-12.md" ]' _ "$RC" "$FAKE"
-check "nao-abre: a saída marca nao-abre"                     grep -qF 'nao-abre' <<<"$OUT"
+check "nao-abre: o relatório marca nao-abre (stderr)"           grep -qF 'nao-abre' <<<"$ERR"
 
 # 5. só não conferidas (gh fora do ar): publica com o aviso, código 0
-CASE=naoconf; pc "$CASE" 'Ver #5.'; : > "$FAKE/gh.down"
+CASE=naoconf; pc "$CASE" "$TEXTO_OK"; : > "$FAKE/gh.down"
 sw pr-comment 12 --body-file "$TMP/$CASE/texto.md"
 check "nao-conferido: código 0 e comentou"                   bash -c '[ "$1" -eq 0 ] && [ -e "$2/comentado-12.md" ]' _ "$RC" "$FAKE"
 check "nao-conferido: o aviso diz que não foi conferido"     grep -qF 'referências não conferidas (gh fora do ar)' <<<"$ERR"
+check "nao-conferido: o stdout é só a URL"                  [ "$OUT" = "$URL_OK" ]
 
 # 6. o gh recusa o comentário: código 1 com a mensagem do próprio comando
-CASE=recusa; pc "$CASE" 'Ver #5.'; : > "$FAKE/gh.comment-fail"
+CASE=recusa; pc "$CASE" "$TEXTO_OK"; : > "$FAKE/gh.comment-fail"
 sw pr-comment 12 --body-file "$TMP/$CASE/texto.md"
 check "gh recusa: código 1"                                  [ "$RC" -eq 1 ]
 check "gh recusa: a mensagem diz que o gh pr comment falhou" grep -qF 'gh pr comment #12 falhou' <<<"$ERR"
 
 # 7. uso e arquivo: sem --body-file, número inválido ou arquivo ilegível: código 1, nada comentado
-CASE=uso; pc "$CASE" 'Ver #5.'
+CASE=uso; pc "$CASE" "$TEXTO_OK"
 sw pr-comment 12
 check "sem --body-file: código 1 e o uso na saída de erro"   bash -c '[ "$1" -eq 1 ] && grep -qF "uso: oute-swarm pr-comment" <<<"$2"' _ "$RC" "$ERR"
 sw pr-comment abc --body-file "$TMP/$CASE/texto.md"

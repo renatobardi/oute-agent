@@ -24,6 +24,11 @@ cat > "$TMP/c.test.sh" <<'SH'
 #!/usr/bin/env bash
 echo "falha de propósito do c"; exit 3
 SH
+# o teste filho não vê a variável do runner (o check-lib confere `OUT` sem definir: #829, auditoria)
+cat > "$TMP/d.test.sh" <<'SH'
+#!/usr/bin/env bash
+echo "variavel OUT no filho: ${OUT-vazio}"; exit 1
+SH
 
 # 1. dois testes que só passam juntos, mais um que falha: código 1, os dois ok, o c FALHOU, o log do c na saída
 OUT="$(OUTE_TEST_JOBS=2 bash "$RUN" "$TMP/a.test.sh" "$TMP/b.test.sh" "$TMP/c.test.sh" 2>&1)"; RC=$?
@@ -33,6 +38,8 @@ check "paralelo: c aparece como FALHOU"                      grep -qE "^FALHOU +
 check "paralelo: o log do c vai para a saída"                grep -qF "falha de propósito do c" <<<"$OUT"
 check "paralelo: o resumo conta 3 testes e 1 falha"          grep -qF -- "--- 3 testes, 1 falharam" <<<"$OUT"
 check "paralelo: a duração sai com uma casa decimal"         grep -qE "^ok +[0-9]+\.[0-9]s " <<<"$OUT"
+OUT="$(OUTE_TEST_JOBS=1 bash "$RUN" "$TMP/d.test.sh" 2>&1)"; RC=$?
+check "filho sem OUT: o teste vê a variável vazia, não a do runner" grep -qF "variavel OUT no filho: vazio" <<<"$OUT"
 check "paralelo: os 5 mais lentos aparecem"                  grep -qF -- "--- 5 mais lentos:" <<<"$OUT"
 
 # 2. só testes que passam: código 0 e nenhum FALHOU

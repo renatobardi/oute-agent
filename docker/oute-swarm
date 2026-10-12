@@ -1963,7 +1963,7 @@ cmd_pr_comment() {
   done
   [[ "$pr" =~ ^[0-9]+$ && -n "$file" ]] || die 'uso: oute-swarm pr-comment <pr> --body-file <arquivo>'
   [[ -r "$file" ]] || die "arquivo ilegível: $file"
-  oute-refcheck "$file" || rc=$?
+  oute-refcheck "$file" >&2 || rc=$?   # a saída do refcheck vai ao stderr: o stdout é só a URL (#829, auditoria)
   case "$rc" in
     0) ;;
     3) echo "oute-swarm: referências não conferidas (gh fora do ar): o comentário sai com esse aviso" >&2 ;;
