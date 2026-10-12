@@ -64,6 +64,9 @@ Dois lugares, dois conjuntos de comandos:
                        restaura num diretório temporário do container (nunca no volume) e confere que o banco abre,
                        está íntegro e tem páginas (> 0); rc ≠ 0 se não. Restaurar de verdade (com a stack parada, o
                        `ai-memory restore` recusa rodar com outro ai-memory vivo): ver README, "Backup da memória"
+  oute doctor [opções] captura parcial do ai-memory (#725): roda o `oute-doctor` no container agent e repassa a saída e o
+                       código dele (0 = nenhum aviso; 1 = algum aviso). Opções e o que ele confere: seção
+                       "CONTAINER — captura do ai-memory". Container fora ou imagem sem o comando: diz e sai com 1
   oute lock            tranca o Vaultwarden e apaga a sessão em cache das versões antigas
   oute oci-bootstrap [DRY_RUN=1]       provisiona compartment/buckets/IAM/budget no OCI (pede a master password)
 
@@ -269,6 +272,22 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   pelo oute-emit, sem texto de prompt nem de resposta. Obrigatória em todo PR que muda agent-notes.md, swarm.md ou
   swarm-worker.md (regra do swarm-worker.md). Nunca em CI. Saída: 0 verde, 1 alguma tarefa vermelha, 2 não rodou, 3 cota.
 
+## CONTAINER — captura do ai-memory (oute-doctor, #725)
+  oute-doctor [--json] [--since-days N] [--max-missing-pct P] [--min-sessions N] [--no-save] [--no-emit]
+                                    por agente (claude, codex), compara as sessões locais (arquivos em ~/.claude/projects e
+                                    ~/.codex/sessions) com as capturadas no servidor do ai-memory (soma de todos os projetos,
+                                    só GET). O servidor só dá o total: cada execução grava uma linha em ~/.oute/doctor/ e a
+                                    seguinte compara o que cresceu desde a linha mais antiga dentro de --since-days (7); a 1ª
+                                    compara o total em disco com o total do servidor. Sessões locais sem captura acima de
+                                    --max-missing-pct (20) = aviso; menos de --min-sessions (5) locais = sem veredito.
+                                    Padrões também por OUTE_DOCTOR_SINCE_DAYS, OUTE_DOCTOR_MAX_MISSING_PCT e
+                                    OUTE_DOCTOR_MIN_SESSIONS.
+  Codex: avisa também quando um hook do ai-memory do ~/.codex/hooks.json não tem a entrada `trusted_hash` no
+  ~/.codex/config.toml (o Codex não roda hook sem ela). Confere a presença da entrada, não o valor do hash.
+  Manda as métricas oute.memory.capture.* pelo oute-emit (--no-emit não manda); o agent-studio liga os alertas
+  `memory_capture` e `memory_hooks_untrusted`. --no-save não grava nada (nem a linha da comparação seguinte).
+  Não recupera sessão perdida nem muda o ai-memory. Saída: 0 nenhum aviso, 1 algum aviso (ou servidor sem resposta), 2 uso.
+
 ## CONTAINER — eventos operacionais (oute-emit, ADR-04)
   Rodadas do swarm, pedidos do canal e sessões do oute-task vão como logs OTel (oute.swarm.*,
   oute.canal.*, oute.task.*) ao bucket e ao agent-studio (ADR-08), com a origem do host. A saída do script executado no host nunca vai.
@@ -283,6 +302,9 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     oute-quota --json e emite oute.quota.used_pct e
                                     oute.quota.reset_in_seconds por agente e janela (métricas) e
                                     oute.quota.unknown com o motivo; sem coleta periódica (#347)
+  oute-emit doctor                  (o oute-doctor usa) lê o ~/.oute/doctor/last.json e emite, por agente,
+                                    oute.memory.capture.missing_pct, .local e .captured e, do Codex,
+                                    oute.memory.capture.hooks_untrusted (métricas); sem veredito, sem ponto (#725)
   oute-emit backfill                uma vez por host: manda o histórico anterior ao corte
                                     (~/.oute/emit/since) com a hora original; resumo no stderr;
                                     rodar de novo não emite nada (retoma se falhou no meio)

@@ -1080,6 +1080,17 @@ AGENT_CTR=oute-agent
 approve_dir="$OUTE_HOME/approve"
 ctr() { docker exec "$AGENT_CTR" "$@"; }        # leitura (sem -i: não disputa o teclado com o read)
 ctr_in() { docker exec -i "$AGENT_CTR" "$@"; }  # escrita (stdin -> container)
+# #725: captura parcial do ai-memory. A conferência é do container (lê o home dos agentes e o servidor do ai-memory na
+# rede do compose): aqui só o repasse dos argumentos e do código de saída do `oute-doctor` (0 = sem aviso, 1 = aviso).
+doctor() {
+  docker ps -q -f name="^$AGENT_CTR\$" -f status=running | grep -q . \
+    || die "o container $AGENT_CTR não está de pé (oute up)"
+  ctr sh -c 'command -v oute-doctor >/dev/null' </dev/null \
+    || die "a imagem em uso não tem o oute-doctor: precisa da release com a #725 (oute update)"
+  local rc=0
+  ctr oute-doctor "$@" </dev/null || rc=$?
+  return "$rc"
+}
 approve_pending() {
   local id
   for id in $(ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true); do
@@ -1465,6 +1476,7 @@ case "${1:-}" in
                memory_backup_check "$3" ;;
       *) memory_backup_usage; exit 2 ;;
     esac ;;
+  doctor)  doctor "${@:2}" ;;   # #725: sessões locais × capturadas no ai-memory, por agente, e o trusted_hash do Codex
   lock)    "$ROOT/scripts/oute-secrets.sh" lock ;;
   secrets)   # #21: relê o vault (pede a master password), regrava agent.env e services.env (#256) e tranca a sessão
     [[ "${2:-}" == refresh ]] || { echo "uso: oute secrets refresh" >&2; exit 2; }
@@ -1512,6 +1524,7 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   studio replay --from <ISO> --to <ISO> [--signal s] [--host h] [--legacy]  só no oute-server: reenvia o bucket de telemetria ao agent-studio (ADR-08 §7)
   studio rebuild-state  só no oute-server: remonta o estado do SurrealDB a partir do DuckDB, com o agent-studio parado (ADR-08 §7)
   studio backup [--check <nome|latest>]  só no oute-server: cópia consistente do DuckDB do agent-studio em backups/agent-studio/ do bucket de telemetria, com retenção; --check abre uma cópia do bucket e conta as linhas (#570)
+  doctor [opções]  captura parcial do ai-memory: sessões locais × capturadas por agente e o trusted_hash do Codex (roda o oute-doctor no container; 1 = aviso)
   memory-backup [--check <arquivo>]  backup do volume oute-memory (ai-memory backup) em backups/ai-memory/ do oute-shared, com retenção; --check restaura num tmp e confere
   oci-bootstrap  provisiona compartment/buckets/IAM/budget no OCI e grava a chave S3 no vault [DRY_RUN=1] (pede a senha)
   lock         tranca o Vaultwarden (bw lock) e apaga a sessão em cache das versões antigas

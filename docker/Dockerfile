@@ -172,6 +172,8 @@ COPY docker/oute-select /usr/local/bin/
 COPY docker/oute-sonar /usr/local/bin/
 # cota das assinaturas Claude e Codex (#346): bash + curl + jq, só GET, nunca escreve nem renova credencial
 COPY docker/oute-quota /usr/local/bin/
+# captura parcial do ai-memory (#725): python3 stdlib, só GET no servidor do ai-memory; métricas pelo oute-emit
+COPY docker/oute-doctor /usr/local/bin/
 # screenshot de UI (#472): bash; o Firefox fica em /opt/oute/firefox
 COPY docker/oute-shot /usr/local/bin/
 # conferência de referência de um texto (#485): python3 stdlib, só `gh api` (GET) e `git`
@@ -199,7 +201,7 @@ RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh git && chmod 75
 RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
       /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression \
-      /usr/local/bin/oute-shot /usr/local/bin/oute-refcheck /usr/local/bin/oute-swarm /usr/local/bin/oute
+      /usr/local/bin/oute-shot /usr/local/bin/oute-refcheck /usr/local/bin/oute-swarm /usr/local/bin/oute /usr/local/bin/oute-doctor
 
 USER ${OUTE_USER}
 WORKDIR /workspace

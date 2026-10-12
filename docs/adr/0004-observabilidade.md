@@ -112,6 +112,17 @@ oute-emit reconcile                decided de todo inbox/*.out ainda não enviad
 
 - **Os dois pontos de uma janela têm a mesma hora**, e hora do ponto + `reset_in_seconds` = a hora do reset: o alerta de cota usa o par para saber até quando o ponto vale. Leitura de cache (`stale`) leva a hora da leitura (agora − `age_s`), com o reset contado a partir dela.
 - **`unknown` não emite ponto** (zero seria mentira): vai o evento `oute.quota.unknown`. Janela com `used_pct` fora de 0–100 ou sem hora de reset é pulada.
+
+**Métrica de captura do ai-memory (#725).** O `oute-doctor` (no host, `oute doctor`) compara, por agente, as sessões locais com as capturadas no servidor do ai-memory e chama o `oute-emit doctor`, que manda **métricas** OTLP pela rota `/v1/metrics` do mesmo coletor (bucket e agent-studio). **Sem coleta periódica:** o ponto é o da última conferência, com a hora dela.
+
+| métrica | tipo, unidade | atributo do ponto | recurso |
+|---|---|---|---|
+| `oute.memory.capture.missing_pct` | gauge (double), `%`, 0–100: sessões locais sem captura | `oute.memory.capture.basis` = `delta` (o que cresceu desde a conferência de base) \| `total` (primeira conferência: total em disco × total no servidor) | `oute.agent` = `claude` \| `codex` (o agente conferido, não quem chamou), `host.name`, `oute.instance`, `service.name=oute` |
+| `oute.memory.capture.local`, `oute.memory.capture.captured` | gauge (int), `{session}`: as duas contagens comparadas | o mesmo | o mesmo |
+| `oute.memory.capture.hooks_untrusted` | gauge (int), `{hook}`: hooks do ai-memory do `hooks.json` do Codex sem `trusted_hash` no `config.toml` | nenhum | o mesmo, só com `oute.agent=codex` |
+
+- **Sem veredito não há ponto** (zero seria mentira): agente com menos sessões locais que o mínimo (`amostra`) ou servidor do ai-memory sem resposta (`indeterminado`) não emite `missing_pct` nem as contagens; arquivo do Codex que não se lê não emite `hooks_untrusted`.
+- Nenhum conteúdo de sessão sai: só contagens. Os alertas `memory_capture` e `memory_hooks_untrusted` do agent-studio (ADR-08) leem estas métricas.
 - **Recurso:** só a origem do host e o agente; a marca de sessão (`oute.task.*`, `oute.swarm.*`) não entra, porque o instantâneo é do host.
 - **Sem spool:** métrica que não chega (coletor fora, 4xx) se perde; o instantâneo seguinte a substitui. O evento `unknown` usa o spool como os demais. O endpoint de métricas deriva do de logs (`…/v1/logs` → `…/v1/metrics`); endpoint de logs fora desse padrão = sem métrica.
 - **Alerta:** `quota` do agent-studio (ADR-08 §8), corte de 98% por janela (era 90%, #558).
