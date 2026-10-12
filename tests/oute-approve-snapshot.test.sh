@@ -11,10 +11,12 @@ for v in $(compgen -e | grep -E '^(OCI_|GH_TOKEN$|GITHUB_TOKEN$|AGENT_STUDIO_|BW
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTE="$ROOT/scripts/oute"
 TMP="$(mktemp -d)"
-trap 'rcv_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/otlp.sh"
 CHECK_OUT=30
+# guarda (#815): o container tem OTEL_* reais; nada deste teste pode sair para outro endpoint que não o receptor dele
+guarda_start "$TMP/guarda"
 
 ID1=20261012-010101-pedido-um
 ID2=20261012-020202-pedido-dois
@@ -126,4 +128,5 @@ check "host: container de pé mas sem resposta: nenhuma lista sai (a lista vazia
   test -z "$(emits)"
 rm -f "${F_EXECFAIL:?}"
 
+guarda_check
 check_end

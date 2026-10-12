@@ -80,7 +80,11 @@ SENV=(AGENT_STUDIO_SURREAL_URL="$SURREAL_URL" AGENT_STUDIO_SURREAL_PASS="$SURREA
 studio_start "$TMP/s" "${SENV[@]}" || { cat "$TMP/s/stderr"; die "agent-studio não subiu"; }
 C=(-H "Authorization: Bearer $STUDIO_TOKEN")
 HX=(-H "HX-Request: true")
-page() { studio_page "${C[@]}" "$STUDIO_URL$1"; }
+page() {
+  local rota="$1"
+  studio_page "${C[@]}" "$STUDIO_URL$rota"
+  return $?
+}
 U1="/pedido?id=$P1"
 
 # ---------------------------------------------------------------- 1. antes de qualquer pedido; quem lê
@@ -355,8 +359,11 @@ json.dump({"resourceLogs": [rl(dict(mac, **{"oute.agent": "human"}), [old])]}, o
 grande = event(NOW - 5, "oute.canal.snapshot", "ev-snap-grande", {"oute.canal.ids": json.dumps(
     [f"20261012-{i:06d}-x" for i in range(1, 1002)]), "oute.canal.count": 1001})
 torto = event(NOW - 5, "oute.canal.snapshot", "ev-snap-torta", {"oute.canal.ids": "nao e json", "oute.canal.count": 1})
+# hora à frente do relógio do studio: lista forjada com lista vazia, que esconderia todo pendente de oute-mac se valesse
+futura = event(NOW + 3600, "oute.canal.snapshot", "ev-snap-futura", {"oute.canal.ids": json.dumps([]), "oute.canal.count": 0})
 json.dump({"resourceLogs": [rl(dict(mac, **{"host.name": "oute-server", "oute.agent": "human"}), [bad, grande]),
-                            rl(dict(mac, **{"oute.agent": "human"}), [torto])]},
+                            rl(dict(mac, **{"oute.agent": "human"}), [torto]),
+                            rl(dict(mac, **{"oute.agent": "human"}), [futura])]},
           open(f"{tmp}/s815-invalida.json", "w"))
 PY
 N815_0="$(surreal_q 'SELECT count() FROM pedido GROUP ALL' | jq -r '.[0].count')"
@@ -372,6 +379,8 @@ check "#815: lista mais velha que a gravada não a troca: o pedido real segue pe
 check "#815: lista mais velha (ids vazios) não solta o pedido real nem esconde os de teste" bash -c '[ "$(grep -o "sem otel" <<<"$1" | wc -l)" = 0 ] && grep -q "Pedido real" <<<"$1"' _ "$(page /pedidos)"
 check "#815: listas inválidas (id fora do formato, JSON quebrado, mais de 1000 ids) = 200" test "$(post logs "$S815_INVALIDA")" = 200
 check "#815: depois das listas inválidas, a tela segue igual (os de teste fora, o real dentro)" bash -c '[ "$(grep -o "sem otel" <<<"$1" | wc -l)" = 0 ] && grep -q "Pedido real" <<<"$1"' _ "$(page /pedidos)"
+check "#815: lista com hora à frente do studio é recusada: a de oute-mac segue a de agora (NOW-120)" \
+  jqe --argjson v "$((NOW - 120))" '[.[] | select(.host == "oute-mac") | .at_s] == [$v]' <<<"$(surreal_q 'SELECT record::id(id) AS host, at_s FROM canal_snapshot')"
 check "#815: lista com id fora do formato não esconde pendente (o do oute-server segue)" jqe --arg a "$P1" '.proposals.pending | map(.id) | index($a) != null' <<<"$(page /v1/tray)"
 check "#815: nada apagado: o SurrealDB tem os 16 pedidos a mais (a regra só tira da lista)" test "$(surreal_q 'SELECT count() FROM pedido GROUP ALL' | jq -r '.[0].count')" = "$((N815_0 + 16))"
 surreal_q "DELETE pedido WHERE record::id(id) IN ['$REAL815', '$DEPOIS815'] OR string::starts_with(record::id(id), '20261012-1000')" >/dev/null

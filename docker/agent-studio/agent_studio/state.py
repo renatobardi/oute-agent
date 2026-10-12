@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 from . import phase as phase_mod
@@ -58,7 +59,8 @@ STEP_CYCLE = (
 # que tira o pendente sem arquivo mora em `proposals.py`. Os ids vão em base64, como o texto (#337).
 SNAPSHOT_EVENT = "oute.canal.snapshot"
 SNAPSHOT_MAX = 1000   # o oute-emit não manda lista maior (ele diz por que não saiu)
-PEDIDO_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[a-z0-9-]+\Z")
+SNAPSHOT_SKEW_S = 300  # folga do relógio do host: lista com hora mais que isto à frente do studio é recusada (forjada)
+PEDIDO_ID = re.compile(r"^\d{8}-\d{6}-[a-z0-9-]+\Z", re.ASCII)
 CANAL_SNAPSHOT_UPSERT = (
     'IF (array::first(SELECT VALUE at_s FROM [type::record("canal_snapshot", $v.id)]) ?? 0) <= $v.at_s THEN { '
     'UPSERT type::record("canal_snapshot", $v.id) SET at_s = $v.at_s, '
@@ -244,6 +246,9 @@ def snapshot_statements(row, t):
     except (TypeError, ValueError):
         return []
     if not host or not isinstance(ids, list) or len(ids) > SNAPSHOT_MAX:
+        return []
+    # hora à frente do relógio do studio: lista forjada que esconderia os pendentes anteriores a ela (ADR-08 §10, adendo #815)
+    if int(t) // 1_000_000_000 > time.time() + SNAPSHOT_SKEW_S:
         return []
     if not all(isinstance(i, str) and PEDIDO_ID.match(i) for i in ids):
         return []

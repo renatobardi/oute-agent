@@ -24,6 +24,7 @@ Dois lugares, dois conjuntos de comandos:
   oute version         versão do repo, da imagem rodando e origem (host/instância)
   oute approve         revisa pedidos dos agentes (s = executa, N ou Enter = deixa pendente, r = recusa)
   oute approve --watch fica esperando pedidos novos
+                       cada volta e cada approve mandam a lista da outbox ao agent-studio (oute.canal.snapshot, #815)
   oute approve <id>    decide só aquele pedido (o id que o oute-propose imprime); id que não está
                        pendente = aviso e rc 1, id fora do formato AAAAMMDD-HHMMSS-slug = rc 2
   oute approve suggest [--min N]  lista os comandos repetidos do histórico do canal neste host, com
