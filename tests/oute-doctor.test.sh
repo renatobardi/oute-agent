@@ -22,7 +22,7 @@ unset OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_LOGS_ENDPOINT CLAUDECODE CO
 export OTEL_RESOURCE_ATTRIBUTES="host.name=oute-teste,oute.instance=oute-agent"
 
 # ---------------------------------------------------------------- o servidor falso do ai-memory
-# $MEM/captured.json = {"<workspace>/<projeto>": {"<agente>": sessões}}; $MEM/mode = ok | 500 | lixo | espera;
+# $MEM/captured.json = {"<workspace>/<projeto>": {"<agente>": sessões}}; $MEM/mode = ok | 500 | lixo | espera | semlista;
 # $MEM/token (se existe) = o Bearer exigido (sem ele ou com outro: 401). Cada pedido vai em $MEM/requests.jsonl.
 MEM="$TMP/mem"; mkdir -p "$MEM"
 cat > "$TMP/fake-memory.py" <<'PY'
@@ -55,6 +55,8 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, b"<html>nada</html>")
         if mode == "espera":
             time.sleep(5)
+        if mode == "semlista":
+            return self.reply(200, {"projects": None})
         data = json.loads(read("captured.json", "{}"))
         if u.path == "/admin/projects":
             return self.reply(200, {"projects": [{"workspace_name": k.split("/")[0], "project_name": k.split("/")[1]} for k in data]})
@@ -200,11 +202,14 @@ check "codex sem sessão local: amostra, sem aviso"         ag codex '.local == 
 # ---------------------------------------------------------------- 6. servidor sem resposta ou com resposta ruim: indeterminado
 H="$TMP/h6"; mkdir -p "$H"; claude_sessions "$H" -workspace-a 1 8
 captured '{"default/a": {"claude-code": 8}}'
-for m in 500 lixo espera; do
+for m in 500 lixo espera semlista; do
   mode "$m"; doc "$H" --json --no-emit
   check "servidor em modo $m: indeterminado, rc 1, sem %"  bash -c '[ "$1" -eq 1 ] && jq -e ".warnings == true and (.agents | all(.status == \"indeterminado\" and .missing_pct == null and .note != null))" <<<"$2" >/dev/null' _ "$RC" "$OUT"
 done
 mode ok
+captured '{"default/a": {"claude-code": -1}}'; doc "$H" --json --no-emit
+check "contagem negativa do servidor: indeterminado, com o motivo" ag claude '.status == "indeterminado" and (.note | test("contagem de sessões inválida"))'
+captured '{"default/a": {"claude-code": 8}}'
 check "indeterminado não grava linha no histórico"         test "$(hist "$H")" -eq 0
 check "indeterminado ainda guarda os ids vistos"           test "$(grep -c . "$H/.oute/doctor/seen-claude")" -eq 8
 OUT="$(HOME="$H" AI_MEMORY_SERVER_URL="$SCHEME://127.0.0.1:$(closed_port)" "$DOCTOR" --no-emit --no-save 2>&1)"; RC=$?
@@ -218,6 +223,10 @@ check "o token nunca aparece na saída"                     hasnt_str "$TOKEN"
 OUT="$(HOME="$H" AI_MEMORY_SERVER_URL="$MEM_URL" AI_MEMORY_AUTH_TOKEN="errado-$TOKEN" "$DOCTOR" --no-emit --no-save 2>&1)"; RC=$?
 check "token errado: indeterminado, sem o token na saída"  bash -c '[ "$1" -eq 1 ] && grep -q "respondeu 401" <<<"$2" && ! grep -qF "$3" <<<"$2"' _ "$RC" "$OUT" "$TOKEN"
 rm -f "${MEM:?}/token"
+
+H="$TMP/h6b"; mkdir -p "$H"; claude_sessions "$H" -workspace-a 1 8; : > "$H/.oute"      # ~/.oute é um arquivo: não há onde gravar
+doc "$H" --no-emit
+check "sem onde gravar: avisa e o veredito sai igual (rc 0)" bash -c '[ "$1" -eq 0 ] && grep -q "oute-doctor: não gravou em " <<<"$2" && grep -q "✓ claude 8 locais × 8 capturadas" <<<"$2"' _ "$RC" "$OUT"
 
 # ---------------------------------------------------------------- 7. Codex: hook do ai-memory sem trusted_hash
 H="$TMP/h7"; mkdir -p "$H"; codex_hooks "$H"; captured '{}'

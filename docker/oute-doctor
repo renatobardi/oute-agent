@@ -169,6 +169,18 @@ def snake(event):
     return re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
 
 
+def memory_hook_keys(events, hooks_file):
+    """a chave do `hooks.state` de cada hook do ai-memory do hooks.json: `<arquivo>:<evento>:<grupo>:<hook>`"""
+    keys = []
+    for event, groups in events.items() if isinstance(events, dict) else []:
+        for i, group in enumerate(groups if isinstance(groups, list) else []):
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            for j, hook in enumerate(hooks if isinstance(hooks, list) else []):
+                if isinstance(hook, dict) and "ai-memory" in str(hook.get("command", "")):
+                    keys.append(f"{hooks_file}:{snake(event)}:{i}:{j}")
+    return keys
+
+
 def check_codex_hooks():
     """hooks do ai-memory do Codex sem `trusted_hash` no config.toml. `status`: ok, aviso, indeterminado (arquivo que
     não se lê) ou None (sem ~/.codex: Codex não instalado)"""
@@ -195,13 +207,7 @@ def check_codex_hooks():
     except (OSError, ValueError, AttributeError) as e:
         out.update(status=UNKNOWN, note=f"~/.codex/config.toml não se lê ({type(e).__name__})")
         return out
-    wanted = []
-    for event, groups in events.items() if isinstance(events, dict) else []:
-        for i, group in enumerate(groups if isinstance(groups, list) else []):
-            hooks = group.get("hooks") if isinstance(group, dict) else None
-            for j, hook in enumerate(hooks if isinstance(hooks, list) else []):
-                if isinstance(hook, dict) and "ai-memory" in str(hook.get("command", "")):
-                    wanted.append(f"{hooks_file}:{snake(event)}:{i}:{j}")
+    wanted = memory_hook_keys(events, hooks_file)
     out["hooks"] = len(wanted)
     if not wanted:
         out.update(status=WARN, untrusted=0, note="o ~/.codex/hooks.json não tem hook do ai-memory")
