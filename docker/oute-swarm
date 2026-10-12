@@ -22,6 +22,8 @@
 #              [--wait [--timeout <s>]]             --wait: espera a sessão parar (relê a cada 5 s, OUTE_SWARM_TELL_POLL) e
 #                                                   envia; sem --force; timeout padrão 600 s, recusa final com código 3
 #                                                   2º envio à sessão que voltou ocupada, sem [sessao] parada no log depois: recusado (#786)
+#                                                   campo com texto (o rascunho do Bardi): nada digitado, mensagem NÃO entregue, código 7;
+#                                                   o --force não pula essa checagem (#713)
 #   oute-swarm ask "<pergunta curta>"               (usado pelo dispatcher) a rodada parou esperando uma decisão do Bardi:
 #                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
@@ -656,10 +658,17 @@ field_text() {
 
 # digita <texto> no campo do pane, confere o campo e só então dá Enter (tell e a entrega do watch). <st> = estado do
 # agente. Retorno: 0 enviado; 1 send-text falhou; 2 Enter falhou (texto digitado); 3 o campo não ficou com o texto
-# exato (SF_GOT = o que ele tinha). Não bateu: limpa com ctrl+c (só com a sessão idle/done) e tenta uma vez
+# exato (SF_GOT = o que ele tinha), ou nem deu para ler o campo antes de digitar (nada digitado); 4 o campo já tinha
+# texto (o Bardi digitando): nada digitado, nada limpo (#713).
+# Não bateu: limpa com ctrl+c (só com a sessão idle/done) e tenta uma vez. O ctrl+c limpa o campo inteiro, não só o
+# que foi digitado aqui: o texto que o Bardi começou a digitar entre a leitura de antes e o send-text se perde (janela
+# pequena, declarada no PR #713)
 send_field() {
-  local pane="$1" agent="$2" text="$3" st="$4" try
+  local pane="$1" agent="$2" text="$3" st="$4" try pre
   SF_GOT=""
+  # sem ler o campo antes não dá para saber se há rascunho: não digita (a falha de leitura não vale como campo vazio)
+  pre="$(field_text "$pane" "$agent" 2>/dev/null)" || { SF_GOT="(campo de entrada não encontrado na tela)"; return 3; }
+  [[ -z "$(tr -d '[:space:]' <<<"$pre")" ]] || return 4
   for try in 1 2; do
     herdr pane send-text "$pane" "$text" >/dev/null || return 1
     sleep 0.5
@@ -759,7 +768,7 @@ cmd_tell() {
          ! tell_busy_loop "$state" "$slug" "$label" || refuse "sessão $label ainda ocupada ($st) e o envio anterior já foi recusado; espere o evento [sessao] idle/done/blocked dela (não reenvie em laço) ou use --wait"
          refuse "sessão $label ocupada ($st); tente depois (o Bardi pode usar --force)"
        fi
-       echo "aviso: sessão $label em '$st'; seguindo por --force" >&2 ;;
+       echo "aviso: sessão $label em '$st'; seguindo por --force (o --force não pula a checagem do campo: com texto nele, recusa com o código 7)" >&2 ;;
   esac
   break
   done
@@ -777,6 +786,7 @@ cmd_tell() {
        return 0 ;;
     1) refuse "send-text falhou em $pane" ;;
     2) refuse "send-keys enter falhou em $pane" "texto digitado, sem Enter" ;;
+    4) rc=7; refuse "o campo de entrada de $label tem texto (o Bardi digitando?)" "nada digitado; a mensagem NÃO foi entregue, não reenvie em laço (o --force não pula esta checagem)" ;;
   esac
   printf 'oute-swarm: campo de %s ficou assim (esperado a mensagem exata):\n%s\n' "$label" "$SF_GOT" >&2
   refuse "o campo de entrada não contém exatamente a mensagem" "sem Enter; confira o pane $pane"
@@ -1264,6 +1274,7 @@ w_deliver() {
        W_DLV_WHY="" ;;
     1) w_dlv_wait "send-text falhou em $pane" ;;
     2) w_dlv_wait "send-keys enter falhou em $pane (texto digitado, sem Enter)" ;;
+    4) w_dlv_wait "campo do dispatcher com texto (o Bardi digitando?)" ;;
     *) w_dlv_wait "o campo do dispatcher não ficou com a mensagem exata, sem Enter" ;;
   esac
   return 0
