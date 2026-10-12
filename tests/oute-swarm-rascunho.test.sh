@@ -41,7 +41,7 @@ check "rascunho: nada registrado como ok"                [ "$(grep -c ' tell 7-f
 
 # 2. --wait não espera: campo com texto não é sessão ocupada, a recusa sai na hora
 CASE=rascunho-wait; round "$CASE"; sessao 'rascunho'
-rm -f "$FAKE/tsleeps"
+rm -f "${FAKE:?}/tsleeps"
 sw tell 7-foo "pode seguir" --wait --timeout 5
 check "rascunho com --wait: código 7 na primeira volta"  [ "$RC" -eq 7 -a ! -e "$FAKE/tsleeps" ]
 check "rascunho com --wait: campo intacto"               [ "$(cat "$FAKE/field")" == 'rascunho' ]
