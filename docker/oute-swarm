@@ -919,7 +919,7 @@ w_ev() {
   return 0
 }
 w_keep() { local k; for k in "${!W_PREV[@]}"; do [[ "$k" == "$1"* ]] && W_CUR[$k]="${W_PREV[$k]}"; done; return 0; }
-w_label() { slab "$1"; }
+w_label() { local s="$1"; slab "$s"; return 0; }
 # PR/issue de outro repo que o da rodada vêm como <repo>#<n> (sem colisão de número); os da rodada, só <n>
 w_pfx() { [[ "$1" == "$2" ]] || printf '%s#' "$(basename "$1")"; }
 w_ref() { if [[ "$1" == *"#"* ]]; then printf '%s' "$1"; else printf '#%s' "$1"; fi; }

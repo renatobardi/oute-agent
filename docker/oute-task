@@ -88,7 +88,8 @@ mark_path() { local gd; gd="$(git -C "$1" rev-parse --path-format=absolute --git
 mark_get() { [[ -f "$1" ]] || return 0; sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' || true; }
 # id de modelo na marca: como o mark_get, mais o sufixo [1m]
 mark_model() { [[ -f "$1" ]] || return 0; sed -n 's/^model=//p' "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._[]-' || true; }
-mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço> <assinatura> <abertura>
+# 11º argumento (#825): a abertura (aba, terminal ou sem-tela), gravada como abertura=
+mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço> <assinatura>
   local f="$1"; shift
   { printf 'id=%s\nrepo=%s\nslug=%s\n' "$1" "$2" "$3"
     [[ -z "$4" ]] || printf 'round=%s\n' "$4"
