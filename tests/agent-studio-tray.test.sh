@@ -354,20 +354,22 @@ con.close()
 
 # pedidos: limite, total e hora que não é hora
 class Fake:
-    def __init__(self, rows, n): self.rows, self.n, self.vars = rows, n, None
+    # os pendentes (sem limite no SQL: o corte é do Python, depois da regra do #815) e a lista do host (vazia aqui)
+    def __init__(self, rows): self.rows, self.vars = rows, None
     def query(self, sql, variables):
         self.vars = variables
-        return [{"status": "OK", "result": self.rows}, {"status": "OK", "result": [{"n": self.n}] if self.n else []}]
+        return [{"status": "OK", "result": self.rows}, {"status": "OK", "result": []}]
 rows = [{"id": "a/b c", "title": None, "as": "root", "agent": "claude", "host": "h", "proposed_at": "2026-09-29T07:43:00.5Z"},
         {"id": "sem-hora", "proposed_at": None}]
-f = Fake(rows, 77)
+rows += [{"id": f"p{i}", "proposed_at": "2026-09-29T07:43:00Z"} for i in range(75)]
+f = Fake(rows)
 p = tray.pending(f, 1790667790 * 10**9)  # 2026-09-29T07:43:10Z
-out("pedidos: pede só os 50 mais novos e devolve o total", f.vars == {"pending": 50} and p["total"] == 77 and p["available"] is True)
+out("pedidos: lê os pendentes, corta no limite de 50 e devolve o total", f.vars == {} and p["total"] == 77 and len(p["pending"]) == 50 and p["available"] is True)
 out("pedido: hora do SurrealDB com fração -> ISO em segundos e idade", p["pending"][0]["proposed_at"] == "2026-09-29T07:43:00Z" and p["pending"][0]["age_seconds"] == 10)
 out("pedido: barra do id fica no link, o espaço é codificado", p["pending"][0]["url"] == "/pedido?id=a/b%20c")
 out("pedido sem hora e sem título: campos nulos, sem quebrar", p["pending"][1] == {"id": "sem-hora", "title": None, "as": None, "agent": None, "host": None, "instance": None, "proposed_at": None, "age_seconds": None, "url": "/pedido?id=sem-hora"})
 out("pedido proposto no futuro (relógio do host): idade zero, nunca negativa", proposals.age_seconds("2030-01-01T00:00:00Z", 0) == 0)
-out("nenhum pendente: total zero", tray.pending(Fake([], 0), 0) == {"available": True, "total": 0, "pending": []})
+out("nenhum pendente: total zero", tray.pending(Fake([]), 0) == {"available": True, "total": 0, "pending": []})
 
 # avisos das rodadas (#776): a leitura que falha cai em vazio, sem derrubar o menu
 from agent_studio import avisos

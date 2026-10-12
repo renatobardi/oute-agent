@@ -5,7 +5,7 @@ Lido sob demanda (#753): o `AGENTS.md` traz só as regras e aponta para cá. Aqu
 - `docker/`: `Dockerfile`, `compose.yaml`, `entrypoint.sh` e os comandos do container:
   - `oute-propose`,
   - `oute-inbox`,
-  - `oute-emit` (eventos operacionais ao bucket e ao agent-studio, ADR-04 e ADR-08; o `reconcile` e todo `oute-emit swarm` emitem o `oute.swarm.round.closed` da rodada com a marca `fechada` no disco e sem o evento, com o registro em `~/.oute/emit/rounds-closed/`, #654; `tests/oute-emit.test.sh`, seção 17),
+  - `oute-emit` (eventos operacionais ao bucket e ao agent-studio, ADR-04 e ADR-08; o verbo `snapshot` manda a lista da outbox do host, #815, `tests/oute-approve-snapshot.test.sh`; o `reconcile` e todo `oute-emit swarm` emitem o `oute.swarm.round.closed` da rodada com a marca `fechada` no disco e sem o evento, com o registro em `~/.oute/emit/rounds-closed/`, #654; `tests/oute-emit.test.sh`, seção 17),
   - `shims/gh` (trava do `gh pr merge` de PR de rodada aberta, #538; `tests/gh-merge-guard.test.sh`),
   - `shims/git` (trava do `git` no checkout principal de `/workspace/<repo>`: `checkout`, `switch`, `commit`, `merge` e `rebase` recusados com o código 77; passam a leitura, o `fetch`, o `pull`, o `worktree add` e o `merge --ff-only` na branch padrão sem mudança local; em worktree e em repo de outra pasta nada muda, #651; `tests/git-main-guard.test.sh`),
   - `oute-guard-kill` + `codex-kill.rules` (bloqueio de `pkill`/`killall` nos agentes: hook do Claude e regras do Codex, gravados pelo entrypoint, #538; `tests/guard-kill.test.sh`),

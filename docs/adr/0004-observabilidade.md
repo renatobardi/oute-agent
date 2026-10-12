@@ -277,3 +277,9 @@ O jev-router (LiteLLM + hook do Jev, na frente do OpenRouter) saiu do stack na #
 - **Langfuse:** os spans internos do LiteLLM ficavam fora do painel (seguiam no bucket).
 - **Pendência que ficou:** o custo das chamadas do próprio Jev (Decisions API) não entrava no span.
 - **Lições:** logo depois do `oute up`, o LiteLLM levava ~15–30 s para aceitar conexões (o Pi devolvia `Connection error.` nesse intervalo). Com preset do OpenRouter, o proxy não conhece modelo nem custo: o custo tem que vir do provedor de roteamento.
+
+
+## Adendo 2026-10-12 — lista da outbox do host (#815)
+- **Evento novo:** `oute.canal.snapshot`, log sem corpo, agente `human` (quem decidiu o `oute approve` que o emitiu). Atributos: `oute.canal.ids` (JSON com os ids dos pedidos que estão na `~/outbox` do host agora, ordenados e sem repetição) e `oute.canal.count`. Só ids: o script e a saída do host não saem.
+- **Quem manda:** `oute approve` (do host), pelo `oute-emit snapshot` do container (o mesmo caminho do `oute.canal.decided`). A cada mudança da lista e, sem mudança, a cada 300 s; sem container que responda, nada sai.
+- **Para quê:** o agent-studio tira do pendente o pedido que a lista não tem (ADR-08 §10, adendo #815). Evento que o `oute-emit` não manda por lista grande demais (mais de 1000 ids) ou id fora do formato: não sai, e o pedido segue como estava.

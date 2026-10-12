@@ -126,15 +126,17 @@ e="$(ev '.name == "oute.canal.decided" and .attrs["oute.canal.id"] == "20260927-
 check "approve r: evento recusado, rc 126, sem corpo"  jqe '.attrs["oute.canal.decision"] == "recusado" and (.attrs["oute.canal.rc"] | tonumber) == 126
                                                          and .attrs["oute.agent"] == "human" and .body == null' <<<"$e"
 before="$(posts)"
+# #815: o `oute approve` manda também a lista da outbox (oute.canal.snapshot): o que conta aqui é o decided
+before_d="$(n '.name == "oute.canal.decided"')"
 pedido 20260927-100200-depois 'echo depois'
 approve ''
 check "approve N: fica pendente"                       grep -q 'fica pendente' <<<"$OUT"
-check "approve N: nenhum evento"                       [ "$(posts)" -eq "$before" ]
+check "approve N: nenhum decided" [ "$(n '.name == "oute.canal.decided"')" -eq "$before_d" ]
 F_OLD=1 approve s
 check "imagem antiga: código 0"                        [ "$RC" -eq 0 ]
 check "imagem antiga: resultado gravado"               [ -f "$CH/inbox/20260927-100200-depois.out" ]
 check "imagem antiga: nada sujo na tela"               [ -z "$(grep -iE 'not found|OCI runtime|oute-emit' <<<"$OUT")" ]
-check "imagem antiga: nenhum evento"                   [ "$(posts)" -eq "$before" ]
+check "imagem antiga: nenhum decided"                  [ "$(n '.name == "oute.canal.decided"')" -eq "$before_d" ]
 pedido 20260927-100300-fora 'echo fora'
 t0=$(date +%s)
 OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)" approve s

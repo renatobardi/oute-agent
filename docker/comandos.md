@@ -24,6 +24,7 @@ Dois lugares, dois conjuntos de comandos:
   oute version         versão do repo, da imagem rodando e origem (host/instância)
   oute approve         revisa pedidos dos agentes (s = executa, N ou Enter = deixa pendente, r = recusa)
   oute approve --watch fica esperando pedidos novos
+                       cada volta e cada approve mandam a lista da outbox ao agent-studio (oute.canal.snapshot, #815)
   oute approve <id>    decide só aquele pedido (o id que o oute-propose imprime); id que não está
                        pendente = aviso e rc 1, id fora do formato AAAAMMDD-HHMMSS-slug = rc 2
   oute approve suggest [--min N]  lista os comandos repetidos do histórico do canal neste host, com
@@ -297,6 +298,7 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   Endpoint e origem: OTEL_* do ambiente; sem elas (o shell do Bash tool do Claude Code não as
   herda), do ~/.oute_env, só lido (variável com valor no ambiente vence, uma a uma).
   oute-emit canal <id>              emite a fase atual do pedido (proposto ou decidido)
+  oute-emit snapshot [<id>…]        emite a lista dos pedidos da outbox do host (#815; o oute approve manda)
   oute-emit swarm <rodada> <linha>  emite uma linha do log da rodada
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                     (o oute-task usa) emite o evento da sessão, sem corpo
