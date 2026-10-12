@@ -257,6 +257,12 @@ case "$MODE" in
     mkdir -p "$HOME/.oute"
     oute-agents-install </dev/null >"$HOME/.oute/agents-install.log" 2>&1 &
 
+    # plugin herdr oute.rodada (#722, protótipo): estado da rodada, cota e custo no sidebar. `plugin link` registra com
+    # ou sem servidor no ar e é idempotente; falha não impede a subida
+    log "ligando plugin herdr oute.rodada"
+    herdr plugin link /usr/local/lib/oute/herdr-plugins/oute.rodada </dev/null >/dev/null 2>&1 \
+      || log "AVISO: herdr plugin link oute.rodada falhou"
+
     log "iniciando herdr server"
     # sem SHELL o herdr abre o pane em /bin/sh (dash, sem readline: seta para cima vira ^[[A) (#428)
     export SHELL=/bin/bash

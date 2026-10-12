@@ -1,0 +1,34 @@
+# oute.rodada (#722, protótipo): estado da rodada do swarm, cota e custo no sidebar do herdr.
+# Só escreve metadado de exibição (tokens `$oute_*` de pane e de workspace, com TTL). Não chama LLM (ADR-05) e não
+# toca estado do herdr além disso. Fontes: ~/.oute/swarm/<rodada>/ (disco), `oute-quota --json`, agent-studio /v1/tray.
+id = "oute.rodada"
+name = "Oute rodada"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Estado da rodada, cota e custo no sidebar (tokens $oute_*)"
+platforms = ["linux"]
+
+[[startup]]
+command = ["bash", "oute-rodada-sync", "startup"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bash", "oute-rodada-sync"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["bash", "oute-rodada-sync"]
+
+[[events]]
+on = "pane.closed"
+command = ["bash", "oute-rodada-sync"]
+
+[[events]]
+on = "workspace.focused"
+command = ["bash", "oute-rodada-sync"]
+
+[[actions]]
+id = "atualizar"
+title = "Atualizar o sidebar da rodada"
+contexts = ["global"]
+command = ["bash", "oute-rodada-sync", "--force"]

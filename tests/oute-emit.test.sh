@@ -699,6 +699,26 @@ reg
 check "regression: sem campos não envia nada"           [ "$(n '.attrs["oute.regression.run"] == null and .name == "oute.regression.run"')" -eq 0 ]
 rcv_stop
 
+# ---------------------------------------------------------------- 10b. oute.herdr.sidebar.sync (#722)
+SBH="$TMP/sidebar"; mkdir -p "$SBH"; rcv_start "$TMP/r10b"
+sb() { HOME="$SBH" oute-emit sidebar "$@"; return $?; }
+sb trigger=pane.agent_status_changed result=ok panes=3 workspaces=1 rounds=1 ms=412 quota=ok studio=ok
+e="$(ev '.name == "oute.herdr.sidebar.sync"')"
+check "sidebar: um evento oute.herdr.sidebar.sync"      [ "$(grep -c . <<<"$e")" -eq 1 ]
+check "sidebar: gatilho, resultado e fontes"            jqe '.attrs["oute.herdr.sidebar.trigger"] == "pane.agent_status_changed"
+  and .attrs["oute.herdr.sidebar.result"] == "ok" and .attrs["oute.herdr.sidebar.quota"] == "ok" and .attrs["oute.herdr.sidebar.studio"] == "ok"' <<<"$e"
+check "sidebar: contagens e duração"                    jqe '(.attrs["oute.herdr.sidebar.panes"] | tostring) == "3" and (.attrs["oute.herdr.sidebar.ms"] | tostring) == "412"
+  and (.attrs["oute.herdr.sidebar.rounds"] | tostring) == "1"' <<<"$e"
+check "sidebar: oute.agent unknown, sem corpo"          jqe '.attrs["oute.agent"] == "unknown" and .body == null' <<<"$e"
+sem="$(posts)"
+for bad in "trigger=x result=talvez" "trigger=Maiusculo result=ok" "trigger=x result=ok panes=abc" "trigger=x result=ok quota=nao" \
+           "trigger=x result=ok extra=1" "result=ok" "trigger=x;rm result=ok"; do
+  # shellcheck disable=SC2086
+  sb $bad
+done
+check "sidebar: campo inválido ou faltando não envia"   [ "$(posts)" -eq "$sem" ]
+rcv_stop
+
 # ---------------------------------------------------------------- 15. snapshot da cota (#347)
 # oute-quota falso (a cota de verdade não roda aqui): imprime $FQ_JSON, sai com $FQ_RC e espera $FQ_SLEEP s
 QB="$TMP/qbin"; mkdir -p "$QB"
