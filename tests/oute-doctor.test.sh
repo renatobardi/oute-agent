@@ -68,7 +68,7 @@ open(os.path.join(D, "port.tmp"), "w").write(str(srv.server_address[1]))
 os.replace(os.path.join(D, "port.tmp"), os.path.join(D, "port"))
 srv.serve_forever()
 PY
-python3 "$TMP/fake-memory.py" "$MEM" & MEM_PID=$!
+python3 "$TMP/fake-memory.py" "$MEM" 2>"$MEM/stderr" & MEM_PID=$!   # o cliente que desiste no modo espera deixa um traceback: vai ao arquivo
 for _ in $(seq 1 100); do [[ -s "$MEM/port" ]] && break; sleep 0.1; done
 [[ -s "$MEM/port" ]] || die "o servidor falso do ai-memory não subiu"
 MEM_URL="$SCHEME://127.0.0.1:$(cat "$MEM/port")"
