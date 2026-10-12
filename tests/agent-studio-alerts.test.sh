@@ -14,7 +14,7 @@ TMP="$(mktemp -d)"
 guarda_start "$TMP/guarda"
 rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'guarda_stop; studio_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo
