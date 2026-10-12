@@ -26,6 +26,8 @@ Dois lugares, dois conjuntos de comandos:
   oute approve --watch fica esperando pedidos novos
   oute approve <id>    decide só aquele pedido (o id que o oute-propose imprime); id que não está
                        pendente = aviso e rc 1, id fora do formato AAAAMMDD-HHMMSS-slug = rc 2
+  oute approve suggest [--min N]  lista os comandos repetidos do histórico do canal neste host, com
+                       contagem, último uso e risco (leitura, escrita, root); só lê, não aplica nada
   oute watch [host]    = approve --watch; com host, abre a espera nele via ssh
   oute tray install    só no macOS: compila o tray (barra de menu que lê o agent-studio), monta o .app e
                        abre no login; aprovar pelo tray abre o Terminal no oute approve <id>

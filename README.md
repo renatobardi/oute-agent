@@ -91,6 +91,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
 | `oute watch [host]` | atalho de `approve --watch`; com host (ex.: `oute watch oute-server`), abre a espera naquele host via ssh |
 | `oute approve [--watch]` | revisa e executa (ou recusa) os scripts propostos pelos agentes — ver **Canal de aprovação** |
+| `oute approve suggest [--min N]` | lista os comandos que se repetem no histórico do canal (contagem, último uso, risco); só lê — ver **Canal de aprovação** |
 | `oute tray install` / `uninstall` | **só no macOS**: compila o tray (`tray/`), monta `~/Applications/OuteTray.app` (sem ícone no Dock), cria `~/.oute/tray-hosts` se não houver e abre no login por um LaunchAgent; `uninstall` desfaz — ver **Tray no Mac** |
 | `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
@@ -160,6 +161,7 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 - O que roda é exatamente o que foi mostrado (o script é copiado para o host antes de exibir). Registro em `~/.oute/approve/approve.log` e cópia de cada script/saída em `~/.oute/approve/runs/`.
 - Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (o resto desses arquivos não é tocado).
 - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal é para diagnóstico, ajuste pontual e rodar o deploy de PR mergeado.
+- `oute approve suggest [--min N]` (#726) lê esse histórico no host (`approve.log` e os scripts de `runs/`) e lista os comandos que aparecem em N pedidos executados ou mais (padrão 2): contagem, recusas, último uso e risco (`root` = pedido `--root` ou linha com `sudo`; `leitura` = só comando de uma lista fixa de leitura, sem gravar em arquivo; `escrita` = todo o resto). Serve para escolher candidatos à allowlist. Só lê e imprime: não fala com o container, não roda comando e não muda arquivo. A classificação é por texto da linha; a allowlist do sudoers do `oute-ops` continua mudando só pelo repo `lab`.
 
 
 ## Tray no Mac
