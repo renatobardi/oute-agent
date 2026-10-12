@@ -494,6 +494,7 @@ def canal_proposed(pid, path):
         "oute.canal.title": h.get("titulo"),
         "oute.canal.as": "root" if h.get("como") == "root" else "user",
         "oute.canal.size": len(body.encode()),
+        "oute.canal.sessao": h.get("sessao"),  # a linha `# sessao:` do arquivo (#735): o approve_sha a refaz
     }, body, scope=f"canal/{pid}")
 
 

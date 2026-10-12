@@ -75,7 +75,8 @@ _EVENT = f"""
     SELECT time_unix_nano, host_name AS host, oute_instance AS instance, oute_agent AS agent, body AS script,
            json_extract_string(attributes, '$."oute.canal.title"') AS title,
            json_extract_string(attributes, '$."oute.canal.as"') AS "as",
-           TRY_CAST(json_extract_string(attributes, '$."oute.canal.size"') AS BIGINT) AS size
+           TRY_CAST(json_extract_string(attributes, '$."oute.canal.size"') AS BIGINT) AS size,
+           json_extract_string(attributes, '$."oute.canal.sessao"') AS sessao
     FROM logs
     WHERE event_name = '{PROPOSED}' AND json_extract_string(attributes, '$."oute.canal.id"') = ?
     ORDER BY time_unix_nano, dedupe_key LIMIT 1"""
@@ -84,7 +85,8 @@ _VERSIONS = f"""
     SELECT count(*) FROM (
       SELECT DISTINCT body, oute_agent, time_unix_nano // 1000000000,
              json_extract_string(attributes, '$."oute.canal.title"'),
-             json_extract_string(attributes, '$."oute.canal.as"')
+             json_extract_string(attributes, '$."oute.canal.as"'),
+             json_extract_string(attributes, '$."oute.canal.sessao"')
       FROM logs
       WHERE event_name = '{PROPOSED}' AND json_extract_string(attributes, '$."oute.canal.id"') = ?)"""
 
@@ -137,13 +139,16 @@ def approve_sha(ev):
 
     O `oute approve` (scripts/oute) calcula o sha256 do **arquivo** do pedido: o cabeçalho do `oute-propose`
     (título, como, agente, criado) + linha em branco + script. O evento leva essas mesmas partes (`oute-emit`), então
-    o arquivo é refeito aqui. Pedido que não nasceu do `oute-propose` (cabeçalho diferente) dá outro valor."""
+    o arquivo é refeito aqui. Com a worktree de uma sessão do `oute-task`, o `oute-propose` põe a linha `# sessao:`
+    depois de `# criado:` (#455); o evento a leva em `oute.canal.sessao` (#735), e ela entra aqui. Pedido que não nasceu
+    do `oute-propose` (cabeçalho diferente) dá outro valor."""
     if ev.get("script") is None:
         return None
     agent = ev.get("agent") or "unknown"
     created = datetime.fromtimestamp(ev["time_unix_nano"] // 1_000_000_000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sessao = f"# sessao: {ev['sessao']}\n" if ev.get("sessao") else ""
     text = (f"# oute-propose\n# titulo: {ev.get('title') or ''}\n# como: {ev.get('as') or 'user'}\n"
-            f"# agente: {'desconhecido' if agent == 'unknown' else agent}\n# criado: {created}\n\n{ev['script']}")
+            f"# agente: {'desconhecido' if agent == 'unknown' else agent}\n# criado: {created}\n{sessao}\n{ev['script']}")
     return hashlib.sha256(text.encode()[:APPROVE_READ]).hexdigest()[:12]
 
 
