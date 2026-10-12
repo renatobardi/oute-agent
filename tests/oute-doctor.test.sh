@@ -72,8 +72,8 @@ python3 "$TMP/fake-memory.py" "$MEM" & MEM_PID=$!
 for _ in $(seq 1 100); do [[ -s "$MEM/port" ]] && break; sleep 0.1; done
 [[ -s "$MEM/port" ]] || die "o servidor falso do ai-memory não subiu"
 MEM_URL="$SCHEME://127.0.0.1:$(cat "$MEM/port")"
-captured() { printf '%s' "$1" > "$MEM/captured.json"; return 0; }
-mode() { printf '%s' "$1" > "$MEM/mode"; return 0; }
+captured() { local json="$1"; printf '%s' "$json" > "$MEM/captured.json"; return 0; }
+mode() { local name="$1"; printf '%s' "$name" > "$MEM/mode"; return 0; }
 
 # ---------------------------------------------------------------- o home dos agentes
 # uid <n>: um id de sessão fixo por número (nada sorteado: o teste confere o nome inteiro)
