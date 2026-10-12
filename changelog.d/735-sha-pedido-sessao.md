@@ -1,2 +1,0 @@
-### Fixed
-- **sha256 do pedido de sessão confere com o `oute approve`** (#735). O agent-studio refazia o arquivo do pedido sem a linha `# sessao:` que o `oute-propose` grava na worktree de uma sessão, então a página mostrava um aviso de sha diferente que não existia. O `oute-emit` agora manda essa linha no evento (`oute.canal.sessao`) e o agent-studio a põe de volta no sha256 exibido. Pedido antigo, já ingerido sem o atributo, segue com o sha256 de antes. **Precisa de release** (o `docker/oute-emit` e o `docker/agent-studio` vão na imagem).
