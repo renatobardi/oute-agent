@@ -24,6 +24,9 @@ from .tabela import Col, Table
 
 PENDING_LIMIT = 200  # pedidos pendentes na lista (os mais recentes)
 RECENT_LIMIT = 50    # pedidos decididos na lista (os últimos, pela hora da decisão)
+# #815: pendente que a lista da outbox do host, tirada depois, não tem: some da lista, do tray e do gate. A folga cobre
+# o pedido recém-proposto (a hora dele é a do `criado`, e a lista pode ser de um segundo antes). Nada é apagado.
+SNAPSHOT_MARGIN_S = 60
 
 PROPOSED = "oute.canal.proposed"
 
@@ -63,11 +66,14 @@ _FIELDS = ("record::id(id) AS id, title, as, agent, host, instance, size, state,
 # antes do primeiro `oute.canal.*` a tabela não existe, e ler tabela que não existe é erro no SurrealDB: sem ela,
 # lista vazia. Os valores vão sempre em variáveis.
 _IF_TABLE = "IF (INFO FOR DB).tables.pedido THEN ({}) ELSE [] END;"
-_PENDING = f'SELECT {_FIELDS} FROM pedido WHERE state = "pendente" ORDER BY proposed_at DESC LIMIT $pending'
 _RECENT = f'SELECT {_FIELDS} FROM pedido WHERE state = "decidido" ORDER BY decided_at DESC LIMIT $recent'
-_COUNT = 'SELECT count() AS n FROM pedido WHERE state = "pendente" GROUP ALL'
-_LIST = " ".join(_IF_TABLE.format(q) for q in (_PENDING, _RECENT, _COUNT))
-_PENDING_ONLY = " ".join(_IF_TABLE.format(q) for q in (_PENDING, _COUNT))
+# os pendentes saem todos (sem LIMIT): a regra do #815 corta depois, e o total é o dos que sobram
+_PENDING_ALL = f'SELECT {_FIELDS} FROM pedido WHERE state = "pendente" ORDER BY proposed_at DESC'
+# a última lista da outbox de cada host (`oute.canal.snapshot`, ingestão em state.py); tabela ausente = nenhuma
+_SNAPSHOTS = 'SELECT record::id(id) AS host, at_s, ids FROM canal_snapshot'
+_IF_SNAPSHOTS = f"IF (INFO FOR DB).tables.canal_snapshot THEN ({_SNAPSHOTS}) ELSE [] END;"
+_LIST = " ".join([_IF_TABLE.format(_PENDING_ALL), _IF_TABLE.format(_RECENT), _IF_SNAPSHOTS])
+_PENDING_ONLY = " ".join([_IF_TABLE.format(_PENDING_ALL), _IF_SNAPSHOTS])
 # pelo id do registro: sem varrer a tabela (e tabela que ainda não existe = nenhum registro)
 _ONE = f'SELECT {_FIELDS} FROM [type::record("pedido", $id)];'
 
@@ -93,24 +99,38 @@ _VERSIONS = f"""
 APPROVE_READ = 65536  # o `oute approve` lê no máximo isto do arquivo do pedido (`head -c` no scripts/oute)
 
 
+def _snapshots(rows):
+    """Linhas de `canal_snapshot` -> {host: (at_s, ids do pedido na outbox)}: o ids vêm num texto, um por linha."""
+    return {r["host"]: (r.get("at_s") or 0, {i for i in (r.get("ids") or "").split("\n") if i})
+            for r in rows if r.get("host")}
+
+
+def _sem_arquivo(p, snaps):
+    """O pendente que a última lista do host (tirada depois do pedido, com a folga) não tem (#815): o arquivo não está
+    na outbox, então o `oute approve` não tem o que decidir. Host sem lista, ou hora que não lê: continua pendente."""
+    snap, at = snaps.get(p.get("host")), _epoch(p.get("proposed_at"))
+    return snap is not None and at is not None and at < snap[0] - SNAPSHOT_MARGIN_S and p.get("id") not in snap[1]
+
+
+def _sobram(rows, snaps):
+    return [p for p in rows if not _sem_arquivo(p, snaps)]
+
+
 def listing(surreal, pending_limit=PENDING_LIMIT, recent_limit=RECENT_LIMIT):
-    """Pedidos pendentes (do mais novo para o mais antigo; `pending_total` diz quantos há) e os últimos decididos (a
-    tela, que pagina, pede `tabela.ALL` nos dois).
+    """Pedidos pendentes (do mais novo para o mais antigo; `pending_total` diz quantos há, sem os que a regra do #815
+    tira) e os últimos decididos (a tela, que pagina, pede `tabela.ALL` nos dois).
     Erro do SurrealDB levanta (SurrealError): sem o estado não há lista."""
-    found = surreal.query(_LIST, {"pending": pending_limit, "recent": recent_limit})
-    return {"pending": found[0]["result"] or [], "recent": found[1]["result"] or [],
-            "pending_total": _total(found[2])}
+    found = surreal.query(_LIST, {"recent": recent_limit})
+    pend = _sobram(found[0]["result"] or [], _snapshots(found[2]["result"] or []))
+    return {"pending": pend[:pending_limit], "recent": found[1]["result"] or [], "pending_total": len(pend)}
 
 
 def pending(surreal, limit=PENDING_LIMIT):
-    """Só os pendentes (os `limit` mais novos) e quantos há ao todo: o que o tray mostra (#205). As mesmas consultas
-    da lista. Erro do SurrealDB levanta (SurrealError)."""
-    found = surreal.query(_PENDING_ONLY, {"pending": limit})
-    return {"pending": found[0]["result"] or [], "pending_total": _total(found[1])}
-
-
-def _total(statement):
-    return (statement["result"] or [{}])[0].get("n", 0)
+    """Só os pendentes (os `limit` mais novos) e quantos há ao todo: o que o tray mostra (#205) e o gate do painel.
+    As mesmas consultas e a mesma regra da lista (#815). Erro do SurrealDB levanta (SurrealError)."""
+    found = surreal.query(_PENDING_ONLY, {})
+    pend = _sobram(found[0]["result"] or [], _snapshots(found[1]["result"] or []))
+    return {"pending": pend[:limit], "pending_total": len(pend)}
 
 
 def page_path(proposal_id):

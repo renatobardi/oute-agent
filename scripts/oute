@@ -1098,6 +1098,24 @@ approve_pending() {
     compgen -G "$approve_dir/runs/$id.*.result" >/dev/null || echo "$id"
   done
 }
+# #815: a lista dos pedidos que estão na outbox do host agora vai ao agent-studio (oute.canal.snapshot). Sai a cada
+# mudança da lista e, sem mudança, a cada 300 s (o pedido proposto depois da última lista só some numa lista posterior).
+# Container fora = nada sai: a lista vazia de um container que não respondeu tiraria os pedidos reais da tela. Imagem
+# sem o verbo `snapshot` cala como os outros eventos (oute-emit sai 0).
+APPROVE_SNAPSHOT_EVERY=300
+approve_snapshot() {
+  local out ids now hash file="$approve_dir/snapshot.last" last_at=0 last=""
+  out="$(ctr sh -c 'for f in "$HOME"/outbox/*.sh; do if [ -e "$f" ]; then b="${f##*/}"; echo "${b%.sh}"; fi; done' </dev/null)" || return 0
+  ids="$(printf '%s\n' "$out" | { grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true; } | sort -u | tr '\n' ' ' | sed 's/ *$//')" || return 0
+  hash="$(printf '%s' "$ids" | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)"
+  now="$(date +%s)"
+  [[ -r "$file" ]] && read -r last_at last < "$file" || true
+  [[ "$hash" == "$last" ]] && (( now - last_at < APPROVE_SNAPSHOT_EVERY )) && return 0
+  mkdir -p "$approve_dir"
+  ctr oute-emit snapshot $ids </dev/null >/dev/null 2>&1 || true
+  printf '%s %s\n' "$now" "$hash" > "$file"
+  return 0
+}
 # evento operacional oute.canal.decided (ADR-04, #124): o oute-emit do container lê o cabeçalho do .out (nunca a
 # saída). Sem -i (não disputa o teclado com o read); imagem sem oute-emit ou coletor fora do ar: segue em silêncio
 approve_emit() { ctr oute-emit canal "$1" </dev/null >/dev/null 2>&1 || true; }
@@ -1405,6 +1423,7 @@ approve() {
   # aprovado reiniciou o agent) espera ele voltar por até OUTE_APPROVE_WAIT s e entrega, em vez de recusar de cara
   compgen -G "$approve_dir/runs/*.result" >/dev/null && approve_flush "${OUTE_APPROVE_WAIT:-90}"
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
+  approve_snapshot
   if [[ -n "$one" ]]; then
     approve_flush
     grep -qxF "$one" <<<"$(approve_pending)" || { echo "oute: pedido $one não está pendente (já decidido ou não existe)" >&2; return 1; }
@@ -1412,6 +1431,7 @@ approve() {
   fi
   while :; do
     approve_flush
+    approve_snapshot
     local ids; ids="$(approve_pending)"
     for id in $ids; do
       [[ " $seen " == *" $id "* ]] && continue   # 'N' = pula nesta rodada do --watch

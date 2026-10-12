@@ -3,6 +3,8 @@
 ao agent-studio (ADR-08, pipeline logs/studio do collector).
 
   oute-emit canal <id>               fase atual do pedido: proposto (outbox/<id>.sh) ou decidido (inbox/<id>.out)
+  oute-emit snapshot [<id>…]         lista dos pedidos que estão na outbox do host agora (#815): o `oute approve` manda a
+                                     cada volta; o agent-studio tira do pendente o pedido que uma lista posterior não tem
   oute-emit swarm <rodada> <linha>   a linha que o oute-swarm acabou de gravar no log da rodada (a linha `etapa …`, #507, leva
                                      o texto da etapa: o arquivo em ~/.oute/swarm/<rodada>/etapas/, no corpo do evento)
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
@@ -545,6 +547,24 @@ def cmd_canal(pid):
     if src:
         return [canal_proposed(pid, src)]
     raise Skip(f"pedido {pid} não encontrado")
+
+
+# #815: a lista dos pedidos que estão na outbox do host agora. O agent-studio tira do pendente o pedido que uma lista
+# posterior (com folga de 60 s) não tem: pedido de teste, que nunca chegou ao canal, não fica para sempre na tela.
+# Lista com mais de SNAPSHOT_MAX ids, ou id fora do formato, não sai: sem a lista inteira, nenhum pedido se esconde.
+SNAPSHOT_MAX = 1000
+
+
+def cmd_snapshot(ids):
+    if len(ids) > SNAPSHOT_MAX or not all(ID_RE.match(i) for i in ids):
+        raise Skip("lista de pedidos inválida ou grande demais")
+    ids = sorted(set(ids))
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    key = hashlib.sha256(" ".join(ids).encode()).hexdigest()[:16]
+    return [event("oute.canal.snapshot", "human", now, {
+        "oute.canal.ids": json.dumps(ids),
+        "oute.canal.count": len(ids),
+    }, scope="canal/snapshot", key=key)]
 
 
 # ---------------------------------------------------------------- swarm
@@ -1346,6 +1366,8 @@ def main(argv):
         bad = False
     elif verb in ("regression", "sidebar"):
         bad = len(argv) < 2
+    elif verb == "snapshot":
+        bad = False  # zero ids é a lista vazia: a outbox sem pedido
     elif verb == "task":
         bad = len(argv) < 3
     else:
@@ -1374,6 +1396,9 @@ def main(argv):
             mark_decided(events)  # a reconciliação da subida não repete
     elif verb == "reconcile":
         cmd_reconcile(deadline, drained)
+    elif verb == "snapshot":
+        events = cmd_snapshot(argv[1:])
+        send(events, deadline, drained)
     elif verb == "swarm":
         events = cmd_swarm(argv[1], argv[2])
         r = send(events, deadline, drained)
