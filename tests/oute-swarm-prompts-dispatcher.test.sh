@@ -228,7 +228,7 @@ check "538: dispatcher compara o head mergeado com o auditado e pede o delta" gr
 check "538: dispatcher não atribui a uma sessão o que não sabe" grep -qF 'sem atribuir a uma sessão o que você não sabe' "$D"
 check "538: dispatcher cita a trava (código 77) e o limite" bash -c 'grep -qF "já é recusado (código 77)" "$1" && grep -qF "protege contra engano, não contra contorno" "$1"' _ "$D"
 # 541. kaizen: link de comentário copiado da saída do gh e saída dos gates em arquivo
-check "541: tell com comentário usa o URL da saída do gh pr comment, em variável, nunca digitado" grep -qF 'usa o URL copiado da saída do `gh pr comment`, guardado numa variável' "$D"
+check "541: tell com comentário usa o URL da saída do gh pr comment, em variável, nunca digitado" grep -qF 'usa o URL copiado da saída do `pr-comment`, guardado numa variável' "$D"
 check "541: auditoria e reauditoria gravam a saída do gate e só tiram a worktree depois de copiar a falha" grep -qF 'a saída de cada gate vai para um arquivo' "$D"
 check "541: worktree só sai depois de a falha ser lida e copiada para o relatório" grep -qF 'a worktree só sai depois de a falha ser lida e copiada para o relatório' "$D"
 # 485. refcheck antes do pedido de merge
@@ -281,8 +281,8 @@ check "771: §4.3 passo 3: tira a URL de job do Actions das fontes" grep -qF 'Ti
 check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" bash -c 'l="$(grep -F "Fontes para o revisor (#771)" "$1")"; grep -qF "arquivo de fatos" <<<"$l" && grep -qF "§4.3, passo 3" <<<"$l"' _ "$D"
 
 # 772. auditoria delegada a subagente: ele devolve o texto, o dispatcher publica com oute-refcheck
-check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente de auditoria não publica nada" "devolve o texto do relatório" "**você** o publica" "oute-refcheck <arquivo>" "gh pr comment <n> --body-file <arquivo>"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
-check "772: §3: o refcheck vem antes da publicação" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; a="${l%%oute-refcheck*}"; b="${l%%gh pr comment*}"; [ "${#a}" -lt "${#b}" ]' _ "$D"
+check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente de auditoria não publica nada" "devolve o texto do relatório" "**você** o publica" "oute-swarm pr-comment <n> --body-file <arquivo>" "quebrada ou nao-abre não comenta"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "772: §3: o pr-comment roda o oute-refcheck antes de comentar" grep -qF "roda o \`oute-refcheck\` antes" "$D"
 check "772: §3: recusa da ferramenta de escrita ao subagente não bloqueia a auditoria" grep -qF 'Se a ferramenta de escrita recusar ao subagente, isso não bloqueia a auditoria' "$D"
 # 766. aba de PR mergeado fecha sem pergunta; ação coberta por regra não se pergunta; registro da espera; pendência parada do watch
 check "766: §3: a lista de confirmações só leva o close de aba com sessão trabalhando ou PR aberto" grep -qF 'merge, `oute-swarm close … --yes` de aba com sessão ainda trabalhando (ou com PR aberto), `oute-task clean --yes` e `tell` que manda aplicar no host' "$D"
