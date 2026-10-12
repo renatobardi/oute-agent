@@ -1151,6 +1151,7 @@ sa() {
   while [[ "${todos[$i]}" != -- ]]; do e+=("${todos[$i]}"); i=$((i + 1)); done
   args=("${todos[@]:$((i + 1))}")
   OUT="$(cd "$WS/proj" && env ${e[@]+"${e[@]}"} "$TASK" ${args[@]+"${args[@]}"} 2>"$TMP/err" </dev/null)"; RC=$?; ERR="$(cat "$TMP/err")"
+  return 0
 }
 rm -f "${FAKE:?}"/herdr.log "${FAKE:?}"/pane-cmd "${FAKE:?}"/tabs "${FAKE:?}"/tabs.n "${FAKE:?}"/claude.* "${FAKE:?}"/codex.*
 HJ=(HERDR_ENV=1 HERDR_WORKSPACE_ID=w1)
