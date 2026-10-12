@@ -60,6 +60,28 @@ check "campo vazio: código 0"                            [ "$RC" -eq 0 ]
 check "campo vazio: mensagem no campo e Enter"           [ "$(cat "$FAKE/field")" == "[dispatcher swarm-test, repassando o Bardi] pode seguir" -a "$(grep -c '^pane send-keys w1:p1 enter' "$FAKE/herdr.log")" -eq 1 ]
 check "campo vazio: sem ctrl+c"                          [ "$(grep -c 'ctrl+c' "$FAKE/herdr.log")" -eq 0 ]
 
+# ---------------------------------------------------------------- #713: field_text com placeholder e sugestão
+# Linhas copiadas de `herdr pane read --format ansi` de verdade (herdr 0.9.3; Claude Code 2.1.296 e Codex 0.159.2, abas
+# paradas): o placeholder e a sugestão vêm em SGR 2 (esmaecido), depois de NBSP (Claude) ou do fundo (Codex); a régua e o
+# fundo do Codex vêm em cor 38/48;2;r;g;b. Sem esconder isso, o campo vazio seria lido como texto e todo `tell` recusaria.
+. <(sed -n '/^field_text() {/,/^}/p' "$SWARM")
+RUL='\033[0m\033[38;2;136;136;136m──────────\033[0m'
+tela() { printf "$1\n" > "$FAKE/pane-style"; return 0; }
+herdr() { FAKE="$FAKE" "$BIN/herdr" "$@"; }   # o field_text chama o herdr do PATH; aqui, o dublê
+# lê o campo; leitura que falha (campo não achado) não passa por campo vazio
+campo() { field_text w1:p1 "$1" 2>/dev/null; return 0; }
+campo_vazio() { local out; out="$(field_text w1:p1 "$1" 2>/dev/null)" || return 1; [[ -z "$out" ]]; }
+
+tela "$RUL"'\n❯\xc2\xa0\033[0m\033[2mTry "how does oute-swarm.test.sh work?"\033[0m\n'"$RUL"
+check "field_text: placeholder do Claude Code (conversa nova) não é texto"   campo_vazio claude
+tela "$RUL"'\n❯\xc2\xa0\033[0m\033[2mabre o PR\033[0m\n'"$RUL"
+check "field_text: sugestão do Claude Code (depois de um turno) não é texto" campo_vazio claude
+tela "$RUL"'\n❯\xc2\xa0\033[0mrascunho do Bardi\033[0m\n'"$RUL"
+check "field_text: texto de verdade do Claude Code é lido"                   [ "$(campo claude)" == "rascunho do Bardi" ]
+tela '\033[0m\033[1m\033[48;2;59;64;76m›\033[0m\033[48;2;59;64;76m \033[0m\033[2m\033[48;2;59;64;76mAsk Codex to do anything\033[0m\033[48;2;59;64;76m  \033[0m'
+check "field_text: placeholder do Codex não é texto"                         campo_vazio codex
+rm -f "${FAKE:?}/pane-style"
+
 guarda_check
 guarda_stop
 check_end
