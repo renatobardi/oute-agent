@@ -151,4 +151,35 @@ Uma mensagem, nesta ordem:
    Sem release: em cada host, `git pull` + `oute down` + `oute up`.
 8. **Próximo passo:** depois do deploy, `oute-aidlc-ship-verify` em cada host.
 
-Pare aqui. Não rode os comandos do item 7.
+Pare aqui. Não rode os comandos do item 7. O pedido do passo 8 só sai se o Bardi pedir pelo canal.
+
+## 8. Pedido de release pelo canal (só se o Bardi pedir)
+
+Se o Bardi pedir a release pelo canal de aprovação, o pedido leva o sha da `main` conferido no passo 1 (`git rev-parse origin/main`). O script confere esse sha contra o `origin/main` do host antes de qualquer passo e para sem alterar nada se for outro: a release sai da mesma `main` que você conferiu, e não de uma que entrou depois. Monte o pedido com `OUTE_PROPOSE_AGENT=<claude|codex> oute-propose "release <x.y.z>" <<'SH'`, com `<sha conferido>` e `<x.y.z>` trocados pelos valores do relatório, e leia a saída do canal antes de aprovar.
+
+```bash
+set -euo pipefail
+# RESUMO
+# Faz: confere que o origin/main do host é o sha conferido, e só então roda scripts/release, publica a main e a tag v<x.y.z>.
+# Host: o checkout principal da main no host (oute-server ou Mac). Altera: VERSION, CHANGELOG.md, o commit de release, a tag v<x.y.z> e o remoto (push da main e da tag).
+# Não toca: as worktrees de sessão, os outros branches e os hosts (o deploy é do Bardi, com oute update).
+# Reinicia: nada.
+SHA_CONFERIDO="<sha conferido>"
+VERSAO="<x.y.z>"
+echo "1/4: confere o origin/main com o sha do relatório"
+git fetch --quiet --tags origin
+atual="$(git rev-parse origin/main)"
+[[ "$atual" == "$SHA_CONFERIDO" ]] || { echo "origin/main é $atual, não o conferido ($SHA_CONFERIDO): nada alterado" >&2; exit 1; }
+echo "2/4: confere que a árvore está limpa e a main em dia"
+git diff --quiet && git diff --cached --quiet || { echo "há alterações locais: nada alterado" >&2; exit 1; }
+git switch --quiet main
+git merge --quiet --ff-only origin/main
+echo "3/4: roda scripts/release $VERSAO na main conferida"
+scripts/release "$VERSAO"
+echo "4/4: publica a main e a tag"
+# CUIDADO: `git push` da main e da tag v$VERSAO publica a release no remoto. Desfazer exige apagar a tag e a release no GitHub; não se desfaz sozinho.
+git push origin main
+git push origin "v$VERSAO"
+```
+
+Feito quando: o pedido sai com o sha do relatório e a saída do canal mostra o passo 1 com o sha igual. Se o passo 1 parar, a release não foi feita: refaça o relatório (passo 1) com a `main` atual.
