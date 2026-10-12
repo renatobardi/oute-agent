@@ -11,7 +11,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+guarda_start "$TMP/guarda"
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
 # 8. abertura, spawn, tell (ok e recusado), close, rodada fechada e watch
@@ -240,4 +241,6 @@ check "dispatcher: chama ask ao parar com opções numeradas (#386)" grep -qF 't
 check "dispatcher: ask com pergunta curta, sem saída de host (#386)" grep -qF 'nunca saída de comando, de host ou de tela' "$D"
 check "dispatcher: answered ao receber a resposta (#386)" grep -qF 'o primeiro passo é `oute-swarm answered`' "$D"
 check "ajuda e comandos.md citam ask e answered (#386)"   bash -c 'for f in "$@"; do grep -qF "oute-swarm ask" "$f" && grep -qF "oute-swarm answered" "$f" || exit 1; done' _ "$SWARM" "$ROOT/docker/comandos.md"
+guarda_check
+guarda_stop
 check_end

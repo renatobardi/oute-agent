@@ -11,7 +11,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+guarda_start "$TMP/guarda"
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #212: agente das sessões da rodada (--agent na abertura)
 # 10. abertura com --agent: meta, prompt, aviso, log e oute.swarm.round.opened
@@ -94,4 +95,6 @@ check "meta inválido: mensagem com a origem"             grep -qF 'Pi saiu do s
 check "meta inválido: nada registrado nem aberto"        [ "$(cat "$STATE/spawned")" == "$before" -a "$(grep -c 'tab create' "$FAKE/herdr.log")" -eq "$tabs" ]
 sw spawn 13-y "instrução" --kaizen --agent claude
 check "meta inválido + --agent: abre com o explícito"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 13-y)" == claude ]
+guarda_check
+guarda_stop
 check_end

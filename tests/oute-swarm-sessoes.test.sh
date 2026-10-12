@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 # ---------------------------------------------------------------- #85: sessão kaizen em outro repo
@@ -271,4 +274,6 @@ check "407: close com | head -1 registra a baixa"       grep -qxF '8-baz' "$STAT
 MAX=3 sw spawn 10-test "instrução"
 check "407: novo spawn passa (vaga liberada)"           [ "$RC" -eq 0 ]
 check "407: spawned tem 7-foo, 9-qux e 10-test"         [ "$(awk 'NR <= 1 || $1 ~ /(7-foo|9-qux|10-test)/ { print $1 }' "$STATE/spawned" | grep -c .)" -eq 3 ]
+guarda_check
+guarda_stop
 check_end

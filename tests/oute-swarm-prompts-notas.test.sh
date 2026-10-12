@@ -7,8 +7,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/oute-swarm-prompts.sh"
 W="$ROOT/docker/swarm-worker.md"; N="$ROOT/docker/agent-notes.md"; PT="$ROOT/docs/pt-controlado.md"
@@ -83,4 +86,6 @@ check "665: notas mandam rodar gh issue list antes de todo gh issue create, em i
 check "665: notas mandam comentar na issue aberta em vez de criar outra" grep -qF 'new evidence goes in a comment on it (`gh issue comment <n>`)' "$N"
 check "486: notas mandam só Refs e ## Falta com critério pendente, sem Closes nem negado" grep -qF 'write only `Refs #<n>` and list what is missing under `## Falta`; in that case never write `Closes #<n>`' "$N"
 check "703: notas mandam Closes com só critério (ship) pendente, com a marca no Falta, como o worker" bash -c 'grep -qF "except those of \`ship\`" "$1" && grep -qF "with the mark \`(ship)\` and still use \`Closes\` (#387)" "$1" && grep -qF "exceto os de \`ship\`" "$2" && grep -qF "com a marca \`(ship)\`, e o PR usa \`Closes\`" "$2"' _ "$N" "$W"
+guarda_check
+guarda_stop
 check_end

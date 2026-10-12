@@ -10,11 +10,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 
@@ -342,4 +345,6 @@ check("append: a hora cresce sempre e a marca mais nova do alvo é a última", r
       and acks.last(con, "f" * 32) is None and [len(b) for b in acks.rows(con, 1)] == [1, 1])
 PY
 check_py "$TMP/py.out"
+guarda_check
+guarda_stop
 check_end

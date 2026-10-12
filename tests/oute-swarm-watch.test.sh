@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 # 1. watch: cada evento impresso vai também para o log da rodada; a linha de base não grava nada
@@ -426,4 +429,6 @@ echo : > "$FAKE/on-sleep-2"
 OUTE_WATCH_STALL_S=abc OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "prazo: valor inválido usa 1800 s, nada aos 16 min" [ -z "$(pend_events)" ]
 
+guarda_check
+guarda_stop
 check_end

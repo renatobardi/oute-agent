@@ -13,11 +13,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # antes do primeiro receptor o endpoint é porta fechada (o agent-studio do teste também posta); a guarda só pega o intervalo antes do rcv_start, e o resto do teste não é coberto por ela (#815)
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 PKG="$ROOT/docker/agent-studio/agent_studio"
@@ -523,4 +525,6 @@ check "lógica em Python: os 44 casos rodaram"          test "$((n_ok + n_fail))
 check "templates dos pedidos vão na imagem (dentro do pacote copiado)" bash -c 'test -f "$1/templates/proposals.html" && test -f "$1/templates/proposal.html" && grep -q "COPY docker/agent-studio/agent_studio /opt/agent-studio/app/agent_studio" "$2/docker/Dockerfile"' _ "$PKG" "$ROOT"
 check "compose: agent-studio só em 127.0.0.1"          bash -c 'awk "/^  agent-studio:/{f=1;print;next} f&&/^  [a-z]/{exit} f" "$1" | grep -q "\"127.0.0.1:\${OUTE_AGENT_STUDIO_PORT:-8430}:8430\""' _ "$ROOT/docker/compose.yaml"
 
+guarda_check
+guarda_stop
 check_end

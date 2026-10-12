@@ -11,7 +11,34 @@ rcv_start() {
   local i; for i in $(seq 1 50); do [[ -s "$RCV_DIR/port" ]] && break; sleep 0.1; done
   export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(cat "$RCV_DIR/port")"
 }
-rcv_stop() { [[ -z "${RCV_PID:-}" ]] || { kill "$RCV_PID" 2>/dev/null; wait "$RCV_PID" 2>/dev/null; RCV_PID=""; }; }
+rcv_stop() {
+  [[ -z "${RCV_PID:-}" ]] || { kill "$RCV_PID" 2>/dev/null; wait "$RCV_PID" 2>/dev/null; RCV_PID=""; }
+  # com a guarda (#815), sem receptor o endpoint é uma porta fechada: nada chega a um coletor de verdade (o evento
+  # fica no spool do HOME do teste), e a guarda só vê o que sai antes do primeiro receptor
+  [[ -z "${GUARDA_DIR:-}" ]] || export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:$(closed_port)"
+  return 0
+}
+# guarda (#815): o container tem OTEL_* reais e o ~/.oute_env com o coletor de verdade. Um evento que o teste manda sem
+# receptor próprio, com o endpoint herdado, iria ao coletor real. guarda_start <dir>: sobe um receptor que só guarda o que
+# chegar e aponta o ambiente a ele; guarda_check (pelo check) falha se algum POST chegou lá; guarda_posts: quantos.
+guarda_start() {
+  local dir="$1"
+  GUARDA_DIR="$dir"; mkdir -p "$GUARDA_DIR"; rm -f "${GUARDA_DIR:?}/port"
+  unset OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+  python3 "$OTLP_LIB/otlp-receiver.py" "$GUARDA_DIR" & GUARDA_PID=$!
+  disown "$GUARDA_PID"   # fora da tabela de jobs: um `wait` do teste não espera a guarda
+  local i; for i in $(seq 1 50); do [[ -s "$GUARDA_DIR/port" ]] && break; sleep 0.1; done
+  GUARDA_EP="http://127.0.0.1:$(cat "$GUARDA_DIR/port")"
+  export OTEL_EXPORTER_OTLP_ENDPOINT="$GUARDA_EP"
+  return 0
+}
+guarda_posts() { ls "$GUARDA_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; return 0; }
+guarda_check() {
+  [[ "$(guarda_posts)" -eq 0 ]] || for f in "$GUARDA_DIR"/*.json; do echo "     guarda | $(cat "${f%.json}.path" 2>/dev/null) $(head -c 300 "$f")"; done
+  check "guarda: nenhum evento saiu para endpoint que não é o receptor do teste ($(guarda_posts) POST)" [ "$(guarda_posts)" -eq 0 ]
+  return $?
+}
+guarda_stop() { [[ -z "${GUARDA_PID:-}" ]] || { kill "$GUARDA_PID" 2>/dev/null; GUARDA_PID=""; }; return 0; }
 events() {
   local f; f=("$1"/*.json); [[ -e "${f[0]}" ]] || return 0
   jq -c '.resourceLogs[]? | (.resource.attributes | map({(.key): (.value | to_entries[0].value)}) | add) as $res

@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 # nenhum pane ou agente de verdade no ambiente de quem roda
@@ -245,4 +248,6 @@ check "sem etapas: recusa"                               [ "$RC" -ne 0 ]
 check "sem etapas: diz a causa"                          grep -qF 'etapas do prompt ausentes' <<<"$ERR"
 check "sem etapas: nenhum agente aberto"                 [ ! -e "$FAKE/oute-task.last" ]
 
+guarda_check
+guarda_stop
 check_end

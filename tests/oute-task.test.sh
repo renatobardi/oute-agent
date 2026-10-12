@@ -12,8 +12,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
-trap 'rcv_stop; chmod -R u+w "${TMP:?}" 2>/dev/null; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; rcv_stop; chmod -R u+w "${TMP:?}" 2>/dev/null; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+guarda_start "$TMP/guarda"
 command -v jq >/dev/null && command -v python3 >/dev/null && command -v git >/dev/null || die "precisa de jq, python3 e git"
 TASK="$ROOT/docker/oute-task"
 [[ -x "$TASK" ]] || die "oute-task ausente ou sem +x: $TASK"
@@ -1127,4 +1128,6 @@ rm -f "${FAKE:?}/quota.json"
 
 rcv_stop
 
+guarda_check
+guarda_stop
 check_end

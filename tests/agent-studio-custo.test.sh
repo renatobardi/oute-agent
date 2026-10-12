@@ -10,8 +10,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo
@@ -141,4 +143,6 @@ check "tela: janela vazia avisa"                       grep -q 'Nenhuma chamada 
 # ---------------------------------------------------------------- 5. nada novo na origem
 check "origem: oute-task/oute-emit/oute-swarm sem atributo de prompt, título ou caminho no evento da sessão" \
   bash -c '! grep -nE "oute\.task\.(prompt|title|path|role)" "$1"/docker/oute-emit "$1"/docker/oute-task "$1"/docker/oute-swarm' _ "$ROOT"
+guarda_check
+guarda_stop
 check_end

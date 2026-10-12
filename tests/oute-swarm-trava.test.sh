@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 # q7 <% da janela de 7 dias do claude> [status]: grava o JSON do `oute-quota --json` (5 h folgada, as outras assinaturas folgadas)
@@ -81,4 +84,6 @@ check "--weekly-guard sem valor: código 2"              bash -c 'env PATH="$1:$
 # valor inválido na tabela: tabela recusada (aviso), a sessão abre com o padrão do agente e a trava não se aplica
 BADT="$TMP/$CASE/bad.toml"; sed 's/^weekly_guard_pct = 95/weekly_guard_pct = 150/' "$TABLE" > "$BADT"
 check "weekly_guard_pct fora de 1 a 100: tabela inválida, aviso" bash -c 'env PATH="$1:$PATH" FAKE="$2" OUTE_SELECT_TABLE="$3" "$4" --weekly-guard claude 2>&1 | grep -qF "weekly_guard_pct fora de 1 a 100"' _ "$BIN" "$FAKE" "$BADT" "$ROOT/docker/oute-select"
+guarda_check
+guarda_stop
 check_end

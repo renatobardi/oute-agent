@@ -12,8 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
 . "$ROOT/tests/lib/check.sh"
+guarda_start "$TMP/guarda"
 mem_stop() { [[ -z "${MEM_PID:-}" ]] || { kill "$MEM_PID" 2>/dev/null; wait "$MEM_PID" 2>/dev/null; MEM_PID=""; }; return 0; }
-trap 'mem_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; mem_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 command -v jq >/dev/null && command -v python3 >/dev/null || die "precisa de jq e python3"
 CHECK_OUT=20
 DOCTOR="$ROOT/docker/oute-doctor"
@@ -337,4 +338,6 @@ check "imagem sem o oute-doctor: diz que precisa da release, rc 1" bash -c '[ "$
 check "o guia e o uso citam o comando"                     bash -c 'grep -q "^  oute doctor " "$1/docker/comandos.md" && grep -q "^  doctor \[opções\]" "$1/scripts/oute" && grep -q "^## CONTAINER — captura do ai-memory (oute-doctor, #725)" "$1/docker/comandos.md"' _ "$ROOT"
 check "a imagem leva o comando, executável"                bash -c 'grep -q "^COPY docker/oute-doctor /usr/local/bin/" "$1/docker/Dockerfile" && grep -q "/usr/local/bin/oute-doctor" "$1/docker/Dockerfile" && [ -x "$1/docker/oute-doctor" ]' _ "$ROOT"
 
+guarda_check
+guarda_stop
 check_end

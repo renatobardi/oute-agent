@@ -9,7 +9,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null || { echo "FAIL precisa de jq e python3"; exit 1; }
 
@@ -18,6 +18,15 @@ ln -s "$ROOT/docker/oute-emit" "$BIN/oute-emit"
 export PATH="$BIN:$PATH" OTEL_RESOURCE_ATTRIBUTES="host.name=oute-mac,oute.instance=oute-agent,deployment.environment=oute-mac"
 unset CLAUDECODE CODEX_THREAD_ID PI_CODING_AGENT OUTE_PROPOSE_AGENT OUTE_INBOX OUTE_OUTBOX OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
 
+# guarda (#815): o endpoint herdado do container é o coletor de verdade; sem receptor do teste, o evento cai aqui
+guarda_start "$TMP/guarda"
+DEAD="http://127.0.0.1:$(closed_port)"   # coletor fora do ar: o que o teste espera de um evento sem receptor
+# prova da guarda (antes de qualquer outro caso): um oute-propose sem receptor do teste, com o endpoint herdado e a
+# origem do Mac (a da suíte, linha 13), tem que cair na guarda; depois sai o POST de prova, para a guarda ficar limpa
+PROVA="$TMP/prova"; mkdir -p "$PROVA"
+OUT="$(HOME="$PROVA" "$ROOT/docker/oute-propose" "vazamento de prova" <<<"echo prova" 2>/dev/null)"
+check "guarda: pega o evento que sai sem o receptor do teste" [ "$(guarda_posts)" -eq 1 ]
+rm -f "${GUARDA_DIR:?}"/*.json
 posts() { ls "$RCV_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; }
 # propose <home> <título> [args]: roda o oute-propose com o script de $SCRIPT; stdout em $OUT, código em $RC
 propose() { local h="$1"; shift; OUT="$(HOME="$h" "$ROOT/docker/oute-propose" "$@" <<<"$SCRIPT" 2>/dev/null)"; RC=$?; }
@@ -68,7 +77,7 @@ check "lento: não passa do timeout (~2 s)"             [ $(( $(date +%s) - t0 )
 rcv_stop
 OUT="$(HOME="$H" OTEL_EXPORTER_OTLP_ENDPOINT= oute-emit canal "$OUT" 2>&1)"; RC=$?
 check "sem endpoint: rc 0, nada na tela"               [ "$RC" -eq 0 -a -z "$OUT" ]
-OUT="$(HOME="$H" oute-emit canal ../../etc/passwd 2>&1; oute-emit nada 2>&1; oute-emit swarm x 2>&1)"; RC=$?
+OUT="$(export OTEL_EXPORTER_OTLP_ENDPOINT="$DEAD"; HOME="$H" oute-emit canal ../../etc/passwd 2>&1; oute-emit nada 2>&1; oute-emit swarm x 2>&1)"; RC=$?
 check "uso inválido: rc 0, nada na tela"               [ "$RC" -eq 0 -a -z "$OUT" ]
 
 # ---------------------------------------------------------------- 3. oute approve → oute.canal.decided (docker falso)
@@ -288,9 +297,9 @@ rcv_stop
 
 # agent-studio de teste: os POSTs capturados (da janela e do ao vivo), entregues duas vezes, não criam linha nova
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
-studio_start "$TMP/s5w" || die "agent-studio não subiu: $(cat "$TMP/s5w/stderr")"
+studio_start "$TMP/s5w" OTEL_EXPORTER_OTLP_ENDPOINT="$DEAD" || die "agent-studio não subiu: $(cat "$TMP/s5w/stderr")"
 for f in "$TMP/r5"/*.json "$WIN_DIR"/*.json "$TMP/r5"/*.json "$WIN_DIR"/*.json; do post logs "$f" >/dev/null; done
 studio_stop
 check "agent-studio: ao vivo + janela, duas vezes = 14 linhas (13 ao vivo + o watch novo)" [ "$(studio_sql "$TMP/s5w/db.duckdb" "SELECT count(*) AS n FROM logs" | jq -r .n)" -eq 14 ]
@@ -491,7 +500,7 @@ rcv_start "$TMP/r7a"
 HOME="$RH" oute-emit canal 20260928-121500-vivo
 check "reconcile: ao vivo aceito marca o pedido"        [ "$(n true)" -eq 1 -a -e "$RD/20260928-121500-vivo" ]
 rcv_stop
-HOME="$RH" oute-emit canal 20260928-122000-vivospool
+OTEL_EXPORTER_OTLP_ENDPOINT="$DEAD" HOME="$RH" oute-emit canal 20260928-122000-vivospool
 check "reconcile: ao vivo no spool também marca"        [ -e "$RD/20260928-122000-vivospool" -a "$(ls "$RS/"*.json | wc -l)" -eq 1 ]
 # subida com o coletor fora: vai para o spool e marca
 OTEL_EXPORTER_OTLP_ENDPOINT="$DOWN" subida
@@ -933,4 +942,6 @@ HOME="$SH" oute-emit swarm r-aberta "$P"
 check "fechada no disco, sem corte: só o evento da linha, nada marcado" [ "$(n true)" -eq 1 -a "$(fech r-canal)" -eq 0 -a ! -e "$SH/.oute/emit/rounds-closed" ]
 rcv_stop
 
+guarda_check
+guarda_stop
 check_end

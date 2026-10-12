@@ -9,8 +9,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
 GIT_SHIM="${GIT_SHIM:-$ROOT/docker/shims/git}"
 # true_git: o primeiro git do PATH que não é shim do oute (#737). Mesma varredura de docker/shims/git, mas pula as cópias
 # instaladas do shim (o `command -v git` devolve a cópia instalada no container de agente, e o teste trava nela).
@@ -247,4 +249,6 @@ else
   bad "oute-task ausente ou sem +x: $TASK"
 fi
 
+guarda_check
+guarda_stop
 check_end

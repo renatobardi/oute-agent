@@ -5,8 +5,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROPOSE="${PROPOSE:-$ROOT/docker/oute-propose}"
-TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
 
 H="$TMP/home"; mkdir -p "$H" "$TMP/bin"
 # oute-emit falso: o pedido não manda evento de verdade
@@ -41,4 +43,6 @@ mkdir -p "$TMP/fora"
 propose "$TMP/fora" "fora de repo"
 check "sessao: fora de repo git, sem o campo"             bash -c '! grep -q "^# sessao:" "$1" && [ -s "$1" ]' _ "$F"
 
+guarda_check
+guarda_stop
 check_end

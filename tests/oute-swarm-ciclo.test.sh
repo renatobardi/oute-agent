@@ -12,7 +12,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+guarda_start "$TMP/guarda"
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 . "$ROOT/tests/lib/swarm-reviewer.sh"
 CYCLE=renatobardi/oute-agent#509
@@ -90,4 +91,6 @@ swa ask "o ciclo fechou?"
 check "ask sem OUTE_SWARM_ID cai na rodada, não na pasta do ciclo" bash -c '[ "$1" -eq 0 ] && grep -q " pergunta " "$2/log" && [ ! -e "$3/log" ]' _ "$RC" "$STATE" "$H/.oute/swarm/$CID"
 swa list
 check "list: a pasta do ciclo não aparece como rodada"      bash -c '[ "$1" -eq 0 ] && ! grep -qF "ciclo-" <<<"$2"' _ "$RC" "$OUT"
+guarda_check
+guarda_stop
 check_end

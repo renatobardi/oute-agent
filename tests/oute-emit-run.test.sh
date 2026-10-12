@@ -6,8 +6,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
 command -v python3 >/dev/null || die "precisa de python3"
 EMIT="$ROOT/docker/oute-emit"
 H="$TMP/home"; mkdir -p "$H"
@@ -109,4 +111,6 @@ run -- "$TMP/nao-existe"
 check "run: comando que não existe: 127, só o nome na mensagem" bash -c '[ "$1" -eq 127 ] && grep -qF "não rodei" <<<"$2"' _ "$RC" "$ERR"
 check "run: nunca escreve no stdout em erro"             [ -z "$OUT" ]
 check "docs: o uso do oute-emit lista o run"             bash -c '"$1" --help 2>&1 | grep -qF "oute-emit run [--attr k=v]"' _ "$EMIT"
+guarda_check
+guarda_stop
 check_end

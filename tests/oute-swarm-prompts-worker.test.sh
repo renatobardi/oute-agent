@@ -7,8 +7,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/oute-swarm-prompts.sh"
 
@@ -187,4 +190,6 @@ check "worker antes do PR: testes que citam o termo alterado (#578)" grep -qF '`
 check "worker antes do PR: só arquivos da issue (#578)" grep -qF '`git diff --name-only origin/main...HEAD` só lista arquivos da própria issue; arquivo de runtime ou binário sai do PR.' "$P"
 check "worker antes do PR: arquivo apagado ou revertido (#578)" grep -qF '`git diff origin/main --stat` não mostra arquivo apagado ou revertido que a issue não pediu.' "$P"
 check "worker antes do PR: sem placeholder no prompt"      [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
+guarda_check
+guarda_stop
 check_end

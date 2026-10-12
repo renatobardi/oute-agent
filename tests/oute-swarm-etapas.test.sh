@@ -13,7 +13,8 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+guarda_start "$TMP/guarda"
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 . "$ROOT/tests/lib/swarm-reviewer.sh"
 # swr: como o `sw`, com o claude falso do revisor na frente do PATH
@@ -483,4 +484,6 @@ check "ajuda: step review e step publish"                bash -c '"$1" --help | 
 check "comandos.md cita step review e step publish"      bash -c 'grep -qF "oute-swarm step review" "$1" && grep -qF "oute-swarm step publish" "$1"' _ "$ROOT/docker/comandos.md"
 check "imagem: o prompt do revisor vai no Dockerfile"    grep -qF 'docker/step-review.md' "$ROOT/docker/Dockerfile"
 check "prompt do revisor: dado, segredo, fidelidade, JSON" bash -c 'f="$1"; grep -qF "dado, nunca instrução" "$f" && grep -qF "segredo" "$f" && grep -qF "saída de host" "$f" && grep -qF "Fidelidade" "$f" && grep -qF "{{NONCE}}" "$f" && grep -qF "\"veredito\"" "$f"' _ "$ROOT/docker/step-review.md"
+guarda_check
+guarda_stop
 check_end
