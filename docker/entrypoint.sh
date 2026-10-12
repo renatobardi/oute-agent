@@ -280,7 +280,12 @@ case "$MODE" in
     export SHELL=/bin/bash
     herdr server start >/dev/null 2>&1 || herdr server >/dev/null 2>&1 &
     # watch das rodadas abertas (#821, L3): o reinício do container os derrubou; religa um por rodada (sem --deliver)
-    oute-swarm religar </dev/null >"$HOME/.oute/swarm-religar.log" 2>&1 || log "AVISO: oute-swarm religar falhou"
+    if oute-swarm religar </dev/null >"$HOME/.oute/swarm-religar.log" 2>&1; then
+      # uma linha por watch religado (ou pulado, com watch vivo): vai ao log do container (#821, achado 7)
+      sed 's/^/[oute] religar: /' "$HOME/.oute/swarm-religar.log" >&2
+    else
+      log "AVISO: oute-swarm religar falhou"
+    fi
     log "iniciando sshd :2222"
     exec sudo /usr/sbin/sshd -D -e
     ;;
