@@ -41,7 +41,8 @@ services:
       OTEL_LOG_USER_PROMPTS: "1"
       OTEL_LOG_ASSISTANT_RESPONSES: "1"
       OTEL_LOG_TOOL_DETAILS: "1"
-      OTEL_LOG_TOOL_CONTENT: "1"
+      # conteúdo do resultado de ferramenta fica desligado por padrão: é onde mais aparece segredo do ambiente (ADR-04, adendo)
+      OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-0}
       # origem = máquina + instância (o `oute` resolve OUTE_HOST/OUTE_INSTANCE; o collector reforça em tudo)
       OUTE_HOST: ${OUTE_HOST:-oute}
       OUTE_INSTANCE: ${OUTE_INSTANCE:-oute-agent}

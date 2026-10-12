@@ -1,6 +1,7 @@
 # OTel Collector do oute-agent (issue #13, ADR-04) — porta de entrada única de telemetria.
 # Fontes (rede docker "oute", sem porta publicada): Claude Code e Codex.
-# Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt.
+# Destino 1 (sempre): bucket OCI oute-observability via API S3 — TUDO, inclusive conteúdo de prompt, com segredo
+# conhecido mascarado pelo transform/redact antes da escrita (ADR-04, adendo).
 # Destino 2 (opcional, agent-studio.yaml): agent-studio — tudo, com conteúdo (ADR-08).
 # Sem perda no bucket (#161, #152): fila em disco por exporter, lote formado na fila (não em memória),
 # retry sem prazo. kill -9 ou OCI fora por dias não perdem o que o collector aceitou (tests/otelcol-queue.test.sh).
@@ -52,6 +53,34 @@ processors:
     metric_statements:
       - context: resource
         statements: *agent_by_service
+  # Filtro de segredo (ADR-04, adendo): mascara, no corpo e nos atributos de log e de span, padrões conhecidos de
+  # credencial. Mascara o trecho; nunca apaga o registro nem a linha (telemetria nunca é apagada). Cobre PEM, Bearer,
+  # tokens do GitHub (gh*_ e github_pat_), sk-, AKIA, AIza e NOME=valor com NOME em maiúscula terminando em KEY, TOKEN,
+  # SECRET ou PASSWORD (ou começando em GH_), valor sem aspas, com aspas ou com aspas escapadas. Não pega credencial sem
+  # prefixo nem nome conhecido: é uma rede, não a garantia. No OTTL, barra dupla; as aspas entram como \x22 e \x27
+  # (aspa crua fecha a string OTTL).
+  transform/redact:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - 'replace_pattern(body, "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----", "[redigido]")'
+          - 'replace_pattern(body, "(?i)\\bbearer\\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer [redigido]")'
+          - 'replace_pattern(body, "\\bgh[pousr]_[A-Za-z0-9]{20,}|\\bgithub_pat_[A-Za-z0-9_]{20,}|\\bsk-[A-Za-z0-9_-]{20,}", "[redigido]")'
+          - 'replace_pattern(body, "\\bAKIA[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
+          - 'replace_pattern(body, "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*)=(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27\\\\]+)", "$1=[redigido]")'
+      - context: log
+        statements: &redact_attrs
+          - 'replace_all_patterns(attributes, "value", "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "(?i)\\bbearer\\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer [redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\bgh[pousr]_[A-Za-z0-9]{20,}|\\bgithub_pat_[A-Za-z0-9_]{20,}|\\bsk-[A-Za-z0-9_-]{20,}", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\bAKIA[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*)=(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27\\\\]+)", "$1=[redigido]")'
+    trace_statements:
+      - context: span
+        statements: *redact_attrs
+      - context: spanevent
+        statements: *redact_attrs
 
 exporters:
   awss3/traces:
@@ -141,7 +170,7 @@ service:
   pipelines:
     traces/archive:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource]
+      processors: [memory_limiter, transform/agent, resource, transform/redact]
       exporters: [awss3/traces]
     metrics/archive:
       receivers: [otlp]
@@ -149,5 +178,5 @@ service:
       exporters: [awss3/metrics]
     logs/archive:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource]
+      processors: [memory_limiter, transform/agent, resource, transform/redact]
       exporters: [awss3/logs]

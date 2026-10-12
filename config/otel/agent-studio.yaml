@@ -78,7 +78,7 @@ service:
   pipelines:
     traces/studio:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource, filter/codex_noise]
+      processors: [memory_limiter, transform/agent, resource, transform/redact, filter/codex_noise]
       exporters: [otlp_http/studio_traces]
     metrics/studio:
       receivers: [otlp]
@@ -86,5 +86,5 @@ service:
       exporters: [otlp_http/studio_metrics]
     logs/studio:
       receivers: [otlp]
-      processors: [memory_limiter, transform/agent, resource]
+      processors: [memory_limiter, transform/agent, resource, transform/redact]
       exporters: [otlp_http/studio_logs]

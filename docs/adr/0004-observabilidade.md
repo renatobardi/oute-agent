@@ -202,6 +202,15 @@ Decisão do Bardi (2026-10-05, #599): a conversa aberta direto numa pasta, sem o
   - Ler conteúdo (o `cd <pasta>` do comando) para cobrir o resto é decisão do Bardi e está pendente (#599).
 - Opções descartadas: criar `oute.task.id` para a conversa interativa (fora de escopo da #599: ela não é sessão); marcar pelo nome da pasta da worktree (dois nomes para o mesmo repositório no filtro); mudar o `oute-task` (fora de escopo da #599).
 
+## Adendo — segredo na telemetria (sem issue, sessão avulsa, 2026-10-12)
+- **Problema:** `OTEL_LOG_TOOL_CONTENT=1` (compose) mandava o resultado das ferramentas ao bucket, que nunca é apagado. Uma checagem de ambiente feita por ferramenta (`env`, `declare -px`) põe credencial no resultado. Se isso já chegou ao bucket: **não verificado** (o bucket não foi lido nesta sessão).
+- **Filtro no collector:** o `transform/redact` (`config/otel/collector.yaml`) mascara, antes da escrita, no corpo e nos atributos de log e de span, o que casa com: bloco PEM; `Bearer <token>`; `gh[pousr]_…` e `github_pat_…`; `sk-…`; `AKIA…`; `AIza…`; e `NOME=valor` com NOME em maiúscula terminando em `KEY`, `TOKEN`, `SECRET` ou `PASSWORD`, ou começando em `GH_` (valor sem aspas, com aspas ou com aspas escapadas). Troca só o trecho por `[redigido]` (no `NOME=valor`, o nome fica). O registro e a linha ficam: a regra "telemetria nunca é apagada" vale. Entra nos pipelines de logs e traces do bucket e do agent-studio (ADR-08).
+- **Limite do filtro:** é uma rede de padrões conhecidos, não garantia. Credencial sem prefixo conhecido e sem nome `…_KEY`/`…_TOKEN`/… não é pega, e nome em minúscula não é pego. Custo de CPU do filtro no collector: **não medido**.
+- **`OTEL_LOG_TOOL_CONTENT` desligado por padrão:** o compose passa `${OTEL_LOG_TOOL_CONTENT:-0}`, e o `oute-emit` (`TELEMETRY_KEYS`) deixou de levar a chave do `~/.oute_env` ao agente headless do `oute-emit run`. Ligar de novo é decisão do Bardi, no ambiente do compose. As demais chaves de conteúdo (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_ASSISTANT_RESPONSES`) seguem ligadas.
+- **O que se perde com o conteúdo desligado:** o texto do resultado de ferramenta nas sessões novas, no bucket e no agent-studio. O agent-studio, no código, não lê `tool_input` nem `tool_output`: lê `full_command` e `tool_name` (`docker/agent-studio/agent_studio/phase.py:55-56`) e `tool_parameters.skill_name` (`phase.py:141`), que vêm de `OTEL_LOG_TOOL_DETAILS`, ainda ligado. Se a página de conversa mostra esse texto por outro caminho: **não medido**. Nome do atributo de conteúdo do Claude Code: **não verificado** contra bucket real (ver a nota de nomes acima).
+- **Não cobre:** registros já gravados (o bucket não apaga; o que fazer com o que já está lá e com credenciais que estiveram no ambiente é decisão do Bardi) e segredo em prompt ou resposta fora dos padrões acima.
+- **Teste:** `tests/otelcol-redact.test.sh` (collector de verdade contra o S3 falso; segredos gerados na hora; texto exato com `[redigido]`; nenhum registro some). Base (HEAD): 27 falhas; head: 35 ok.
+
 ## Onde cada coisa fica / limites
 | Local | Conteúdo | Limite |
 |---|---|---|

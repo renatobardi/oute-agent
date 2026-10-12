@@ -24,7 +24,7 @@ export OUT_DIR="$TMP/out"; mkdir -p "$OUT_DIR"
 # uma GH_, uma OUTE_ e uma OTEL_SERVICE_NAME (fora do conjunto); e uma linha de shell solta, que só um source executaria
 envfile() {
   local h="$1"; shift
-  env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=segredo OTEL_SERVICE_NAME=outro "$@" bash -c 'declare -px' \
+  env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=segredo OTEL_SERVICE_NAME=outro "$@" bash -c 'declare -px' </dev/null \
     | grep -E '^declare -x (GH_|OUTE_|OTEL_|CLAUDE_CODE_)' > "$h/.oute_env"
   printf 'touch "%s/pwned"\n' "$h" >> "$h/.oute_env"
   return 0

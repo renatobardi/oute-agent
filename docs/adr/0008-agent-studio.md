@@ -641,6 +641,10 @@ O Bardi decidiu, em 2026-10-05 ([comentário na #564](https://github.com/renatob
 - **Exceção escrita:** nenhuma. O download do modelo não ganha rota. Sem o modelo, o `ai-memory` fica com a busca por texto, por entidade e por grafo, sem a parte vetorial. Para ter a busca híbrida num volume novo, o modelo entra no volume por outro caminho (decisão do Bardi, fora da #564). Recomendação do autor: conferir `models/` no volume dos dois hosts depois do deploy.
 - Depois do deploy, o `oute-aidlc-ship-verify` confere o que a sessão não pôde: `ai-memory` saudável, hook, MCP e `oute memory-backup` (critério `ship` da #564).
 
+### Segredo na telemetria (sem issue, 2026-10-12)
+- O agent-studio recebe o mesmo filtro do bucket (`transform/redact` em `traces/studio` e `logs/studio`, `config/otel/agent-studio.yaml`): o texto que ele guarda com conteúdo sai mascarado nos padrões de credencial conhecidos (ADR-04, adendo). Registros já gravados no DuckDB e no SurrealDB não mudam.
+- `OTEL_LOG_TOOL_CONTENT` sai desligado por padrão (ADR-04, adendo). O agent-studio, no código, não lê o conteúdo de ferramenta (`phase.py:55-56`, `141`); o efeito na página de conversa é **não medido**.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.
