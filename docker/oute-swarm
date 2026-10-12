@@ -1164,17 +1164,21 @@ perguntas_abertas() {
   awk '$2 == "pergunta" { sub(/^[^ ]+ pergunta /, ""); p = p $0 "\n" } $2 == "resposta" { p = "" } END { printf "%s", p }' "$state/log" 2>/dev/null || true
   return 0
 }
-# w_pergunta_cita <perguntas abertas> <referência do item, #n ou repo#n>: 0 se alguma cita o número do item como número
-# inteiro (#12 não casa com #120; #12 não casa com outro#12, que é outro repo), 1 se não (#821, L4)
+# w_pergunta_cita <perguntas abertas> <referência do item, #n ou repo#n> <repo da rodada>: 0 se alguma cita o número do item
+# como número inteiro (#12 não casa com #120), 1 se não (#821, L4). Antes do número, vale começo de linha, caractere que não
+# seja letra, dígito, `.`, `_` ou `-`, `PR` (o `PR#12` escrito sem espaço) e o nome do repo da rodada (`oute-agent#12`).
+# `outro#12` não casa: é outro repo (achado 1 da reauditoria do #823)
 w_pergunta_cita() {
-  local ask="$1" ref="$2" re
+  local ask="$1" ref="$2" rr="$3" re rre alt
   [[ -n "$ask" && -n "$ref" ]] || return 1
   re="${ref//./\\.}"
-  grep -qE -- "(^|[^A-Za-z0-9._-])${re}([^0-9]|\$)" <<<"$ask"
+  alt="^|[^A-Za-z0-9._-]|PR"
+  if [[ -n "$rr" ]]; then rre="${rr//./\\.}"; alt+="|$rre"; fi
+  grep -qE -- "(${alt})${re}([^0-9]|\$)" <<<"$ask"
   return $?
 }
 w_stalled() {
-  local quiet="$1" stall="${OUTE_WATCH_STALL_S:-1800}" now k id st old since last pr slug iid has desc="" n=0 oldest=0 age ask
+  local quiet="$1" stall="${OUTE_WATCH_STALL_S:-1800}" now k id st old since last pr slug iid has desc="" n=0 oldest=0 age ask rr
   local -A cur=() refs=()
   [[ "$stall" =~ ^[0-9]+$ ]] || stall=1800
   now="$(w_now)"
@@ -1198,6 +1202,7 @@ w_stalled() {
   last="${W_PREV[pendemit]:-0}"; [[ "$last" =~ ^[0-9]+$ ]] || last=0
   W_CUR[pendemit]="$last"
   ask="$(perguntas_abertas "$W_STATE")"
+  rr="$(sed -n 's/^repo=//p' "$W_STATE/meta" 2>/dev/null | head -1)"; rr="${rr##*/}"
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
     old="${W_PREV[pend|$id]:-}"; since="${old##*|}"; old="${old%|*}"
@@ -1205,7 +1210,7 @@ w_stalled() {
     W_CUR["pend|$id"]="${cur[$id]}|$since"
     age=$(( now - since ))
     # item com pergunta ao Bardi ainda sem resposta espera o Bardi: não entra como parada (#821, L4). O relógio segue contando
-    if (( age >= stall )) && ! w_pergunta_cita "$ask" "${refs[$id]:-}"; then
+    if (( age >= stall )) && ! w_pergunta_cita "$ask" "${refs[$id]:-}" "$rr"; then
       desc+="${desc:+; }${cur[$id]}"; n=$((n + 1))
       (( age <= oldest )) || oldest="$age"
     fi

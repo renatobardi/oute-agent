@@ -210,13 +210,16 @@ Regras de execução:
 - **sem segredos no ambiente:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>' </dev/null`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente. O `env -i` **não isola o sistema de arquivos**: o gate roda como o mesmo usuário e lê qualquer caminho absoluto que ele lê (`~/.config`, `~/.ssh`, `/run/secrets`, o `agent_env` montado). Por isso só execute depois do passo 4 `livre`, e nunca descreva o gate como "isolado" ou "sem acesso a segredos" no relatório;
 - **stdin fechado e ambiente que não se imprime (#821, L1):** todo gate roda com `</dev/null`, e todo prompt de subagente leva o bloco abaixo. Na reauditoria do PR #813, um subagente rodou um comando que imprimiu o ambiente do processo sob `env -i`: o `~/.bashrc` carregou o `~/.oute_env` e valores de duas chaves de API saíram na saída da ferramenta (https://github.com/renatobardi/oute-agent/pull/813#issuecomment-6116636670). O `env -i` não impede isso, porque o comando que ele roda pode ler o arquivo. Texto a copiar no prompt de cada subagente (e vale para os seus próprios comandos):
 
-  > Você pode rodar só isto, e cada comando leva `</dev/null`:
-  > - `bash <arquivo de teste>` e `bash -n <script>`, dentro da worktree da auditoria;
-  > - `git` de leitura: `git diff`, `git log`, `git show`, `git status`, `git grep`, `git ls-files`;
-  > - `gh` de leitura: `gh pr view`, `gh pr checks`, `gh issue view`, `gh api` só com GET;
-  > - leitura de arquivo e busca: `cat`, `sed -n`, `grep`, `awk`, `wc`, `head`, `tail`, `ls`.
+  > Você pode rodar só o que está nesta lista, e cada comando leva `</dev/null`. Vale para você e para cada subagente:
+  > - o gate do passo 6, `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>' </dev/null` (o `env -i` só com um comando depois, nunca sozinho), e `bash -n <script>`;
+  > - `python3 -I scripts/changelog check` e `bash scripts/exec-files`, dentro da worktree da auditoria;
+  > - `git` de leitura e de worktree: `diff`, `log`, `show`, `status`, `grep`, `ls-files`, `rev-parse`, `merge-base`, `fetch origin`, `worktree add/remove` dos caminhos de `$AUD`, e `checkout <sha> -- <arquivo de teste>` dentro da worktree da base;
+  > - `gh` de leitura: `gh pr view`, `gh pr diff`, `gh pr checks`, `gh issue view`, `gh api` só com GET; `gh pr comment` só para publicar o relatório (passo 12);
+  > - `oute-sonar pr <N> --json` (só GET);
+  > - `mktemp -d`, e `rm -rf` só com o caminho literal que o passo 6 imprimiu;
+  > - leitura e busca de arquivo: `cat`, `sed -n`, `grep`, `awk`, `wc`, `head`, `tail`, `ls`, `find` sem `-exec`.
   >
-  > Qualquer outro comando não está na lista: pergunte antes. Em especial, nada que imprima o ambiente do processo (`env`, `printenv`, `declare -p`, `set` sem argumento, `export -p`, `compgen -e`, `typeset -p`, `cat /proc/self/environ`, nem `env -i`) e nada que leia `~/.oute_env` ou `agent.env`. Para saber se uma variável está preenchida, use um teste que não imprime o valor, por exemplo `[ -n "${VAR:-}" ] && echo preenchida || echo vazia`.
+  > Qualquer outro comando: pergunte antes. Em particular, nada que imprima o ambiente do processo (`env` e `printenv` sem comando, `declare -p`, `set` sem argumento, `export -p`, `compgen -e`, `typeset -p`, `cat /proc/self/environ`) e nada que leia `~/.oute_env`, `agent.env`, `agent_env` ou qualquer arquivo sob `/run/secrets/`. Para saber se uma variável está preenchida, use um teste que não imprime o valor, por exemplo `[ -n "${VAR:-}" ] && echo preenchida || echo vazia`.
 
 - sem rede, quando o gate não precisa dela; nada de `push`, `release`, `oute up`, deploy ou canal de aprovação;
 - anote comando, código de saída e o trecho relevante da saída de cada gate, lido do arquivo da execução (veja "Saída dos gates", abaixo);

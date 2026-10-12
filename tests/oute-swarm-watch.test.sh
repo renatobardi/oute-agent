@@ -460,6 +460,17 @@ echo : > "$FAKE/on-sleep-2"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "L4 pergunta sobre outro#12 não segura o #12 deste repo" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
 
+# #821 (achado 1 da reauditoria do #823): `PR#12` e `<repo da rodada>#12` (aqui `repo`) calam o #12; `outro#12` não (acima)
+CASE=pendformas; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR#12: mergear? 1 sim 2 não" >> "$STATE/log"
+echo "$(date -u +%FT%TZ) pergunta repo#12: mergear? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 3720))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 PR#12 e repo#12 calam o #12 deste repo"         [ -z "$(pend_events)" ]
+
 CASE=pendrespondida; round "$CASE"
 FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
 clock "$T0"
