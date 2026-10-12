@@ -1371,7 +1371,7 @@ cmd_religar() {
     pid="$(cat "$d/watch.pid" 2>/dev/null || true)"
     if [[ "$pid" =~ ^[0-9]+$ ]]; then
       cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-      if [[ "$cmd" == *"watch --round $id"* ]]; then echo "watch já ativo, sem religar: $id"; continue; fi
+      if [[ "$cmd" == *"watch --round $id "* ]]; then echo "watch já ativo, sem religar: $id"; continue; fi
     fi
     "$0" watch --round "$id" </dev/null >>"$d/watch.out" 2>&1 &
     echo "watch religado: $id"

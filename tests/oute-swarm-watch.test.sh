@@ -515,12 +515,22 @@ rel_religar() {
   return 0
 }
 CASE=religarvivo; round "$CASE"
-bash -c 'sleep 60; :' oute-swarm watch --round swarm-test </dev/null >/dev/null 2>&1 & LIVE=$!
+# exec -a: o próprio sleep vira o watch no /proc (um só processo, que o kill encerra)
+bash -c 'exec -a "oute-swarm watch --round swarm-test" sleep 60' </dev/null >/dev/null 2>&1 & LIVE=$!
 echo "$LIVE" > "$STATE/watch.pid"
 rel_religar
 check "religar: watch vivo não é trocado (aviso na saída)" [ "$OUT" == "watch já ativo, sem religar: swarm-test" ]
 check "religar: watch vivo não ganha um segundo watch"    [ ! -e "$STATE/watch.out" ]
 kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
+
+# NIT 4 da reauditoria: `watch --round swarm-test-2` (outra rodada, id que começa igual) não conta como watch vivo de swarm-test
+CASE=religarprefixo; round "$CASE"
+bash -c 'exec -a "oute-swarm watch --round swarm-test-2" sleep 60' </dev/null >/dev/null 2>&1 & LIVE=$!
+echo "$LIVE" > "$STATE/watch.pid"
+rel_religar
+check "religar: id que começa igual não pula a rodada"    [ "$OUT" == "watch religado: swarm-test" ]
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
 
 CASE=religarmorto; round "$CASE"
 bash -c 'exit 0' & DEAD=$!; wait "$DEAD" 2>/dev/null || true
