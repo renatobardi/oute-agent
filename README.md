@@ -91,6 +91,7 @@ CI: runner `ubuntu-24.04-arm` (nativo), cache de camadas no GitHub (`type=gha`),
 | `oute` (sem argumento) | sobe a stack se não estiver rodando e abre o herdr |
 | `oute watch [host]` | atalho de `approve --watch`; com host (ex.: `oute watch oute-server`), abre a espera naquele host via ssh |
 | `oute approve [--watch]` | revisa e executa (ou recusa) os scripts propostos pelos agentes — ver **Canal de aprovação** |
+| `oute approve suggest [--min N]` | lista os comandos que se repetem no histórico do canal (contagem, último uso, risco); só lê — ver **Canal de aprovação** |
 | `oute tray install` / `uninstall` | **só no macOS**: compila o tray (`tray/`), monta `~/Applications/OuteTray.app` (sem ícone no Dock), cria `~/.oute/tray-hosts` se não houver e abre no login por um LaunchAgent; `uninstall` desfaz — ver **Tray no Mac** |
 | `oute install` | link `oute` no PATH (`~/.local/bin`, `/opt/homebrew/bin` ou `/usr/local/bin`) |
 | `oute attach` / `ssh [cmd]` / `shell` | herdr, ssh no container, `docker exec` |
@@ -160,6 +161,12 @@ oute-inbox --wait <id>                       ◄─  saída + código em ~/inbox
 - O que roda é exatamente o que foi mostrado (o script é copiado para o host antes de exibir). Registro em `~/.oute/approve/approve.log` e cópia de cada script/saída em `~/.oute/approve/runs/`.
 - Os agentes sabem do canal por um bloco gerenciado em `~/.claude/CLAUDE.md` e `~/.codex/AGENTS.md` (o resto desses arquivos não é tocado).
 - Mudança permanente no oute-server continua no fluxo do repo `lab` (PR); o canal é para diagnóstico, ajuste pontual e rodar o deploy de PR mergeado.
+- `oute approve suggest [--min N]` (#726) lê esse histórico no host (`approve.log` e os scripts de `runs/`) e lista os comandos que aparecem em N pedidos executados ou mais (padrão 2): contagem, recusas, último uso e risco. Serve para escolher candidatos à allowlist. Só lê e imprime: não fala com o container, não roda comando e não muda arquivo. A allowlist do sudoers do `oute-ops` continua mudando só pelo repo `lab`.
+  - Uma linha do script é um comando. Heredoc, continuação com `\`, `<<<` e bloco (`if`, `for`) **não são interpretados**: cada linha entra sozinha, inclusive as do corpo de um heredoc.
+  - Risco: `root` = pedido `--root` ou linha com `sudo` (também `sudoedit`, `su`, `doas`, `pkexec`). `leitura` = só **linha simples**: o comando está numa lista fixa de comandos que só leem e a linha inteira só tem caracteres de uma lista de permitidos: letra sem acento, dígito, espaço e `. _ / : = @ % + , ~ * -`. Qualquer outro caractere dá `escrita`: aspa simples ou dupla, `$`, crase, `\`, `<`, `>`, `(`, `)`, `;`, `&`, `|`, `{`, `}`, `[`, `]`, `!`, `#`, `?`, `^`, letra acentuada, caractere de controle e NUL. Uma palavra `nome=valor` em qualquer posição da linha também dá `escrita`, e opção longa de `date` e `journalctl` só vale por extenso e de uma lista curta.
+  - O que se perde com isso, sempre para o lado `escrita`: comando de leitura com argumento entre aspas (`ls "a b"`, `find … -name '*.gz'`), com pipe, com `2>/dev/null`, com caminho acentuado, com `nome=valor` (`docker ps --filter name=oute`) ou com opção longa fora da lista (`journalctl --merge`). `oute doctor` e `date` com operando também saem `escrita`. `escrita` = todo o resto, inclusive pipe só de leitura, `2>/dev/null` e comando que a lista não conhece (`sed` sai sempre `escrita`).
+  - A lista de leitura é por texto: opção que grava ou executa e que a lista não prevê, num comando dela, pode sair `leitura`. Leia o comando antes de decidir.
+  - Segredo literal em forma conhecida (`Bearer …`, `TOKEN=…`, `--password …`, `ghp_…`, `usuário:senha@` em URL) sai como `{segredo}`; a máscara é por padrão de texto e não pega todo formato.
 
 
 ## Tray no Mac
