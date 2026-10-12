@@ -9,7 +9,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 command -v python3 >/dev/null || die "precisa de python3"
 
@@ -40,6 +40,7 @@ shell_do() {
     nao-interativo-devnull) env -i HOME="$home" PATH="$PATH" bash -c "$PROBE" </dev/null ;;
     login-socket) env -i HOME="$home" PATH="$PATH" python3 -I "$SOCK" bash -lc "$PROBE" ;;
     interativo-socket) env -i HOME="$home" PATH="$PATH" python3 -I "$SOCK" bash -ic "$PROBE" 2>/dev/null ;;
+    *) return 1 ;;
   esac
   return $?
 }

@@ -233,7 +233,7 @@ flush_spool() {
 }
 
 # ---------------------------------------------------------------- 5b. ~/.oute_env nos shells (#250)
-# .profile (login: ssh cmd, `oute shell`) carrega o ~/.oute_env na primeira linha. .bashrc só quando o shell é
+# .profile (login: `oute ssh`, `oute shell`, `bash -l`) carrega o ~/.oute_env na primeira linha. .bashrc só quando o shell é
 # interativo: o bash lê o .bashrc também sem ser interativo quando o stdin é um socket (o caso do shell que uma
 # ferramenta abre), e a linha antiga, sem guarda e no topo, punha as credenciais no ambiente desse shell.
 # A gravação troca a linha de versões anteriores (o home é volume e persiste entre containers).

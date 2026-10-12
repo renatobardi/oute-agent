@@ -643,7 +643,7 @@ O Bardi decidiu, em 2026-10-05 ([comentário na #564](https://github.com/renatob
 
 ### Segredo na telemetria (sem issue, 2026-10-12)
 - O agent-studio recebe o mesmo filtro do bucket (`transform/redact` em `traces/studio` e `logs/studio`, `config/otel/agent-studio.yaml`): o texto que ele guarda com conteúdo sai mascarado nos padrões de credencial conhecidos (ADR-04, adendo). Registros já gravados no DuckDB e no SurrealDB não mudam.
-- `OTEL_LOG_TOOL_CONTENT` sai ligado por padrão (ADR-04, adendo). O agent-studio, no código, não lê o conteúdo de ferramenta (`phase.py:55-56`, `141`); o efeito na página de conversa é **não medido**.
+- `OTEL_LOG_TOOL_CONTENT` sai desligado por padrão (ADR-04, adendo). O agent-studio, no código, não lê o conteúdo de ferramenta (`phase.py:55-56`, `141`); o efeito na página de conversa é **não medido**.
 
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
