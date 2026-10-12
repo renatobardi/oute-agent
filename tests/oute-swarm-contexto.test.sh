@@ -8,6 +8,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID OUTE_SWARM_RESTART_MERGES
 
@@ -166,4 +169,6 @@ hold
 wd
 check "sucesso zera o contador de falhas"                [ ! -e "$STATE/reinicio.falhas" -a "$(cat "$STATE/reinicio.n")" == 5 ]
 
+guarda_check
+guarda_stop
 check_end

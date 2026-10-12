@@ -9,8 +9,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "${TMP:?}"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 
 # AT = D1 + 10 dias. Pontos (minutos antes do AT):
@@ -131,4 +134,6 @@ for kind in (\"memory_capture\", \"memory_hooks_untrusted\"):
 "' _ "$ROOT"
 check "o limite do oute-doctor e o da config do repo são o mesmo (20)" bash -c 'grep -qx "memory_capture_max_missing_pct = 20" "$1/config/agent-studio/config.toml" && grep -q "OUTE_DOCTOR_MAX_MISSING_PCT\") or \"20\"" "$1/docker/oute-doctor"' _ "$ROOT"
 
+guarda_check
+guarda_stop
 check_end

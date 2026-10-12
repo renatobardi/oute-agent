@@ -10,6 +10,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 # nproc falso: $FAKE_NPROC núcleos (padrão 4); `falha` = sai com 1, sem número
@@ -65,4 +68,6 @@ check "spawn recusado pelo limite: sem aviso de carga"     bash -c '[ "$1" -ne 0
 check "padrão do spawn: lê o /proc/loadavg"                grep -qF 'file="${OUTE_SWARM_LOADAVG:-/proc/loadavg}"' "$SWARM"
 check "apoio dos temas: a carga de quem roda o teste não entra" test "$OUTE_SWARM_LOADAVG" = "$TMP/sem-loadavg" -a ! -e "$TMP/sem-loadavg"
 
+guarda_check
+guarda_stop
 check_end

@@ -297,7 +297,7 @@ rcv_stop
 
 # agent-studio de teste: os POSTs capturados (da janela e do ao vivo), entregues duas vezes, não criam linha nova
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 studio_start "$TMP/s5w" OTEL_EXPORTER_OTLP_ENDPOINT="$DEAD" || die "agent-studio não subiu: $(cat "$TMP/s5w/stderr")"
 for f in "$TMP/r5"/*.json "$WIN_DIR"/*.json "$TMP/r5"/*.json "$WIN_DIR"/*.json; do post logs "$f" >/dev/null; done

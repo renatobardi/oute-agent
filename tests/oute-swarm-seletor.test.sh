@@ -12,7 +12,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
 guarda_start "$TMP/guarda"
-rcv_stop   # antes do primeiro receptor, o endpoint é uma porta fechada (a guarda só vê o que vazar)
+rcv_stop   # antes do primeiro receptor o endpoint é porta fechada: a guarda só pega o que sair antes do rcv_start (aqui, nada; o sensor do caso fica no intervalo antes do primeiro receptor, #815)
 trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #219: seletor de modelo (ADR-02)

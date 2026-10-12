@@ -10,8 +10,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/agent-studio.sh"
-trap 'studio_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rm -rf "$TMP"' EXIT
 studio_init
 
 # ---------------------------------------------------------------- DuckDB de exemplo
@@ -383,4 +386,6 @@ check "leitura que falha: 500"                         test "$(code "${A[@]}" "$
 studio_stop
 check "leitura que falha: causa no stderr"             grep -q "consulta de alertas falhou" "$TMP/f/stderr"
 
+guarda_check
+guarda_stop
 check_end

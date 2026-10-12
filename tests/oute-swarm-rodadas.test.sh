@@ -15,7 +15,7 @@ trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
 guarda_start "$TMP/guarda"
-rcv_stop   # sem receptor neste tema: o endpoint é uma porta fechada (a guarda só vê o que vazar)
+rcv_stop   # sem receptor neste tema: o endpoint vira porta fechada, então a guarda não vê nada daqui em diante (o sensor fica só no intervalo antes do primeiro receptor, #815)
 
 NAMES="$ROOT/docker/agent-studio/agent_studio/names.py"
 NAME_RE='^[A-Z][a-z]+_[A-Z][a-z]+$'

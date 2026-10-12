@@ -17,7 +17,7 @@ trap 'guarda_stop; studio_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 . "$ROOT/tests/lib/otlp.sh"
 guarda_start "$TMP/guarda"
-rcv_stop   # antes do primeiro receptor, o endpoint é uma porta fechada (o agent-studio do teste também posta)
+rcv_stop   # antes do primeiro receptor o endpoint é porta fechada (o agent-studio do teste também posta); a guarda só pega o intervalo antes do rcv_start, e o resto do teste não é coberto por ela (#815)
 . "$ROOT/tests/lib/surreal.sh"
 trap 'guarda_stop; studio_stop; rcv_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin

@@ -11,6 +11,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
+. "$ROOT/tests/lib/otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
 TABLE="$ROOT/config/select/models.toml"
@@ -179,4 +182,6 @@ echo aidlc:spec > "$FAKE/labels-8"
 check "next: pela issue (fase spec): cadeia claude → zai → codex" bash -c '[ "$(jq -c .chain <<<"$1")" == "[\"claude\",\"zai\",\"codex\"]" ]' _ "$(nx claude --repo "$REPO" --issue 8)"
 check "next: assinatura fora da tabela: código 2"          bash -c 'env PATH="$1:$PATH" FAKE="$2" "$3" --next-subscription zzz --phase build >/dev/null 2>&1; [ $? -eq 2 ]' _ "$BIN" "$FAKE" "$ROOT/docker/oute-select"
 check "next: sem valor: código 2"                          bash -c 'env PATH="$1:$PATH" FAKE="$2" "$3" --next-subscription >/dev/null 2>&1; [ $? -eq 2 ]' _ "$BIN" "$FAKE" "$ROOT/docker/oute-select"
+guarda_check
+guarda_stop
 check_end
