@@ -10,7 +10,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"
-trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"

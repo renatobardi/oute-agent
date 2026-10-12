@@ -11,7 +11,7 @@ TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/agent-studio.sh"
 . "$ROOT/tests/lib/otlp.sh"
 guarda_start "$TMP/guarda"
-trap 'guarda_stop; studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 studio_init
 DB="$TMP/s/db.duckdb"
 count() { studio_sql "$DB" "SELECT count(*) AS n FROM $1 ${2:-}" | jq -r .n; }
@@ -282,7 +282,7 @@ check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-pro
 
 # ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
 . "$ROOT/tests/lib/surreal.sh"
-trap 'guarda_stop; studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; surreal_stop; rm -rf "${TMP:?}"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 sq() { surreal_q "$1"; }

@@ -13,7 +13,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
 guarda_start "$TMP/guarda"
-trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 . "$ROOT/tests/lib/swarm-reviewer.sh"
 CYCLE=renatobardi/oute-agent#509

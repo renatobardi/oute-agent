@@ -23,7 +23,7 @@ rcv_stop() {
 # chegar e aponta o ambiente a ele; guarda_check (pelo check) falha se algum POST chegou lá; guarda_posts: quantos.
 guarda_start() {
   local dir="$1"
-  GUARDA_DIR="$dir"; mkdir -p "$GUARDA_DIR"; rm -f "$GUARDA_DIR/port"
+  GUARDA_DIR="$dir"; mkdir -p "$GUARDA_DIR"; rm -f "${GUARDA_DIR:?}/port"
   unset OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
   python3 "$OTLP_LIB/otlp-receiver.py" "$GUARDA_DIR" & GUARDA_PID=$!
   disown "$GUARDA_PID"   # fora da tabela de jobs: um `wait` do teste não espera a guarda

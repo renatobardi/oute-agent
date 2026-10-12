@@ -12,7 +12,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
 guarda_start "$TMP/guarda"
-trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #212: agente das sessões da rodada (--agent na abertura)
 # 10. abertura com --agent: meta, prompt, aviso, log e oute.swarm.round.opened

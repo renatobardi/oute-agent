@@ -6,7 +6,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'guarda_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/otlp.sh"
 guarda_start "$TMP/guarda"

@@ -9,7 +9,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/otlp.sh"
-trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 command -v jq >/dev/null && command -v python3 >/dev/null || { echo "FAIL precisa de jq e python3"; exit 1; }
 
@@ -26,7 +26,7 @@ DEAD="http://127.0.0.1:$(closed_port)"   # coletor fora do ar: o que o teste esp
 PROVA="$TMP/prova"; mkdir -p "$PROVA"
 OUT="$(HOME="$PROVA" "$ROOT/docker/oute-propose" "vazamento de prova" <<<"echo prova" 2>/dev/null)"
 check "guarda: pega o evento que sai sem o receptor do teste" [ "$(guarda_posts)" -eq 1 ]
-rm -f "$GUARDA_DIR"/*.json
+rm -f "${GUARDA_DIR:?}"/*.json
 posts() { ls "$RCV_DIR"/*.json 2>/dev/null | wc -l | tr -d ' '; }
 # propose <home> <título> [args]: roda o oute-propose com o script de $SCRIPT; stdout em $OUT, código em $RC
 propose() { local h="$1"; shift; OUT="$(HOME="$h" "$ROOT/docker/oute-propose" "$@" <<<"$SCRIPT" 2>/dev/null)"; RC=$?; }

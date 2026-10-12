@@ -12,7 +12,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
 guarda_start "$TMP/guarda"
-trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #124: eventos operacionais (receptor OTLP falso)
 # 8. abertura, spawn, tell (ok e recusado), close, rodada fechada e watch
