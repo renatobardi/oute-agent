@@ -298,6 +298,47 @@ check "root: sudo entre aspas" row 1 0 "$T" root "'sudo' rm d"
 no_read_removal() { ! grep -qE " leitura +(.* )?r[m] " <<<"$OUT"; return $?; }
 check "nenhuma linha que apaga sai leitura" no_read_removal
 
+# --- 4d. 4ª auditoria do PR #814: leitura por lista de caracteres permitidos (chaves, NUL, opção colada ou abreviada)
+reset
+{ cat <<'SH'
+sort {-o,x} f
+find . -d{elete,}
+git log --o{utput,}=f
+docker compose config -ox
+docker compose config -o=x
+date --s=@0
+journalctl --rot
+date --utc
+journalctl --unit nginx --since today --no-pager
+ls "a b"
+ls [ab]x
+ls a?
+ls !x
+ls ^x
+ls a#b
+cat /etc/hósts
+set -e; rm -rf x
+SH
+  printf 'find . -d\000elete\nsort -\000o f x\n'; } | hist 20261001-100000-permitidos user exec 2026-10-01T10:00:00Z
+run_suggest --min 1
+check "escrita: chaves montam a opção (sort {-o,x} f)" row 1 0 "$T" escrita "sort {-o,x} f"
+check "escrita: chaves montam a opção (find . -d{elete,})" row 1 0 "$T" escrita "find . -d{elete,}"
+check "escrita: chaves montam a opção (git log --o{utput,}=f)" row 1 0 "$T" escrita "git log --o{utput,}=f"
+check "escrita: NUL no meio da opção (find -d<NUL>elete)" row 1 0 "$T" escrita "find . -d·elete"
+check "escrita: NUL no meio da opção (sort -<NUL>o)" row 1 0 "$T" escrita "sort -·o f x"
+check "escrita: docker compose config -ox (valor colado)" row 1 0 "$T" escrita "docker compose config -ox"
+check "escrita: docker compose config -o=x" row 1 0 "$T" escrita "docker compose config -o=x"
+check "escrita: date --s= (abreviação de --set)" row 1 0 "$T" escrita "date --s=@0"
+check "escrita: journalctl --rot (abreviação de --rotate)" row 1 0 "$T" escrita "journalctl --rot"
+check "leitura: date com opção longa da lista" row 1 0 "$T" leitura "date --utc"
+check "leitura: journalctl com opções longas da lista" row 1 0 "$T" leitura "journalctl --unit nginx --since today --no-pager"
+check "leitura: argumento entre aspas, com espaço" row 1 0 "$T" leitura 'ls "a b"'
+for c in "ls [ab]x" "ls a?" "ls !x" "ls ^x" "ls a#b" "cat /etc/hósts"; do
+  check "escrita: caractere fora da lista de permitidos em '$c'" row 1 0 "$T" escrita "$c"
+done
+check "set -e seguido de outro comando não some da lista" row 1 0 "$T" escrita "set -e; rm -rf x"
+check "nenhuma linha sai leitura além das três esperadas" test "$(grep -cE '^ +[0-9]+ +[0-9]+ +[^ ]+ +leitura ' <<<"$OUT")" = 3
+
 # segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
 reset
 SEG="$(od -An -N20 -tx1 /dev/urandom | tr -d ' \n' | tr '0-9a-f' 'g-v')"

@@ -1189,8 +1189,8 @@ approve_one() {
 # Comando normalizado = a linha do script sem espaço repetido, com id de pedido, data e hash trocados por marca.
 # Uma linha do script é um comando: heredoc, continuação com \ e bloco não são interpretados.
 # Risco: root (pedido --root ou linha com sudo), leitura (linha simples: comando de uma lista fixa de comandos
-# que só leem e nenhum de $ crase \ < > ( ) ; & |, nem variável de ambiente na frente) ou escrita (todo o resto:
-# na dúvida, escrita). Segredo literal em forma conhecida (Bearer, TOKEN=, --password, ghp_…, usuário:senha@ em
+# que só leem e a linha inteira feita só de caracteres de uma lista de permitidos, sem variável de ambiente na
+# frente) ou escrita (todo o resto: na dúvida, escrita). Segredo literal em forma conhecida (Bearer, TOKEN=, --password, ghp_…, usuário:senha@ em
 # URL) sai como {segredo}; é por padrão de texto, não garante.
 # awk sem extensão do gawk nem intervalo em regex ({n}): roda no awk do macOS.
 # o programa fica fora da função: os campos do awk ($1, $3…) não são parâmetro posicional do shell
@@ -1238,10 +1238,10 @@ function readonly(p,    w, n, k, c, a, b) {
   if (c == "uniq") { for (k++; k <= n; k++) if (w[k] !~ /^-/) return 0; return 1 }
   if (c == "find") return (p !~ / -(delete|exec|execdir|ok|okdir|fprint|fprintf|fls)/)
   if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --/)
-  if (c == "date") return (p !~ / -[A-Za-z]*s/ && p !~ / --set/)
+  if (c == "date") return (p !~ / -[A-Za-z]*s/ && longok(p, LD))
   if (c == "hostname") return (k == n)
-  if (c == "journalctl") return (p !~ / --(vacuum|rotate|flush|sync|relinquish|setup-keys|update-catalog)/)
-  if (c == "docker" && p ~ / -o( |$)/) return 0
+  if (c == "journalctl") return longok(p, LJ)
+  if (c == "docker" && p ~ / -[A-Za-z]*o/) return 0
   if (c == "docker" && a == "compose") return (b in DC)
   if (c == "docker" && a in DG) return (b == "ls" || b == "inspect")
   if (c == "docker") return (a in D1)
@@ -1256,45 +1256,32 @@ function readonly(p,    w, n, k, c, a, b) {
   if (c == "oute") return (a in O1)
   return 0
 }
-# leitura só para linha simples: sem nenhum caractere que o shell usa para compor, expandir, redirecionar ou
-# escapar ($ crase \ < > ( ) ; & |) e com o comando na lista de leitura. As aspas saem antes de conferir o
-# comando e as opções (sort "-o" é sort -o). Todo o resto é escrita; com sudo (ou su, doas, pkexec), root.
+# leitura só para linha simples, por lista de PERMITIDOS: a linha inteira só tem letra, dígito, espaço e
+# . _ / : = @ % + , ~ * - (e aspas, em número par), e o comando está na lista de leitura. Qualquer outro
+# caractere ($ crase \ < > ( ) ; & | { } [ ] ! # ? ^, controle, NUL, byte acima de 127) = escrita. As aspas saem
+# antes de conferir o comando e as opções (sort "-o" é sort -o). Com sudo (ou su, doas, pkexec), root.
 function risk(s, root,    t) {
   t = s; gsub("[" DQ SQ "]", "", t)
   if (root || t ~ /(^|[^A-Za-z0-9_-])(sudo|sudoedit|su|doas|pkexec)( |$)/) return "root"
-  if (s ~ /[$`\\<>();&|]/) return "escrita"
+  if (t !~ /^[A-Za-z0-9 ._\/:=@%+,~*-]*$/) return "escrita"
   if (gsub(DQ, DQ, s) % 2 || gsub(SQ, SQ, s) % 2) return "escrita"
   return readonly(t) ? "leitura" : "escrita"
 }
-function set(arr, list,    n, i, w) { n = split(list, w, " "); for (i = 1; i <= n; i++) arr[w[i]] = 1 }
-BEGIN {
-  SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); B64 = "[a-z0-9+/=]"
-  SKEY = "(token|secret|password|passwd|senha|api[_-]?key|credential)"; D2 = "[0-9][0-9]"; D4 = D2 D2
-  H = "[0-9a-f]"; H12 = H H H H H H H H H H H H H "*"
-  set(R1, "cat ls grep egrep fgrep head tail stat df du ps wc cut tr id whoami uname uptime free test [ [[ true false pwd which type echo printf lsblk nproc readlink basename dirname sha256sum shasum md5sum")
-  set(D1, "ps logs inspect images version info stats port top diff")
-  set(DC, "ps logs config ls images top version")
-  set(DG, "volume network image container context")
-  set(G1, "status log diff show rev-parse describe ls-files")
-  set(S1, "status is-active is-enabled is-failed list-units list-timers list-unit-files show cat")
-  set(O1, "version help status doctor")
-}
-{
-  if (NF < 7 || ($5 != "exec" && $5 != "recusado") || $3 !~ /^[0-9]+-[0-9]+-[a-z0-9-]+$/ || $1 !~ /^[0-9]+-[0-9]+-[0-9]+T[0-9:]+Z$/) { bad++; next }
-  id = $3; ts = $1; ex = ($5 == "exec"); f = runs "/" id ".sh"
-  if (ex) nexec++; else nrej++
-  root = 0; as = 0; got = 0; nl = 0
-  while ((getline line < f) > 0) {
-    got = 1
-    if (!as && line ~ /^# como: /) { root = (line == "# como: root"); as = 1 }
-    c = norm(line)
-    if (c == "" || c ~ /^#/ || c ~ /^set [-+]/ || c ~ /^(fi|done|then|else|do|esac|[{]|[}]|;;)$/) continue
-    cmd[++nl] = c
-    # o risco sai da linha como está no script, antes da máscara e das marcas (a máscara não esconde nada dele)
-    raw[nl] = line; gsub(/\t/, " ", raw[nl]); gsub(/  +/, " ", raw[nl]); raw[nl] = trim(raw[nl])
+# toda opção longa (--x ou --x=valor) da linha está, por extenso, na lista ok; abreviação não vale
+function longok(p, ok,    w, n, i, o) {
+  n = split(p, w, " ")
+  for (i = 1; i <= n; i++) {
+    if (w[i] !~ /^--/) continue
+    o = w[i]; sub(/=.*/, "", o)
+    if (!(o in ok)) return 0
   }
-  close(f)
-  if (!got) { noscript++; next }
+  return 1
+}
+# fecha o pedido em curso: conta os comandos dele (ou o script que faltou)
+function flush(    i, r, key) {
+  if (!active) return
+  active = 0
+  if (!got) { noscript++; return }
   for (i = 1; i <= nl; i++) {
     r = risk(raw[i], root)
     if (r == "leitura" && cmd[i] ~ /^(echo|printf)( |$)/) continue
@@ -1304,13 +1291,60 @@ BEGIN {
     if (ex) { cnt[key]++; if (ts > last[key]) last[key] = ts } else rej[key]++
   }
 }
+function set(arr, list,    n, i, w) { n = split(list, w, " "); for (i = 1; i <= n; i++) arr[w[i]] = 1 }
+BEGIN {
+  SQ = sprintf("%c", 39); DQ = sprintf("%c", 34); B64 = "[a-z0-9+/=]"
+  SKEY = "(token|secret|password|passwd|senha|api[_-]?key|credential)"; D2 = "[0-9][0-9]"; D4 = D2 D2
+  H = "[0-9a-f]"; H12 = H H H H H H H H H H H H H "*"
+  set(R1, "cat ls grep egrep fgrep head tail stat df du ps wc cut tr id whoami uname uptime free test true false pwd which type echo printf lsblk nproc readlink basename dirname sha256sum shasum md5sum")
+  set(D1, "ps logs inspect images version info stats port top diff")
+  set(DC, "ps logs config ls images top version")
+  set(DG, "volume network image container context")
+  set(G1, "status log diff show rev-parse describe ls-files")
+  set(S1, "status is-active is-enabled is-failed list-units list-timers list-unit-files show cat")
+  set(O1, "version help status doctor")
+  set(LD, "--utc --universal --date --iso-8601 --rfc-3339 --rfc-email --reference --help --version")
+  set(LJ, "--since --until --unit --user-unit --lines --follow --reverse --boot --priority --grep --identifier --no-pager --no-hostname --utc --system --user --dmesg --quiet --disk-usage --list-boots --help --version")
+}
+# entrada: o que o approve_suggest_stream monta. L = linha do approve.log; F = linha do script daquele pedido
+$1 == "L" {
+  flush()
+  if (NF < 8 || ($6 != "exec" && $6 != "recusado") || $4 !~ /^[0-9]+-[0-9]+-[a-z0-9-]+$/ || $2 !~ /^[0-9]+-[0-9]+-[0-9]+T[0-9:]+Z$/) { bad++; next }
+  id = $4; ts = $2; ex = ($6 == "exec"); active = 1
+  if (ex) nexec++; else nrej++
+  root = 0; as = 0; got = 0; nl = 0
+  next
+}
+$1 == "F" && active {
+  got = 1; line = substr($0, 3)
+  if (!as && line ~ /^# como: /) { root = (line == "# como: root"); as = 1 }
+  c = norm(line)
+  if (c == "" || c ~ /^#/ || c ~ /^set [-+][A-Za-z0-9 +-]*$/ || c ~ /^(fi|done|then|else|do|esac|[{]|[}]|;;)$/) next
+  cmd[++nl] = c
+  # o risco sai da linha como está no script, antes da máscara e das marcas (a máscara não esconde nada dele)
+  raw[nl] = line; gsub(/\t/, " ", raw[nl]); gsub(/  +/, " ", raw[nl]); raw[nl] = trim(raw[nl])
+}
 END {
+  flush()
   printf "S\t%d\t%d\t%d\t%d\n", nexec, nrej, noscript, bad
   for (key in keys) if (cnt[key] >= min) printf "R\t%d\t%d\t%s\t%s\n", cnt[key], rej[key], last[key], key
 }'
+# monta a entrada do awk: cada linha do approve.log (L) seguida das linhas do script daquele pedido (F). O NUL
+# do script vira \001 aqui: o bash que rodou o pedido descartou o NUL, e cada awk trata o byte de um jeito;
+# trocado por um caractere de controle, a linha nunca casa a lista de permitidos e sai escrita.
+approve_suggest_stream() {
+  local log="$1" runs="$2" line rest id
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf 'L\t%s\n' "$line"
+    rest="${line#*$'\t'}"; rest="${rest#*$'\t'}"; id="${rest%%$'\t'*}"
+    [[ "$id" =~ ^[0-9]+-[0-9]+-[a-z0-9-]+$ && -f "$runs/$id.sh" ]] || continue
+    LC_ALL=C tr '\000' '\001' < "$runs/$id.sh" | sed 's/^/F	/'
+  done < "$log"
+  return 0
+}
 approve_suggest_awk() {
   local log="$1" runs="$2" min="$3"
-  LC_ALL=C awk -F '\t' -v runs="$runs" -v min="$min" "$APPROVE_SUGGEST_AWK" "$log"
+  approve_suggest_stream "$log" "$runs" | LC_ALL=C awk -F '\t' -v min="$min" "$APPROVE_SUGGEST_AWK"
   return $?
 }
 approve_suggest_usage() {
