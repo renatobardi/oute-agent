@@ -56,18 +56,21 @@ check "canal: bash -n no script com os blocos (#480)"             bash -n "$TMP/
 # 481. sessão em Haiku: a redação final para o Bardi vai a um subagente em Sonnet
 for f in "$W"; do b="$(basename "$f")"
   check "haiku: $b manda a redação final a um subagente em Sonnet (#481)" grep -qF 'A sessão em Haiku passa a redação final a um subagente em Sonnet' "$f"
-  check "haiku: $b passa fatos e fontes ao subagente (#481)"        grep -qF 'Ela entrega ao subagente os fatos e as fontes' "$f"
+  check "haiku: $b passa fatos e fontes ao subagente (#481)"        grep -qF 'Entrega a ele fatos, fontes e `docs/pt-controlado.md`' "$f"
   check "haiku: $b confere o resultado contra os fatos (#481)"      grep -qF 'a sessão confere o texto do subagente contra os fatos' "$f"
-  check "haiku: $b diz como saber o próprio modelo (#481)"          grep -qF '**Como saber o próprio modelo:**' "$f"
-  check "haiku: $b trata id desconhecido como Haiku (#481)"         grep -qF 'Se o id não aparecer, trate a sessão como Haiku' "$f"
+  check "haiku: $b diz como saber o próprio modelo (#481)"          grep -qF '**Modelo:** o id de "You are powered by the model named …"' "$f"
+  check "haiku: $b trata id desconhecido como Haiku (#481)"         grep -qF 'com `haiku`, ou sem id, é Haiku' "$f"
   check "haiku: $b sem subagente publica e avisa (#481)"            grep -qF 'avisa, na primeira linha do texto, que ele saiu do Haiku' "$f"
 done
 check "haiku: notas mandam a redação final a um subagente em Sonnet (#481)" grep -qF 'Haiku hands the final wording to a Sonnet subagent (`Agent` tool, `model: "sonnet"`)' "$N"
-check "haiku: notas passam fatos, fontes e regras ao subagente (#481)" grep -qF 'giving it the facts, the sources and the rules of `docs/pt-controlado.md`' "$N"
-check "haiku: notas conferem o texto do subagente contra os fatos (#481)" grep -qF "check the subagent's text against the facts: every number, condition and source must match what you passed, no new fact" "$N"
+check "haiku: notas passam fatos, fontes e regras ao subagente (#481)" grep -qF 'giving it facts, sources and `docs/pt-controlado.md`' "$N"
+check "haiku: notas conferem o texto do subagente contra os fatos (#481)" grep -qF 'check its text against the facts: every number, condition and source must match, no new fact' "$N"
 check "haiku: notas dizem como saber o próprio modelo (#481)"     grep -qF '**Own model:** read the model id in the session context' "$N"
 check "haiku: notas tratam id desconhecido como Haiku (#481)"     grep -qF 'No id: treat as Haiku' "$N"
 check "haiku: notas sem subagente publicam e avisam na primeira linha (#481)" grep -qF 'say on its first line that it came from Haiku and was not reviewed by Sonnet' "$N"
+# 832. quem abre subagente diz na aba, numa linha, para quê (regra curta; o dispatcher grava também no log, em auditoria.md)
+check "subagente: notas pedem a linha na aba antes de abrir (#832)"     grep -qF '`subagente: <what for, why>`' "$N"
+check "subagente: swarm-worker pede a linha na aba antes de abrir (#832)" grep -qF '`subagente: <para quê e por quê>`' "$W"
 # 538. sessões no mesmo container: merge de PR de rodada, processo, "o que está rodando", comentário de merge, limites
 check "538: notas recusam o merge de PR de rodada aberta e dizem o que responder ao Bardi" bash -c 'grep -qF "Merging a PR of an open round is not yours" "$1" && grep -qF "the last audit state" "$1" && grep -qF "the merge goes through that round" "$1"' _ "$N"
 check "538: notas só deixam encerrar processo pelo PID ou id da tarefa" grep -qF 'Only kill a process you opened' "$N"

@@ -25,6 +25,7 @@
   {% call tile("Custo", "receipt") %}<span class="custo">{{ cost(u.cost) }}</span>{% endcall %}
   {% call tile("Duração", "timer") %}{{ c.duration_ns|dur }}{% endcall %}
 </div>
+<p class="nota" data-subagentes data-calls="{{ c.subagents.calls }}">Subagentes: {{ c.subagents.calls|num }} {{ "chamada" if c.subagents.calls == 1 else "chamadas" }}, {{ c.subagents.usd|usd }}{% if c.subagents.pct is not none %} ({{ c.subagents.pct }} % do custo){% endif %}</p>
 {% endcall %}
 <div class="duas">
 {% call fragment("spans") %}

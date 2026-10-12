@@ -235,11 +235,13 @@ def spans_with_cost(span_where, span_params, log_where, log_params):
     # `_rid` é calculada antes e é nula fora do span da chamada do Claude (nulo não junta).
     # a `zai` (#679): o custo que o Claude Code calcula para o `glm-*` não é real; vira NULL e a chamada é estimada
     sql = ("(SELECT t.* EXCLUDE (_rid) REPLACE (CASE WHEN COALESCE(t.oute_subscription, '') = ? THEN NULL "
-           "ELSE COALESCE(t.cost_usd, l.cost_usd) END AS cost_usd) FROM ("
+           "ELSE COALESCE(t.cost_usd, l.cost_usd) END AS cost_usd), "
+           "l.agent_log AS agent_log FROM ("
            "SELECT s.*, CASE WHEN s.name = ? THEN json_extract_string(s.attributes, '$.request_id') END AS _rid "
            f"FROM spans s WHERE {span_where}) t LEFT JOIN ("
            "SELECT json_extract_string(attributes, '$.request_id') AS request_id, "
-           "max(TRY_CAST(json_extract_string(attributes, '$.cost_usd') AS DOUBLE)) AS cost_usd FROM logs "
+           "max(TRY_CAST(json_extract_string(attributes, '$.cost_usd') AS DOUBLE)) AS cost_usd, "
+           "bool_or(COALESCE(json_extract_string(attributes, '$.query_source'), '') LIKE 'agent:%') AS agent_log FROM logs "
            f"WHERE event_name IN ({', '.join('?' * len(API_REQUEST_EVENTS))}) AND {log_where} GROUP BY ALL) l "
            "ON l.request_id = t._rid)")
     return sql, [ZAI, CLAUDE_CALL_SPAN, *span_params, *API_REQUEST_EVENTS, *log_params]

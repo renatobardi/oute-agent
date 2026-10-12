@@ -713,6 +713,8 @@ def swarm_event(rnd, line, nth=1):
         return event("oute.swarm.round.asked", agent, ts, base, rest.strip()[:300], key=rest.strip()[:300], **fact)
     if kind == "resposta":  # #386: o Bardi respondeu; sem corpo (a resposta não vai ao log)
         return event("oute.swarm.round.answered", agent, ts, base, **fact)
+    if kind == "subagente" and rest.strip():  # #832: o dispatcher delegou a um subagente; o corpo é o motivo (até 300 caracteres)
+        return event("oute.swarm.round.subagent", agent, ts, base, rest.strip()[:300], key=rest.strip()[:300], **fact)
     if kind == "rodada" and rest.startswith("fechada"):
         return event("oute.swarm.round.closed", agent, ts, base, **fact)
     if kind == "etapa":  # #507: o texto de uma etapa da rodada, para a página do agent-studio

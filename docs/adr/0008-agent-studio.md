@@ -654,6 +654,25 @@ O Bardi decidiu, em 2026-10-05 ([comentário na #564](https://github.com/renatob
 - O agent-studio recebe o mesmo filtro do bucket (`transform/redact` em `traces/studio` e `logs/studio`, `config/otel/agent-studio.yaml`): o texto que ele guarda com conteúdo sai mascarado nos padrões de credencial conhecidos (ADR-04, adendo). Registros já gravados no DuckDB e no SurrealDB não mudam.
 - `OTEL_LOG_TOOL_CONTENT` sai desligado por padrão (ADR-04, adendo). O agent-studio, no código, não lê o conteúdo de ferramenta (`phase.py:55-56`, `141`); o efeito na página de conversa é **não medido**.
 
+### Subagente visível (#832)
+Adendo da issue #832, pedido do Bardi em 2026-10-12 e liberado em `aidlc:build`. Trabalho delegado a subagente aparece na aba, no log da rodada e no agent-studio.
+
+**Levantamento (medido, não suposto).** Um `claude -p` real com um subagente `general-purpose` (Claude Code 2.1.296, modelo `claude-haiku-5-5`), telemetria OTLP para um receptor local:
+- Span `claude_code.llm_request` da chamada do subagente: `query_source_safe` = `agent.builtin.general-purpose` e o atributo `agent_id`. A chamada da sessão principal tem `query_source_safe` = `sdk` e não tem `agent_id`. O `query_source` cru não veio no span.
+- Log `api_request` do subagente: `query_source` = `agent:builtin:general-purpose` (cru) e `agent.name` = `general-purpose`. A principal: `query_source` = `sdk`.
+- Log `subagent_completed` (`agent_type`, `agent.source` = `built-in`, `model`, `final_model`, `model_swapped`) e eventos `hook_execution_*` com `SubagentStart` e `SubagentStop`.
+- Codex (0.160.0): a delegação é a ferramenta `spawn_agent`. Não achei atributo de origem no binário e não medi em execução: **não medido**.
+
+**Regra do agent-studio.** Chamada de subagente: `query_source_safe` começando com `agent.`, ou `agent_id` no span, ou `query_source` começando com `agent:` no log. Ela recebe o papel `subagente`; a sessão mantém o próprio papel nas outras chamadas. `GET /v1/usage` traz a quebra por papel com esse valor, e a página da conversa mostra as chamadas e o custo de subagente.
+
+**Rodada.** `oute-swarm subagente "<para quê>"` (usado pelo dispatcher) grava a linha `subagente` no log e emite `oute.swarm.round.subagent` com o motivo (até 300 caracteres). O `watch` avisa a linha nova, e a página da rodada lista os subagentes. É aviso, não contabilidade: modelo e custo vêm da telemetria.
+
+**Prompts.** Quem abre subagente diz na aba, numa linha, para quê (`docker/agent-notes.md`, `docker/swarm-worker.md`). A auditoria delegada pelo dispatcher também grava `oute-swarm subagente` antes de delegar (`docker/swarm/auditoria.md`).
+
+**Fora desta fatia:** proibir subagente ou a auditoria delegada (a decisão vem depois do quadro de 7 dias).
+
+**Pendente, no PR e na issue:** o quadro de 7 dias (chamadas e custo de subagente por papel e origem) e a recomendação sobre manter a redação do Haiku em subagente. Os dois dependem de dados depois do deploy do agent-studio.
+
 ## Opções consideradas
 - **Pagar um plano maior do Langfuse (Core, Pro):** resolve a janela, não o "tudo com conteúdo" (governança: SaaS na UE só recebe metadados) nem a consulta sem limite. Descartado.
 - **Langfuse self-hosted:** guarda sem prazo, mas traz ClickHouse, Postgres, Redis e S3 para operar, e continua só com traces. Fora do mapa.

@@ -281,9 +281,11 @@ check "771: §4.3 passo 3: tira a URL de job do Actions das fontes" grep -qF 'Ti
 check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" bash -c 'l="$(grep -F "Fontes para o revisor (#771)" "$1")"; grep -qF "arquivo de fatos" <<<"$l" && grep -qF "§4.3, passo 3" <<<"$l"' _ "$D"
 
 # 772. auditoria delegada a subagente: ele devolve o texto, o dispatcher publica com oute-refcheck
-check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente de auditoria não publica nada" "devolve o texto do relatório" "**você** o publica" "oute-swarm pr-comment <n> --body-file <arquivo>" "quebrada ou nao-abre não comenta"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente não publica: devolve o texto" "devolve o texto do relatório" "**você** o publica" "oute-swarm pr-comment <n> --body-file <arquivo>" "quebrada ou nao-abre não comenta"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "772: §3: o pr-comment roda o oute-refcheck antes de comentar" grep -qF "roda o \`oute-refcheck\` antes" "$D"
-check "772: §3: recusa da ferramenta de escrita ao subagente não bloqueia a auditoria" grep -qF 'Se a ferramenta de escrita recusar ao subagente, isso não bloqueia a auditoria' "$D"
+check "772: §3: recusa da escrita ao subagente, a publicação fica com o dispatcher" grep -qF 'Se a escrita for recusada ao subagente, a publicação é sua' "$D"
+check "832: §3: antes de delegar, o dispatcher grava oute-swarm subagente na rodada" grep -qF 'grave `oute-swarm subagente "<para quê>"`' "$D"
+
 # 766. aba de PR mergeado fecha sem pergunta; ação coberta por regra não se pergunta; registro da espera; pendência parada do watch
 check "766: §3: a lista de confirmações só leva o close de aba com sessão trabalhando ou PR aberto" grep -qF 'merge, `oute-swarm close … --yes` de aba com sessão ainda trabalhando (ou com PR aberto), `oute-task clean --yes` e `tell` que manda aplicar no host' "$D"
 check "766: §3: o close da aba de PR mergeado ou abandonado está fora da lista e vale a regra de fechar" bash -c 'l="$(grep -F "**Exceção, sem pergunta (#766):**" "$1")"; for t in "aba de um PR **mergeado**" "**abandonou**" "não entra nesta lista" "vale a regra de fechar a aba do §3" "sem opção numerada"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"

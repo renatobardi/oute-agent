@@ -2,7 +2,7 @@
 qualquer agrupamento de `day`/`host`/`agent`/`model`/`conversation`/`session`. Tudo pela **hora do fato** (`time_unix_nano`), nunca pela de chegada;
 dia no fuso configurado (#415: a meia-noite do fuso, não a do UTC; só a leitura converte). As regras de escopo e de custo estão no `cost.py`.
 
-Papel e fase da conversa (#433, #749, #751): `role` = dispatcher, worker, reviewer (o revisor das etapas, #751) ou standalone (a sessão avulsa), dos eventos `oute.task.opened`/`reopened` da sessão
+Papel e fase da conversa (#433, #749, #751): `role` = subagente (a chamada de subagente, #832), dispatcher, worker, reviewer (o revisor das etapas, #751) ou standalone (a sessão avulsa), dos eventos `oute.task.opened`/`reopened` da sessão
 (`oute.swarm.round`/`oute.swarm.session`) ou, sem eles, do resource da chamada. `phase` = **sempre uma fase do ADR-07**: a da
 conversa em `conversation_phase` (o `phase.py` a deriva: abertura, label, skill, papel, ação, Jev ou troca do Bardi), a da abertura da
 sessão se a conversa ainda não foi classificada, `build` (a mais provável) se nem isso, e `ops` para o fato sem conversa (ex.: o
@@ -54,7 +54,7 @@ TOP_SESSION_TABLE, TOP_CONVERSATION_TABLE = _top_table("session", "_topsessao"),
 TABLES = (ROLE_TABLE, PHASE_TABLE, SUBSCRIPTION_TABLE, ROLE_MODEL_TABLE, ROLE_PHASE_TABLE, TOP_SESSION_TABLE, TOP_CONVERSATION_TABLE)
 NO_SUBSCRIPTION = "sem assinatura"  # a chamada que não é de assinatura nenhuma (ex.: o LLM do ai-memory), só na exibição
 KEYS = ("day", "host", "agent", "model", "conversation", "session", "role", "phase", "repo", "subscription")
-ROLES = ("dispatcher", "worker", "reviewer", "standalone")
+ROLES = ("subagente", "dispatcher", "worker", "reviewer", "standalone")
 # conversation = `session.id` (a conversa do agente, CONTEXT.md), para a tela (#206);
 # session = `oute.task.id` (a sessão do `oute-task`), para a tela de sessões (#207)
 _COLS = {"host": "host_name", "agent": "oute_agent",
@@ -91,7 +91,14 @@ _SESSION_INFO = (
 # e sem sessão de worker: o mesmo sinal do `phase.py`; vale antes da sessão, porque a chamada pode levar o `oute.task.id` do dispatcher
 _REVIEWER = ("json_extract_string(t.resource_attributes, '$.\"oute.swarm.step\"') IS NOT NULL AND t.oute_swarm_round IS NOT NULL "
              "AND json_extract_string(t.resource_attributes, '$.\"oute.swarm.session\"') IS NULL")
-_SCOPE = (f"(SELECT t.*, CASE WHEN {_REVIEWER} THEN 'reviewer' ELSE COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
+# a chamada de subagente (#832): o span leva `query_source_safe` `agent.…` ou `agent_id` (a da sessão principal, nenhum dos dois); o log
+# `api_request`, `query_source` `agent:…`. Vale antes de qualquer outro papel; a conta de custo e o rateio não mudam
+_SUB_SPAN = ("(COALESCE(json_extract_string(t.attributes, '$.query_source_safe'), '') LIKE 'agent.%' "
+             "OR json_extract_string(t.attributes, '$.agent_id') IS NOT NULL)")
+_SUB_LOG = "COALESCE(json_extract_string(t.attributes, '$.query_source'), '') LIKE 'agent:%'"
+_SUB_COST = f"({_SUB_SPAN} OR COALESCE(t.agent_log, false))"  # subconsulta de `spans_with_cost`: soma o log de mesmo `request_id`
+_SCOPE = ("(SELECT t.*, CASE WHEN @SUB@ THEN 'subagente' "
+          f"WHEN {_REVIEWER} THEN 'reviewer' ELSE COALESCE(i.role, CASE WHEN json_extract_string(t.resource_attributes, "
           "'$.\"oute.swarm.session\"') IS NOT NULL THEN 'worker' WHEN t.oute_swarm_round IS NOT NULL THEN 'dispatcher' "
           f"ELSE 'standalone' END) END AS role, {phase_mod.sql_phase()} AS phase "
           f"FROM @TABLE@ t LEFT JOIN {_SESSION_INFO} i ON i.task = t.oute_task_id "
@@ -100,7 +107,10 @@ _SCOPE = (f"(SELECT t.*, CASE WHEN {_REVIEWER} THEN 'reviewer' ELSE COALESCE(i.r
 
 def _scope(table, keys):
     """`table` com as colunas `role` e `phase`, só quando alguma chave pede (as outras consultas não pagam a junção)."""
-    return _SCOPE.replace("@TABLE@", table) if _PER_SESSION & set(keys) else table
+    if not _PER_SESSION & set(keys):
+        return table
+    sub = {"spans": _SUB_SPAN, "logs": _SUB_LOG}.get(table, _SUB_COST)
+    return _SCOPE.replace("@SUB@", sub).replace("@TABLE@", table)
 
 
 def _query(con, keys, cols, aggs, table, where, params):

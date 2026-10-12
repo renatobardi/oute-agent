@@ -936,6 +936,7 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if data is not None:
             etapas_mod.render(data["steps"])
             acoes_mod.collect(surreal, data)
+            data["subagents"] = store.read(lambda con: etapas_mod.subagents(con, rnd))
         return data
 
     @screen("/rodada")
