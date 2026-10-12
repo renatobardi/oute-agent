@@ -1189,8 +1189,8 @@ approve_one() {
 # Comando normalizado = a linha do script sem espaço repetido, com id de pedido, data e hash trocados por marca.
 # Uma linha do script é um comando: heredoc, continuação com \ e bloco não são interpretados.
 # Risco: root (pedido --root ou linha com sudo), leitura (linha simples: comando de uma lista fixa de comandos
-# que só leem e a linha inteira feita só de caracteres de uma lista de permitidos, sem variável de ambiente na
-# frente) ou escrita (todo o resto: na dúvida, escrita). Segredo literal em forma conhecida (Bearer, TOKEN=, --password, ghp_…, usuário:senha@ em
+# que só leem e a linha inteira feita só de caracteres de uma lista de permitidos, sem aspa e sem nome=valor)
+# ou escrita (todo o resto: na dúvida, escrita). Segredo literal em forma conhecida (Bearer, TOKEN=, --password, ghp_…, usuário:senha@ em
 # URL) sai como {segredo}; é por padrão de texto, não garante.
 # awk sem extensão do gawk nem intervalo em regex ({n}): roda no awk do macOS.
 # o programa fica fora da função: os campos do awk ($1, $3…) não são parâmetro posicional do shell
@@ -1238,7 +1238,7 @@ function readonly(p,    w, n, k, c, a, b) {
   if (c == "uniq") { for (k++; k <= n; k++) if (w[k] !~ /^-/) return 0; return 1 }
   if (c == "find") return (p !~ / -(delete|exec|execdir|ok|okdir|fprint|fprintf|fls)/)
   if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --/)
-  if (c == "date") return (p !~ / -[A-Za-z]*s/ && longok(p, LD))
+  if (c == "date") { for (k++; k <= n; k++) if (w[k] !~ /^[-+]/) return 0; return (p !~ / -[A-Za-z]*s/ && longok(p, LD)) }
   if (c == "hostname") return (k == n)
   if (c == "journalctl") return longok(p, LJ)
   if (c == "docker" && p ~ / -[A-Za-z]*o/) return 0
@@ -1257,15 +1257,14 @@ function readonly(p,    w, n, k, c, a, b) {
   return 0
 }
 # leitura só para linha simples, por lista de PERMITIDOS: a linha inteira só tem letra, dígito, espaço e
-# . _ / : = @ % + , ~ * - (e aspas, em número par), e o comando está na lista de leitura. Qualquer outro
-# caractere ($ crase \ < > ( ) ; & | { } [ ] ! # ? ^, controle, NUL, byte acima de 127) = escrita. As aspas saem
-# antes de conferir o comando e as opções (sort "-o" é sort -o). Com sudo (ou su, doas, pkexec), root.
+# . _ / : = @ % + , ~ * -, e o comando está na lista de leitura. Qualquer outro caractere (aspa simples ou
+# dupla, $ crase \ < > ( ) ; & | { } [ ] ! # ? ^, controle, NUL, byte acima de 127) = escrita. Com sudo (ou su,
+# doas, pkexec), root; aí as aspas saem antes de procurar a palavra ("sudo" rm é root).
 function risk(s, root,    t) {
   t = s; gsub("[" DQ SQ "]", "", t)
   if (root || t ~ /(^|[^A-Za-z0-9_-])(sudo|sudoedit|su|doas|pkexec)( |$)/) return "root"
-  if (t !~ /^[A-Za-z0-9 ._\/:=@%+,~*-]*$/) return "escrita"
-  if (gsub(DQ, DQ, s) % 2 || gsub(SQ, SQ, s) % 2) return "escrita"
-  return readonly(t) ? "leitura" : "escrita"
+  if (s !~ /^[A-Za-z0-9 ._\/:=@%+,~*-]*$/) return "escrita"
+  return readonly(s) ? "leitura" : "escrita"
 }
 # toda opção longa (--x ou --x=valor) da linha está, por extenso, na lista ok; abreviação não vale
 function longok(p, ok,    w, n, i, o) {
@@ -1302,7 +1301,7 @@ BEGIN {
   set(DG, "volume network image container context")
   set(G1, "status log diff show rev-parse describe ls-files")
   set(S1, "status is-active is-enabled is-failed list-units list-timers list-unit-files show cat")
-  set(O1, "version help status doctor")
+  set(O1, "version help status")
   set(LD, "--utc --universal --date --iso-8601 --rfc-3339 --rfc-email --reference --help --version")
   set(LJ, "--since --until --unit --user-unit --lines --follow --reverse --boot --priority --grep --identifier --no-pager --no-hostname --utc --system --user --dmesg --quiet --disk-usage --list-boots --help --version")
 }
@@ -1333,10 +1332,10 @@ END {
 # do script vira \001 aqui: o bash que rodou o pedido descartou o NUL, e cada awk trata o byte de um jeito;
 # trocado por um caractere de controle, a linha nunca casa a lista de permitidos e sai escrita.
 approve_suggest_stream() {
-  local log="$1" runs="$2" line rest id
+  local log="$1" runs="$2" tab=$'\t' line rest id
   while IFS= read -r line || [[ -n "$line" ]]; do
     printf 'L\t%s\n' "$line"
-    rest="${line#*$'\t'}"; rest="${rest#*$'\t'}"; id="${rest%%$'\t'*}"
+    rest="${line#*"$tab"}"; rest="${rest#*"$tab"}"; id="${rest%%"$tab"*}"
     [[ "$id" =~ ^[0-9]+-[0-9]+-[a-z0-9-]+$ && -f "$runs/$id.sh" ]] || continue
     LC_ALL=C tr '\000' '\001' < "$runs/$id.sh" | sed 's/^/F	/'
   done < "$log"

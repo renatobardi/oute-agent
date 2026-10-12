@@ -125,6 +125,7 @@ ferramenta-desconhecida --ver
 sed -i 's/a/b/' arquivo
 find /var/log -name '*.gz' -delete
 find /var/log -name '*.gz'
+find /var/log -name access.log
 git -C /srv/repo status
 git -C /srv/repo pull --ff-only
 cat arquivo | sudo tee /etc/x
@@ -150,7 +151,8 @@ check "escrita: docker compose up" row 1 0 "$T" escrita "docker compose up -d"
 check "escrita: comando fora da lista de leitura" row 1 0 "$T" escrita "ferramenta-desconhecida --ver"
 check "escrita: sed -i" row 1 0 "$T" escrita "sed -i 's/a/b/' arquivo"
 check "escrita: find -delete" row 1 0 "$T" escrita "find /var/log -name '*.gz' -delete"
-check "leitura: find sem ação" row 1 0 "$T" leitura "find /var/log -name '*.gz'"
+check "leitura: find sem ação e sem aspa" row 1 0 "$T" leitura "find /var/log -name access.log"
+check "escrita: find sem ação, com aspa" row 1 0 "$T" escrita "find /var/log -name '*.gz'"
 check "leitura: git -C <dir> status" row 1 0 "$T" leitura "git -C /srv/repo status"
 check "escrita: git -C <dir> pull" row 1 0 "$T" escrita "git -C /srv/repo pull --ff-only"
 check "root: sudo depois do pipe" row 1 0 "$T" root "cat arquivo | sudo tee /etc/x"
@@ -265,10 +267,11 @@ su -c 'rm g'
 SH
 run_suggest --min 1
 for c in "ls -la /srv" "grep -c nginx /etc/nginx/nginx.conf" "docker ps" "systemctl is-active nginx" \
-    'tail -n 20 "/var/log/meu arquivo.log"' "sort -u /etc/hosts" "journalctl -u nginx --since today" "ls depois-hifen"; do
+    "sort -u /etc/hosts" "journalctl -u nginx --since today" "ls depois-hifen"; do
   check "leitura: linha simples '$c'" row 1 0 "$T" leitura "$c"
 done
 check "escrita: uniq com operando" row 1 0 "$T" escrita "uniq -c /etc/hosts"
+check "escrita: argumento entre aspas duplas" row 1 0 "$T" escrita 'tail -n 20 "/var/log/meu arquivo.log"'
 for c in 'ls $HOME' 'ls `pwd`' 'ls a\ b' "cat < /etc/hosts" "ls > /tmp/x" "ls (x" "ls x)" "ls /a ; ls /b" "ls /c &" "ls /d | cat"; do
   check "escrita: caractere de shell em '$c'" row 1 0 "$T" escrita "$c"
 done
@@ -311,6 +314,15 @@ journalctl --rot
 date --utc
 journalctl --unit nginx --since today --no-pager
 ls "a b"
+ls 'a b'
+ls 'a
+ls a"
+find . '"' "x
+ls" -fprint '"'
+date 10120026
+date +%s
+oute doctor
+oute version
 ls [ab]x
 ls a?
 ls !x
@@ -332,12 +344,21 @@ check "escrita: date --s= (abreviação de --set)" row 1 0 "$T" escrita "date --
 check "escrita: journalctl --rot (abreviação de --rotate)" row 1 0 "$T" escrita "journalctl --rot"
 check "leitura: date com opção longa da lista" row 1 0 "$T" leitura "date --utc"
 check "leitura: journalctl com opções longas da lista" row 1 0 "$T" leitura "journalctl --unit nginx --since today --no-pager"
-check "leitura: argumento entre aspas, com espaço" row 1 0 "$T" leitura 'ls "a b"'
+check "escrita: argumento entre aspas duplas, com espaço (5ª auditoria: toda aspa é escrita)" row 1 0 "$T" escrita 'ls "a b"'
+check "escrita: argumento entre aspas simples" row 1 0 "$T" escrita "ls 'a b'"
+check "escrita: linha com uma aspa simples só" row 1 0 "$T" escrita "ls 'a"
+check "escrita: linha com uma aspa dupla só" row 1 0 "$T" escrita 'ls a"'
+check "escrita: par do relatório, 1ª linha (aspa aberta que junta a linha seguinte)" row 1 0 "$T" escrita "find . '\"' \"x"
+check "escrita: par do relatório, 2ª linha (começa com ls e carrega -fprint)" row 1 0 "$T" escrita "ls\" -fprint '\"'"
+check "escrita: date com operando (acerta o relógio)" row 1 0 "$T" escrita "date 10120026"
+check "leitura: date com formato" row 1 0 "$T" leitura "date +%s"
+check "escrita: oute doctor grava o próprio resultado" row 1 0 "$T" escrita "oute doctor"
+check "leitura: oute version" row 1 0 "$T" leitura "oute version"
 for c in "ls [ab]x" "ls a?" "ls !x" "ls ^x" "ls a#b" "cat /etc/hósts"; do
   check "escrita: caractere fora da lista de permitidos em '$c'" row 1 0 "$T" escrita "$c"
 done
 check "set -e seguido de outro comando não some da lista" row 1 0 "$T" escrita "set -e; rm -rf x"
-check "nenhuma linha sai leitura além das três esperadas" test "$(grep -cE '^ +[0-9]+ +[0-9]+ +[^ ]+ +leitura ' <<<"$OUT")" = 3
+check "nenhuma linha sai leitura além das quatro esperadas" test "$(grep -cE '^ +[0-9]+ +[0-9]+ +[^ ]+ +leitura ' <<<"$OUT")" = 4
 
 # segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
 reset
