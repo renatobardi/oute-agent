@@ -1,0 +1,2 @@
+### Fixed
+- **Testes não mandam evento ao coletor de verdade** (#815). A suíte herdava o endpoint de telemetria do container e, em alguns casos, tinha `oute-propose`/`oute-emit` sem receptor próprio: o pedido de teste (`oute.canal.proposed`) chegava ao agent-studio e aparecia como pendente no tray. Agora cada teste que roda `oute-propose` ou `oute-emit` de verdade aponta o ambiente a uma guarda (`tests/lib/otlp.sh`) que falha se algum evento sair para endpoint que não é o receptor do teste. **Não precisa de release** (só `tests/`).

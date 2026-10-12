@@ -11,7 +11,9 @@ TMP="$(mktemp -d)"; trap 'rm -rf "${TMP:?}"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
-trap 'rcv_stop; rm -rf "${TMP:?}"' EXIT
+guarda_start "$TMP/guarda"
+rcv_stop   # antes do primeiro receptor, o endpoint é uma porta fechada (a guarda só vê o que vazar)
+trap 'guarda_stop; rcv_stop; rm -rf "${TMP:?}"' EXIT
 
 # ---------------------------------------------------------------- #219: seletor de modelo (ADR-02)
 # 11. spawn: fase da issue, exceção, sem label, gh fora
@@ -158,4 +160,6 @@ check "sem oute-select: abre claude como antes, sem aviso" [ "$RC" -eq 0 -a -z "
 before="$(cat "$STATE/spawned")"
 nosel spawn 11-nosel "instrução" --model claude-opus-5-5
 check "sem oute-select + --model: recusa, nada registrado" bash -c '[ "$1" -ne 0 ] && grep -qF -- "--model precisa do oute-select" <<<"$2" && [ "$3" == "$4" ]' _ "$RC" "$ERR" "$(cat "$STATE/spawned")" "$before"
+guarda_check
+guarda_stop
 check_end

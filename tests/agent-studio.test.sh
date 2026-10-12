@@ -10,7 +10,8 @@ TMP="$(mktemp -d)"
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/agent-studio.sh"
 . "$ROOT/tests/lib/otlp.sh"
-trap 'studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
+guarda_start "$TMP/guarda"
+trap 'guarda_stop; studio_stop; rcv_stop; rm -rf "$TMP"' EXIT
 studio_init
 DB="$TMP/s/db.duckdb"
 count() { studio_sql "$DB" "SELECT count(*) AS n FROM $1 ${2:-}" | jq -r .n; }
@@ -281,7 +282,7 @@ check "down/status enxergam o profile"                 bash -c 'grep -q "\-\-pro
 
 # ---------------------------------------------------------------- 9. SurrealDB: estado derivado (#187)
 . "$ROOT/tests/lib/surreal.sh"
-trap 'studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; studio_stop; rcv_stop; surreal_stop; rm -rf "$TMP"' EXIT
 surreal_bin
 surreal_start "$TMP/sdb" || { cat "$TMP/sdb/log"; die "SurrealDB não subiu"; }
 sq() { surreal_q "$1"; }
@@ -466,4 +467,6 @@ check "métricas do agent-studio no DuckDB"             test "$(count metrics "W
 check "compose: telemetria ao otel-collector local"    bash -c 'grep -q "OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318" <<<"$0" && grep -q "OTEL_SERVICE_NAME: agent-studio" <<<"$0" && grep -q "OTEL_RESOURCE_ATTRIBUTES: host.name=\${OUTE_HOST:-oute},oute.instance=\${OUTE_INSTANCE:-oute-agent}" <<<"$0"' \
                                                          "$(awk '/^  agent-studio:$/ {on=1; next} on && /^  [a-z]/ {exit} on {print}' "$ROOT/docker/compose.yaml")"
 
+guarda_check
+guarda_stop
 check_end

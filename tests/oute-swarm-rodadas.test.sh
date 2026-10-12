@@ -10,10 +10,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWARM="${SWARM:-$ROOT/docker/oute-swarm}"
 TMP="$(mktemp -d)"
-trap 'rcv_stop; rm -rf "$TMP"' EXIT
+trap 'guarda_stop; rcv_stop; rm -rf "$TMP"' EXIT
 . "$ROOT/tests/lib/check.sh"
 . "$ROOT/tests/lib/swarm.sh"
 . "$ROOT/tests/lib/swarm-otlp.sh"
+guarda_start "$TMP/guarda"
+rcv_stop   # sem receptor neste tema: o endpoint é uma porta fechada (a guarda só vê o que vazar)
 
 NAMES="$ROOT/docker/agent-studio/agent_studio/names.py"
 NAME_RE='^[A-Z][a-z]+_[A-Z][a-z]+$'
@@ -250,4 +252,6 @@ check "list: rodada com nome aparece como Nome (id)"                grep -qxF '=
 check "list: as sessões seguem sob o cabeçalho"                     grep -qF '7-foo w1:p1 claude' <<<"$OUT"
 check "triagem: o prompt usa oute-swarm busy e não oferece a issue" bash -c 'grep -qF "oute-swarm busy" "$1" && grep -qF "Issue com sessão aberta em outra rodada não é oferecida" "$1" && grep -qF "em andamento na rodada <nome> (<id>)" "$1"' _ "$SWARM_MD_ALL"
 
+guarda_check
+guarda_stop
 check_end
