@@ -22,7 +22,7 @@ otelcol_env
 CFG="$ROOT/config/otel/collector.yaml"
 export AGENT_STUDIO_INGEST_TOKEN="$(python3 -c "import secrets; print(secrets.token_hex(16))")" AGENT_STUDIO_URL=https://studio.invalid
 check "validate collector.yaml + agent-studio.yaml"     "$OTELCOL" validate --config="$CFG" --config="$ROOT/config/otel/agent-studio.yaml"
-P="$(otelcol_print --config="$CFG")"
+P="$(otelcol_print --config="$CFG" --config="$ROOT/config/otel/agent-studio.yaml")"
 check "transform/redact nos pipelines de logs e traces (bucket e agent-studio)" jqp '
   [.service.pipelines | to_entries[] | select(.key | test("^(logs|traces)/")) | .value.processors | index("transform/redact")]
   | all(. != null)'
@@ -56,6 +56,11 @@ def gen(path, run):
     bearer, env, envq, envesc, span = (rnd(32) for _ in range(5))
     spanev = 'ghp_' + rnd(36)
     aws, pem, env2 = 'AKIA' + rnd(16, UP), rnd(64), rnd(32)
+    asia, xox, jwt = 'ASIA' + rnd(16, UP), 'xoxb-' + rnd(24), 'eyJ' + rnd(20) + '.eyJ' + rnd(20) + '.' + rnd(20)
+    basic, uuser, upass = rnd(20), rnd(8), rnd(20)
+    low, pw, sp, bs = rnd(32), rnd(24), rnd(32), rnd(8) + '\\'
+    pem_trunc = '-----BEGIN OPENSSH PRIVATE KEY-----\\n' + rnd(40)
+    pgp = '-----BEGIN PGP PRIVATE KEY BLOCK-----\\n' + rnd(40) + '\\n-----END PGP PRIVATE KEY BLOCK-----'
     pem_txt = '-----BEGIN OPENSSH PRIVATE KEY-----\\n' + pem + '\\n-----END OPENSSH PRIVATE KEY-----'
     limpo = 'ls -la /workspace && echo ok'
     # (caso, campo, origem, texto de entrada, texto esperado, segredos que não podem sair)
@@ -74,6 +79,18 @@ def gen(path, run):
         ('limpo', 'conteudo', limpo, limpo, []),
         ('quase', 'conteudo', 'risk-management task-123 ghost_mode=1 sk-curto', 'risk-management task-123 ghost_mode=1 sk-curto', []),
         ('nome-sem-segredo', 'conteudo', 'NOME_SEM_SEGREDO=valor-visivel', 'NOME_SEM_SEGREDO=valor-visivel', []),
+        ('quase-prosa', 'conteudo', 'the key: value, max_tokens=4096', 'the key: value, max_tokens=4096', []),
+        ('pem-truncado', 'conteudo', 'chave ' + pem_trunc, 'chave [redigido]', [pem_trunc.split('\\n')[1]]),
+        ('pgp', 'conteudo', pgp, '[redigido]', [pgp.split('\\n')[1]]),
+        ('slack', 'conteudo', f'slack {xox}', 'slack [redigido]', [xox]),
+        ('asia', 'conteudo', f'id {asia}', 'id [redigido]', [asia]),
+        ('jwt', 'conteudo', f'token {jwt}', 'token [redigido]', [jwt]),
+        ('basic', 'conteudo', f'Authorization: Basic {basic}', 'Authorization: Basic [redigido]', [basic]),
+        ('url-senha', 'conteudo', f'git clone https://{uuser}:{upass}@host/x', 'git clone https://[redigido]@host/x', [upass]),
+        ('minuscula', 'conteudo', f'api_key={low} ok', 'api_key=[redigido] ok', [low]),
+        ('json-senha', 'conteudo', '{"password": "' + pw + '"}', '{password=[redigido]}', [pw]),
+        ('espaco-igual', 'conteudo', f'OPENAI_API_KEY = {sp} fim', 'OPENAI_API_KEY=[redigido] fim', [sp]),
+        ('barra-invertida', 'conteudo', f'NOME_TOKEN={bs}cd fim', 'NOME_TOKEN=[redigido] fim', [bs.rstrip('\\')]),
     ]
     spans = [
         ('span-env', 'conteudo', f'export OUTE_TESTE_KEY={span}', 'export OUTE_TESTE_KEY=[redigido]', [span]),
@@ -174,5 +191,14 @@ for _ in $(seq 1 120); do python3 -I "$TMP/redact.py" ready "$TMP/casos.json" "$
 python3 -I "$TMP/redact.py" check "$TMP/casos.json" "$S3D/objects.jsonl" > "$TMP/res.txt" 2>&1
 check_py_lines "$TMP/res.txt"
 check "o S3 falso recebeu o lote (objetos gravados)" [ -s "$S3D/objects.jsonl" ]
+
+# ---------------------------------------------------------------- conteúdo de ferramenta desligado por padrão
+check "compose: OTEL_LOG_TOOL_CONTENT desligado por padrão e sobrescrevível" \
+  grep -qxF '      OTEL_LOG_TOOL_CONTENT: ${OTEL_LOG_TOOL_CONTENT:-0}' "$ROOT/docker/compose.yaml"
+# o oute-emit run não leva a chave do ~/.oute_env ao agente headless (TELEMETRY_KEYS)
+H="$TMP/home-emit"; mkdir -p "$H"
+printf 'declare -x OTEL_LOG_TOOL_CONTENT="1"\n' > "$H/.oute_env"
+check "oute-emit run: a chave do ~/.oute_env não chega ao agente headless" \
+  env -i HOME="$H" PATH="$PATH" "$ROOT/docker/oute-emit" run -- sh -c '[ -z "${OTEL_LOG_TOOL_CONTENT:-}" ]'
 
 check_end
