@@ -27,11 +27,4 @@ jobs:
 
       # #89: todo tests/*.test.sh roda sem editar o workflow; um falhando deixa o check vermelho
       - name: testes (tests/*.test.sh)
-        run: |
-          rc=0
-          for t in tests/*.test.sh; do
-            echo "::group::$t"
-            "$t" || { echo "::error::$t falhou"; rc=1; }
-            echo "::endgroup::"
-          done
-          exit "$rc"
+        run: bash tests/run-all.sh
