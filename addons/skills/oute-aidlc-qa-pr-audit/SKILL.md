@@ -207,7 +207,20 @@ Nunca `rm -rf` com `$(…)` nem glob em `/tmp` (`/tmp/tmp.*`).
 - para `scripts/oute`: o caminho do Mac (bash 3.2, sem `mapfile`, `timeout`, `${var,,}`), por leitura ou com um bash 3.2, se houver.
 
 Regras de execução:
-- **sem segredos no ambiente:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>'`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente. O `env -i` **não isola o sistema de arquivos**: o gate roda como o mesmo usuário e lê qualquer caminho absoluto que ele lê (`~/.config`, `~/.ssh`, `/run/secrets`, o `agent_env` montado). Por isso só execute depois do passo 4 `livre`, e nunca descreva o gate como "isolado" ou "sem acesso a segredos" no relatório;
+- **sem segredos no ambiente:** rode cada gate com ambiente limpo, por exemplo `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>' </dev/null`. Nunca com `GH_TOKEN`, `agent_env` ou credencial de nuvem no ambiente. O `env -i` **não isola o sistema de arquivos**: o gate roda como o mesmo usuário e lê qualquer caminho absoluto que ele lê (`~/.config`, `~/.ssh`, `/run/secrets`, o `agent_env` montado). Por isso só execute depois do passo 4 `livre`, e nunca descreva o gate como "isolado" ou "sem acesso a segredos" no relatório;
+- **stdin fechado e ambiente que não se imprime (#821, L1):** todo gate roda com `</dev/null`, e todo prompt de subagente leva o bloco abaixo. Na reauditoria do PR #813, um subagente rodou um comando que imprimiu o ambiente do processo sob `env -i`: o `~/.bashrc` carregou o `~/.oute_env` e valores de duas chaves de API saíram na saída da ferramenta (https://github.com/renatobardi/oute-agent/pull/813#issuecomment-6116636670). O `env -i` não impede isso, porque o comando que ele roda pode ler o arquivo. Texto a copiar no prompt de cada subagente (e vale para os seus próprios comandos):
+
+  > Você pode rodar só o que está nesta lista, e cada comando leva `</dev/null`. Vale para você e para cada subagente:
+  > - o gate do passo 6, `env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash -c '<gate>' </dev/null` (o `env -i` só com um comando depois, nunca sozinho), e `bash -n <script>`;
+  > - `python3 -I scripts/changelog check` e `bash scripts/exec-files`, dentro da worktree da auditoria;
+  > - `git` de leitura e de worktree: `diff`, `log`, `show`, `status`, `grep`, `ls-files`, `rev-parse`, `merge-base`, `fetch origin`, `worktree add/remove` dos caminhos de `$AUD`, e `checkout <sha> -- <arquivo de teste>` dentro da worktree da base;
+  > - `gh` de leitura: `gh pr view`, `gh pr diff`, `gh pr checks`, `gh issue view`, `gh api` só com GET; `gh pr comment` só para publicar o relatório (passo 12);
+  > - `oute-sonar pr <N> --json` (só GET);
+  > - `mktemp -d`, e `rm -rf` só com o caminho literal que o passo 6 imprimiu;
+  > - leitura e busca de arquivo: `cat`, `sed -n`, `grep`, `awk`, `wc`, `head`, `tail`, `ls`, `find` sem `-exec`.
+  >
+  > Qualquer outro comando: pergunte antes. Em particular, nada que imprima o ambiente do processo (`env` e `printenv` sem comando, `declare -p`, `set` sem argumento, `export -p`, `compgen -e`, `typeset -p`, `cat /proc/self/environ`) e nada que leia `~/.oute_env`, `agent.env`, `agent_env` ou qualquer arquivo sob `/run/secrets/`. Para saber se uma variável está preenchida, use um teste que não imprime o valor, por exemplo `[ -n "${VAR:-}" ] && echo preenchida || echo vazia`.
+
 - sem rede, quando o gate não precisa dela; nada de `push`, `release`, `oute up`, deploy ou canal de aprovação;
 - anote comando, código de saída e o trecho relevante da saída de cada gate, lido do arquivo da execução (veja "Saída dos gates", abaixo);
 - **testes que falham na base e passam no head:** para teste novo ou alterado que o PR apresenta como prova de correção, copie o teste para a worktree da base (`git -C "$AUD/base" checkout "$HEAD_SHA" -- <arquivos de teste>`) e **confira que o arquivo trocou** (`git -C "$AUD/base" status --short` mostra `M` para alterado ou `A` para novo); se não trocou, refaça o checkout e não prossiga. Depois rode o teste. Tem que falhar na base e passar no head. Se passa nos dois, o teste não prova a mudança (slop: teste vazio, passo 8);
@@ -230,7 +243,7 @@ Regras de execução:
 
 ```bash
 G=addons-link                                  # nome curto do gate
-( cd "$AUD/head" && env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash tests/addons-link.test.sh ) > "$AUD/$G.out" 2>&1; echo "rc=$?"
+( cd "$AUD/head" && env -i HOME="$AUD/home" PATH="$PATH" LANG=C.UTF-8 bash tests/addons-link.test.sh ) </dev/null > "$AUD/$G.out" 2>&1; echo "rc=$?"
 tail -n 3 "$AUD/$G.out"                        # o resumo, lido do arquivo
 grep -n -E '^FAIL |[Ee]rror|falha' "$AUD/$G.out"   # as linhas da falha, com o número da linha
 ```
@@ -293,7 +306,8 @@ Regras duras do oute-agent que costumam aparecer (confira no AGENTS.md da base; 
 - teste vazio: não afirma nada, afirma o próprio mock, está desligado, ou passa na base e no head quando é apresentado como prova;
 - erro engolido: `|| true`, `2>/dev/null`, `catch` vazio, código de saída ignorado, onde a falha importa e ninguém avisa;
 - comentário ou doc que contradiz o código, ou que narra a mudança em vez de explicar o código;
-- duplicação colada de um trecho que já existe no repo, em vez de reusar.
+- duplicação colada de um trecho que já existe no repo, em vez de reusar;
+- **filtro de segurança por lista de barrados** sobre texto de comando (o classificador recusa o que está numa lista de padrões proibidos): o padrão é lista de permitidos, e a de barrados é BLOCKING (#821, L2; motivo no `oute-aidlc-build-implement`), salvo se o repo endossa a de barrados.
 
 **Code smells (julgamento).** A linha de base abaixo vale mesmo quando o repo não documenta nada, com duas regras: **a regra do repo vence** (se o repo endossa algo que a lista marcaria, suprima o smell) e **smell é sempre julgamento** (`possível <smell>`, nunca violação dura, no máximo SHOULD-FIX). Cada item: o que é → como corrigir. Adaptado e traduzido do code-review de Matt Pocock (MIT), que parte dos smells de Fowler (_Refactoring_, cap. 3):
 - **Nome misterioso:** função, variável ou tipo cujo nome não diz o que faz ou guarda. → renomear; se nenhum nome honesto aparece, o desenho está confuso.

@@ -429,6 +429,116 @@ echo : > "$FAKE/on-sleep-2"
 OUTE_WATCH_STALL_S=abc OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "prazo: valor inválido usa 1800 s, nada aos 16 min" [ -z "$(pend_events)" ]
 
+# 821, L4: pendência com pergunta ao Bardi sem resposta sobre o item não sai; sem pergunta sai (acima); outro item sai;
+# depois da resposta, sai. A pergunta casa com o número inteiro: "#12" não casa com "#120"
+CASE=pendpergunta; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #12: mergear agora? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 3720))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta aberta: código 0"                      [ "$RC" -eq 0 ]
+check "L4 pergunta aberta sobre o PR: nada sai, nem aos 62 min" [ -z "$(pend_events)" ]
+
+CASE=pendoutra; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #120: outra coisa? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta sobre #120 não segura o PR #12"        [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
+
+# #821 (achado 6 da auditoria do #823): o número sem borda à esquerda casava com outro repo ("outro#12" calava o #12)
+CASE=pendoutrorepo; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta outro#12: mesma coisa? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta sobre outro#12 não segura o #12 deste repo" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
+
+# #821 (achado 1 da reauditoria do #823): `PR#12` e `<repo da rodada>#12` (aqui `repo`) calam o #12; `outro#12` não (acima)
+CASE=pendformas; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR#12: mergear? 1 sim 2 não" >> "$STATE/log"
+echo "$(date -u +%FT%TZ) pergunta repo#12: mergear? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 3720))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 PR#12 e repo#12 calam o #12 deste repo"         [ -z "$(pend_events)" ]
+
+CASE=pendrespondida; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #12: mergear agora? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 2100)) 'echo "$(date -u +%FT%TZ) resposta" >> "$STATE/log"'
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta respondida: a pendência volta a sair, com o relógio de antes" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 35 min ou mais, sem mudança: PR #12 aberto" ]
+
+# a sessão `done` sem PR também é item: a pergunta sobre "#7 foo" segura a pendência dela
+CASE=pendsessaopergunta; round "$CASE"
+echo "$(date -u +%FT%TZ) pergunta #7 foo: continuar a sessão? 1 sim 2 não" >> "$STATE/log"
+clock "$T0"
+hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 sessão com pergunta aberta: nada sai"           [ -z "$(pend_events)" ]
+
+# 821, L3: o religar (chamado pelo boot do container) põe um watch em cada rodada aberta com sessão; a rodada fechada e a
+# sem `spawned` ficam como estão. O watch religado roda em segundo plano e termina sozinho (a rodada fecha no sleep falso)
+CASE=religar; round "$CASE"
+FECHADA="$H/.oute/swarm/swarm-fechada"; SEMSESS="$H/.oute/swarm/swarm-semsessao"
+mkdir -p "$FECHADA" "$SEMSESS"
+cp "$STATE/meta" "$STATE/spawned" "$FECHADA/"; touch "$FECHADA/fechada"
+cp "$STATE/meta" "$SEMSESS/"; : > "$SEMSESS/spawned"
+OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
+       OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" "$SWARM" religar 2>"$FAKE/err")"; RC=$?
+check "religar: código 0"                                 [ "$RC" -eq 0 ]
+check "religar: anuncia só a rodada aberta com sessão"     [ "$OUT" == "watch religado: swarm-test" ]
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
+check "religar: o watch da rodada aberta roda e termina"  logged "[rodada] swarm-test fechada (oute-swarm close --all); watch encerrado"
+check "religar: rodada fechada não ganha watch"           [ ! -e "$FECHADA/watch.out" -a ! -e "$FECHADA/watch.pid" ]
+check "religar: rodada sem sessão não ganha watch"        [ ! -e "$SEMSESS/watch.out" -a ! -e "$SEMSESS/watch.pid" ]
+# o boot chama o religar depois do herdr server (sem ele, o watch sobe antes do herdr e falha na primeira passada)
+check "religar: o entrypoint chama religar depois do herdr server" bash -c 'l="$(grep -n "herdr server start" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; r="$(grep -n "oute-swarm religar" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; [[ -n "$l" && -n "$r" && "$r" -gt "$l" ]]' _ "$ROOT"
+
+# #821 (achado 2 da auditoria do #823): o religar não troca um watch vivo da rodada; com watch.pid de processo morto, religa
+# rel_religar: roda o religar do caso (saída em $OUT, sem o watch em segundo plano preso na captura)
+rel_religar() {
+  OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
+         OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" "$SWARM" religar 2>"$FAKE/err")"; RC=$?
+  return 0
+}
+CASE=religarvivo; round "$CASE"
+# exec -a: o próprio sleep vira o watch no /proc (um só processo, que o kill encerra)
+bash -c 'exec -a "oute-swarm watch --round swarm-test" sleep 60' </dev/null >/dev/null 2>&1 & LIVE=$!
+echo "$LIVE" > "$STATE/watch.pid"
+rel_religar
+check "religar: watch vivo não é trocado (aviso na saída)" [ "$OUT" == "watch já ativo, sem religar: swarm-test" ]
+check "religar: watch vivo não ganha um segundo watch"    [ ! -e "$STATE/watch.out" ]
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
+
+# NIT 4 da reauditoria: `watch --round swarm-test-2` (outra rodada, id que começa igual) não conta como watch vivo de swarm-test
+CASE=religarprefixo; round "$CASE"
+bash -c 'exec -a "oute-swarm watch --round swarm-test-2" sleep 60' </dev/null >/dev/null 2>&1 & LIVE=$!
+echo "$LIVE" > "$STATE/watch.pid"
+rel_religar
+check "religar: id que começa igual não pula a rodada"    [ "$OUT" == "watch religado: swarm-test" ]
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
+
+CASE=religarmorto; round "$CASE"
+bash -c 'exit 0' & DEAD=$!; wait "$DEAD" 2>/dev/null || true
+echo "$DEAD" > "$STATE/watch.pid"
+rel_religar
+check "religar: watch.pid de processo morto religa a rodada" [ "$OUT" == "watch religado: swarm-test" ]
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
+
 guarda_check
 guarda_stop
 check_end
