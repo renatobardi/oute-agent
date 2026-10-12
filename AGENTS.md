@@ -51,7 +51,7 @@ Skill de fluxo nova entra nesta tabela no mesmo PR. Por onde começar: `oute-aid
 - `docker compose config` (gate no CI pelo teste `tests/compose-config.test.sh`, não no container).
 - Linker de addons: `tests/addons-link.test.sh`.
 - Collector: `otelcol-contrib validate --config=config/otel/collector.yaml --config=config/otel/agent-studio.yaml` (os dois pipelines juntos, como no host com o agent-studio ligado).
-- Script do host: pensar no caminho do Mac (bash 3.2, sem `timeout`, Docker Desktop).
+- Script do host: pensar no Mac (bash 3.2). Banco do studio: `docs/studio-banco.md`.
 - **SonarCloud é gate do PR** (#192): o check `SonarCloud Code Analysis` do head (`gh pr checks <n>`) faz parte do "CI verde", que só vale com ele concluído com sucesso; pendente não é verde. O motivo de um gate reprovado (condição, issues, hotspots) sai de `oute-sonar pr <n>` (#226; saída 1 = gate reprovado; precisa de `SONAR_TOKEN`). **Agente nunca chama endpoint de escrita do SonarCloud** (aceitar issue, marcar hotspot, mudar gate ou configuração): o `oute-sonar` só faz `GET`, e o agente propõe a justificativa no PR; a decisão é do Bardi, na UI. O que costuma derrubar a nota de segurança no código novo:
   - credencial literal, inclusive em teste (gerar aleatória);
   - dado vindo do cliente em log ou em resposta de erro;

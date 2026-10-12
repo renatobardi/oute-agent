@@ -51,6 +51,10 @@
 #   oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]   (usado pelo dispatcher, #752) conferência de antes do merge,
 #                                                   sem modelo: PR aberto e sem conflito, head = o auditado, base = a ensaiada, CI verde (só SUCCESS; pulado e neutro não contam) com
 #                                                   o SonarCloud Code Analysis. Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
+#   oute-swarm pr-comment <pr> --body-file <arquivo>  (usado pelo dispatcher, #829) confere as referências do texto com o
+#                                                   oute-refcheck e só então comenta o PR (gh pr comment); imprime a URL do
+#                                                   comentário. Saída 1: quebrada ou nao-abre, não comentou; 3 só não conferidas,
+#                                                   comentou com o aviso
 #   oute-swarm estado [--autorizacao "<texto>"]     (#752) grava ~/.oute/swarm/<rodada>/estado.md só do disco; --autorizacao registra a
 #                                                   autorização permanente de merge. O watch --deliver recomeça o contexto do dispatcher
 #                                                   a cada OUTE_SWARM_RESTART_MERGES merges (padrão 5, 0 desliga): /clear + [contexto]
@@ -1955,8 +1959,36 @@ cmd_premerge() {
   return 0
 }
 
+# pr-comment <pr> --body-file <arquivo> (#829): confere as referências do texto (oute-refcheck) e só então comenta o PR.
+# Quebrada ou nao-abre (saída 1 do refcheck) não comenta; uso ou arquivo ilegível também não. Só não conferidas (saída 3,
+# gh fora do ar) comenta, com o aviso em stderr. Imprime a URL do comentário.
+cmd_pr_comment() {
+  local pr="" file="" rc=0 url=""
+  while [[ $# -gt 0 ]]; do
+    local a="$1" v="${2:-}"
+    case "$a" in
+      --body-file) file="${v:?}"; shift 2 ;;
+      -*) die "opção desconhecida: $a" ;;
+      *) [[ -z "$pr" ]] || die "argumento a mais: $a"; pr="${a#\#}"; shift ;;
+    esac
+  done
+  [[ "$pr" =~ ^[0-9]+$ && -n "$file" ]] || die 'uso: oute-swarm pr-comment <pr> --body-file <arquivo>'
+  [[ -r "$file" ]] || die "arquivo ilegível: $file"
+  oute-refcheck "$file" >&2 || rc=$?   # a saída do refcheck vai ao stderr: o stdout é só a URL (#829, auditoria)
+  case "$rc" in
+    0) ;;
+    3) echo "oute-swarm: referências não conferidas (gh fora do ar): o comentário sai com esse aviso" >&2 ;;
+    1) echo "oute-swarm: não comentou: referência quebrada ou que não abre (saída acima); corrija o texto e rode de novo" >&2
+       return 1 ;;
+    *) echo "oute-swarm: não comentou: oute-refcheck falhou (código $rc)" >&2; return 1 ;;
+  esac
+  url="$(gh pr comment "$pr" --body-file "$file")" || die "gh pr comment #$pr falhou"
+  echo "$url"
+  return 0
+}
+
 case "${1:-}" in
-  ""|-h|--help) sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help) sed -n '2,58p' "$0" | sed 's/^# \{0,1\}//' ;;
   spawn) shift; cmd_spawn "$@" ;;
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;
@@ -1970,5 +2002,6 @@ case "${1:-}" in
   busy) shift; cmd_busy "$@" ;;
   estado) shift; cmd_estado "$@" ;;
   premerge) shift; cmd_premerge "$@" ;;
+  pr-comment) shift; cmd_pr_comment "$@" ;;
   *) cmd_start "$@" ;;
 esac
