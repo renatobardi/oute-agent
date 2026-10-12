@@ -1,2 +1,0 @@
-### Changed
-- **Preço do `glm-5.3-flash` travado no agent-studio** (#826). O alerta `price_sources_diverge` deixa de aparecer para o modelo: o preço vem da página oficial da Z.ai (entrada 0,15; saída 0,5; cache lido 0,03; escrita em cache grátis), com `fixed = true`, como o `glm-5.3` (#733). Precisa de `git pull` e `oute down/up` no host (`config/agent-studio/config.toml`); não precisa de release.

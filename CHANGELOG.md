@@ -4,6 +4,15 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-10-12
+
+### Changed
+- **Trava semanal de 95% em todas as assinaturas** (#800, decisão do Bardi de 2026-10-12; ADR-02, adendo de 2026-10-12). `weekly_guard_pct` sobe para 95 na `zai` (era 85) e entra com 95 no `codex` (antes sem trava). O `oute-swarm spawn` passa a recusar com código 5 a sessão codex com a janela de 7 dias em 95% ou mais, como já fazia com a claude e a zai; cota do codex não lida só avisa. A tabela entra com `git pull` + `oute down/up`. **Precisa de release** (o `docker/swarm/abertura.md` e o comentário do `docker/oute-swarm` vão na imagem; sem ela o prompt do dispatcher ainda diz o valor antigo).
+- **Preço do `glm-5.3-flash` travado no agent-studio** (#826). O alerta `price_sources_diverge` deixa de aparecer para o modelo: o preço vem da página oficial da Z.ai (entrada 0,15; saída 0,5; cache lido 0,03; escrita em cache grátis), com `fixed = true`, como o `glm-5.3` (#733). Precisa de `git pull` e `oute down/up` no host (`config/agent-studio/config.toml`); não precisa de release.
+
+### Fixed
+- **`oute-swarm tell` não apaga o rascunho da sessão** (#713). Antes, com texto no campo da sessão, o `tell` digitava por cima e mandava `ctrl+c`, apagando o que o Bardi escrevia, e registrava `ok`. Agora não digita nem limpa: sai com código 7, a mensagem não é entregue e a recusa vai ao log da rodada. **Precisa de release** (o `oute-swarm` vai na imagem).
+
 ## [0.8.5] - 2026-10-12
 
 ### Changed
