@@ -232,6 +232,21 @@ flush_spool() {
   done
 }
 
+# ---------------------------------------------------------------- 5b. ~/.oute_env nos shells (#250)
+# .profile (login: ssh cmd, `oute shell`) carrega o ~/.oute_env na primeira linha. .bashrc só quando o shell é
+# interativo: o bash lê o .bashrc também sem ser interativo quando o stdin é um socket (o caso do shell que uma
+# ferramenta abre), e a linha antiga, sem guarda e no topo, punha as credenciais no ambiente desse shell.
+# A gravação troca a linha de versões anteriores (o home é volume e persiste entre containers).
+# tests/entrypoint-shell-env.test.sh extrai esta função e a roda num HOME temporário.
+shell_env_rc() {
+  local body
+  body="$(grep -vF '.oute_env' "$HOME/.profile" 2>/dev/null || true)"
+  printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$body" > "$HOME/.profile"
+  body="$(grep -vF '.oute_env' "$HOME/.bashrc" 2>/dev/null || true)"
+  printf '%s\n%s\n' 'case $- in *i*) [ -f ~/.oute_env ] && . ~/.oute_env ;; esac' "$body" > "$HOME/.bashrc"
+  return 0
+}
+
 # ---------------------------------------------------------------- run
 case "$MODE" in
   serve)
@@ -242,10 +257,7 @@ case "$MODE" in
     # declare -px cita os valores (espaços, vírgulas, '=' não quebram o source)
     declare -px | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_|SONAR_)' \
       > "$HOME/.oute_env"
-    # .bashrc do Ubuntu dá return em shell não-interativo; .profile cobre login (ssh cmd / bash -l)
-    for rc in "$HOME/.profile" "$HOME/.bashrc"; do
-      grep -q '.oute_env' "$rc" 2>/dev/null || printf '%s\n%s\n' '[ -f ~/.oute_env ] && . ~/.oute_env' "$(cat "$rc" 2>/dev/null)" > "$rc"
-    done
+    shell_env_rc
     # claude/codex no checkout principal de um repo -> sessão numa worktree própria (oute-task); só shell interativo
     grep -q 'agent-wrap.sh' "$HOME/.bashrc" 2>/dev/null \
       || printf '\n%s\n' '[ -f /usr/local/lib/oute/agent-wrap.sh ] && . /usr/local/lib/oute/agent-wrap.sh' >> "$HOME/.bashrc"

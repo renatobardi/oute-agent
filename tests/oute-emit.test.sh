@@ -558,7 +558,7 @@ FILE_ORIGIN="host.name=oute-server,oute.instance=oute-agent,deployment.environme
 # dadas e uma OUTE_ e uma GH_ quaisquer; e uma linha de shell solta, que só um source executaria
 envfile() {
   local h="$1"; shift
-  env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=1 "$@" bash -c 'declare -px' \
+  env -i OUTE_X='valor com "aspas" e $(touch '"$h"'/pwned)' GH_X=1 "$@" bash -c 'declare -px' </dev/null \
     | grep -E '^declare -x (GH_|OUTE_|AI_MEMORY|GOOGLE_APP|AWS_|RCLONE_CONFIG_|OTEL_|CLAUDE_CODE_)' > "$h/.oute_env"
   printf 'touch "%s/pwned"\n' "$h" >> "$h/.oute_env"
 }
