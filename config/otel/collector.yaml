@@ -55,27 +55,40 @@ processors:
         statements: *agent_by_service
   # Filtro de segredo (ADR-04, adendo): mascara, no corpo e nos atributos de log e de span, padrões conhecidos de
   # credencial. Mascara o trecho; nunca apaga o registro nem a linha (telemetria nunca é apagada). Cobre PEM, Bearer,
-  # tokens do GitHub (gh*_ e github_pat_), sk-, AKIA, AIza e NOME=valor com NOME em maiúscula terminando em KEY, TOKEN,
-  # SECRET ou PASSWORD (ou começando em GH_), valor sem aspas, com aspas ou com aspas escapadas. Não pega credencial sem
-  # prefixo nem nome conhecido: é uma rede, não a garantia. No OTTL, barra dupla; as aspas entram como \x22 e \x27
+  # tokens do GitHub (gh*_ e github_pat_), sk-, xox*, AKIA/ASIA, AIza, JWT, Authorization: Basic, URL com usuário:senha,
+  # NOME=valor e NOME: valor com nome em maiúscula ou com _key/_token/_secret/_password em minúscula, e "password": "…"
+  # (valor sem aspas, com aspas, com aspas escapadas ou com barra invertida). Não pega credencial sem prefixo nem nome
+  # conhecido: é uma rede, não a garantia. No OTTL, barra dupla; as aspas entram como \x22 e \x27
   # (aspa crua fecha a string OTTL).
   transform/redact:
     error_mode: ignore
     log_statements:
       - context: log
         statements:
-          - 'replace_pattern(body, "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----", "[redigido]")'
+          - 'replace_pattern(body, "-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\\s\\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)", "[redigido]")'
           - 'replace_pattern(body, "(?i)\\bbearer\\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer [redigido]")'
+          - 'replace_pattern(body, "(?i)authorization: ?basic [A-Za-z0-9+/=]{8,}", "Authorization: Basic [redigido]")'
           - 'replace_pattern(body, "\\bgh[pousr]_[A-Za-z0-9]{20,}|\\bgithub_pat_[A-Za-z0-9_]{20,}|\\bsk-[A-Za-z0-9_-]{20,}", "[redigido]")'
-          - 'replace_pattern(body, "\\bAKIA[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
-          - 'replace_pattern(body, "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*)=(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27\\\\]+)", "$1=[redigido]")'
+          - 'replace_pattern(body, "\\bxox[abpr]-[A-Za-z0-9-]{10,}", "[redigido]")'
+          - 'replace_pattern(body, "\\b(?:AKIA|ASIA)[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
+          - 'replace_pattern(body, "\\beyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+", "[redigido]")'
+          - 'replace_pattern(body, "([a-zA-Z][a-zA-Z0-9+.-]*://)[^\\s:/@]+:[^\\s@/]+@", "$1[redigido]@")'
+          - 'replace_pattern(body, "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*) ?= ?(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27]+)", "$1=[redigido]")'
+          - 'replace_pattern(body, "(?i)\\b([a-z0-9]+_[a-z0-9_]*(?:key|token|secret|password|passwd))\\\\?\\x22? ?[:=] ?\\\\?\\x22?[^\\s\\x22\\x27,;}]+", "$1=[redigido]")'
+          - 'replace_pattern(body, "(?i)\\\\?\\x22(password|passwd|secret|token)\\\\?\\x22 ?: ?\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22", "$1=[redigido]")'
       - context: log
         statements: &redact_attrs
-          - 'replace_all_patterns(attributes, "value", "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\\s\\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)", "[redigido]")'
           - 'replace_all_patterns(attributes, "value", "(?i)\\bbearer\\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer [redigido]")'
+          - 'replace_all_patterns(attributes, "value", "(?i)authorization: ?basic [A-Za-z0-9+/=]{8,}", "Authorization: Basic [redigido]")'
           - 'replace_all_patterns(attributes, "value", "\\bgh[pousr]_[A-Za-z0-9]{20,}|\\bgithub_pat_[A-Za-z0-9_]{20,}|\\bsk-[A-Za-z0-9_-]{20,}", "[redigido]")'
-          - 'replace_all_patterns(attributes, "value", "\\bAKIA[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
-          - 'replace_all_patterns(attributes, "value", "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*)=(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27\\\\]+)", "$1=[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\bxox[abpr]-[A-Za-z0-9-]{10,}", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\b(?:AKIA|ASIA)[0-9A-Z]{16}|\\bAIza[0-9A-Za-z_-]{35}", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "\\beyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+", "[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "([a-zA-Z][a-zA-Z0-9+.-]*://)[^\\s:/@]+:[^\\s@/]+@", "$1[redigido]@")'
+          - 'replace_all_patterns(attributes, "value", "\\b([A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)|GH_[A-Z0-9_]*) ?= ?(?:\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22|\\x27[^\\x27]*\\x27|[^\\s\\x22\\x27]+)", "$1=[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "(?i)\\b([a-z0-9]+_[a-z0-9_]*(?:key|token|secret|password|passwd))\\\\?\\x22? ?[:=] ?\\\\?\\x22?[^\\s\\x22\\x27,;}]+", "$1=[redigido]")'
+          - 'replace_all_patterns(attributes, "value", "(?i)\\\\?\\x22(password|passwd|secret|token)\\\\?\\x22 ?: ?\\\\?\\x22[^\\x22\\\\]*\\\\?\\x22", "$1=[redigido]")'
     trace_statements:
       - context: span
         statements: *redact_attrs
