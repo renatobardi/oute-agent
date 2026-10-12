@@ -1253,7 +1253,7 @@ function readonly(p,    w, n, k, c, a, b) {
   if (c == "uniq") { for (k++; k <= n; k++) if (w[k] !~ /^-/) return 0; return 1 }
   if (c == "fi" || c == "done") return (k == n)
   if (c == "find") return (p !~ / -(delete|exec|execdir|ok|okdir|fprint|fprintf|fls)/)
-  if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --output/)
+  if (c == "sort") return (p !~ / -[A-Za-z]*o/ && p !~ / --(output|compress)/)
   if (c == "date") return (p !~ / -[A-Za-z]*s/ && p !~ / --set/)
   if (c == "hostname") return (k == n)
   if (c == "journalctl") return (p !~ / --(vacuum|rotate|flush|sync|relinquish|setup-keys|update-catalog)/)
@@ -1273,7 +1273,7 @@ function readonly(p,    w, n, k, c, a, b) {
   return 0
 }
 function risk(s, root,    t, n, i, seg, p) {
-  if (root || s ~ /(^|[|;&(] *)sudo( |$)/) return "root"
+  if (root || s ~ /(^|[^A-Za-z0-9_-])sudo( |$)/) return "root"
   if (index(s, "$(") || index(s, "`") || index(s, "<(") || index(s, "$" SQ)) return "escrita"
   t = unquote(s)
   if (t == "") return "escrita"
@@ -1308,20 +1308,29 @@ BEGIN {
   while ((getline line < f) > 0) {
     got = 1
     if (!as && line ~ /^# como: /) { root = (line == "# como: root"); as = 1 }
-    if (here != "") { if (trim(line) == here) here = ""; continue }
+    if (here != "") {
+      # corpo de heredoc com delimitador sem aspas é expandido pelo shell: $( ) ou crase ali executa
+      if (trim(line) == here) here = ""
+      else if (!hq && (index(line, "$(") || index(line, "`"))) force[hidx] = 1
+      continue
+    }
     if (line ~ /\\$/) { cont = cont substr(line, 1, length(line) - 1) " "; continue }
     line = cont line; cont = ""
     c = norm(line)
     if (c == "" || c ~ /^#/ || c ~ /^set [-+]/ || c ~ /^(fi|done|then|else|do|esac|[{]|[}]|;;)$/) continue
-    if (match(line, /<<-?[ ]*["\047]?[A-Za-z_][A-Za-z0-9_]*/)) {
-      here = substr(line, RSTART, RLENGTH); sub(/^<<-?[ ]*["\047]?/, "", here)
+    cmd[++nl] = c; force[nl] = 0
+    # heredoc: a here-string (<<<) não abre um, nem o << de dentro de uma string
+    h = line; gsub(/<<</, "", h)
+    if (unquote(h) ~ /<<-?[ ]*[QEA-Za-z_]/ && match(h, /<<-?[ ]*["\047\\]?[A-Za-z_][A-Za-z0-9_]*/)) {
+      here = substr(h, RSTART, RLENGTH); hq = (here ~ /["\047\\]/); hidx = nl
+      sub(/^<<-?[ ]*["\047\\]?/, "", here)
     }
-    cmd[++nl] = c
   }
   close(f)
   if (!got) { noscript++; next }
   for (i = 1; i <= nl; i++) {
     r = risk(cmd[i], root)
+    if (force[i] && r == "leitura") r = "escrita"
     if (r == "leitura" && cmd[i] ~ /^(echo|printf)( |$)/) continue
     key = r "\t" short(cmd[i])
     if ((id, key) in seen) continue

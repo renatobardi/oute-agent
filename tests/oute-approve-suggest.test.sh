@@ -210,6 +210,48 @@ check "leitura: \\ dentro de aspas simples não muda a classe" row 1 0 "$T" leit
 check "escrita: aspas sem fechar" row 1 0 "$T" escrita 'cat "/etc/hosts'
 check "escrita: o risco vem da linha inteira, não dos 200 caracteres exibidos" row 1 0 "$T" escrita "${LONG:0:200}…"
 
+# --- 4c. reauditoria do PR #814: heredoc que executa, sudo em qualquer posição, here-string, sort que executa
+reset
+hist 20261001-100000-reauditoria user exec 2026-10-01T10:00:00Z <<'SH'
+cat <<EOF
+$(rm ~/z31)
+EOF
+tr a b <<-FIM
+	`rm ~/z32`
+	FIM
+cat <<'ASPAS'
+$(rm ~/z33)
+ASPAS
+cat <<\BARRA
+$(rm ~/z34)
+BARRA
+cat <<TEXTO
+só texto, sem substituição
+TEXTO
+cat <<< "x"
+rm ~/depois-da-here-string
+grep "a << b" /etc/hosts
+rm ~/depois-do-menor-menor-entre-aspas
+echo x | xargs sudo rm ~/z35
+env sudo rm ~/z36
+if true; then sudo rm ~/z37; fi
+sort --compress-program=rm /etc/hosts
+SH
+run_suggest --min 1
+check "escrita: heredoc sem aspas com \$( ) no corpo" row 1 0 "$T" escrita "cat <<EOF"
+check "escrita: heredoc <<- sem aspas com crase no corpo" row 1 0 "$T" escrita "tr a b <<-FIM"
+check "leitura: heredoc com delimitador entre aspas não expande o corpo" row 1 0 "$T" leitura "cat <<'ASPAS'"
+check "leitura: heredoc com delimitador escapado (\\) não expande o corpo" row 1 0 "$T" leitura 'cat <<\BARRA'
+check "leitura: heredoc sem aspas e sem substituição no corpo" row 1 0 "$T" leitura "cat <<TEXTO"
+check "corpo de heredoc segue fora da lista" bash -c '! grep -qE "z3[1-4]|só texto" <<<"$1"' _ "$OUT"
+check "here-string (<<<) não abre heredoc: a própria linha fica" row 1 0 "$T" leitura 'cat <<< "x"'
+check "here-string (<<<) não abre heredoc: a linha seguinte fica" row 1 0 "$T" escrita "rm ~/depois-da-here-string"
+check "<< dentro de aspas não abre heredoc" row 1 0 "$T" escrita "rm ~/depois-do-menor-menor-entre-aspas"
+check "root: sudo depois de xargs" row 1 0 "$T" root "echo x | xargs sudo rm ~/z35"
+check "root: sudo depois de env" row 1 0 "$T" root "env sudo rm ~/z36"
+check "root: sudo depois de then" row 1 0 "$T" root "if true; then sudo rm ~/z37; fi"
+check "escrita: sort --compress-program executa programa" row 1 0 "$T" escrita "sort --compress-program=rm /etc/hosts"
+
 # segredo literal em forma conhecida sai como {segredo}; o valor é sorteado e sem trecho hexadecimal (não vira {hash})
 reset
 SEG="$(od -An -N20 -tx1 /dev/urandom | tr -d ' \n' | tr '0-9a-f' 'g-v')"
