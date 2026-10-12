@@ -94,6 +94,11 @@ check "--weekly-guard sem valor: código 2"              bash -c 'env PATH="$1:$
 # valor inválido na tabela: tabela recusada (aviso), a sessão abre com o padrão do agente e a trava não se aplica
 BADT="$TMP/$CASE/bad.toml"; sed 's/^weekly_guard_pct = 95/weekly_guard_pct = 150/' "$TABLE" > "$BADT"
 check "weekly_guard_pct fora de 1 a 100: tabela inválida, aviso" bash -c 'env PATH="$1:$PATH" FAKE="$2" OUTE_SELECT_TABLE="$3" "$4" --weekly-guard claude 2>&1 | grep -qF "weekly_guard_pct fora de 1 a 100"' _ "$BIN" "$FAKE" "$BADT" "$ROOT/docker/oute-select"
+# sessão sem issue (#825): a trava vale do mesmo jeito, com o slug no lugar do #<n> na mensagem
+q7 95
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn sem-issue-trava "$INSTR"
+check "sem issue, 7d=95: código 5 (a trava vale)"        [ "$RC" -eq 5 ]
+check "sem issue: a mensagem diz o slug no lugar do #<n>" bash -c 'grep -q "sem-issue-trava não abre (código 5)" <<<"$1"' _ "$ERR"
 guarda_check
 guarda_stop
 check_end

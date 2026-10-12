@@ -9,7 +9,7 @@ ao agent-studio (ADR-08, pipeline logs/studio do collector).
                                      o texto da etapa: o arquivo em ~/.oute/swarm/<rodada>/etapas/, no corpo do evento)
   oute-emit task <opened|reopened|removed> <quem chamou> chave=valor…
                                      sessão do oute-task (#128): repo, slug, id, agent, base, reason, legacy, round, session;
-                                     escolha do seletor (#219): phase, origin, model, effort
+                                     escolha do seletor (#219): phase, origin, model, effort; como abriu (#825): abertura
   oute-emit regression chave=valor…  resultado de uma rodada do oute-regression (#366, #484): run, image, claude, codex, models, calls, secs,
                                      rounds, result, green, red, unverified, cost, tasks, agent (quem causou)
   oute-emit sidebar chave=valor…     uma atualização do sidebar do herdr pelo plugin oute.rodada (#722): trigger, result, panes,
@@ -807,8 +807,11 @@ TASK_KEYS = {"id": "oute.task.id", "repo": "oute.task.repo", "slug": "oute.task.
              # assinatura de onde a sessão saiu para a reserva (#598): o agente do evento é a de destino
              "reserve_from": "oute.task.reserve_from",
              # assinatura da sessão (#678): claude, zai ou codex; a zai é o agente claude na API da Z.ai
-             "subscription": "oute.task.subscription"}
+             "subscription": "oute.task.subscription",
+             # como a sessão abriu (#825): aba (numa aba do herdr), terminal ou sem-tela
+             "abertura": "oute.task.abertura"}
 TASK_REASONS = ("merged", "empty", "detached")
+TASK_ABERTURAS = ("aba", "terminal", "sem-tela")
 TASK_ORIGINS = ("manual", "label", "jev", "padrao")
 TASK_RESERVES = ("indisponivel", "cota")
 SELECT_KEYS = ("phase", "origin", "model", "effort", "confidence", "reserve", "reserve_from", "subscription")
@@ -849,6 +852,8 @@ def cmd_task(kind, caller, pairs):
             if not re.fullmatch(r"0(\.[0-9]+)?|1(\.0+)?", f["confidence"]):
                 raise Skip(f"confiança inválida: {f['confidence']}")
             f["confidence"] = float(f["confidence"])
+    if "abertura" in f and f["abertura"] not in TASK_ABERTURAS:
+        raise Skip(f"abertura inválida: {f['abertura']}")
     if "legacy" in f:
         if f["legacy"] != "true":
             raise Skip(f"legacy inválido: {f['legacy']}")

@@ -29,6 +29,16 @@
 # Jev (#257): sem label de fase e com texto da tarefa (o prompt: último argumento do agente, com mais de uma palavra),
 # o oute-select pede a fase ao Jev; sem texto (sessão aberta na mão), Sonnet sem chamar o Jev.
 #
+# Sem terminal (#825): quem chama não tem terminal (um agente pela ferramenta Bash, um script) e não passou --here. Então:
+#   dentro de uma rodada (OUTE_SWARM_ID/OUTE_SWARM_ROUND, ou a worktree do dispatcher ou de uma sessão de rodada): recusa,
+#     código 7, e manda usar `oute-swarm spawn` (a sessão de rodada tem aba e linha no spawned);
+#   fora de rodada, com herdr: abre uma aba nova, roda o oute-task no pane dela com os mesmos argumentos (--here) e volta
+#     com 0, dizendo a aba e o pane;
+#   fora de rodada, sem herdr, chamado por agente (CLAUDECODE=1 ou CODEX_THREAD_ID): recusa, código 8;
+#   fora de rodada, sem herdr, sem agente (script, cron): abre aqui, como antes.
+# --here: roda no terminal atual, sem aba (os testes, o dispatcher ao abrir a própria aba, os scripts). Com terminal, nada muda.
+# O oute.task.opened e a marca da sessão dizem como abriu (`abertura`): aba (com terminal dentro do herdr), terminal ou sem-tela.
+# `oute-task list` marca `[sem aba]` as de abertura terminal ou sem-tela.
 # Assinatura `zai` (#678, ADR-02 e ADR-01, adendos de 2026-10-05 e 2026-10-06): a sessão é do `claude`, com as variáveis da Z.ai só
 # no ambiente do processo que abre (nunca no ~/.claude/settings.json: uma sessão `claude` ao lado não as tem) e com `--settings`
 # negando o `Read` de imagem. A chave vem de OUTE_ZAI_API_KEY, só do ambiente: nunca em argv, aviso, marca nem evento.
@@ -78,7 +88,7 @@ mark_path() { local gd; gd="$(git -C "$1" rev-parse --path-format=absolute --git
 mark_get() { [[ -f "$1" ]] || return 0; sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' || true; }
 # id de modelo na marca: como o mark_get, mais o sufixo [1m]
 mark_model() { [[ -f "$1" ]] || return 0; sed -n 's/^model=//p' "$1" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._[]-' || true; }
-mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço> <assinatura>
+mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <agente> <modelo> <esforço> <assinatura> <abertura>
   local f="$1"; shift
   { printf 'id=%s\nrepo=%s\nslug=%s\n' "$1" "$2" "$3"
     [[ -z "$4" ]] || printf 'round=%s\n' "$4"
@@ -86,7 +96,8 @@ mark_write() {   # <arquivo> <id> <repo> <slug> <rodada> <sessão do swarm> <age
     [[ -z "$6" ]] || printf 'agent=%s\n' "$6"
     [[ -z "$7" ]] || printf 'model=%s\n' "$7"
     [[ -z "$8" ]] || printf 'effort=%s\n' "$8"
-    [[ -z "${9:-}" ]] || printf 'subscription=%s\n' "$9"; } 2>/dev/null > "$f"
+    [[ -z "${9:-}" ]] || printf 'subscription=%s\n' "$9"
+    [[ -z "${10:-}" ]] || printf 'abertura=%s\n' "${10}"; } 2>/dev/null > "$f"
 }
 # OTEL_RESOURCE_ATTRIBUTES de agora sem oute.task.*/oute.swarm.* (fica a origem) + os pares dados (par sem valor não
 # entra): chave que já existia não se repete, vale a nova
@@ -116,7 +127,8 @@ mark_env() {
 WHO=unknown
 who_called() {
   local r a=""
-  if [[ "${CLAUDECODE:-}" == 1 ]]; then WHO=claude
+  if [[ -n "$TAB_QUEM" ]]; then WHO="$TAB_QUEM"   # o pane de uma aba (#825): quem abriu a aba, que o pane não vê
+  elif [[ "${CLAUDECODE:-}" == 1 ]]; then WHO=claude
   elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then WHO=codex
   elif [[ -n "${OUTE_SWARM_ID:-}${OUTE_SWARM_ROUND:-}${OUTE_SWARM_WORKER:-}" ]]; then
     r="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}"
@@ -159,11 +171,12 @@ removed() {   # <base> <merged|empty|detached>, depois do task_of
 # Escolha do seletor (S_*, do select_model): vai no evento e, para claude/codex, na marca; o `shell` não mexe nela
 session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
   local ev="$1" wt="$2" rname slug="$4" agent="$5" base="$6" mf="" id="" mid round eround mround="" sess msess="" legacy=""
-  local ma="" mm="" me="" ms="" wa wm we ws
+  local ma="" mm="" me="" ms="" mab="" wa wm we ws
   rname="$(attr "$3")"
   if mf="$(mark_path "$wt")"; then
     id="$(mark_get "$mf" id)"; mround="$(mark_get "$mf" round)"; msess="$(mark_get "$mf" session)"
     ma="$(mark_get "$mf" agent)"; mm="$(mark_model "$mf")"; me="$(mark_get "$mf" effort)"; ms="$(mark_get "$mf" subscription)"
+    mab="$(mark_get "$mf" abertura)"
   fi
   # assinatura (#678): a do seletor; sem ela (sem oute-select), a do agente. O `shell` mantém a da marca
   if [[ "$agent" == shell ]]; then wa="$ma"; wm="$mm"; we="$me"; ws="$ms"; else wa="$agent"; wm="$S_MODEL"; we="$S_EFFORT"; ws="${S_SUB:-$agent}"; fi
@@ -173,16 +186,16 @@ session() {   # <opened|reopened> <worktree> <repo> <slug> <agente> <base>
     round="$eround"; sess=""
     [[ -z "${OUTE_SWARM_WORKER:-}" ]] || sess="$slug"
   fi
-  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" || "$wa" != "$ma" || "$wm" != "$mm" || "$we" != "$me" || "$ws" != "$ms" ]]; then
+  if [[ -z "$id" || "$round" != "$mround" || "$sess" != "$msess" || "$wa" != "$ma" || "$wm" != "$mm" || "$we" != "$me" || "$ws" != "$ms" || "$ABERTURA" != "$mab" ]]; then
     # worktree sem id na reabertura = anterior à #128: ganha um agora, com legacy
     if [[ -z "$id" ]]; then id="$rname-$slug-$(date -u +%Y%m%d%H%M%S)"; [[ "$ev" == opened ]] || legacy=true; fi
-    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess" "$wa" "$wm" "$we" "$ws"; then
+    if [[ -z "$mf" ]] || ! mark_write "$mf" "$id" "$rname" "$slug" "$round" "$sess" "$wa" "$wm" "$we" "$ws" "$ABERTURA"; then
       [[ -n "$mid" ]] || { echo "aviso: não consegui gravar o id da sessão em ${mf:-$wt}; a sessão segue sem id" >&2; id=""; legacy=""; }
     fi
   fi
   emit "$ev" "id=$id" "repo=$rname" "slug=$slug" "agent=$agent" "base=$base" "round=$round" "session=$sess" "legacy=$legacy" \
     "phase=$S_PHASE" "origin=$S_ORIGIN" "model=$S_MODEL" "effort=$S_EFFORT" "confidence=$S_CONF" "reserve=$S_RESERVE" "reserve_from=$S_RESERVE_FROM" \
-    "subscription=$ws"
+    "subscription=$ws" "abertura=$ABERTURA"
   quota_snapshot || true
   mark_env "$id" "$rname" "$slug" "$round" "$sess" "$ws"
 }
@@ -332,9 +345,99 @@ cmd_zai_env() {   # [dir]: NOME=valor das variáveis da zai (sem a chave) se a m
 }
 
 cmd_list() {
-  local r; for r in $(all_repos); do
-    git -C "$r" worktree list | awk -v root="$WT_ROOT" 'index($1, root"/")==1'
+  local r l; for r in $(all_repos); do
+    git -C "$r" worktree list | awk -v root="$WT_ROOT" 'index($1, root"/")==1' | while IFS= read -r l; do
+      if sem_aba "${l%% *}"; then l="$l  [sem aba]"; fi
+      echo "$l"
+    done
   done
+}
+
+# ---------------------------------------------------------------- abertura sem terminal (#825)
+# Como a sessão abre (ver o cabeçalho): aqui, ou numa aba nova do herdr, com o oute-task rodando no pane dela. Recusa,
+# sem abrir nada, dentro de uma rodada (7) e para agente sem herdr (8).
+O_HERE=0; ORIG_ARGS=(); ARGV_LIDO=(); ABERTURA=""; TAB=0; TAB_QUEM=""
+# rodada de quem chama: a do ambiente, a da worktree de dispatcher (sessao/swarm-<id>) ou a da marca da sessão. Fora delas, exit 1
+rodada_do_chamador() {
+  local r="${OUTE_SWARM_ID:-${OUTE_SWARM_ROUND:-}}" b f
+  if [[ -z "$r" ]]; then
+    b="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    [[ "$b" =~ ^sessao/(swarm-[A-Za-z0-9-]+)$ ]] && r="${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$r" ]]; then
+    f="$(mark_path "$PWD")" || return 1
+    r="$(mark_get "$f" round)"
+  fi
+  [[ -n "$r" ]] || return 1
+  printf '%s' "$r"
+  return 0
+}
+# TAB=1 quando a sessão abre numa aba nova; recusa (7 ou 8) quando não pode abrir
+abertura_modo() {
+  local r
+  TAB=0
+  if (( O_HERE )) || [[ -t 0 ]]; then return 0; fi
+  if r="$(rodada_do_chamador)"; then
+    echo "oute-task: sem terminal dentro da rodada $r: a sessão não abre aqui. Abra com \`oute-swarm spawn <slug> \"<instrução>\"\` (ou <n>-<slug>, com a issue): a aba e a linha da rodada saem dele" >&2
+    exit 7
+  fi
+  if [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]]; then TAB=1; return 0; fi
+  if [[ "${CLAUDECODE:-}" == 1 || -n "${CODEX_THREAD_ID:-}" ]]; then
+    echo "oute-task: sem terminal, sem herdr e chamado por agente: não há como abrir a aba da sessão. Rode dentro do herdr, ou com --here (no terminal atual)" >&2
+    exit 8
+  fi
+  return 0
+}
+# ABERTURA: aba (com terminal dentro do herdr), terminal ou sem-tela (sem terminal, e não é aba)
+abertura_rotulo() {
+  if [[ -n "$TAB_QUEM" ]]; then ABERTURA=aba   # o pane de uma aba que o oute-task abriu
+  elif [[ -t 0 ]]; then
+    if [[ -n "${HERDR_ENV:-}" && -n "${HERDR_WORKSPACE_ID:-}" ]]; then ABERTURA=aba; else ABERTURA=terminal; fi
+  else ABERTURA=sem-tela; fi
+  return 0
+}
+# sessão sem aba (#825): aberta no terminal de quem chamou ou sem tela; o `list` a marca
+sem_aba() {   # <worktree>
+  local w="$1" f ab
+  f="$(mark_path "$w")" || return 1
+  ab="$(mark_get "$f" abertura)"
+  if [[ "$ab" == terminal || "$ab" == sem-tela ]]; then return 0; fi
+  return 1
+}
+# a sessão numa aba nova (#825): a aba roda o oute-task no pane dela, com os mesmos argumentos gravados em NUL num arquivo (a
+# instrução nunca vai à linha de comando) e com --here, que é a trava: o oute-task do pane não abre outra aba. Imprime a aba e o
+# pane; sai com 1 se o herdr não criou a aba ou o pane
+abre_aba() {   # <slug> <argumentos originais…>
+  local slug="$1" label out pane tab argf cmd
+  shift
+  if [[ "$slug" =~ ^([0-9]+)-(.+)$ ]]; then label="#${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"; else label="$slug"; fi
+  mkdir -p "$HOME/.oute/task" && argf="$(mktemp "$HOME/.oute/task/abre.XXXXXX")" || die "não consegui gravar os argumentos da aba em $HOME/.oute/task"
+  printf '%s\0' --here "$@" > "$argf"
+  # aba com o mesmo rótulo já aberta: a antiga fica (#289), com aviso
+  if herdr tab list 2>/dev/null | jq -e --arg l "$label" 'any(.. | objects; (.label? // "") == $l)' >/dev/null 2>&1; then
+    echo "aviso: já há uma aba com o rótulo \"$label\"; a antiga não é fechada" >&2
+  fi
+  out="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "$label" --no-focus)" || { rm -f "${argf:?}"; die "herdr tab create falhou: $out"; }
+  pane="$(jq -r '.result.root_pane.pane_id // empty | strings' <<<"$out" 2>/dev/null || true)"
+  tab="$(jq -r '.result.tab.tab_id // empty | strings' <<<"$out" 2>/dev/null || true)"
+  if [[ -z "$pane" ]]; then
+    rm -f "${argf:?}"
+    [[ -z "$tab" ]] || herdr tab close "$tab" >/dev/null 2>&1 || true
+    die "não achei o pane da aba nova na saída do herdr (aba \"$label\" fechada): $out"
+  fi
+  printf -v cmd 'OUTE_TASK_QUEM=%q oute-task --argv-file %q' "$WHO" "$argf"
+  herdr pane run "$pane" "$cmd" >/dev/null || { rm -f "${argf:?}"; die "herdr pane run falhou em $pane"; }
+  echo "aberta na aba: $label · tab ${tab:--} · pane $pane"
+  return 0
+}
+# --argv-file <arquivo> (o pane de uma aba, #825): os argumentos gravados em NUL por quem abriu a aba, em ARGV_LIDO; o arquivo some
+load_argv_file() {   # <arquivo>
+  local f="$1" a
+  ARGV_LIDO=()
+  [[ -f "$f" ]] || return 1
+  while IFS= read -r -d '' a; do ARGV_LIDO+=("$a"); done < "$f"
+  rm -f "${f:?}"
+  return 0
 }
 
 # ---------------------------------------------------------------- sessão em uso (#374)
@@ -499,6 +602,9 @@ cmd_open() {
   [[ -z "$O_AGENT" || -z "$pos" || "$pos" == "$O_AGENT" ]] || die "--agent $O_AGENT e o agente $pos não andam juntos"
   main="$(main_root "$repo")" || die "$repo não é um repositório git"
   name="$(basename "$main")"; slug="$(slugify "$slug")"; [[ -n "$slug" ]] || die "slug vazio"
+  # sem terminal (#825): a aba nova sai antes de qualquer escolha e de qualquer worktree (a aba roda o oute-task no pane)
+  abertura_modo
+  if (( TAB )); then abre_aba "$slug" "${ORIG_ARGS[@]}"; exit 0; fi
   # modelo da sessão (#219), também antes da worktree: --model inválido sai aqui. Escolha explícita = --agent,
   # --model, `codex` posicional e o --model/-m dos argumentos do agente; o `claude` posicional (o do shim) não conta
   if [[ "$agent" != shell ]]; then
@@ -533,6 +639,7 @@ cmd_open() {
   fi
   cd "$wt"
   [[ -n "$base" ]] || { base="$(default_branch "$main")"; base="${base:-main}"; }
+  abertura_rotulo
   session "$ev" "$wt" "$name" "$slug" "$agent" "$base" || true   # sessão no bucket (ADR-04, #128)
   case "$agent" in
     claude|codex)
@@ -549,6 +656,18 @@ cmd_open() {
 }
 
 O_AGENT=""; O_MODEL=""; O_PHASE=""; O_PREFER=""; O_SUB=""
+# quem abriu a aba (#825), só para o pane: a variável sai do ambiente, senão a sessão do agente a herdaria
+TAB_QUEM="${OUTE_TASK_QUEM:-}"; unset OUTE_TASK_QUEM
+[[ "$TAB_QUEM" =~ ^[a-z0-9_-]{1,32}$ ]] || TAB_QUEM=""
+# o dispatcher abre a própria sessão no pane dele (oute-swarm <repo>, sem a linha de argumentos da flag): --here por ambiente (#825)
+if [[ "${OUTE_TASK_HERE:-}" == 1 ]]; then O_HERE=1; fi
+unset OUTE_TASK_HERE
+if [[ "${1:-}" == --argv-file ]]; then
+  load_argv_file "${2:-}" || die "argumentos da aba ausentes: ${2:-}"
+  set -- "${ARGV_LIDO[@]}"
+fi
+ORIG_ARGS=("$@")
+while [[ "${1:-}" == --here ]]; do O_HERE=1; shift; done
 case "${1:-}" in
   ""|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
   list) cmd_list ;;
@@ -561,6 +680,7 @@ case "${1:-}" in
      # opções da abertura, antes do slug; --phase (fase fixa, sem ler a issue) é o que o oute-swarm usa no dispatcher
      while [[ "${1:-}" == -* ]]; do
        case "$1" in
+         --here) O_HERE=1; shift; continue ;;
          -r) [[ $# -ge 3 ]] || die "uso: oute-task -r <repo> <slug> [agente]"
              r="$2"; [[ -d "$r" ]] || r="$WS_ROOT/$r" ;;
          --agent) O_AGENT="${2:-}"; [[ "$O_AGENT" != pi ]] || die "Pi saiu do stack (#217), use claude ou codex"

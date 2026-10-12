@@ -46,7 +46,7 @@ Only with opt-in `OUTE_MEMORY_RUN=1` (off by default): the interactive worktree 
 
 ## Git: one session = one worktree + one branch
 
-- Each session in its **own worktree** (`/workspace/.worktrees/<space>/<repo>-<slug>`, branch `sessao/<slug>`; `<space>` = herdr space as folder name, `_sem-space` outside one), opened by `oute-task`. The container shell does it when the user types `claude`/`codex` in the main checkout.
+- Each session in its **own worktree** (`/workspace/.worktrees/<space>/<repo>-<slug>`, branch `sessao/<slug>`; `<space>` = herdr space as folder name, `_sem-space` outside one), opened by `oute-task` (in a round, `oute-swarm spawn`), never by `claude -p` or `claude` from Bash, which open no tab. The shim does it too.
 - **Before creating, editing or committing any file, run `git rev-parse --git-dir --git-common-dir`.** Both equal = main checkout: do not create, edit or commit, even if the user says "do it now"; only warn and suggest `oute-task <slug>`.
 - **Never edit or switch branch in the main checkout** (`/workspace/<repo>`, always the default branch). If you are in it (`git rev-parse --git-dir` = `--git-common-dir`): change nothing, warn the user, suggest `oute-task <slug>`. Only exception: you may run `git pull --ff-only` there without asking, and only on the default branch with no local changes (`oute-task clean --yes` does it).
 - Before the first push: `git branch -m …` to `<tipo>/<issue>-<slug>`; types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
