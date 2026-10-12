@@ -14,12 +14,12 @@ guarda_start "$TMP/guarda"
 rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 
-# q7 <% da janela de 7 dias do claude> [status]: grava o JSON do `oute-quota --json` (5 h folgada, as outras assinaturas folgadas)
+# q7 <% da janela de 7 dias do claude> [status] [% da janela de 7 dias do codex]: grava o JSON do `oute-quota --json` (5 h folgada, zai folgada)
 q7() {
-  local used="$1" status="${2:-ok}"
-  jq -n --argjson u "$used" --arg s "$status" '{schema: 1, max_pct: 98, reset_grace_s: 1200, agents: {
+  local used="$1" status="${2:-ok}" cx7="${3:-10}"
+  jq -n --argjson u "$used" --arg s "$status" --argjson x "$cx7" '{schema: 1, max_pct: 98, reset_grace_s: 1200, agents: {
     claude: {status: $s, windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: $u, resets_in_s: 90000, resets_at: "2030-01-05T00:00:00Z"}}},
-    codex: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: 10, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
+    codex: {status: "ok", windows: {"5h": {used_pct: 10, resets_in_s: 9000}, "7d": {used_pct: $x, resets_in_s: 90000}}}}}' > "$FAKE/quota.json"
   return $?
 }
 TABLE="$ROOT/config/select/models.toml"
@@ -27,7 +27,7 @@ SPEC="aidlc:spec"   # fase com a cadeia claude → zai → codex: o claude é a 
 INSTR="instrução"
 
 CASE=trava; round "$CASE"; labels 8 "$SPEC"; labels 9 "$SPEC"; labels 10 "$SPEC"; labels 11 "$SPEC"; labels 12 "$SPEC"; labels 13 "$SPEC"
-check "a tabela do repo tem weekly_guard_pct = 95 na claude e 85 na zai" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 85, '"'"'codex'"'"': None}"' _ "$TABLE"
+check "a tabela do repo tem weekly_guard_pct = 95 em claude, zai e codex" bash -c 'python3 -I -c "import sys,tomllib; t=tomllib.load(open(sys.argv[1],\"rb\")); print({s[\"name\"]: s.get(\"weekly_guard_pct\") for s in t[\"subscription\"]})" "$1" | grep -qxF "{'"'"'claude'"'"': 95, '"'"'zai'"'"': 95, '"'"'codex'"'"': 95}"' _ "$TABLE"
 
 # acima da trava: recusa com código 5, sem abrir aba nem registrar a sessão
 q7 95
@@ -69,14 +69,24 @@ OUTE_SELECT_TABLE="$ROOT/tests/lib/select-table-sem-zai.toml" MAX=5 sw spawn 8-a
 check "tabela de antes, 7d=97: abre no claude como antes, sem aviso" [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 8-antes)" == claude ]
 check "o JSON do seletor não ganha campo novo (saída de antes)" [ "$(jq -c keys "$STATE/8-antes.select")" == '["agent","confidence","effort","model","origin","phase","reason","reserve","subscription"]' ]
 check "tabela de antes: sem linha guard"                bash -c '! grep -q " guard " "$1"' _ "$STATE/log"
+# codex com a trava (#800): a janela de 7 dias dele vem do oute-quota, como a do claude
+q7 10 ok 97
 OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 9-cx "$INSTR" --agent codex
-check "codex (sem weekly_guard_pct) com 7d=97: abre"    [ "$RC" -eq 0 -a "$(sp_agent swarm-test 9-cx)" == codex ]
+check "codex com 7d=97 (trava 95): código 5"            [ "$RC" -eq 5 ]
+check "codex: diz a assinatura e os números"            bash -c 'grep -qF "assinatura codex está em 97% da janela de 7 dias, na trava de 95%" <<<"$1"' _ "$ERR"
+check "codex: linha guard no log"                       grep -qE '^[0-9T:Z-]+ guard 9-cx codex 7d=97% trava=95%$' "$STATE/log"
+q7 10 ok 94
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 10-cx "$INSTR" --agent codex
+check "codex com 7d=94 (abaixo): abre, código 0, no codex" [ "$RC" -eq 0 -a -z "$ERR" -a "$(sp_agent swarm-test 10-cx)" == codex ]
+q7 10 ok 97
+OUTE_SELECT_TABLE="$TABLE" MAX=5 sw spawn 11-cx "$INSTR" --agent codex --force
+check "codex com 7d=97 e --force: abre"                 [ "$RC" -eq 0 -a "$(sp_agent swarm-test 11-cx)" == codex ]
 
 # oute-select --weekly-guard: o contrato que o spawn e o oute-task usam
 CASE=trava-select; round "$CASE"; q7 95
 wg() { local sub="$1"; env PATH="$BIN:$PATH" FAKE="$FAKE" OUTE_SELECT_TABLE="$TABLE" "$ROOT/docker/oute-select" --weekly-guard "$sub"; return $?; }
 check "--weekly-guard claude (95): over, com os números" bash -c '[ "$(jq -c "[.status,.guard_pct,.used_pct,.resets_in_s]" <<<"$1")" == "[\"over\",95,95,90000]" ]' _ "$(wg claude)"
-check "--weekly-guard codex: none"                      bash -c '[ "$(jq -r .status <<<"$1")" == none ]' _ "$(wg codex)"
+check "--weekly-guard codex (95, 7d=10): ok, com o número do codex" bash -c '[ "$(jq -c "[.status,.guard_pct,.used_pct]" <<<"$1")" == "[\"ok\",95,10]" ]' _ "$(wg codex)"
 check "--weekly-guard assinatura fora da tabela: none"  bash -c '[ "$(jq -r .status <<<"$1")" == none ]' _ "$(wg zzz)"
 q7 40; check "--weekly-guard claude (40): ok"           bash -c '[ "$(jq -r .status <<<"$1")" == ok ]' _ "$(wg claude)"
 q7 40 error; check "--weekly-guard com cota não lida: unknown" bash -c '[ "$(jq -r .status <<<"$1")" == unknown ]' _ "$(wg claude)"
