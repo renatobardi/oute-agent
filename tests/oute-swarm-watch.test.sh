@@ -429,6 +429,63 @@ echo : > "$FAKE/on-sleep-2"
 OUTE_WATCH_STALL_S=abc OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "prazo: valor inválido usa 1800 s, nada aos 16 min" [ -z "$(pend_events)" ]
 
+# 821, L4: pendência com pergunta ao Bardi sem resposta sobre o item não sai; sem pergunta sai (acima); outro item sai;
+# depois da resposta, sai. A pergunta casa com o número inteiro: "#12" não casa com "#120"
+CASE=pendpergunta; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #12: mergear agora? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 3720))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta aberta: código 0"                      [ "$RC" -eq 0 ]
+check "L4 pergunta aberta sobre o PR: nada sai, nem aos 62 min" [ -z "$(pend_events)" ]
+
+CASE=pendoutra; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #120: outra coisa? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860))
+echo : > "$FAKE/on-sleep-2"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta sobre #120 não segura o PR #12"        [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto" ]
+
+CASE=pendrespondida; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+echo "$(date -u +%FT%TZ) pergunta PR #12: mergear agora? 1 sim 2 não" >> "$STATE/log"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 2100)) 'echo "$(date -u +%FT%TZ) resposta" >> "$STATE/log"'
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 pergunta respondida: a pendência volta a sair, com o relógio de antes" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 35 min ou mais, sem mudança: PR #12 aberto" ]
+
+# a sessão `done` sem PR também é item: a pergunta sobre "#7 foo" segura a pendência dela
+CASE=pendsessaopergunta; round "$CASE"
+echo "$(date -u +%FT%TZ) pergunta #7 foo: continuar a sessão? 1 sim 2 não" >> "$STATE/log"
+clock "$T0"
+hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "L4 sessão com pergunta aberta: nada sai"           [ -z "$(pend_events)" ]
+
+# 821, L3: o religar (chamado pelo boot do container) põe um watch em cada rodada aberta com sessão; a rodada fechada e a
+# sem `spawned` ficam como estão. O watch religado roda em segundo plano e termina sozinho (a rodada fecha no sleep falso)
+CASE=religar; round "$CASE"
+FECHADA="$H/.oute/swarm/swarm-fechada"; SEMSESS="$H/.oute/swarm/swarm-semsessao"
+mkdir -p "$FECHADA" "$SEMSESS"
+cp "$STATE/meta" "$STATE/spawned" "$FECHADA/"; touch "$FECHADA/fechada"
+cp "$STATE/meta" "$SEMSESS/"; : > "$SEMSESS/spawned"
+OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
+       OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" "$SWARM" religar 2>"$FAKE/err")"; RC=$?
+check "religar: código 0"                                 [ "$RC" -eq 0 ]
+check "religar: anuncia só a rodada aberta com sessão"     [ "$OUT" == "watch religado: swarm-test" ]
+for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
+check "religar: o watch da rodada aberta roda e termina"  logged "[rodada] swarm-test fechada (oute-swarm close --all); watch encerrado"
+check "religar: rodada fechada não ganha watch"           [ ! -e "$FECHADA/watch.out" -a ! -e "$FECHADA/watch.pid" ]
+check "religar: rodada sem sessão não ganha watch"        [ ! -e "$SEMSESS/watch.out" -a ! -e "$SEMSESS/watch.pid" ]
+# o boot chama o religar depois do herdr server (sem ele, o watch sobe antes do herdr e falha na primeira passada)
+check "religar: o entrypoint chama religar depois do herdr server" bash -c 'l="$(grep -n "herdr server start" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; r="$(grep -n "oute-swarm religar" "$1/docker/entrypoint.sh" | head -1 | cut -d: -f1)"; [[ -n "$l" && -n "$r" && "$r" -gt "$l" ]]' _ "$ROOT"
+
 guarda_check
 guarda_stop
 check_end
