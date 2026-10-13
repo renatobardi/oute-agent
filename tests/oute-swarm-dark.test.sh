@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Testes do oute-swarm, tema: modo dark, fatia (a) (#841, ADR-10): `--dark` grava dark=1 no meta e põe "modo dark, ADR-10" no prompt;
+# Testes do oute-swarm, tema: modo dark, fatias (a) e (b) (#841, #842, ADR-10; (b): --phase arch, autorização e dark.md): `--dark` grava dark=1 no meta e põe "modo dark, ADR-10" no prompt;
 # recusa o oute-agent (código 7) e pré-requisito faltando (código 8, um item por linha; cota de 7 dias e permissão de push).
 # Bash puro, sem herdr, gh nem rede de verdade (dublês e apoio em tests/lib/swarm.sh e tests/lib/oute-swarm-dark.sh).
 # Uso: tests/oute-swarm-dark.test.sh   (sai != 0 se algum caso falhar)
@@ -70,6 +70,13 @@ R="$(nova)"
 check "tudo presente: dark=1 no meta"            grep -qxF "dark=1" "$H/.oute/swarm/$R/meta"
 check "tudo presente: o prompt traz \"modo dark, ADR-10\"" grep -qF "modo dark, ADR-10" "$FAKE/oute-task.last"
 check "tudo presente: sem {{DARK}} sobrando"     bash -c '! grep -qF "{{DARK}}" "$1"' _ "$FAKE/oute-task.last"
+# fatia (b) (#842): o juiz abre em arch, a autorização fica gravada, o dark.md existe só aqui
+check "dark: oute-task com --phase arch"         [ "$(tr '\n' ' ' < "$FAKE/oute-task.args")" == "--phase arch -r $REPO $R claude " ]
+check "dark: autorizacao gravada na abertura"    grep -qxF "modo dark (ADR-10, #839), dada na abertura" "$H/.oute/swarm/$R/autorizacao"
+check "dark: estado.md traz a autorização"       grep -qF "modo dark (ADR-10, #839), dada na abertura" "$H/.oute/swarm/$R/estado.md"
+check "dark: dark.md renderizado, com o id da rodada" bash -c 'grep -qF "juiz da rodada \`$1\`" "$2" && ! grep -q "{{" "$2"' _ "$R" "$H/.oute/swarm/$R/prompt/dark.md"
+check "dark: o prompt manda ler o dark.md da rodada" grep -qF "~/.oute/swarm/$R/prompt/dark.md" "$FAKE/oute-task.last"
+check "dark: o dark.md não manda perguntar (sem ask no juiz)" bash -c 'grep -qF "Nunca \`oute-swarm ask\`" "$1"' _ "$H/.oute/swarm/$R/prompt/dark.md"
 
 # -------- sem --dark: nada muda
 CASE=sem; round "$CASE"
@@ -79,6 +86,10 @@ check "sem --dark: abre mesmo com cota e push faltando" [ "$RC" -eq 0 ]
 R="$(nova)"
 check "sem --dark: sem dark= no meta"            bash -c '! grep -q "^dark=" "$1"' _ "$H/.oute/swarm/$R/meta"
 check "sem --dark: o prompt não cita o modo dark" bash -c '! grep -qF "modo dark" "$1"' _ "$FAKE/oute-task.last"
+check "sem --dark: oute-task com --phase plan"   [ "$(tr '\n' ' ' < "$FAKE/oute-task.args")" == "--phase plan -r $REPO $R claude " ]
+check "sem --dark: sem autorizacao gravada"      [ ! -e "$H/.oute/swarm/$R/autorizacao" ]
+check "sem --dark: sem dark.md na pasta da rodada" [ ! -e "$H/.oute/swarm/$R/prompt/dark.md" ]
+check "sem --dark: nenhuma etapa citada leva a dark.md" bash -c '! grep -qF "dark.md" "$1"' _ "$FAKE/oute-task.all"
 
 guarda_check
 guarda_stop

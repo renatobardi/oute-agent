@@ -52,6 +52,7 @@ check "os prompts fixos do repo estão dentro do teto de docs/prompts-teto.md" [
 [[ "$RC" -eq 0 ]] || printf '%s\n' "$OUT" | sed 's/^/     | /'
 check "a tabela tem o AGENTS.md, as notas, o worker e o núcleo do dispatcher" bash -c \
   'for f in AGENTS.md docker/agent-notes.md docker/swarm-worker.md docker/swarm.md; do grep -qF "| \`$f\` |" "$1" || exit 1; done' _ "$TABELA"
+check "o prompt do juiz do modo dark (swarm/dark.md, #842) tem teto na tabela" grep -qF "| \`docker/swarm/dark.md\` |" "$TABELA"
 check "a regra de regra nova tirar ou fundir outra está escrita na tabela" grep -qF 'entra tirando ou fundindo outra' "$TABELA"
 check "a regra está também no AGENTS.md" grep -qF 'entra tirando ou fundindo outra' "$ROOT/AGENTS.md"
 
