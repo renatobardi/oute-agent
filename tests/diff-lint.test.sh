@@ -97,8 +97,8 @@ check "função em arquivo que não é shell: passa"                 test "$RC" 
 
 # ---------------------------------------------------------------- 3. o diff deste PR
 # caso_do_pr <raiz> <ci>: o lint sobre o diff de merge-base(origin/main ou main, HEAD) até HEAD, na raiz dada. Sai 0 se
-# passa, 1 se reprova, 2 se pula (sem base e <ci> preenchido, ou seja, no CI). Sem base fora do CI, reprova e OUT diz
-# o que rodar (#859). Define OUT.
+# passa; 1 se o lint reprova ou se falta a base fora do CI (nesse caso OUT diz o que rodar, #859); 2 se pula (sem base
+# no CI, com <ci> preenchido). Define OUT.
 caso_do_pr() {
   local raiz="$1" ci="$2" base="" ref
   for ref in origin/main main; do
