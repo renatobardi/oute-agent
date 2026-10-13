@@ -13,7 +13,7 @@ G=(git -c user.email=t@t -c user.name=t)
 
 # repo <nome>: repo com contrato válido commitado (três scripts 100755, host)
 repo() {
-  local d="$TMP/$1"
+  local n="$1" d="$TMP/$1"
   rm -rf "${d:?}"; git init -q "$d" -b main; mkdir -p "$d/.oute"
   local s; for s in deploy verify rollback; do printf '#!/usr/bin/env bash\nset -euo pipefail\necho %s\n' "$s" > "$d/.oute/$s.sh"; done
   chmod 755 "$d"/.oute/*.sh
@@ -21,7 +21,7 @@ repo() {
   "${G[@]}" -C "$d" add -A && "${G[@]}" -C "$d" commit -qm contrato
   return 0
 }
-commit() { "${G[@]}" -C "$TMP/$1" add -A && "${G[@]}" -C "$TMP/$1" commit -qm "$2"; return 0; }
+commit() { local r="$1" m="$2"; "${G[@]}" -C "$TMP/$r" add -A && "${G[@]}" -C "$TMP/$r" commit -qm "$m"; return 0; }
 run() { OUT="$("$@" 2>&1)"; RC=$?; return 0; }
 
 repo ok; run "$DC" check "$TMP/ok"
@@ -38,13 +38,13 @@ repo f2; chmod 644 "$TMP/f2/.oute/deploy.sh"; commit f2 modo; run "$DC" check "$
 check "deploy sem 100755: sai 1"                        [ "$RC" -eq 1 ]
 check "deploy sem 100755: diz o modo"                   bash -c 'grep -F "(.oute/deploy.sh)" <<<"$1" | grep -qF "100644 blob"' _ "$OUT"
 # symlink no lugar do script: não é 100755 blob
-repo f3; rm "$TMP/f3/.oute/verify.sh"; ln -s deploy.sh "$TMP/f3/.oute/verify.sh"; commit f3 link; run "$DC" check "$TMP/f3"
+repo f3; rm "${TMP:?}/f3/.oute/verify.sh"; ln -s deploy.sh "$TMP/f3/.oute/verify.sh"; commit f3 link; run "$DC" check "$TMP/f3"
 check "verify symlink: sai 1"                           [ "$RC" -eq 1 ]
 # host
-repo f4; sed -i.bak 's/^host = .*/host = ""/' "$TMP/f4/.oute/deploy.toml"; rm -f "$TMP/f4/.oute/deploy.toml.bak"; commit f4 host; run "$DC" check "$TMP/f4"
+repo f4; sed -i.bak 's/^host = .*/host = ""/' "$TMP/f4/.oute/deploy.toml"; rm -f "${TMP:?}/f4/.oute/deploy.toml.bak"; commit f4 host; run "$DC" check "$TMP/f4"
 check "host vazio: sai 1 e diz o motivo"                bash -c '[ "$1" -eq 1 ] && grep -qF "host" <<<"$2"' _ "$RC" "$OUT"
 # caminho que sai do repo
-repo f5; sed -i.bak 's#^deploy = .*#deploy = "../fora.sh"#' "$TMP/f5/.oute/deploy.toml"; rm -f "$TMP/f5/.oute/deploy.toml.bak"; commit f5 trav; run "$DC" check "$TMP/f5"
+repo f5; sed -i.bak 's#^deploy = .*#deploy = "../fora.sh"#' "$TMP/f5/.oute/deploy.toml"; rm -f "${TMP:?}/f5/.oute/deploy.toml.bak"; commit f5 trav; run "$DC" check "$TMP/f5"
 check "caminho com '..': recusa"                        bash -c '[ "$1" -eq 1 ] && grep -qF "caminho relativo seguro" <<<"$2"' _ "$RC" "$OUT"
 # contrato só no disco, sem commit
 repo f6; "${G[@]}" -C "$TMP/f6" rm -q --cached .oute/deploy.toml; "${G[@]}" -C "$TMP/f6" commit -qm tira; run "$DC" check "$TMP/f6"
@@ -58,7 +58,7 @@ check "check sem caminho: uso, código 2"                [ "$RC" -eq 2 ]
 # segredo: valor que parece token no contrato, sem mostrá-lo
 TOK="ghp_$(printf 'a1B2c3D4%.0s' 1 2 3 4)"
 repo s1; printf 'host = "%s"\n' "$TOK" > "$TMP/s1/.oute/deploy.toml.novo"
-printf '# contrato\ndeploy = ".oute/deploy.sh"\nverify = ".oute/verify.sh"\nrollback = ".oute/rollback.sh"\nhost = "%s"\n' "$TOK" > "$TMP/s1/.oute/deploy.toml"; rm -f "$TMP/s1/.oute/deploy.toml.novo"
+printf '# contrato\ndeploy = ".oute/deploy.sh"\nverify = ".oute/verify.sh"\nrollback = ".oute/rollback.sh"\nhost = "%s"\n' "$TOK" > "$TMP/s1/.oute/deploy.toml"; rm -f "${TMP:?}/s1/.oute/deploy.toml.novo"
 commit s1 token; run "$DC" check "$TMP/s1"
 check "token no contrato: sai 1"                        [ "$RC" -eq 1 ]
 check "token no contrato: a saída não repete o valor"   bash -c '! grep -qF "$1" <<<"$2" && grep -qF "parece segredo" <<<"$2"' _ "$TOK" "$OUT"
@@ -70,7 +70,7 @@ repo s3; printf 'API_TOKEN="%s"\n' "$(printf 'Zq9xK2mPw4Rt7YhB')" >> "$TMP/s3/.o
 check "literal em variável de token no script: recusa"  bash -c '[ "$1" -eq 1 ] && grep -qF "(.oute/verify.sh) tem linha que parece segredo" <<<"$2"' _ "$RC" "$OUT"
 # o que NÃO é segredo: ler do ambiente, caminho comprido, host comprido
 repo s4; printf 'TOKEN="${GH_TOKEN:?}"\nTOKEN_FILE=/run/secrets/agent_env\nssh oute-server-production-eu-1 true\n' >> "$TMP/s4/.oute/deploy.sh"
-sed -i.bak 's#^host = .*#host = "oute-server-production-eu-1"#' "$TMP/s4/.oute/deploy.toml"; rm -f "$TMP/s4/.oute/deploy.toml.bak"; commit s4 ambiente; run "$DC" check "$TMP/s4"
+sed -i.bak 's#^host = .*#host = "oute-server-production-eu-1"#' "$TMP/s4/.oute/deploy.toml"; rm -f "${TMP:?}/s4/.oute/deploy.toml.bak"; commit s4 ambiente; run "$DC" check "$TMP/s4"
 check "segredo do ambiente e nome longo de host passam" [ "$RC" -eq 0 ]
 
 # parse: lê da entrada padrão

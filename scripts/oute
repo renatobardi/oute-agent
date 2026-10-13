@@ -1506,15 +1506,15 @@ dark_gate() {
 # lê) e devolve as marcas: fechada, parada (dark.stop, a do `oute-swarm stop`, fatia d), meta, e repo=/dark= do meta
 dark_state() {
   local round="$1"
-  ctr sh -c 'r="$HOME/.oute/swarm/$1"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$1.alive"
+  ctr sh -c 'n="$1"; r="$HOME/.oute/swarm/$n"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$n.alive"
     [ -f "$r/fechada" ] && echo fechada; [ -f "$r/dark.stop" ] && echo parada
     if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi; true' _ "$round" </dev/null
   return $?
 }
 DARK_LOCK=""; DARK_ROUND_NOW=""
 dark_cleanup() {
-  [[ -z "$DARK_LOCK" ]] || rm -f "$DARK_LOCK"
-  if [[ -n "$DARK_ROUND_NOW" ]]; then ctr sh -c 'rm -f "$HOME/.oute/approve/dark.$1.alive"' _ "$DARK_ROUND_NOW" </dev/null >/dev/null 2>&1 || true; fi
+  [[ -z "$DARK_LOCK" ]] || rm -f "${DARK_LOCK:?}"
+  if [[ -n "$DARK_ROUND_NOW" ]]; then ctr sh -c 'n="$1"; rm -f "$HOME/.oute/approve/dark.${n:?}.alive"' _ "$DARK_ROUND_NOW" </dev/null >/dev/null 2>&1 || true; fi
   return 0
 }
 approve_dark() {
@@ -1528,7 +1528,7 @@ approve_dark() {
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       echo "oute: já há um 'oute approve --dark $round' rodando (pid $pid, $lock)" >&2; return 1
     fi
-    rm -f "$lock"   # lock de um laço que morreu
+    rm -f "${lock:?}"   # lock de um laço que morreu
   fi
   # noclobber: dois starts juntos não passam os dois
   if ! ( set -o noclobber; printf '%s\n' "$$" > "$lock" ) 2>/dev/null; then

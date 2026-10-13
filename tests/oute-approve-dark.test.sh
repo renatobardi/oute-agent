@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTE="$ROOT/scripts/oute"
 TMP="$(mktemp -d)"
 LOOPS=""
-cleanup() { local p; for p in $LOOPS; do kill "$p" 2>/dev/null || true; done; rm -rf "${TMP:?}"; }
+cleanup() { local p; for p in $LOOPS; do kill "$p" 2>/dev/null || true; done; rm -rf "${TMP:?}"; return 0; }
 trap cleanup EXIT
 . "$ROOT/tests/lib/check.sh"
 CHECK_OUT=30
@@ -20,7 +20,7 @@ CHECK_OUT=30
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/docker" <<'SH'
 #!/usr/bin/env bash
-up() { [[ -e "$F_UP" ]]; }
+up() { [[ -e "$F_UP" ]]; return $?; }
 case "$1" in
   ps)   up && echo abc123; exit 0 ;;
   exec) shift; [[ "$1" == -i ]] && shift; shift
@@ -47,7 +47,7 @@ G=(git -c user.email=t@t -c user.name=t)
 WORK="$TMP/work"   # o repo "do container": /workspace/proj
 
 # script do contrato: grava uma linha em $F_RUNS com o nome dele
-script_of() { printf '#!/usr/bin/env bash\nset -euo pipefail\necho "%s" >> "$F_RUNS"\necho "feito %s"\n' "$1" "$1"; return 0; }
+script_of() { local n="$1"; printf '#!/usr/bin/env bash\nset -euo pipefail\necho "%s" >> "$F_RUNS"\necho "feito %s"\n' "$n" "$n"; return 0; }
 # contrato novo no remoto e clone do container; $1 = o que o deploy.sh imprime (muda o hash)
 mk_repo() {
   local seed="$TMP/seed" deploy="${1:-deploy}"
@@ -71,7 +71,7 @@ mk_round() {
   return 0
 }
 reset() {
-  rm -rf "${TMP:?}/host" "${TMP:?}/ctr" "$F_EMITS" "$F_RUNS"; mkdir -p "$TMP/host" "$F_CTR_HOME/outbox" "$F_CTR_HOME/inbox"
+  rm -rf "${TMP:?}/host" "${TMP:?}/ctr" "${F_EMITS:?}" "${F_RUNS:?}"; mkdir -p "$TMP/host" "$F_CTR_HOME/outbox" "$F_CTR_HOME/inbox"
   : > "$F_RUNS"; touch "$F_UP"
   return 0
 }
@@ -99,13 +99,14 @@ until_() {
 }
 # stop_ <rodada>: fecha a rodada pela marca e espera o laço sair; $RC = código
 stop_() {
-  : > "$F_CTR_HOME/.oute/swarm/$1/fechada"
+  local r="$1"
+  : > "$F_CTR_HOME/.oute/swarm/$r/fechada"
   until_ 15 bash -c '! kill -0 "$1" 2>/dev/null' _ "$PID" || { kill "$PID" 2>/dev/null; RC=124; return 0; }
   wait "$PID"; RC=$?
   return 0
 }
-inbox() { cat "$F_CTR_HOME/inbox/$1.out" 2>/dev/null; }
-ran() { grep -cx "$1" "$F_RUNS" || true; }
+inbox() { local i="$1"; cat "$F_CTR_HOME/inbox/$i.out" 2>/dev/null; return 0; }
+ran() { local n="$1"; grep -cx "$n" "$F_RUNS" || true; return 0; }
 D_OK="$(script_of deploy)"
 
 # --- 1. hash igual: executa sem perguntar e registra human-dark
