@@ -3,7 +3,8 @@
 #
 #   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão.
 #              [--dark]                             --dark (ADR-10, #841): grava dark=1 no meta e põe "modo dark, ADR-10" no prompt; recusa o
-#                                                   oute-agent (código 7) e pré-requisito faltando (código 8, um item por linha)
+#                                                   oute-agent (código 7) e pré-requisito faltando (código 8, um item por linha); o
+#                                                   dispatcher abre com --phase arch (juiz), grava a autorização de merge e lê swarm/dark.md (#842)
 #              [--agent claude|codex]               --agent: agente do dispatcher e das sessões da rodada (sem ele: claude no
 #                                                   dispatcher e o seletor nas sessões). Com codex, o watch roda numa aba própria
 #                                                   e digita os eventos no campo do dispatcher parado (#213)
@@ -345,7 +346,7 @@ dark_prereqs() {
 
 cmd_start() {
   [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>] [--subscription <assinatura>] [--dark]"
-  local repo max=3 label="" workers="" prefer="" subscr="" dark=0 dark_texto="" miss main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
+  local repo max=3 label="" workers="" prefer="" subscr="" dark=0 dark_texto="" dphase=plan miss main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -383,8 +384,11 @@ cmd_start() {
       exit 8
     fi
     dark_texto=" Rodada: modo dark, ADR-10."
+    dphase=arch   # o juiz abre na linha de raciocínio (ADR-10, #842); o dispatcher de hoje abre em plan (#219)
   fi
   id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
+  # o juiz lê o dark.md (renderizado só aqui, abaixo) antes de qualquer etapa; vai no {{DARK}} do núcleo, sem tocar no swarm.md (#753)
+  [[ -z "$dark_texto" ]] || dark_texto+=" Você é o juiz: leia \`~/.oute/swarm/$id/prompt/dark.md\` inteiro antes de qualquer etapa; ele vale sobre as regras de pergunta ao Bardi."
   space="$(herdr_space)"
   # agent = o do dispatcher (oute.agent dos eventos da rodada): claude, ou o do --agent quando é codex (#213);
   # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
@@ -407,9 +411,15 @@ cmd_start() {
   # em $STATE_ROOT/$id/prompt/ e lido pelo dispatcher ao entrar nela (e de novo depois de um recomeço do contexto)
   mkdir -p "$STATE_ROOT/$id/prompt"
   for etapa in "$LIB"/swarm/*.md; do
+    [[ "$(basename "$etapa")" != dark.md || -n "$dark_texto" ]] || continue   # o dark.md só existe na rodada --dark (#842)
     render_prompt "$etapa" > "$STATE_ROOT/$id/prompt/$(basename "$etapa")"
   done
   printf '%s' "$prompt" > "$STATE_ROOT/$id/prompt.md"   # o dispatcher recomeçado relê as instruções daqui (#752)
+  # modo dark (ADR-10, #842): a autorização permanente de merge da rodada, gravada na abertura pelo mesmo `estado` do §3 (merge.md)
+  if (( dark )); then
+    OUTE_SWARM_ID="$id" cmd_estado --autorizacao "modo dark (ADR-10, #839), dada na abertura" >/dev/null \
+      || die "não gravei a autorização do modo dark em $STATE_ROOT/$id"
+  fi
   slog "$STATE_ROOT/$id" "$(sed -n 's/^started=//p' "$STATE_ROOT/$id/meta") abertura $id${rname:+ · $rname} (repo $name, max $max${label:+, label $label}${workers:+, agente $workers})"
   echo "dispatcher $rlabel · repo $name · max $max${label:+ · label $label}${workers:+ · agente $workers}" >&2
   if [[ -n "$others" ]]; then
@@ -432,7 +442,7 @@ cmd_start() {
   herdr pane run "$wpane" "$wcmd" >/dev/null || die "herdr pane run falhou na aba do watch ($wpane)"
   slog "$STATE_ROOT/$id" "$(date -u +%FT%TZ) watch --deliver aberto na aba $wpane (dispatcher $dagent, pane $HERDR_PANE_ID)"
   OUTE_TASK_HERE=1 OUTE_SWARM_ID="$id" OUTE_SWARM_MAX="$max" OUTE_SWARM_REPO="$main" \
-    exec oute-task --phase plan -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219)
+    exec oute-task --phase "$dphase" -r "$main" "$id" "$dagent" "$prompt"   # dispatcher: fase plan fixa (ADR-02, #219); arch no dark (#842)
 }
 
 # carga do container (#623): avisa em stderr, sem bloquear, quando a média de 1 min do /proc/loadavg passa de 2 × nproc.
