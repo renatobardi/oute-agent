@@ -57,3 +57,50 @@ dcontract() {
   git -C "$dir" add -A && git -C "$dir" -c user.email=t@t -c user.name=t commit -qm contrato
   return 0
 }
+
+# ---- #844: o agent-studio falso (tests/lib/fake-studio-usage.py), o oute-emit falso e a rodada dark em andamento
+# dstudio_up <pasta>: sobe o dublê e exporta AGENT_STUDIO_URL e AGENT_STUDIO_READ_TOKEN para o oute-swarm (o token é sorteado)
+dstudio_up() {
+  local dir="$1" i
+  mkdir -p "$dir"; rm -f "${dir:?}/port"
+  DSTUDIO_TOKEN="tok-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  python3 "$ROOT/tests/lib/fake-studio-usage.py" "$dir" "$DSTUDIO_TOKEN" &
+  DSTUDIO_PID=$!
+  for i in $(seq 1 50); do [[ -s "$dir/port" ]] && break; /bin/sleep 0.1; done
+  [[ -s "$dir/port" ]] || { echo "FAIL o agent-studio falso não subiu"; return 1; }
+  DSTUDIO_DIR="$dir"
+  export AGENT_STUDIO_URL="http""://127.0.0.1:$(cat "$dir/port")" AGENT_STUDIO_READ_TOKEN="$DSTUDIO_TOKEN"
+  return 0
+}
+
+# dstudio_down: derruba o dublê (o PID que dstudio_up abriu)
+dstudio_down() {
+  [[ -z "${DSTUDIO_PID:-}" ]] || { kill "$DSTUDIO_PID" 2>/dev/null; wait "$DSTUDIO_PID" 2>/dev/null; }
+  DSTUDIO_PID=""
+  return 0
+}
+
+# dcost <rodada> <usd>: o custo que o dublê devolve para a rodada
+dcost() {
+  local rodada="$1" usd="$2"
+  printf '%s\n' "$usd" > "$DSTUDIO_DIR/cost-$rodada"
+  return 0
+}
+
+# demit: oute-emit falso no PATH do teste; anota `<tipo> <rodada> <linha>` em $FAKE/emit.log
+demit() {
+  cat > "$BIN/oute-emit" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE/emit.log"
+SH
+  chmod +x "$BIN/oute-emit"
+  return 0
+}
+
+# ddark [<budget>]: a rodada swarm-test (do round) vira dark; com budget, grava budget= no meta
+ddark() {
+  local budget="${1:-}"
+  printf 'dark=1\n' >> "$STATE/meta"
+  [[ -z "$budget" ]] || printf 'budget=%s\n' "$budget" >> "$STATE/meta"
+  return 0
+}

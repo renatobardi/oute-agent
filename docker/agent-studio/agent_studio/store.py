@@ -434,6 +434,10 @@ class Store:
         self.classify_pending()
         return self.read_free(lambda con: usage_mod.usage(con, from_ns, to_ns, prices, tz, repo, paid, sub), "usage")
 
+    def usage_round(self, from_ns, to_ns, prices, rodada, tz=tz_mod.UTC):
+        """Leitura do `/v1/usage?rodada=` (#844): o total da rodada do swarm na janela; fora da trava do escritor (#570)."""
+        return self.read_free(lambda con: usage_mod.round_usage(con, from_ns, to_ns, prices, rodada, tz), "usage")
+
     def repos(self, from_ns, to_ns):
         """Os repositórios com fato na janela (#528), para o filtro das telas; fora da trava do escritor (#570)."""
         return self.read_free(lambda con: repo_mod.options(con, from_ns, to_ns), "repos")

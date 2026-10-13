@@ -194,6 +194,37 @@ check "/uso: as tabelas por papel, por fase e por assinatura (#679) seguem na te
 GE="$(data <<<"$(studio_page "${A[@]}" "$STUDIO_URL/uso?from=2030-01-01&to=2030-01-02")")"
 check "/uso: janela vazia, gráficos sem coluna e sem barra" jqe '([.[] | select(.bucket or .nome)] | length) == 0 and ([.[] | select(.grafico)] | length) == 5' <<<"$GE"
 
+# ---------------------------------------------------------------- 6b. o total de uma rodada (#844): GET /v1/usage?rodada=<id>
+# duas rodadas e uma sessão avulsa, todas com custo real no log api_request; o filtro é o `oute.swarm.round` do resource
+PYTHONPATH="$ROOT/tests/lib" python3 - "$TMP" <<'PY'
+import json, sys
+import otlp_json
+from otlp_json import claude_call, rl, rs
+otlp_json._spans = otlp_json._requests = 1000   # outro processo: os ids de span e de request não podem repetir os do lote de cima (dedupe)
+tmp, D1 = sys.argv[1], 1759000000
+base = {"host.name": "oute-server", "service.name": "claude-code", "oute.agent": "claude"}
+model = {"model": "claude-sonnet-5", "input_tokens": 10, "output_tokens": 5}
+a1, la1 = claude_call(D1 + 100, 1, model, 1.5)
+a2, la2 = claude_call(D1 + 200, 1, model, 2.25)
+b1, lb1 = claude_call(D1 + 300, 1, model, 40.0)
+s1, ls1 = claude_call(D1 + 400, 1, model, 900.0)
+ra, rb = {**base, "oute.swarm.round": "swarm-rodada-a"}, {**base, "oute.swarm.round": "swarm-rodada-b"}
+json.dump({"resourceSpans": [rs(ra, [a1, a2]), rs(rb, [b1]), rs(base, [s1])]}, open(f"{tmp}/rodadas-traces.json", "w"))
+json.dump({"resourceLogs": [rl(ra, [la1, la2]), rl(rb, [lb1]), rl(base, [ls1])]}, open(f"{tmp}/rodadas-logs.json", "w"))
+PY
+check "rodadas: traces = 200"                          test "$(post traces "$TMP/rodadas-traces.json")" = 200
+check "rodadas: logs = 200"                            test "$(post logs "$TMP/rodadas-logs.json")" = 200
+RA="$(usage "$WIN&rodada=swarm-rodada-a")"
+RB="$(usage "$WIN&rodada=swarm-rodada-b")"
+check "rodada: devolve o id e só os totais da rodada"  jqe '.rodada == "swarm-rodada-a" and .totals.calls == 2 and (has("rows") | not)' <<<"$RA"
+check "rodada: custo = só o dela (1,50 + 2,25)"        jqe "$(usd .totals.cost.real_usd) == 3750000" <<<"$RA"
+check "rodada: a outra rodada e a sessão avulsa ficam de fora" jqe "$(usd .totals.cost.real_usd) == 40000000" <<<"$RB"
+check "rodada sem fato: zerada, não 404"               jqe '.totals.calls == 0 and .totals.cost.real_usd == null' <<<"$(usage "$WIN&rodada=swarm-nao-existe")"
+check "rodada sem janela: vale o máximo do ADR-08 (366 dias), não as últimas 24 h" jqe '((.to | fromdate) - (.from | fromdate)) == 366 * 86400' <<<"$(usage "?rodada=swarm-rodada-a")"
+check "rodada inválida: 400"                           test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?rodada=a%20b")" = 400
+check "rodada vazia: 400"                              test "$(code "${A[@]}" "$STUDIO_URL/v1/usage?rodada=")" = 400
+check "sem rodada: o usage de sempre (rows)"           jqe 'has("rows") and (has("rodada") | not)' <<<"$(usage "$WIN")"
+
 studio_stop
 
 # ---------------------------------------------------------------- 6. lógica reusável (#204-#206), direto no módulo

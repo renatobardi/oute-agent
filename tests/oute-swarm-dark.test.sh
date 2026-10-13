@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Testes do oute-swarm, tema: modo dark, fatias (a) e (b) (#841, #842, ADR-10; (b): --phase arch, autorização e dark.md): `--dark` grava dark=1 no meta e põe "modo dark, ADR-10" no prompt;
+# Testes do oute-swarm, tema: modo dark, fatias (a), (b) e (d) (#841, #842, #844, ADR-10; (b): --phase arch, autorização e dark.md): `--dark` grava dark=1 no meta e põe "modo dark, ADR-10" no prompt;
 # recusa o oute-agent (código 7) e pré-requisito faltando (código 8, um item por linha; cota de 7 dias e permissão de push).
+# Fatia (d): --budget no meta, spawn com o custo da rodada lido do agent-studio falso (código 9, [budget]; leitura que falha abre),
+# dark_parada=deploy, e `oute-swarm stop` (idempotente).
 # Bash puro, sem herdr, gh nem rede de verdade (dublês e apoio em tests/lib/swarm.sh e tests/lib/oute-swarm-dark.sh).
 # Uso: tests/oute-swarm-dark.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
@@ -17,6 +19,7 @@ rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o
 
 # a tabela do repo: claude, zai e codex, todas com weekly_guard_pct = 95
 export OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
+export OUTE_SWARM_CONFIG="$ROOT/config/swarm.toml"   # o padrão do repo (dark_budget_usd, #844)
 
 # -------- código 7: o oute-agent não é alvo
 CASE=c7; round "$CASE"
@@ -119,6 +122,156 @@ check "sem --dark: oute-task com --phase plan"   [ "$(tr '\n' ' ' < "$FAKE/oute-
 check "sem --dark: sem autorizacao gravada"      [ ! -e "$H/.oute/swarm/$R/autorizacao" ]
 check "sem --dark: sem dark.md na pasta da rodada" [ ! -e "$H/.oute/swarm/$R/prompt/dark.md" ]
 check "sem --dark: nenhuma etapa citada leva a dark.md" bash -c '! grep -qF "dark.md" "$1"' _ "$FAKE/oute-task.all"
+
+INSTR="instrução"
+# ======== fatia (d), #844: --budget, spawn com teto de custo, dark_parada e stop
+# -------- abertura: --budget no meta, o padrão de config/swarm.toml, e as recusas
+CASE=b1; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
+opn --dark --budget 25.50
+check "budget: abre (código 0)"                  [ "$RC" -eq 0 ]
+R="$(nova)"
+check "budget: budget=25.50 no meta"             grep -qxF "budget=25.50" "$H/.oute/swarm/$R/meta"
+
+CASE=b2; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
+opn --dark
+check "sem --budget: abre"                       [ "$RC" -eq 0 ]
+R="$(nova)"
+check "sem --budget: o padrão de config/swarm.toml (1000) no meta" grep -qxF "budget=1000" "$H/.oute/swarm/$R/meta"
+check "config/swarm.toml: dark_budget_usd = 1000 (decisão do Bardi, #844)" grep -qxF "dark_budget_usd = 1000" "$ROOT/config/swarm.toml"
+
+CASE=b3; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
+opn --budget 10
+check "--budget sem --dark: recusa"              [ "$RC" -ne 0 ]
+check "--budget sem --dark: diz o motivo"        bash -c 'grep -qF -- "--budget só vale com --dark" <<<"$1"' _ "$ERR"
+check "--budget sem --dark: nada aberto"         so_teste
+for bad in 0 abc -5 1.234 ""; do
+  opn --dark --budget "$bad"
+  check "--budget '$bad': recusa"                [ "$RC" -ne 0 ]
+  check "--budget '$bad': nada aberto"           so_teste
+done
+OUTE_SWARM_CONFIG="$TMP/nao-existe.toml" opn --dark
+check "sem --budget e sem config: recusa (sem teto, sem humano)" [ "$RC" -eq 1 ]
+check "sem --budget e sem config: diz o que falta" bash -c 'grep -qF "dark_budget_usd" <<<"$1"' _ "$ERR"
+check "sem --budget e sem config: nada aberto"   so_teste
+
+# -------- spawn: budget ok, estourado (código 9) e leitura que falha (abre)
+CASE=sp; round "$CASE"; demit; ddark 50; MAX=20   # vagas de sobra: o teste é do teto de custo, não do --max
+dstudio_up "$TMP/$CASE/studio" || exit 1
+trap 'dstudio_down; rm -rf "${TMP:?}"' EXIT
+dcost swarm-test 49.99
+sw spawn 1-ok "$INSTR"
+check "budget ok (49,99 < 50): spawn abre"       [ "$RC" -eq 0 ]
+check "budget ok: o pedido foi ao /v1/usage da rodada com o token" grep -qxF "/v1/usage?rodada=swarm-test auth=ok" "$DSTUDIO_DIR/requests.log"
+check "budget ok: a sessão está no spawned"      grep -q '^1-ok ' "$STATE/spawned"
+check "budget ok: sem linha [budget] no log"     bash -c '! grep -qF "[budget]" "$1"' _ "$STATE/log"
+dcost swarm-test 50
+sw spawn 2-estoura "$INSTR"
+check "budget estourado (50 >= 50): código 9"    [ "$RC" -eq 9 ]
+check "budget estourado: diz custo, teto e a sessão" bash -c 'grep -qF "gastou US\$ 50" <<<"$1" && grep -qF "budget de US\$ 50" <<<"$1" && grep -qF "2-estoura não abre (código 9)" <<<"$1"' _ "$ERR"
+check "budget estourado: linha [budget] no log da rodada" bash -c 'grep -qF "[budget] spawn 2-estoura recusado: custo da rodada US\$ 50 >= budget US\$ 50" "$1"' _ "$STATE/log"
+check "budget estourado: nenhuma aba nova nem entrada no spawned" bash -c '! grep -q "^2-estoura " "$1" && [ "$(grep -c "tab create" "$2")" -eq 1 ]' _ "$STATE/spawned" "$FAKE/herdr.log"
+check "budget estourado: nada de .instr nem .prompt da sessão recusada" [ ! -e "$STATE/2-estoura.instr" ] 
+dcost swarm-test 51.5
+sw spawn 2-estoura "$INSTR"
+check "acima do teto (51,5): código 9 também"    [ "$RC" -eq 9 ]
+
+for modo in erro lixo; do
+  printf '%s\n' "$modo" > "$DSTUDIO_DIR/mode"
+  sw spawn "3-$modo" "$INSTR"
+  check "leitura '$modo': abre (cota desconhecida não trava)" [ "$RC" -eq 0 ]
+  check "leitura '$modo': avisa que não conferiu o teto" bash -c 'grep -qF "não li o custo da rodada swarm-test" <<<"$1" && grep -qF "3-'"$modo"' abre" <<<"$1"' _ "$ERR"
+  check "leitura '$modo': a sessão está no spawned" grep -q "^3-$modo " "$STATE/spawned"
+done
+printf 'lento\n' > "$DSTUDIO_DIR/mode"
+t0=$SECONDS
+sw spawn 4-lento "$INSTR"
+check "leitura lenta (acima de 3 s): abre"       [ "$RC" -eq 0 ]
+check "leitura lenta: avisa"                     bash -c 'grep -qF "não li o custo da rodada" <<<"$1"' _ "$ERR"
+check "leitura lenta: espera o teto de 3 s, não os 6 s do servidor" [ $((SECONDS - t0)) -le 5 ]
+printf 'ok\n' > "$DSTUDIO_DIR/mode"
+dstudio_down
+sw spawn 5-fora "$INSTR"
+check "agent-studio fora do ar: abre com aviso"  bash -c '[ "$1" -eq 0 ] && grep -qF "não li o custo da rodada" <<<"$2"' _ "$RC" "$ERR"
+AGENT_STUDIO_READ_TOKEN="" sw spawn 6-sem-token "$INSTR"
+check "sem token de leitura: abre com aviso"     bash -c '[ "$1" -eq 0 ] && grep -qF "não li o custo da rodada" <<<"$2"' _ "$RC" "$ERR"
+
+# -------- spawn fora do modo dark: nem consulta o agent-studio
+CASE=nd; round "$CASE"; MAX=3
+dstudio_up "$TMP/$CASE/studio" || exit 1
+dcost swarm-test 99999
+sw spawn 1-livre "$INSTR"
+check "rodada sem dark: abre mesmo com custo enorme" [ "$RC" -eq 0 ]
+check "rodada sem dark: o agent-studio nem foi consultado" [ ! -s "$DSTUDIO_DIR/requests.log" ]
+dstudio_down
+
+# -------- dark_parada=deploy e stop
+CASE=st; round "$CASE"; demit; ddark 1000
+dstudio_up "$TMP/$CASE/studio" || exit 1
+dcost swarm-test 1
+sw dark-parada deploy
+check "dark-parada: código 0"                    [ "$RC" -eq 0 ]
+sw dark-parada deploy
+check "dark-parada duas vezes: uma linha no meta" [ "$(grep -c '^dark_parada=deploy$' "$STATE/meta")" -eq 1 ]
+check "dark-parada: linha [parada] no log, uma vez" [ "$(grep -c '\[parada\] rodada parada' "$STATE/log")" -eq 1 ]
+sw spawn 1-depois "$INSTR"
+check "depois do dark_parada: spawn recusa com código 9" [ "$RC" -eq 9 ]
+check "depois do dark_parada: linha [parada] de spawn" bash -c 'grep -qF "[parada] spawn 1-depois recusado" "$1"' _ "$STATE/log"
+check "depois do dark_parada: nem consultou o custo" [ ! -s "$DSTUDIO_DIR/requests.log" ]
+sw dark-parada rollback
+check "dark-parada: só aceita deploy"            [ "$RC" -ne 0 ]
+dstudio_down
+
+CASE=np; round "$CASE"
+sw dark-parada deploy
+check "dark-parada em rodada sem dark: recusa"   [ "$RC" -ne 0 ]
+check "dark-parada em rodada sem dark: meta intacto" bash -c '! grep -q dark_parada "$1"' _ "$STATE/meta"
+
+CASE=stop; round "$CASE"; demit; ddark 1000
+mkdir -p "$H/.oute/approve/dark.swarm-test.lock" "$H/.oute/approve/dark.outra.lock"
+echo 1234 > "$H/.oute/approve/dark.swarm-test.lock/pid"; echo 1234 > "$H/.oute/approve/dark.outra.lock/pid"
+date +%s > "$H/.oute/approve/dark.swarm-test.alive"
+touch "$FAKE/tab-close.fail"
+sw stop swarm-test
+check "stop com aba que não fecha: código 1"     [ "$RC" -eq 1 ]
+check "stop com aba que não fecha: diz para rodar de novo" bash -c 'grep -qF "nem todas as abas" <<<"$1"' _ "$ERR"
+check "stop com aba que não fecha: sem a marca fechada" [ ! -e "$STATE/fechada" ]
+check "stop com aba que não fecha: laço já desligado (dark.stop)" [ -s "$STATE/dark.stop" ]
+check "stop: o lock da rodada saiu"              [ ! -e "$H/.oute/approve/dark.swarm-test.lock" ]
+check "stop: a batida da rodada saiu"            [ ! -e "$H/.oute/approve/dark.swarm-test.alive" ]
+check "stop: o lock de OUTRA rodada fica"        [ -d "$H/.oute/approve/dark.outra.lock" ]
+rm -f "${FAKE:?}/tab-close.fail"
+sw stop swarm-test
+check "stop: código 0"                           [ "$RC" -eq 0 ]
+check "stop: fecha a aba da sessão (herdr tab close)" grep -qxF "tab close w1:t1" "$FAKE/herdr.log"
+check "stop: marca fechada no disco"             [ -s "$STATE/fechada" ]
+check "stop: a sessão entra no closed"           grep -qxF "7-foo" "$STATE/closed"
+check "stop: uma linha 'rodada fechada' no log"  [ "$(grep -c ' rodada fechada$' "$STATE/log")" -eq 1 ]
+check "stop: emite o round.closed (oute-emit swarm <rodada> ... rodada fechada)" [ "$(grep -c '^swarm swarm-test .* rodada fechada$' "$FAKE/emit.log")" -eq 1 ]
+closes="$(grep -c '^tab close ' "$FAKE/herdr.log")"; emits="$(wc -l < "$FAKE/emit.log")"
+sw stop swarm-test
+check "stop de novo: código 0 (idempotente)"     [ "$RC" -eq 0 ]
+check "stop de novo: diz que já estava fechada"  bash -c 'grep -qF "já fechada" <<<"$1"' _ "$OUT"
+check "stop de novo: não fecha aba nem emite outra vez" bash -c '[ "$(grep -c "^tab close " "$1")" -eq "$2" ] && [ "$(wc -l < "$3")" -eq "$4" ]' _ "$FAKE/herdr.log" "$closes" "$FAKE/emit.log" "$emits"
+check "stop de novo: ainda uma linha 'rodada fechada'" [ "$(grep -c ' rodada fechada$' "$STATE/log")" -eq 1 ]
+sw spawn 1-depois-do-stop "$INSTR"
+check "spawn depois do stop: código 9"           [ "$RC" -eq 9 ]
+check "spawn depois do stop: a marca fechada não é desfeita" [ -s "$STATE/fechada" ]
+check "spawn depois do stop: linha [parada] com oute-swarm stop" bash -c 'grep -qF "[parada] spawn 1-depois-do-stop recusado: rodada parada por oute-swarm stop" "$1"' _ "$STATE/log"
+sw stop swarm-nao-existe
+check "stop de rodada que não existe: erro"      [ "$RC" -ne 0 ]
+check "stop de rodada que não existe: diz qual"  bash -c 'grep -qF "rodada swarm-nao-existe não existe" <<<"$1"' _ "$ERR"
+sw stop
+check "stop sem rodada: uso"                     bash -c '[ "$1" -ne 0 ] && grep -qF "uso: oute-swarm stop <rodada>" <<<"$2"' _ "$RC" "$ERR"
+sw stop "../fora"
+check "stop com caminho no lugar do id: recusa"  bash -c '[ "$1" -ne 0 ] && grep -qF "uso: oute-swarm stop" <<<"$2"' _ "$RC" "$ERR"
+
+CASE=stop0; round "$CASE"; demit; ddark 1000
+rm -f "${STATE:?}/spawned"
+sw stop swarm-test
+check "stop de rodada dark sem nenhuma sessão: código 0 e fechada" bash -c '[ "$1" -eq 0 ] && [ -s "$2/fechada" ]' _ "$RC" "$STATE"
 
 guarda_check
 guarda_stop

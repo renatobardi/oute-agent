@@ -68,6 +68,8 @@ services:
       - ./addons:/opt/oute/addons:ro
       # tabela de fase do seletor de modelo (ADR-02, #219), read-only: muda com git pull + oute down/up, sem release
       - ./config/select:/opt/oute/select:ro
+      # padrões do oute-swarm (#844): dark_budget_usd, read-only; muda com git pull + oute down/up, sem release
+      - ./config/swarm.toml:/opt/oute/swarm.toml:ro
     depends_on:
       volume-init:
         condition: service_completed_successfully

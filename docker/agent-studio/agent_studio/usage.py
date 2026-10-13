@@ -132,13 +132,21 @@ def _epoch_col(prices):
     return f"len(list_filter([{', '.join(str(int(b)) for b in bounds)}]::UBIGINT[], x -> x <= time_unix_nano))"
 
 
-def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, sub=None):
+def _round_scope(repo, sub, rodada=None):
+    """O filtro de repositório e de assinatura, mais o da rodada do swarm (#844, `oute.swarm.round`): (SQL, parâmetros)."""
+    rsql, rparams = sub_mod.scope(repo, sub)
+    if rodada is None:
+        return rsql, rparams
+    return f"{rsql} AND oute_swarm_round = ?", [*rparams, rodada]
+
+
+def _calls(con, keys, from_ns, to_ns, prices, tz, repo=None, sub=None, rodada=None):
     aggs = ["count(*) AS calls", "count(cost_usd) AS calls_real", "sum(cost_usd) AS cost_real"]
     for t in ("input", "output", "cache_read", "cache_creation"):
         aggs.append(f"COALESCE(sum({t}_tokens), 0) AS {t}")
         aggs.append(f"COALESCE(sum({t}_tokens) FILTER (WHERE cost_usd IS NULL), 0) AS est_{t}")
     # custo efetivo (o do span ou o do log `api_request`, #157): a regra está no `cost.spans_with_cost`
-    rsql, rparams = sub_mod.scope(repo, sub)
+    rsql, rparams = _round_scope(repo, sub, rodada)
     table, params = window_spans_with_cost(from_ns, to_ns, rsql, rparams)
     # `sub` sempre (não só no pago, #531): a chamada de assinatura sem custo real é custo de lista calculado, não
     # estimado (#747), e a diferença se decide por grupo de assinatura
@@ -154,15 +162,15 @@ def _p95(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
                   f"{_WINDOW} AND duration_ns IS NOT NULL AND {MODEL_CALL_SQL}{rsql}", [from_ns, to_ns, *MODEL_CALL_PARAMS, *rparams])
 
 
-def _spans(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
+def _spans(con, keys, from_ns, to_ns, tz, repo=None, sub=None, rodada=None):
     """Todos os spans (o denominador da taxa de erro) e os com status de erro."""
-    rsql, rparams = sub_mod.scope(repo, sub)
+    rsql, rparams = _round_scope(repo, sub, rodada)
     return _query(con, keys, _cols(tz), ["count(*) AS spans", "count(*) FILTER (WHERE status_code = ?) AS n"], _scope("spans", keys),
                   f"{_WINDOW}{rsql}", [SPAN_STATUS_ERROR, from_ns, to_ns, *rparams])
 
 
-def _log_errors(con, keys, from_ns, to_ns, tz, repo=None, sub=None):
-    rsql, rparams = sub_mod.scope(repo, sub)
+def _log_errors(con, keys, from_ns, to_ns, tz, repo=None, sub=None, rodada=None):
+    rsql, rparams = _round_scope(repo, sub, rodada)
     return _query(con, keys, _cols(tz, _LOG_MODEL), ["count(*) AS n"], _scope("logs", keys), f"{_WINDOW} AND severity_number >= ?{rsql}",
                   [from_ns, to_ns, LOG_SEVERITY_ERROR, *rparams])
 
@@ -287,7 +295,7 @@ def _idle_key(k, day, name):
     return name if k == "subscription" else rateio.NO_USE
 
 
-def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, paid=False, sub=None, alloc=None):
+def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=tz_mod.UTC, p95=True, repo=None, paid=False, sub=None, alloc=None, rodada=None):
     """{tupla das chaves: acumulador} na janela [from_ns, to_ns). O custo estimado é calculado por modelo e
     depois somado; sem `model` nas chaves, o agrupamento fino inclui o modelo e sobe para `keys`. O preço é o que valia
     na **hora do fato** de cada chamada (`PriceTable`, #339): o agrupamento fino também separa as faixas entre trocas.
@@ -297,7 +305,7 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
     `paid=True` (#531, custo pago; rateado desde o #748): a chamada de assinatura (`cost.SUBSCRIPTION_SQL`, a regra de `cost.is_subscription`) recebe a sua
     parte do valor do plano do dia (`rateio.py`; entra no `real_*`, sem estimativa), e o dia com plano e sem chamada da assinatura vira um grupo "sem uso"
     (`rateio.NO_USE` em toda chave que não é o dia nem a assinatura; sem ele a soma não fecha com a mensalidade; só sem filtro de repositório); `alloc` = o
-    `paid_alloc` já calculado, se quem chama já o tem. Chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
+    `paid_alloc` já calculado, se quem chama já o tem. `rodada` (#844) = só os fatos dessa rodada do swarm (`oute.swarm.round`; só o `round_usage` o usa, com `p95=False`). Chamadas, tokens, erros e p95 não mudam. Padrão `False` = custo de lista, o que a API e o tray sempre devolvem."""
     keys = tuple(keys)
     if set(keys) - set(KEYS):
         raise ValueError(f"chave inválida: {keys}")
@@ -310,16 +318,16 @@ def aggregate(con, from_ns, to_ns, prices, keys=("host", "agent", "model"), tz=t
         return groups.setdefault(tuple(rec[k] for k in keys), _empty())
 
     fine = _fine_keys(keys, alloc)
-    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, sub):
+    for rec in _calls(con, fine, from_ns, to_ns, prices, tz, repo, sub, rodada):
         _add_call(acc(rec), rec, prices, at_ns, alloc)
     _add_idle(groups, keys, alloc, (from_ns, to_ns), tz, repo, sub)
     if p95:
         fill_p95(con, groups, keys, from_ns, to_ns, tz, repo, sub)
-    for rec in _spans(con, keys, from_ns, to_ns, tz, repo, sub):
+    for rec in _spans(con, keys, from_ns, to_ns, tz, repo, sub, rodada):
         a = acc(rec)
         a["spans"] += rec["spans"]
         a["span_errors"] += rec["n"]
-    for rec in _log_errors(con, keys, from_ns, to_ns, tz, repo, sub):
+    for rec in _log_errors(con, keys, from_ns, to_ns, tz, repo, sub, rodada):
         if rec["n"]:
             acc(rec)["log_errors"] += rec["n"]
     return groups
@@ -404,6 +412,13 @@ def rendered(groups, key):
 
 def _sorted(groups):
     return sorted(groups.items(), key=lambda kv: tuple((v is not None, v if v is not None else "") for v in kv[0]))
+
+
+def round_usage(con, from_ns, to_ns, prices, rodada, tz=tz_mod.UTC):
+    """O total de uma rodada do swarm (#844, `GET /v1/usage?rodada=`): o mesmo `totals` do `usage`, só dos fatos com
+    `oute.swarm.round` = `rodada`; rodada sem fato = zerado. É o custo que o `--budget` do modo dark confere."""
+    groups = aggregate(con, from_ns, to_ns, prices, (), tz, p95=False, rodada=rodada)
+    return {"rodada": rodada, "totals": rendered(groups, ())}
 
 
 def usage(con, from_ns, to_ns, prices, tz=tz_mod.UTC, repo=None, paid=False, sub=None):
