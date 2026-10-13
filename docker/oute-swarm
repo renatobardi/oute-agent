@@ -357,6 +357,9 @@ dark_prereqs() {
     if ! out="$(oute-deploy-contract check "$main" 2>&1)"; then
       while IFS= read -r line; do [[ -z "$line" ]] || printf '%s\n' "$line"; done <<<"$out"
       miss=1
+    else
+      # passou: o aviso (conferiu só o HEAD local) vai a quem abre a rodada, em stderr; stdout é só o que falta
+      while IFS= read -r line; do [[ "$line" != aviso:* ]] || printf 'oute-swarm: modo dark: %s\n' "$line" >&2; done <<<"$out"
     fi
   else
     printf 'contrato: sem o oute-deploy-contract nesta imagem (precisa da release com a #843)\n'; miss=1

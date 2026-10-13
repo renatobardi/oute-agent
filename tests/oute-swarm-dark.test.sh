@@ -66,6 +66,7 @@ CASE=ok; round "$CASE"
 REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 94; dgh true; dalive; dcontract "$REPO"
 opn --dark
 check "tudo presente: código 0"                  [ "$RC" -eq 0 ]
+check "tudo presente: o aviso do HEAD local chega a quem abre (stderr)" bash -c 'grep -qF "conferi só o HEAD" <<<"$1"' _ "$ERR"
 R="$(nova)"
 check "tudo presente: dark=1 no meta"            grep -qxF "dark=1" "$H/.oute/swarm/$R/meta"
 check "tudo presente: o prompt traz \"modo dark, ADR-10\"" grep -qF "modo dark, ADR-10" "$FAKE/oute-task.last"

@@ -19,7 +19,7 @@ set -euo pipefail
 
 MSG_SEGREDO="parece segredo (valor não mostrado); segredo vem do ambiente do host ou do vault, nunca do contrato"
 # prefixos de token conhecidos e blocos de chave; a mensagem nunca repete o valor
-SECRET_PREFIX='(ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|xox[abprs]-|sk-[A-Za-z0-9]|sk_(live|test)_|rk_(live|test)_|npm_[A-Za-z0-9]{10}|hf_[A-Za-z0-9]{10}|shp(at|ss|ca|pa)_[A-Za-z0-9]|SG\.[A-Za-z0-9_-]{10}|AKIA[0-9A-Z]{8}|AIza[0-9A-Za-z_-]{10}|eyJ[A-Za-z0-9_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY)'
+SECRET_PREFIX='((^|[^A-Za-z0-9_])(sk-[A-Za-z0-9]|hf_[A-Za-z0-9]{10})|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|xox[abprs]-|sk_(live|test)_|rk_(live|test)_|npm_[A-Za-z0-9]{10}|shp(at|ss|ca|pa)_[A-Za-z0-9]|SG\.[A-Za-z0-9_-]{10}|AKIA[0-9A-Z]{8}|AIza[0-9A-Za-z_-]{10}|eyJ[A-Za-z0-9_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY)'
 # `Bearer <token>` e credencial na URL (`https://usuario:senha@host`)
 SECRET_AUTH='([Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{16,}|://[^/[:space:]@:]+:[^/[:space:]@]+@)'
 # variável de nome sensível recebendo literal longo (`TOKEN=abc…`, `export API_KEY="abc…"`); `$(…)`, `${…}` e `$VAR` não casam
@@ -108,7 +108,7 @@ cmd_check() {
   (( rc == 0 )) || return 1
   printf 'contrato ok: %s\n' "$(tr '\n' ' ' <<<"$parsed" | sed 's/ *$//')"
   # o laço do host (`oute approve --dark`) não lê este clone: lê a ponta do ramo padrão no GitHub, buscada pelo host
-  echo "aviso: conferi só o HEAD de $repo (clone local); o laço do host lê a ponta do ramo padrão no GitHub, depois do merge" >&2
+  echo "aviso: conferi só o HEAD de $repo (clone local); o laço do host lê a ponta do ramo padrão no GitHub e o Bardi confirma os hashes na partida do laço" >&2
   return 0
 }
 
