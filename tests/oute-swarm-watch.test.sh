@@ -56,6 +56,16 @@ echo 'fake-tabs blocked' > "$FAKE/on-sleep-1"
 watch
 check "sem PR: evento da sessão"                         logged "[sessao] #7 foo: blocked (sem PR)"
 
+# 4b. sessão sem issue (#825): o evento [sessao] sai com o slug como rótulo, sem #, e sem PR associado
+CASE=sem-issue; round "$CASE"
+printf 'levantar w1:p2 claude 2026-01-01T00:00:02Z w1:t2\n' >> "$STATE/spawned"
+FAKE="$FAKE" "$BIN/fake-tabs" '#7 foo=working' 'levantar=working'
+echo 'fake-tabs idle levantar=idle' > "$FAKE/on-sleep-1"
+watch
+check "sem issue: código 0"                              [ "$RC" -eq 0 ]
+check "sem issue: evento com o slug, sem #"             logged "[sessao] levantar: idle (sem PR)"
+check "sem issue: sem evento com # vazio"               bash -c '! grep -qF "[sessao] # levantar" <<<"$1"' _ "$(log_events)"
+
 # ---------------------------------------------------------------- #266: falha de CI em head já substituído
 # fake-pr <sha do head> [<estado>] [<checks do head, JSON>]: PR #12 da issue #7 no repo da rodada (usável nos ganchos)
 cat > "$BIN/fake-pr" <<'SH'

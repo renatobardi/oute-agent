@@ -294,6 +294,14 @@ sw spawn "!!!" "instrução"
 check "slug vazio: recusa com a regra nova"              bash -c '[ "$1" -ne 0 ] && grep -q "ou <slug> sem issue" <<<"$2"' _ "$RC" "$ERR"
 sw switch tell-nao-apaga
 check "switch: só troca a assinatura de sessão com issue" bash -c '[ "$1" -ne 0 ] && grep -q "switch só troca" <<<"$2"' _ "$RC" "$ERR"
+# tell na sessão sem issue: acha pelo slug (rótulo da aba sem #), digita e registra com o slug
+FAKE="$FAKE" "$BIN/fake-tabs" "tell-nao-apaga=idle"
+echo '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2","agent":"claude"}]}}' > "$FAKE/panes.json"
+echo '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"idle"}]}}' > "$FAKE/agents.json"
+sw tell tell-nao-apaga "pode seguir"
+check "sem issue: tell sai com 0"                     [ "$RC" -eq 0 ]
+check "sem issue: tell Enter no pane da sessão"       grep -q 'pane send-keys w1:p2 enter' "$FAKE/herdr.log"
+check "sem issue: tell registrado com o slug, sem #"  grep -q " tell tell-nao-apaga ok"$'\t'"pode seguir\$" "$STATE/log"
 sw close tell-nao-apaga --yes
 check "sem issue: close a alcança (baixa no closed)"     grep -qxF 'tell-nao-apaga' "$STATE/closed"
 guarda_check
