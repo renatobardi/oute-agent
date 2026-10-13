@@ -1506,15 +1506,15 @@ dark_gate() {
 # lê) e devolve as marcas: fechada, parada (dark.stop, a do `oute-swarm stop`, fatia d), meta, e repo=/dark= do meta
 dark_state() {
   local round="$1"
-  ctr sh -c 'n="$1"; r="$HOME/.oute/swarm/$n"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$n.alive"
+  ctr env DARK_N="$round" sh -c 'n="$DARK_N"; r="$HOME/.oute/swarm/$n"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$n.alive"
     [ -f "$r/fechada" ] && echo fechada; [ -f "$r/dark.stop" ] && echo parada
-    if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi; true' _ "$round" </dev/null
+    if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi; true' </dev/null
   return $?
 }
 DARK_LOCK=""; DARK_ROUND_NOW=""
 dark_cleanup() {
   [[ -z "$DARK_LOCK" ]] || rm -f "${DARK_LOCK:?}"
-  if [[ -n "$DARK_ROUND_NOW" ]]; then ctr sh -c 'n="$1"; rm -f "$HOME/.oute/approve/dark.${n:?}.alive"' _ "$DARK_ROUND_NOW" </dev/null >/dev/null 2>&1 || true; fi
+  if [[ -n "$DARK_ROUND_NOW" ]]; then ctr env DARK_N="$DARK_ROUND_NOW" sh -c 'rm -f "${HOME:?}/.oute/approve/dark.${DARK_N:?}.alive"' </dev/null >/dev/null 2>&1 || true; fi
   return 0
 }
 approve_dark() {
