@@ -42,7 +42,7 @@ chmod +x "$BIN/docker" "$BIN/oute-emit"
 
 export PATH="$BIN:$PATH" OUTE_HOST=teste OUTE_INSTANCE=teste
 export F_UP="$TMP/up" F_CTR_HOME="$TMP/ctr" F_EMITS="$TMP/emits" F_RUNS="$TMP/runs" F_REMOTE="$TMP/remote.git"
-export OUTE_DARK_OWNER=testowner OUTE_DARK_POLL=0.2 OUTE_DARK_CONTRACT_TTL=0
+export OUTE_DARK_WORKSPACE="$TMP" OUTE_DARK_OWNER=testowner OUTE_DARK_POLL=0.2 OUTE_DARK_CONTRACT_TTL=0
 G=(git -c user.email=t@t -c user.name=t)
 WORK="$TMP/work"   # o repo "do container": /workspace/proj
 
@@ -239,6 +239,27 @@ start swarm-t13
 until_ 10 test -s "$F_CTR_HOME/.oute/approve/dark.swarm-t13.alive"
 check "lock de pid morto: o laço assume"                     grep -qx "$PID" "$TMP/host/.oute/approve/dark.swarm-t13.lock"
 stop_ swarm-t13
+
+# --- 13b. repo do meta fora de /workspace/<nome>: o laço não executa nada
+mk_repo; reset; mk_round swarm-t13b; id=20261012-010113-repo-fora
+printf 'repo=/tmp/evil/proj\ndark=1\n' > "$F_CTR_HOME/.oute/swarm/swarm-t13b/meta"
+propose "$id" swarm-t13b <<<"$D_OK"
+start swarm-t13b
+until_ 15 grep -q "traz um repo fora de" "$TMP/dark.log"
+sleep 1
+check "repo do meta fora de /workspace: avisa e não executa"  test "$(ran deploy)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
+stop_ swarm-t13b
+
+# --- 13c. refs/replace no clone do container não muda o conteúdo lido (GIT_NO_REPLACE_OBJECTS)
+mk_repo; reset; mk_round swarm-t13c; id=20261012-010114-replace
+old="$(git -C "$WORK" rev-parse HEAD:.oute/deploy.sh)"
+new="$(script_of evil | git -C "$WORK" hash-object -w --stdin)"
+git -C "$WORK" replace -f "$old" "$new"
+propose "$id" swarm-t13c <<<"$(script_of evil)"
+start swarm-t13c
+until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
+check "refs/replace: o script trocado por replace não passa"  test "$(ran evil)" = 0
+stop_ swarm-t13c
 
 # --- 14. argumento ruim: sai antes de qualquer docker
 out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark 'x;rm' 2>&1)"; rc=$?

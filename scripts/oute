@@ -1436,6 +1436,15 @@ dark_owner() {
   git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]([^/]+)/.*$#\1#' | head -1
   return 0
 }
+# git do container para ler o contrato (#843, achado da auditoria): binário por caminho absoluto (não o do PATH do agente), sem
+# objetos substituídos (refs/replace mudaria o conteúdo de um commit que o remoto não mudou) e com a configuração do repo que o
+# agente escreve neutralizada (proxy, TLS, fsmonitor, hooks, ssh). Não elimina a confiança no container: ver docs (ADR-10, residual).
+dgit() {
+  ctr env GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 "${OUTE_DARK_GIT:-/usr/bin/git}" \
+    -c http.sslVerify=true -c http.proxy= -c core.gitProxy= -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.sshCommand=ssh \
+    -C "$DARK_REPO" "$@" </dev/null
+  return $?
+}
 # resolve o contrato da ponta do ramo padrão do repo $DARK_REPO e põe em DARK_HASHES uma linha "<sha256> <chave>" por script.
 # Devolve 1 com o motivo em DARK_WHY (nada é aprovado). Reaproveita o resultado por OUTE_DARK_CONTRACT_TTL s (padrão 20).
 dark_contract() {
@@ -1445,22 +1454,22 @@ dark_contract() {
   DARK_HASHES=""
   owner="$(dark_owner)"
   [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || { DARK_WHY="não sei o dono do remoto deste host (clone do oute-agent sem origin do GitHub)"; return 1; }
-  url="$(ctr git -C "$repo" remote get-url origin </dev/null 2>/dev/null)" || { DARK_WHY="repo $repo sem remoto origin"; return 1; }
+  url="$(dgit remote get-url origin 2>/dev/null)" || { DARK_WHY="repo $repo sem remoto origin"; return 1; }
   [[ "$url" =~ ^(git@github\.com:|https://github\.com/|ssh://git@github\.com/)$owner/[A-Za-z0-9._-]+(\.git)?/?$ ]] \
     || { DARK_WHY="origin de $repo não é github.com/$owner/…"; return 1; }
-  ctr env GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 git -C "$repo" fetch -q origin </dev/null >/dev/null 2>&1 \
+  dgit fetch -q origin >/dev/null 2>&1 \
     || { DARK_WHY="git fetch origin falhou em $repo (sem rede ou sem credencial)"; return 1; }
-  ref="$(ctr git -C "$repo" symbolic-ref -q refs/remotes/origin/HEAD </dev/null 2>/dev/null)" || ref=refs/remotes/origin/main
-  commit="$(ctr git -C "$repo" rev-parse --verify -q "$ref^{commit}" </dev/null 2>/dev/null)" || commit=""
+  ref="$(dgit symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)" || ref=refs/remotes/origin/main
+  commit="$(dgit rev-parse --verify -q "$ref^{commit}" 2>/dev/null)" || commit=""
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { DARK_WHY="não achei o commit de $ref em $repo"; return 1; }
-  toml="$(ctr git -C "$repo" cat-file blob "$commit:.oute/deploy.toml" </dev/null 2>/dev/null)" \
+  toml="$(dgit cat-file blob "$commit:.oute/deploy.toml" 2>/dev/null)" \
     || { DARK_WHY="sem .oute/deploy.toml no commit ${commit:0:12}"; return 1; }
   parsed="$(printf '%s\n' "$toml" | "$ROOT/scripts/deploy-contract" parse 2>&1)" || { DARK_WHY="contrato inválido: $(tr '\n' ';' <<<"$parsed" | cut -c1-200)"; return 1; }
   for k in deploy verify rollback; do
     p="$(sed -n "s/^$k=//p" <<<"$parsed")"
-    mode="$(ctr git -C "$repo" ls-tree "$commit" -- "$p" </dev/null 2>/dev/null | awk '{print $1 " " $2}')"
+    mode="$(dgit ls-tree "$commit" -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
     [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob no commit ${commit:0:12}"; DARK_HASHES=""; return 1; }
-    h="$(ctr git -C "$repo" cat-file blob "$commit:$p" </dev/null 2>/dev/null | norm_body | sha256_stdin)"
+    h="$(dgit cat-file blob "$commit:$p" 2>/dev/null | norm_body | sha256_stdin)"
     [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) no commit ${commit:0:12}"; DARK_HASHES=""; return 1; }
     DARK_HASHES="$DARK_HASHES$h $k"$'\n'
   done
@@ -1541,7 +1550,8 @@ approve_dark() {
       announced="$announced nodark"
     else
       repo="$(sed -n 's/^repo=//p' <<<"$st" | head -1)"
-      if [[ "$repo" =~ ^/[A-Za-z0-9._/-]+$ && "$repo" != *..* ]]; then
+      # só /workspace/<nome>, um nível: o meta é do container; caminho livre apontaria para um repo que o agente montou
+      if [[ "$repo" =~ ^${OUTE_DARK_WORKSPACE:-/workspace}/[A-Za-z0-9][A-Za-z0-9._-]*$ && "$repo" != *..* ]]; then
         DARK_REPO="$repo"
         approve_flush
         approve_snapshot
@@ -1554,7 +1564,7 @@ approve_dark() {
           if (( rc == 3 )); then seen="$seen $id"; fi
         done
       else
-        echo "dark: o meta da rodada $round traz um repo inválido; nada executado" >&2
+        echo "dark: o meta da rodada $round traz um repo fora de ${OUTE_DARK_WORKSPACE:-/workspace}/<nome>; nada executado" >&2
       fi
     fi
     sleep "$poll"
