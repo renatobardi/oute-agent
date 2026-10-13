@@ -299,7 +299,7 @@ push_contract "$NOVO"
 sleep 1.5
 check "contrato muda com o laço de pé: o pedido segue na fila (sem busca nova)" test "$(ran deploy-v2)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
 stop_ swarm-t15
-rm -f "$F_CTR_HOME/.oute/swarm/swarm-t15/fechada"
+rm -f "${F_CTR_HOME:?}/.oute/swarm/swarm-t15/fechada"
 start swarm-t15
 until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
 check "laço reiniciado: contrato novo confirmado, o pedido roda uma vez" test "$(ran deploy-v2)" = 1
@@ -361,7 +361,7 @@ check "marca velha: nada rodou"                              test "$(ran lento)"
 # --- 17. o laço dark não reescreve o runs/<id>.sh que o humano revê, e o humano confere o sha depois do `s`
 mk_repo; reset; mk_round swarm-t17; id=20261012-010122-humano
 propose "$id" swarm-t17 <<<"$D_OK"
-FIFO="$TMP/tty-fifo"; rm -f "$FIFO"; mkfifo "$FIFO"
+FIFO="$TMP/tty-fifo"; rm -f "${FIFO:?}"; mkfifo "$FIFO"
 HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_APPROVE_TTY="$FIFO" "$OUTE" approve "$id" > "$TMP/humano.log" 2>&1 &
 HPID=$!; LOOPS="$LOOPS $HPID"
 until_ 10 grep -q "executar?" "$TMP/humano.log"
