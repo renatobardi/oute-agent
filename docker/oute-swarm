@@ -28,6 +28,8 @@
 #   oute-swarm ask "<pergunta curta>"               (usado pelo dispatcher) a rodada parou esperando uma decisão do Bardi:
 #                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
+#   oute-swarm subagente "<para quê>"               (usado pelo dispatcher, #832) delegou trabalho a um subagente: grava `subagente` no log e
+#                                                   emite oute.swarm.round.subagent; o watch avisa. Modelo e custo vêm da telemetria
 #   oute-swarm step review <tipo> [--pr <n>]        (usado pelo dispatcher, #507) etapa = o texto que ele escreve para o Bardi, em
 #              --writer <seu modelo> [--fontes <f>]  ~/.oute/swarm/<rodada>/etapas/<tipo>[-<pr>].r<n>.md (tipos: triagem, merge,
 #   oute-swarm step publish <tipo> [--pr <n>]        kaizen, fechamento, ciclo). review: outro modelo, em modo headless, confere o texto (até
@@ -828,15 +830,23 @@ ask_dir() {
 # #386: a rodada esperando uma decisão do Bardi. Texto de uma linha, sem controles, até ASK_MAX caracteres: é a
 # pergunta que o dispatcher escreve, nunca saída de comando nem do host (vai ao log, ao bucket e ao agent-studio)
 ASK_MAX=300
+# texto de uma linha do log (#386, #832): sem controles, sem marcas de direção, até ASK_MAX caracteres. Vazio se não sobrou nada
+linha_texto() {
+  local t="$1"
+  t="$(printf '%s' "$t" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | tr -s ' ')"; t="${t# }"; t="${t% }"
+  # marcas de direção e separadores Unicode (U+200B-200F, U+2028-202E, U+2060-2069, U+FEFF) também saem: não somem
+  # na tela mas trocam a ordem ou quebram a linha de quem lê o log e o agent-studio
+  t="$(printf '%s' "$t" | LC_ALL=C sed -e 's/\xe2\x80[\x8b-\x8f\xa8-\xae]//g' -e 's/\xe2\x81[\xa0-\xa9]//g' -e 's/\xef\xbb\xbf//g')"
+  (( ${#t} <= ASK_MAX )) || t="${t:0:ASK_MAX-1}…"
+  printf '%s' "$t"
+  return 0
+}
+
 cmd_ask() {
   local text state
   [[ $# -eq 1 ]] || die 'uso: oute-swarm ask "<pergunta curta>"'
-  text="$(printf '%s' "$1" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | tr -s ' ')"; text="${text# }"; text="${text% }"
-  # marcas de direção e separadores Unicode (U+200B-200F, U+2028-202E, U+2060-2069, U+FEFF) também saem: não somem
-  # na tela mas trocam a ordem ou quebram a linha de quem lê o log e o agent-studio
-  text="$(printf '%s' "$text" | LC_ALL=C sed -e 's/\xe2\x80[\x8b-\x8f\xa8-\xae]//g' -e 's/\xe2\x81[\xa0-\xa9]//g' -e 's/\xef\xbb\xbf//g')"
+  text="$(linha_texto "$1")"
   [[ -n "$text" ]] || die "pergunta vazia"
-  (( ${#text} <= ASK_MAX )) || text="${text:0:ASK_MAX-1}…"
   state="$(ask_dir)"
   slog "$state" "$(date -u +%FT%TZ) pergunta $text"
   echo "pergunta registrada na rodada $(basename "$state")"
@@ -848,6 +858,21 @@ cmd_answered() {
   state="$(ask_dir)"
   slog "$state" "$(date -u +%FT%TZ) resposta"
   echo "resposta registrada na rodada $(basename "$state")"
+}
+
+# #832: o dispatcher delegou trabalho a um subagente (ex.: a auditoria do PR). O subagente roda dentro da sessão do dispatcher,
+# então esta linha é o aviso: o agent-studio mostra na rodada (oute.swarm.round.subagent) e o watch avisa. Grava só o motivo;
+# modelo e custo vêm da telemetria
+cmd_subagente() {
+  local arg="${1:-}"
+  local text state
+  [[ $# -eq 1 ]] || die 'uso: oute-swarm subagente "<para quê>"'
+  text="$(linha_texto "$arg")"
+  [[ -n "$text" ]] || die "motivo vazio"
+  state="$(ask_dir)"
+  slog "$state" "$(date -u +%FT%TZ) subagente $text"
+  echo "subagente registrado na rodada $(basename "$state")"
+  return 0
 }
 
 cmd_close() {
@@ -1072,6 +1097,8 @@ w_snapshot() {
   else
     w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; w_keep "falha|"; W_CUR["falha|gh"]=1
   fi
+  # #832: cada linha `subagente` do log é uma chave `sub|<número da linha>`; o log só cresce, então o número não muda entre passadas
+  while IFS=$'\t' read -r n t; do W_CUR["sub|$n"]="$t"; done < <(awk '$2 == "subagente" { sub(/^[^ ]+ subagente /, ""); print NR "\t" $0 }' "$W_STATE/log" 2>/dev/null || true)
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do
     [[ -f "$f" ]] || continue
@@ -1137,6 +1164,8 @@ w_diff() {
         [[ "$new" == pending ]] || continue
         f="$W_OUTBOX/$a.sh"
         w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como))$(w_ask_mark "$f") — aprovação no host: oute watch" ;;
+      sub)
+        if [[ -z "$old" && -n "$new" ]]; then w_ev subagente "subagente: $new"; fi ;;
       res)
         [[ -n "$new" && "$new" != 0 ]] || continue
         if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
@@ -1146,7 +1175,7 @@ w_diff() {
         else w_ev aviso "$a respondendo de novo"; fi ;;
     esac
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
-             | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res", o, " "); for (i in o) p[o[i]] = i }
+             | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res sub", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
   for a in "${!okpr[@]}"; do
     names="" head="${W_CUR[head|$a]:-}"
@@ -2012,6 +2041,7 @@ case "${1:-}" in
   tell) shift; cmd_tell "$@" ;;
   ask) shift; cmd_ask "$@" ;;
   answered) shift; cmd_answered "$@" ;;
+  subagente) shift; cmd_subagente "$@" ;;
   close) shift; cmd_close "$@" ;;
   watch) shift; cmd_watch "$@" ;;
   religar) shift; cmd_religar "$@" ;;

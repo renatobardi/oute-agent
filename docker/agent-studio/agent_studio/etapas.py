@@ -136,6 +136,19 @@ def events(con, rnd):
     return _dicts(con.execute(_EVENTS, [EVENT, rnd]))
 
 
+SUBAGENT = "oute.swarm.round.subagent"
+SUBAGENT_LIMIT = 100  # linhas na página; o texto do evento tem até 300 caracteres
+_SUBAGENTS = ("SELECT time_unix_nano, body FROM logs WHERE event_name = ? AND oute_swarm_round = ? "
+              "ORDER BY time_unix_nano, dedupe_key LIMIT ?")
+
+
+def subagents(con, rnd):
+    """Os subagentes que o dispatcher da rodada abriu (#832): `[{at (ISO), text}]` pela hora do fato; o texto é o "para quê"
+    (dado de log: a tela o escapa). Sem evento, lista vazia."""
+    rows = con.execute(_SUBAGENTS, [SUBAGENT, rnd, SUBAGENT_LIMIT]).fetchall()
+    return [{"at": iso(t), "text": b[:300] if isinstance(b, str) else ""} for t, b in rows]
+
+
 def round_name(con, rnd):
     """O nome amigável da rodada (#605) no evento de abertura do DuckDB; `None` se a rodada é antiga ou não tem o evento."""
     row = con.execute(_NAME, [OPENED, rnd]).fetchone()

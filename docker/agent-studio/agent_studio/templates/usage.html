@@ -35,7 +35,7 @@
 <div class="cartao rolagem">
 <table class="uso" data-uso="{{ kind }}" data-tabela>
   <thead><tr>
-    <th{{ ta(t, "role", "", "dispatcher, worker, reviewer (o revisor das etapas) e standalone") }}>{{ tb(t, "role", "Papel") }}</th><th{{ ta(t, second, "", title) }}>{{ tb(t, second, label) }}</th>
+    <th{{ ta(t, "role", "", "subagente (a chamada de um subagente), dispatcher, worker, reviewer (o revisor das etapas) e standalone") }}>{{ tb(t, "role", "Papel") }}</th><th{{ ta(t, second, "", title) }}>{{ tb(t, second, label) }}</th>
     <th{{ ta(t, "calls", "n") }}>{{ tb(t, "calls", "Chamadas") }}</th>
     <th{{ ta(t, "tokens", "n", "tokens de entrada / saída (a ordem soma os dois); o cache (leitura / escrita) na linha de baixo") }}>{{ tb(t, "tokens", "Tokens ent / saí") }}</th><th{{ ta(t, "cost", "n") }}>{{ tb(t, "cost", "Custo (" ~ custo_nome() ~ ")") }}</th>
     <th{{ ta(t, "out_share", "n", "a parte do custo que é saída (preço de lista dos tokens)") }}>{{ tb(t, "out_share", "Saída") }}</th>
@@ -120,7 +120,7 @@
 </div>
 {% call fragment("papel") %}
 <h2>Por papel</h2>
-{{ usage_table("role", "Papel", t_role, "dispatcher e worker são as sessões de uma rodada do swarm; reviewer, o revisor das etapas; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)") }}
+{{ usage_table("role", "Papel", t_role, "subagente, a chamada que um subagente fez (qualquer sessão); dispatcher e worker são as sessões de uma rodada do swarm; reviewer, o revisor das etapas; standalone, a sessão avulsa (fora de rodada) (e a conversa sem sessão)") }}
 {% endcall %}
 {% call fragment("fase") %}
 <h2>Por fase</h2>

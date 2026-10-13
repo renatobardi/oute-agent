@@ -62,6 +62,21 @@ def _with_usage(con, convs, prices, paid=False, tz=tz_mod.UTC):
         c["usage"] = usage_mod.rendered(groups, (c["id"],))
 
 
+def _subagents(con, conv, prices, paid, tz):
+    """As chamadas de subagente da conversa (#832): `{calls, usd, pct}`, pela mesma agregação do `/uso` filtrada pelo papel
+    `subagente`. `usd` soma os três custos (real, de lista, estimado); `pct` = parte do custo da conversa, ou `None` sem custo."""
+    groups = usage_mod.aggregate(con, conv["start_ns"], conv["end_ns"] + 1, prices, ("conversation", "role"), tz, paid=paid)
+    sub = usage_mod.rendered(groups, (conv["id"], "subagente"))
+    total = _usd(conv["usage"]["cost"])
+    usd = _usd(sub["cost"])
+    return {"calls": sub["calls"], "usd": usd, "pct": round(100 * usd / total) if total else None}
+
+
+def _usd(cost):
+    """O custo de um `render` em USD: real + de lista + estimado (o que não existe conta 0)."""
+    return sum(cost[k] or 0.0 for k in ("real_usd", "listed_usd", "estimated_usd"))
+
+
 def listing(con, from_ns, to_ns, prices, host=None, agent=None, limit=LIST_LIMIT, repo=None, paid=False, tz=tz_mod.UTC):
     """Conversas com algum fato na janela [from_ns, to_ns), da mais recente para a mais antiga (pelo início).
 
@@ -153,6 +168,7 @@ def detail(con, session_id, prices, span_limit=SPAN_LIMIT, log_limit=LOG_PAGE, e
         return None
     conv = head[0]
     _with_usage(con, [conv], prices, paid, tz)
+    conv["subagents"] = _subagents(con, conv, prices, paid, tz)
     # custo efetivo de cada span (o do span ou o do log `api_request` da conversa, #157), pela regra do `cost.py`
     table, params = spans_with_cost("session_id = ?", [session_id], "session_id = ?", [session_id])
     spans = _dicts(con.execute(

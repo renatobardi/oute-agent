@@ -44,6 +44,15 @@
 </nav>
 {% endcall %}
 {% call fragment("etapas") %}
+{% if r.subagents %}
+<section class="cartao" data-subagentes>
+  <div class="cartao-topo"><div><h2>Subagentes do dispatcher ({{ r.subagents|length }})</h2><p>Cada subagente que o dispatcher abriu, com o motivo que ele registrou.</p></div></div>
+  <ul>
+  {% for a in r.subagents %}<li data-subagente><span class="n">{{ a.at|when }} {{ tzl() }}</span> {{ a.text }}</li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% if not r.steps %}<p class="aviso" data-sem-etapas>Nenhuma etapa publicada nesta rodada.</p>{% endif %}
 {% if loading_target %}
 {% for s in r.steps %}{{ loading_slot("etapa-" ~ loop.index0, "faixa", s.anchor) }}{% endfor %}

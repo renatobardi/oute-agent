@@ -168,6 +168,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
   oute-swarm ask "pergunta"         (o dispatcher usa) a rodada parou esperando a sua decisão: registra a pergunta
                                     (aparece como decisão pendente no agent-studio e no tray); oute-swarm answered
                                     registra que você respondeu
+  oute-swarm subagente "<para quê>"  (o dispatcher usa, #832) delegou trabalho a um subagente: registra o motivo
+                                    (aparece na rodada no agent-studio e no watch); modelo e custo vêm da telemetria
   oute-swarm step review <tipo> [--pr <n>] --writer <modelo> [--fontes <arquivo>]
   oute-swarm step publish <tipo> [--pr <n>] [--rev <n>] [--cycle <dono/repo#n>]
                                     (o dispatcher usa, #507) etapa = o texto que ele escreve para o Bardi, em
