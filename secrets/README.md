@@ -35,6 +35,15 @@ Pasta **`oute-services`** (#256; nunca vai ao `agent`):
 
 Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` os nomes de serviço conhecidos (`AGENT_STUDIO_SURREAL_PASS`, `AGENT_STUDIO_INGEST_TOKEN`, `AGENT_STUDIO_MARK_TOKEN` e o `AGENT_STUDIO_TOKEN` de antes da #256), guarda-os no `services.env` e avisa. O `AGENT_STUDIO_TOKEN` antigo segue valendo como ingestão até a credencial nova existir.
 
+### Segredo no pedido e no contrato de deploy do modo dark (#843, ADR-10)
+
+O `oute approve --dark` executa sem humano o script do contrato `.oute/deploy.toml` do repo alvo (`deploy`, `verify`, `rollback`, `host`). A regra: **nenhum valor de segredo no contrato, nos três scripts nem no pedido**; o script lê do ambiente do host ou do vault (como já vale para qualquer script do canal). `oute deploy-contract check <repo-path>` (e o `dark_prereqs` do `oute-swarm --dark`) recusa o contrato quando uma linha:
+- tem prefixo de token conhecido (`ghp_`, `github_pat_`, `xox…-`, `sk-…`, `sk_live_`, `npm_`, `hf_`, `shpat_`, `SG.`, `AKIA…`, `eyJ…`, bloco `PRIVATE KEY`), `Bearer <token>` ou usuário:senha em URL (`https://u:s@host`);
+- atribui literal longo a variável de nome com `TOKEN`, `SECRET`, `PASSWORD`, `PASS`, `KEY`, `AUTH` ou `CRED` (`${VAR}`, `$(…)` e caminho começando em `/` passam);
+- traz, depois de `=`, uma palavra de 24 ou mais caracteres com maiúscula, minúscula e dígito (base64 com `/` e `+` inclusive), ou 32 ou mais caracteres hexadecimais (um commit de 40 hex também cai aqui: passe-o pelo ambiente).
+
+É heurística por texto: pega o descuido, não o segredo disfarçado. A mensagem de recusa nunca repete o valor. O contrato só aceita as quatro chaves, para não sobrar campo onde um valor se esconda.
+
 ### Rotação da senha root do SurrealDB (oute-server)
 
 A senha só vale na criação do volume do SurrealDB, então trocar o campo no vault não basta: o volume é recriado e o estado, remontado do DuckDB (ADR-08 §7). Rodada de 2026-10-03 (#256, #427). Tudo no oute-server, sem escrever a senha em comando, arquivo, issue ou log.

@@ -516,7 +516,8 @@ def canal_decided(pid, path):
     ts, _, who = when.partition(" por ")
     ts = ts.strip()
     num = lambda v: int(v) if v and re.fullmatch(r"-?\d+", v) else None  # noqa: E731
-    return event("oute.canal.decided", "human", ts, {
+    # `# aprovador: human-dark` (#843): o `oute approve --dark` decidiu pelo hash do contrato, sem humano na hora
+    return event("oute.canal.decided", "human-dark" if h.get("aprovador") == "human-dark" else "human", ts, {
         "oute.canal.id": pid,
         "oute.canal.decision": decision,
         "oute.canal.rc": num(h.get("rc")),

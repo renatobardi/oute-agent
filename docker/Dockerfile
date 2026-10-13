@@ -157,6 +157,8 @@ COPY docker/addons-link /usr/local/lib/oute/addons-link
 COPY scripts/oute-secrets.sh /usr/local/bin/oute-secrets
 # canal de aprovação: o agente propõe, o humano aprova no host (`oute approve`)
 COPY docker/oute-propose docker/oute-inbox /usr/local/bin/
+# contrato de deploy do modo dark (#843, ADR-10): o `dark_prereqs` do oute-swarm valida o .oute/deploy.toml com ele; é o mesmo arquivo do `oute deploy-contract` do host
+COPY scripts/deploy-contract /usr/local/bin/oute-deploy-contract
 # eventos operacionais do swarm e do canal (ADR-04, #124): emissor único, python3 stdlib, ao bucket e ao agent-studio (ADR-08)
 COPY docker/oute-emit /usr/local/bin/
 # proxy do LLM do ai-memory (#459, ADR-08): python3 stdlib, serviço llm-proxy do compose; consumo ao collector

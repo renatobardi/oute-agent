@@ -315,10 +315,10 @@ render_prompt() {
 }
 
 # modo dark (ADR-10, #841): confere os pré-requisitos que já dá para ver sem as fatias seguintes. Imprime um item que falta por linha
-# (stdout) e sai 1 se faltar algum; 0 com tudo presente. A fatia (c) acrescenta aqui o auto-aprovador e o contrato de deploy.
+# (stdout) e sai 1 se faltar algum; 0 com tudo presente. A fatia (c, #843) acrescenta o auto-aprovador e o contrato de deploy.
 # $1 = raiz do repo alvo
 dark_prereqs() {
-  local main="$1" table="${OUTE_SELECT_TABLE:-/opt/oute/select/models.toml}" miss=0 sub js st g u slug perm
+  local main="$1" table="${OUTE_SELECT_TABLE:-/opt/oute/select/models.toml}" miss=0 sub js st g u slug perm f t newest=0 out line
   # (c) cota de todas as assinaturas da tabela abaixo da trava semanal; cota não lida também falta (sem humano para decidir)
   if command -v oute-select >/dev/null 2>&1 && [[ -r "$table" ]]; then
     while IFS= read -r sub; do
@@ -340,6 +340,29 @@ dark_prereqs() {
   else
     perm="$(gh api "repos/$slug" --jq .permissions.push 2>/dev/null)" || perm=""
     [[ "$perm" == true ]] || { printf 'GH_TOKEN: sem permissão de merge (permissions.push) em %s\n' "$slug"; miss=1; }
+  fi
+  # (a) auto-aprovador ligado no host (#843): o `oute approve --dark <rodada>` bate o coração em ~/.oute/approve/dark.<rodada>.alive
+  # (o horário, a cada volta do laço, escrito pelo host por docker exec) e some ao parar. O laço do host é por rodada e o id da rodada
+  # nasce depois deste confere: aqui basta algum laço vivo; o que a rodada aceita é decidido no host, pelo hash (scripts/oute).
+  for f in "$HOME"/.oute/approve/dark.*.alive; do
+    [[ -f "$f" ]] || continue
+    t="$(tr -cd '0-9' < "$f" | head -c 12)"
+    [[ -n "$t" ]] && (( t > newest )) && newest="$t"
+  done
+  if (( newest == 0 )) || (( $(date +%s) - newest > ${OUTE_DARK_ALIVE_MAX:-60} )); then
+    printf 'auto-aprovador: nenhum laço "oute approve --dark <rodada>" vivo no host (sem batida em %s nos últimos %ss)\n' "~/.oute/approve/dark.*.alive" "${OUTE_DARK_ALIVE_MAX:-60}"; miss=1
+  fi
+  # (b) contrato de deploy do repo alvo: .oute/deploy.toml com os três scripts 100755 e host, sem segredo (oute deploy-contract check)
+  if command -v oute-deploy-contract >/dev/null 2>&1; then
+    if ! out="$(oute-deploy-contract check "$main" 2>&1)"; then
+      while IFS= read -r line; do [[ -z "$line" ]] || printf '%s\n' "$line"; done <<<"$out"
+      miss=1
+    else
+      # passou: o aviso (conferiu só o HEAD local) vai a quem abre a rodada, em stderr; stdout é só o que falta
+      while IFS= read -r line; do [[ "$line" != aviso:* ]] || printf 'oute-swarm: modo dark: %s\n' "$line" >&2; done <<<"$out"
+    fi
+  else
+    printf 'contrato: sem o oute-deploy-contract nesta imagem (precisa da release com a #843)\n'; miss=1
   fi
   return "$miss"
 }

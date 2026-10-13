@@ -34,12 +34,16 @@ sessao=""
 if gd="$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" && [[ -f "$gd/oute-task" ]]; then
   sessao="$(sed -n 's/^slug=//p' "$gd/oute-task" 2>/dev/null | head -n1 | tr -cd 'A-Za-z0-9._-' | cut -c1-64 || true)"
 fi
+# rodada (#843, ADR-10): o OUTE_SWARM_ID da sessão; o `oute approve --dark <rodada>` do host só olha pedido com esta linha.
+# Só [A-Za-z0-9._-]; sem a variável (ou vazia depois do filtro) o cabeçalho é o de sempre. Não é prova de nada: quem decide é o hash.
+rodada="$(printf '%s' "${OUTE_SWARM_ID:-}" | tr -cd 'A-Za-z0-9._-' | cut -c1-64)"
 id="$(date -u +%Y%m%d-%H%M%S)-${slug:-pedido}"
 mkdir -p "$HOME/outbox" "$HOME/inbox"
 tmp="$(mktemp "$HOME/outbox/.tmp.XXXXXX")"
 { printf '# oute-propose\n# titulo: %s\n# como: %s\n# agente: %s\n# criado: %s\n' \
     "$title" "$as" "${agent:-desconhecido}" "$(date -u +%FT%TZ)"
   [[ -z "$sessao" ]] || printf '# sessao: %s\n' "$sessao"
+  [[ -z "$rodada" ]] || printf '# rodada: %s\n' "$rodada"
   printf '\n'
   printf '%s\n' "$body"; } > "$tmp"
 mv "$tmp" "$HOME/outbox/$id.sh"   # rename atômico: o host nunca lê pedido pela metade

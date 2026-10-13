@@ -1091,11 +1091,30 @@ doctor() {
   ctr oute-doctor "$@" </dev/null || rc=$?
   return "$rc"
 }
+# marca de execução cujo dono morreu (a sessão caiu no meio do script): o pedido não volta à fila sozinho (rodar de novo um script
+# que parou no meio é pior que esperar), e o aviso diz onde conferir
+RUNNING_WARNED=""
+approve_running_stale() {
+  local id="$1" pid
+  pid="$(head -1 "$approve_dir/runs/$id.running/pid" 2>/dev/null | tr -cd '0-9')"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    [[ " $RUNNING_WARNED " != *" $id "* ]] || return 0   # uma vez por pedido (o laço olha de novo a cada volta)
+    RUNNING_WARNED="$RUNNING_WARNED $id"
+    echo "aviso: o pedido $id ficou marcado em execução por um 'oute approve' que não existe mais; confira $approve_dir/runs/$id.out e, se não rodou, remova $approve_dir/runs/$id.running para voltar à fila" >&2
+  fi
+  return 0
+}
 approve_pending() {
   local id
   for id in $(ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true); do
     # já decidido, resultado ainda não entregue (#210): nunca mostra (nem roda) de novo
-    compgen -G "$approve_dir/runs/$id.*.result" >/dev/null || echo "$id"
+    compgen -G "$approve_dir/runs/$id.*.result" >/dev/null && continue
+    # #843: em execução agora (marca criada antes de rodar): `oute approve --watch` e o laço dark não repetem o pedido
+    if [[ -d "$approve_dir/runs/$id.running" ]]; then
+      approve_running_stale "$id"
+      continue
+    fi
+    echo "$id"
   done
 }
 # #815: a lista dos pedidos que estão na outbox do host agora vai ao agent-studio (oute.canal.snapshot). Sai a cada
@@ -1154,13 +1173,21 @@ approve_flush() {
   return 0
 }
 approve_one() {
-  local id="$1" src title as sha ans rc=0 out t0 dur size res tailpid
+  local id="$1" dark_round="${2:-}" there src title as sha ans rc=0 out t0 dur size res tailpid exe approver=""
   mkdir -p "$approve_dir/runs"; chmod 700 "$approve_dir"
   src="$approve_dir/runs/$id.sh"; out="$approve_dir/runs/$id.out"
+  # #843: o laço dark usa arquivos só dele; o `runs/<id>.sh` que um humano está revendo nunca é reescrito por ele
+  if [[ -n "$dark_round" ]]; then src="$approve_dir/runs/dark.$id.sh"; out="$approve_dir/runs/dark.$id.out"; fi
   ctr sh -c 'head -c 65536 "$HOME/outbox/$1.sh"' _ "$id" > "$src" || { echo "não consegui ler $id" >&2; return 1; }
   title="$(sed -n 's/^# titulo: //p' "$src" | head -1 | LC_ALL=C tr -d '\000-\037\177' | cut -c1-120)"; as="$(sed -n 's/^# como: //p' "$src" | head -1)"
   [[ "$as" == root ]] || as=user
-  sha="$( (shasum -a 256 "$src" 2>/dev/null || sha256sum "$src") | cut -c1-12)"
+  sha="$( (shasum -a 256 "$src" 2>/dev/null || sha256sum "$src") | cut -c1-12)"   # do arquivo do pedido: o que a página do studio exibe (#735)
+  exe="$src"
+  if [[ -n "$dark_round" ]]; then
+    # #843 (ADR-10): o que roda é o corpo que passou no hash, nunca o arquivo do container inteiro (o cabeçalho é dele)
+    dark_gate "$id" "$src" "$dark_round" || return $?
+    exe="$src.body"; as=user; approver="human-dark"; title="[dark $dark_round] $title"
+  fi
   printf '\n\033[1m━━━ pedido %s ━━━\033[0m\n' "$id"
   printf 'título: %s\n' "$title"
   if [[ "$as" == root ]]; then printf 'roda como: \033[1;31mROOT (sudo)\033[0m no host %s\n' "$OUTE_HOST"
@@ -1168,9 +1195,33 @@ approve_one() {
   printf 'sha256: %s   linhas: %s\n\033[2m────────────────────────────────────────\033[0m\n' "$sha" "$(wc -l < "$src" | tr -d ' ')"
   show_safe "$src"
   printf '\033[2m────────────────────────────────────────\033[0m\n'
-  read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""
+  if [[ -n "$dark_round" ]]; then ans=s; echo "executar? sim (modo dark: hash igual ao do contrato de deploy)"
+  else read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""; fi
   case "$ans" in
     s|S|sim)
+      # o que vai rodar é o que foi mostrado: o arquivo do pedido é relido do disco e o sha conferido contra o da tela
+      if [[ -z "$dark_round" && "$( (shasum -a 256 "$src" 2>/dev/null || sha256sum "$src") | cut -c1-12)" != "$sha" ]]; then
+        echo "o pedido $id mudou depois de mostrado (sha256 diferente); nada executado. Rode 'oute approve $id' de novo para ver o novo" >&2
+        return 0
+      fi
+      # marca ANTES de rodar (mkdir é atômico): o segundo `oute approve` que chegar ao mesmo pedido enquanto este roda desiste
+      mkdir "$approve_dir/runs/$id.running" 2>/dev/null || {
+        echo "pedido $id já está em execução em outro 'oute approve'; nada feito" >&2
+        [[ -z "$dark_round" ]] || return 3   # no laço dark, 3 = fica na fila; fora dele não derruba o `oute` (set -e)
+        return 0
+      }
+      printf '%s\n' "$$" > "$approve_dir/runs/$id.running/pid"
+      # já decidido por outro `oute approve` (resultado no host) ou fora da outbox (entregue): a marca de execução não o reabre
+      there="$(ctr sh -c 'if [ -e "$HOME/outbox/$1.sh" ]; then echo sim; else echo nao; fi' _ "$id" </dev/null 2>/dev/null)" || there=""
+      if [[ -z "$there" ]]; then   # container não respondeu: nada decidido, tenta de novo depois
+        rm -rf "${approve_dir:?}/runs/${id:?}.running"; echo "não consegui conferir a outbox de $id; nada executado" >&2; return 1
+      fi
+      if [[ "$there" != sim ]] || compgen -G "$approve_dir/runs/$id.*.result" >/dev/null; then
+        rm -rf "${approve_dir:?}/runs/${id:?}.running"
+        echo "pedido $id já foi decidido por outro 'oute approve'; nada feito" >&2
+        [[ -z "$dark_round" ]] || return 3
+        return 0
+      fi
       echo "── executando…"
       # set +e: script do agente que falha não pode derrubar o `oute` (pipefail + set -e) antes de devolver o resultado
       set +e
@@ -1179,16 +1230,18 @@ approve_one() {
       # mostra na tela; o fim do script é o fim do bash, não o EOF de quem herdou o descritor.
       : > "$out"; tail -n +1 -f "$out" & tailpid=$!; trap 'kill "$tailpid" 2>/dev/null' EXIT
       t0="$(date +%s)"
-      if [[ "$as" == root ]]; then sudo bash "$src" >> "$out" 2>&1; rc=$?
-      else bash "$src" >> "$out" 2>&1; rc=$?; fi
+      if [[ "$as" == root ]]; then sudo bash "$exe" >> "$out" 2>&1; rc=$?
+      else bash "$exe" >> "$out" 2>&1; rc=$?; fi
       dur=$(( $(date +%s) - t0 )); size="$(wc -c < "$out" | tr -d ' ')"
       sleep 1; kill "$tailpid" 2>/dev/null; wait "$tailpid" 2>/dev/null; trap - EXIT
       set -e
       echo "── fim (código $rc)"
       res="$approve_dir/runs/$id.done.result"
-      { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n# sha256: %s\n# duracao: %s s\n# saida: %s bytes\n\n' \
-          "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST" "$sha" "$dur" "$size"; tail -c 262144 "$out"; } > "$res"
+      { printf '# id: %s\n# rc: %s\n# como: %s\n# aprovado: %s por %s@%s\n' "$id" "$rc" "$as" "$(date -u +%FT%TZ)" "$(id -un)" "$OUTE_HOST"
+        [[ -z "$approver" ]] || printf '# aprovador: %s\n' "$approver"
+        printf '# sha256: %s\n# duracao: %s s\n# saida: %s bytes\n\n' "$sha" "$dur" "$size"; tail -c 262144 "$out"; } > "$res"
       printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log"
+      rm -rf "${approve_dir:?}/runs/${id:?}.running"   # o resultado já está no host (acima): a marca de execução cumpriu o papel
       approve_deliver "$res" || true ;;
     r|R)
       res="$approve_dir/runs/$id.rejected.result"
@@ -1404,21 +1457,234 @@ approve_suggest() {
   } | show_safe /dev/stdin
   return 0
 }
-approve_usage() { echo "uso: oute approve [--watch | <id> | suggest [--min N]]   (id: AAAAMMDD-HHMMSS-slug, como o oute-propose imprime)" >&2; return 0; }
+# --- modo dark (#843, ADR-10): `oute approve --dark <rodada> [<repo>]`. A fronteira de confiança é o HASH do script, e a âncora do
+# contrato é um ATO HUMANO: na partida do laço o host busca a ponta do ramo padrão do repo no GitHub (clone só do host,
+# `$approve_dir/dark-src/`, fora do container), imprime repo, commit e os três hashes (deploy, verify, rollback) e pede a
+# confirmação do Bardi. Esses hashes valem até o laço reiniciar: não há busca nova por pedido, e contrato novo exige reiniciar o
+# laço (e confirmar de novo). O nome do repo vem do comando ou, sem ele, do meta da rodada, mas só vale depois da confirmação
+# do humano que lê o nome; o `oute-agent` é recusado. O laço só executa pedido cujo corpo (fim de linha final normalizado) é um
+# dos três scripts confirmados. Falhou qualquer conferência: o pedido fica na fila manual.
+DARK_REPO=""; DARK_OWNER=""; DARK_HASHES=""; DARK_WHY=""; DARK_COMMIT=""; DARK_NOTED=""
+# dark_note <id> <motivo>: avisa uma vez por pedido e motivo (o laço olha o mesmo pedido a cada volta)
+dark_note() {
+  local id="$1" why="$2" key
+  key="$id|$why"
+  case "$DARK_NOTED" in *"$key"*) return 0 ;; esac
+  DARK_NOTED="$DARK_NOTED$key"$'\n'
+  if [[ "$id" == contrato ]]; then echo "dark: contrato indisponível ($why); nenhum pedido roda agora" >&2
+  else echo "dark: $id fica na fila manual: $why" >&2; fi
+  return 0
+}
+sha256_stdin() { (shasum -a 256 2>/dev/null || sha256sum) | cut -d' ' -f1; return 0; }
+# corpo normalizado: sem as quebras de linha do fim, uma só no fim (o oute-propose grava `$(cat)` + \n)
+norm_body() { printf '%s\n' "$(cat)"; return 0; }
+dark_owner() {
+  if [[ -n "${OUTE_DARK_OWNER:-}" ]]; then printf '%s' "$OUTE_DARK_OWNER"; return 0; fi
+  git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]([^/]+)/.*$#\1#' | head -1
+  return 0
+}
+# git do clone do host (fonte do contrato): sem terminal interativo e sem pedir senha
+hgit() {
+  GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 git "$@" </dev/null
+  return $?
+}
+# lê, pelo host, a ponta do ramo padrão de $DARK_OWNER/$DARK_REPO no GitHub e põe em DARK_COMMIT o commit e em DARK_HASHES uma
+# linha "<sha256> <chave>" por script do contrato daquele commit. Devolve 1 com o motivo em DARK_WHY (nada é aprovado).
+dark_contract() {
+  local name="$DARK_REPO" owner url src commit toml parsed k p mode h hashes=""
+  DARK_HASHES=""; DARK_COMMIT=""
+  owner="$(dark_owner)"
+  [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || { DARK_WHY="não sei o dono do remoto deste host (clone do oute-agent sem origin do GitHub)"; return 1; }
+  DARK_OWNER="$owner"
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$name" != *..* ]] || { DARK_WHY="nome de repo inválido"; return 1; }
+  url="https://github.com/$owner/$name.git"
+  src="$approve_dir/dark-src/$owner-$name.git"
+  if [[ ! -d "$src" ]]; then
+    mkdir -p "$approve_dir/dark-src"; chmod 700 "$approve_dir/dark-src"
+    hgit init -q --bare "$src" >/dev/null 2>&1 || { DARK_WHY="não criei o clone do host em $src"; return 1; }
+  fi
+  hgit -C "$src" fetch -q --no-tags --depth 1 "$url" HEAD >/dev/null 2>&1 \
+    || { DARK_WHY="git fetch de $owner/$name falhou no host (sem rede ou sem credencial)"; return 1; }
+  commit="$(hgit -C "$src" rev-parse --verify -q 'FETCH_HEAD^{commit}' 2>/dev/null)" || commit=""
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { DARK_WHY="não achei a ponta do ramo padrão de $owner/$name"; return 1; }
+  toml="$(hgit -C "$src" cat-file blob "$commit:.oute/deploy.toml" 2>/dev/null)" \
+    || { DARK_WHY="sem .oute/deploy.toml na ponta ${commit:0:12} de $owner/$name"; return 1; }
+  parsed="$(printf '%s\n' "$toml" | "$ROOT/scripts/deploy-contract" parse 2>&1)" || { DARK_WHY="contrato inválido: $(tr '\n' ';' <<<"$parsed" | cut -c1-200)"; return 1; }
+  for k in deploy verify rollback; do
+    p="$(sed -n "s/^$k=//p" <<<"$parsed")"
+    mode="$(hgit -C "$src" ls-tree "$commit" -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
+    [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob na ponta ${commit:0:12}"; return 1; }
+    h="$(hgit -C "$src" cat-file blob "$commit:$p" 2>/dev/null | norm_body | sha256_stdin)"
+    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) na ponta ${commit:0:12}"; return 1; }
+    hashes="$hashes$h $k $p"$'\n'
+  done
+  DARK_HASHES="$hashes"; DARK_COMMIT="$commit"
+  return 0
+}
+# âncora do contrato (ato humano): lê o contrato do repo $1, mostra repo, commit e hashes e pede a confirmação. 0 = confirmado e
+# DARK_HASHES/DARK_COMMIT fixos até o fim do laço; 1 = não leu ou o humano não confirmou; 2 = repo recusado.
+dark_anchor() {
+  local repo="$1" ans="" h k p
+  if [[ ! "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$repo" == *..* ]]; then
+    echo "oute: repo inválido para --dark: $(printf '%s' "$repo" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; return 2
+  fi
+  if [[ "$repo" == oute-agent ]]; then echo "oute: o modo dark recusa o repo oute-agent (ADR-10)" >&2; return 2; fi
+  DARK_REPO="$repo"
+  dark_contract || { echo "oute: não li o contrato de $repo: $DARK_WHY" >&2; DARK_REPO=""; return 1; }
+  printf '\n\033[1m━━━ contrato de deploy do modo dark ━━━\033[0m\n'
+  printf 'repo:   %s/%s (GitHub, ponta do ramo padrão lida agora pelo host)\ncommit: %s\n' "$DARK_OWNER" "$repo" "$DARK_COMMIT"
+  while IFS=' ' read -r h k p; do
+    [[ -z "$h" ]] || printf '%-9s %s  %s\n' "$k" "$h" "$p"
+  done <<<"$DARK_HASHES"
+  echo "Daqui em diante o laço executa, sem perguntar, o pedido da rodada cujo script tem um destes hashes."
+  echo "Contrato novo exige reiniciar o laço e confirmar de novo."
+  read -r -p "confirmar este contrato? [s]im / [N]ão: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""
+  case "$ans" in
+    s|S|sim) return 0 ;;
+  esac
+  DARK_HASHES=""; DARK_COMMIT=""; DARK_REPO=""
+  echo "contrato não confirmado; nada será executado." >&2
+  return 1
+}
+# dark_gate <id> <cópia no host> <rodada>: 0 = pode rodar (grava <cópia>.body com o corpo verificado); 3 = fica na fila;
+# (o contrato é o confirmado pelo humano na partida do laço: sem busca por pedido).
+# Rodada ausente ou outra: silêncio (pedido manual de outra sessão). Hash diferente, root ou cabeçalho estranho: avisa.
+dark_gate() {
+  local id="$1" f="$2" round="$3" hdr line got h k
+  [[ "$(LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f" && echo ok)" == ok ]] || { dark_note "$id" "o arquivo tem byte nulo"; return 3; }
+  hdr="$(LC_ALL=C awk '/^$/ {exit} {print}' "$f")"
+  got="$(sed -n 's/^# rodada: //p' <<<"$hdr" | head -1)"
+  [[ "$got" == "$round" ]] || return 3
+  # todo o cabeçalho é comentário `# chave: valor`: nada que o bash execute antes do corpo
+  while IFS= read -r line; do
+    [[ "$line" == "# oute-propose" || "$line" =~ ^#\ [a-z0-9]+:\  || "$line" =~ ^#\ [a-z0-9]+:$ ]] \
+      || { dark_note "$id" "o cabeçalho tem linha fora do formato '# chave: valor'"; return 3; }
+  done <<<"$hdr"
+  if [[ "$(sed -n 's/^# como: //p' <<<"$hdr" | head -1)" == root ]]; then
+    dark_note "$id" "pedido --root nunca sai pelo laço dark"; return 3
+  fi
+  LC_ALL=C awk 'f {print} /^$/ && !f {f=1}' "$f" | norm_body > "$f.body"
+  [[ -s "$f.body" && "$(wc -c < "$f.body" | tr -d ' ')" -gt 1 ]] || { dark_note "$id" "pedido sem corpo"; return 3; }
+  [[ -n "$DARK_HASHES" ]] || { dark_note "$id" "contrato ainda não confirmado"; return 3; }
+  h="$(sha256_stdin < "$f.body")"
+  k="$(awk -v h="$h" '$1 == h {print $2; exit}' <<<"$DARK_HASHES")"
+  [[ -n "$k" ]] || { dark_note "$id" "o hash do script (${h:0:12}) não é de nenhum script do contrato"; return 3; }
+  echo "dark: $id é o script '$k' do contrato (sha256 ${h:0:12})"
+  return 0
+}
+# estado da rodada no container numa ida só: bate o coração (~/.oute/approve/dark.<rodada>.alive, que o dark_prereqs do oute-swarm
+# lê) e devolve as marcas: fechada, parada (dark.stop, a do `oute-swarm stop`, fatia d), meta, e repo=/dark= do meta
+dark_state() {
+  local round="$1"
+  ctr env DARK_N="$round" sh -c 'n="$DARK_N"; r="$HOME/.oute/swarm/$n"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$n.alive"
+    [ -f "$r/fechada" ] && echo fechada; [ -f "$r/dark.stop" ] && echo parada
+    if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi; true' </dev/null
+  return $?
+}
+DARK_LOCK=""; DARK_ROUND_NOW=""
+dark_cleanup() {
+  [[ -z "$DARK_LOCK" ]] || rm -rf "${DARK_LOCK:?}"
+  if [[ -n "$DARK_ROUND_NOW" ]]; then ctr env DARK_N="$DARK_ROUND_NOW" sh -c 'rm -f "${HOME:?}/.oute/approve/dark.${DARK_N:?}.alive"' </dev/null >/dev/null 2>&1 || true; fi
+  return 0
+}
+approve_dark() {
+  local round="${1:-}" want="${2:-}" lock old pid pid2 st repo mname seen="" ids id rc poll="${OUTE_DARK_POLL:-3}" announced="" arc=0
+  [[ "$round" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "oute: rodada inválida para --dark: $(printf '%s' "$round" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
+  if [[ -n "$want" ]]; then   # repo pelo comando: confere antes de tocar no lock, no container ou na rede
+    if [[ ! "$want" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$want" == *..* ]]; then echo "oute: repo inválido para --dark: $(printf '%s' "$want" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; fi
+    [[ "$want" != oute-agent ]] || { echo "oute: o modo dark recusa o repo oute-agent (ADR-10)" >&2; return 2; }
+  fi
+  docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
+  mkdir -p "$approve_dir"; chmod 700 "$approve_dir"
+  lock="$approve_dir/dark.$round.lock"   # diretório: mkdir é atômico, dois starts juntos não passam os dois
+  if [[ -d "$lock" ]]; then
+    pid="$(head -1 "$lock/pid" 2>/dev/null | tr -cd '0-9')"
+    if [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null; then
+      echo "oute: já há um 'oute approve --dark $round' rodando (pid ${pid:-?}, $lock)" >&2; return 1
+    fi
+    # lock de um laço que morreu: renomear é atômico; se o que saiu não é o lock morto lido (outro início recriou no meio), volta
+    old="$lock.velho.$$"
+    if mv "$lock" "$old" 2>/dev/null; then
+      pid2="$(head -1 "$old/pid" 2>/dev/null | tr -cd '0-9')"
+      if [[ "$pid2" == "$pid" ]]; then rm -rf "${old:?}"
+      else mv "$old" "$lock" 2>/dev/null || true; echo "oute: outro 'oute approve --dark $round' acabou de começar ($lock)" >&2; return 1; fi
+    fi
+  elif [[ -e "$lock" ]]; then
+    rm -f "${lock:?}"   # lock em arquivo, de antes de ser diretório
+  fi
+  if ! mkdir "$lock" 2>/dev/null; then
+    echo "oute: outro 'oute approve --dark $round' acabou de começar ($lock)" >&2; return 1
+  fi
+  printf '%s\n' "$$" > "$lock/pid"
+  DARK_LOCK="$lock"; DARK_ROUND_NOW="$round"
+  trap dark_cleanup EXIT
+  trap 'dark_cleanup; trap - EXIT; exit 130' INT TERM
+  DARK_REPO=""; DARK_HASHES=""; DARK_COMMIT=""
+  if [[ -n "$want" ]]; then
+    dark_anchor "$want" || { arc=$?; dark_cleanup; DARK_LOCK=""; DARK_ROUND_NOW=""; trap - EXIT INT TERM; return "$arc"; }
+  fi
+  echo "dark: laço ligado para a rodada $round (lock $lock). Para com oute-swarm stop, com a marca 'fechada' da rodada ou com Ctrl+C"
+  while :; do
+    st="$(dark_state "$round")" || { echo "dark: container $AGENT_CTR fora; tentando de novo" >&2; sleep "$poll"; continue; }
+    if grep -qx fechada <<<"$st"; then echo "dark: rodada $round fechada; laço encerrado"; break; fi
+    if grep -qx parada <<<"$st"; then echo "dark: rodada $round parada; laço encerrado"; break; fi
+    if ! grep -qx meta <<<"$st"; then
+      [[ " $announced " == *" meta "* ]] || echo "dark: a rodada $round ainda não abriu (sem meta no container); aguardando"
+      announced="$announced meta"
+    elif ! grep -qx 'dark=1' <<<"$st"; then
+      [[ " $announced " == *" nodark "* ]] || echo "dark: a rodada $round não foi aberta com --dark; nenhum pedido será executado"
+      announced="$announced nodark"
+    else
+      repo="$(sed -n 's/^repo=//p' <<<"$st" | head -1)"
+      # só /workspace/<nome>, um nível: o meta é do container; caminho livre apontaria para um repo que o agente montou
+      if [[ "$repo" =~ ^${OUTE_DARK_WORKSPACE:-/workspace}/[A-Za-z0-9][A-Za-z0-9._-]*$ && "$repo" != *..* ]]; then
+        mname="${repo##*/}"
+        if [[ -z "$DARK_REPO" ]]; then   # sem repo no comando: o nome do meta só vale depois que o humano o lê e confirma
+          echo "dark: a rodada $round abriu com o repo '$mname' (meta no container); confira o contrato abaixo"
+          dark_anchor "$mname" || { arc=$?; break; }
+        fi
+        if [[ "$mname" != "$DARK_REPO" ]]; then
+          [[ " $announced " == *" outro:$mname "* ]] || echo "dark: o meta da rodada traz o repo '$mname', não o confirmado '$DARK_REPO'; nada executado" >&2
+          announced="$announced outro:$mname"
+        else
+          approve_flush
+          approve_snapshot
+          ids="$(approve_pending)"
+          for id in $ids; do
+            [[ " $seen " == *" $id "* ]] && continue   # já avisado: o contrato é fixo, não adianta olhar de novo
+            rc=0; approve_one "$id" "$round" || rc=$?
+            trap dark_cleanup EXIT   # o approve_one mexe no trap de EXIT
+            # 3 = ficou na fila (o motivo saiu em stderr, uma vez); outro código = erro de leitura: tenta de novo na próxima volta
+            if (( rc == 3 )); then seen="$seen $id"; fi
+          done
+        fi
+      else
+        echo "dark: o meta da rodada $round traz um repo fora de ${OUTE_DARK_WORKSPACE:-/workspace}/<nome>; nada executado" >&2
+      fi
+    fi
+    sleep "$poll"
+  done
+  dark_cleanup; DARK_LOCK=""; DARK_ROUND_NOW=""; trap - EXIT INT TERM
+  return "$arc"
+}
+approve_usage() { echo "uso: oute approve [--watch | <id> | --dark <rodada> [<repo>] | suggest [--min N]]   (id: AAAAMMDD-HHMMSS-slug, como o oute-propose imprime)" >&2; return 0; }
 approve() {
   # argumentos conferidos antes de tocar o container. #158: `oute approve <id>` decide só aquele pedido (o tray do
   # Mac abre o Terminal nele); id fora do formato do oute-propose = rc 2, sem docker exec nenhum
-  local watch=0 one="" id seen=""
+  local watch=0 one="" id seen="" dark="" darkrepo=""
   # #726: `suggest` só lê o histórico do host; sai antes de qualquer docker
   if [[ "${1:-}" == suggest ]]; then approve_suggest "${@:2}"; return $?; fi
   case "$#:${1:-}" in
     0:) ;;
     1:--watch|1:-w) watch=1 ;;
     1:-*) approve_usage; return 2 ;;
+    2:--dark) dark="$2" ;;
+    3:--dark) dark="$2"; darkrepo="$3" ;;
     1:*) [[ "$1" =~ ^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$ ]] || { echo "oute: id inválido: $(printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
          one="$1" ;;
     *) approve_usage; return 2 ;;
   esac
+  if [[ -n "$dark" ]]; then approve_dark "$dark" "$darkrepo"; return $?; fi   # #843: o laço do modo dark (ADR-10)
   # #210: resultado guardado no host sai antes da guarda. `oute approve` chamado com o container fora (o script
   # aprovado reiniciou o agent) espera ele voltar por até OUTE_APPROVE_WAIT s e entrega, em vez de recusar de cara
   compgen -G "$approve_dir/runs/*.result" >/dev/null && approve_flush "${OUTE_APPROVE_WAIT:-90}"
@@ -1638,6 +1904,7 @@ case "${1:-}" in
            exec "$ROOT/scripts/oute" _update2 ;;
   _update2) oute_pull && "$0" down && "$0" up && "$0" version && tray_after_update ;;   # 2ª etapa já com o script novo
   approve) approve "${@:2}" ;;
+  deploy-contract) exec "$ROOT/scripts/deploy-contract" "${@:2}" ;;   # #843: valida o .oute/deploy.toml do repo alvo do modo dark
   tray)    tray_cmd "${@:2}" ;;
   watch)   # atalho: aprovação em modo espera. Com host: roda no host remoto via ssh (ex.: oute watch oute-server)
            if [[ -n "${2:-}" ]]; then exec ssh -t "$2" 'bash -lc "oute approve --watch"'
@@ -1726,6 +1993,8 @@ uso: oute [cmd]     (sem cmd: sobe a stack se preciso e abre o herdr)
   install      link no PATH para chamar só `oute` de qualquer lugar
   update       de qualquer diretório: git pull --tags no repo + pull da imagem + down + up + version
   approve [--watch]  revisa e executa (ou recusa) os scripts que os agentes propuseram com oute-propose
+  approve --dark <rodada> [<repo>]  modo dark (ADR-10): laço que executa, sem perguntar, só o pedido da rodada cujo script é um dos do contrato de deploy (hash)
+  deploy-contract check <repo-path>  valida o .oute/deploy.toml do repo alvo (três scripts 100755, host, sem segredo)
   approve <id>       decide só aquele pedido (id do oute-propose); não pendente = rc 1, id inválido = rc 2
   approve suggest [--min N]  lista os comandos repetidos do histórico do canal (contagem, último uso, risco); só lê, não aplica nada
   tray install|uninstall|sync  só no macOS: compila o tray (barra de menu, lê o agent-studio), monta o .app e abre no login; uninstall desfaz;

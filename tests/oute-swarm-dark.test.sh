@@ -20,7 +20,7 @@ export OUTE_SELECT_TABLE="$ROOT/config/select/models.toml"
 
 # -------- código 7: o oute-agent não é alvo
 CASE=c7; round "$CASE"
-REPO="$TMP/$CASE/oute-agent"; dark_repo "$REPO"; dq 10 10 10; dgh true
+REPO="$TMP/$CASE/oute-agent"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
 opn --dark
 check "oute-agent: código 7"                     [ "$RC" -eq 7 ]
 check "oute-agent: diz o motivo (ADR-10, self-restart)" bash -c 'grep -qF "ADR-10" <<<"$1" && grep -qF "self-restart" <<<"$1" && grep -qF "código 7" <<<"$1"' _ "$ERR"
@@ -28,7 +28,7 @@ check "oute-agent: nenhuma rodada nova nem oute-task" so_teste
 
 # -------- código 8, um item: cota do claude na trava
 CASE=c8a; round "$CASE"
-REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 96 10 10; dgh true
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 96 10 10; dgh true; dalive; dcontract "$REPO"
 opn --dark
 check "1 item faltando: código 8"                [ "$RC" -eq 8 ]
 check "1 item: lista a assinatura, o uso e a trava" bash -c 'grep -qF -- "- cota: a assinatura claude está em 96% da janela de 7 dias, na trava de 95%" <<<"$1"' _ "$ERR"
@@ -37,7 +37,7 @@ check "1 item: nada aberto"                      so_teste
 
 # -------- código 8, dois itens: cota do codex e GH_TOKEN sem push
 CASE=c8b; round "$CASE"
-REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 97 10; dgh false
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 97 10; dgh false; dalive; dcontract "$REPO"
 opn --dark
 check "2 itens faltando: código 8"               [ "$RC" -eq 8 ]
 check "2 itens: uma linha por item"              [ "$(grep -c '^  - ' <<<"$ERR")" -eq 2 ]
@@ -48,7 +48,7 @@ check "2 itens: nada aberto"                     so_teste
 
 # -------- cota não lida e gh sem acesso também faltam
 CASE=c8c; round "$CASE"
-REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; rm -f "${FAKE:?}/quota.json"; echo '{"schema":1,"max_pct":98,"agents":{"claude":{"status":"error","windows":{}}}}' > "$FAKE/quota.json"; dgh erro
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; rm -f "${FAKE:?}/quota.json"; echo '{"schema":1,"max_pct":98,"agents":{"claude":{"status":"error","windows":{}}}}' > "$FAKE/quota.json"; dgh erro; dalive; dcontract "$REPO"
 opn --dark
 check "cota não lida e gh com erro: código 8"    [ "$RC" -eq 8 ]
 check "cota não lida: item da assinatura sem leitura" bash -c 'grep -qF -- "- cota: não li a janela de 7 dias da assinatura claude" <<<"$1"' _ "$ERR"
@@ -56,16 +56,17 @@ check "gh com erro: item do GH_TOKEN"            bash -c 'grep -qF -- "- GH_TOKE
 
 # -------- remoto sem dono/repo
 CASE=c8d; round "$CASE"
-REPO="$TMP/$CASE/projeto"; gitrepo "$REPO"; dq 10 10 10; dgh true
+REPO="$TMP/$CASE/projeto"; gitrepo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
 opn --dark
 check "sem remoto origin: código 8"              [ "$RC" -eq 8 ]
 check "sem remoto origin: o item do GH_TOKEN"    bash -c 'grep -qF -- "- GH_TOKEN: não achei o dono/repo do remoto origin" <<<"$1"' _ "$ERR"
 
 # -------- tudo presente: abre, com dark=1 no meta e o texto no prompt
 CASE=ok; round "$CASE"
-REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 94; dgh true
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 94; dgh true; dalive; dcontract "$REPO"
 opn --dark
 check "tudo presente: código 0"                  [ "$RC" -eq 0 ]
+check "tudo presente: o aviso do HEAD local chega a quem abre (stderr)" bash -c 'grep -qF "conferi só o HEAD" <<<"$1"' _ "$ERR"
 R="$(nova)"
 check "tudo presente: dark=1 no meta"            grep -qxF "dark=1" "$H/.oute/swarm/$R/meta"
 check "tudo presente: o prompt traz \"modo dark, ADR-10\"" grep -qF "modo dark, ADR-10" "$FAKE/oute-task.last"
@@ -78,9 +79,37 @@ check "dark: dark.md renderizado, com o id da rodada" bash -c 'grep -qF "juiz da
 check "dark: o prompt manda ler o dark.md da rodada" grep -qF "~/.oute/swarm/$R/prompt/dark.md" "$FAKE/oute-task.last"
 check "dark: o dark.md não manda perguntar (sem ask no juiz)" bash -c 'grep -qF "Nunca \`oute-swarm ask\`" "$1"' _ "$H/.oute/swarm/$R/prompt/dark.md"
 
+# -------- auto-aprovador: sem batida, com batida velha, e o contrato de deploy faltando ou inválido
+CASE=c8e; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dcontract "$REPO"
+opn --dark
+check "sem laço no host: código 8"               [ "$RC" -eq 8 ]
+check "sem laço: item do auto-aprovador"         bash -c 'grep -qF -- "- auto-aprovador: nenhum laço" <<<"$1"' _ "$ERR"
+check "sem laço: só esse item"                   [ "$(grep -c '^  - ' <<<"$ERR")" -eq 1 ]
+
+CASE=c8f; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dcontract "$REPO"; dalive 300
+opn --dark
+check "batida de 300 s atrás: código 8"          [ "$RC" -eq 8 ]
+check "batida velha: item do auto-aprovador"     bash -c 'grep -qF -- "- auto-aprovador: nenhum laço" <<<"$1"' _ "$ERR"
+
+CASE=c8g; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; ln -sf "$ROOT/scripts/deploy-contract" "$BIN/oute-deploy-contract"
+opn --dark
+check "sem contrato no repo: código 8"           [ "$RC" -eq 8 ]
+check "sem contrato: o item diz que falta o .oute/deploy.toml" bash -c 'grep -qF -- "- contrato: .oute/deploy.toml não existe no HEAD" <<<"$1"' _ "$ERR"
+check "sem contrato: nada aberto"                so_teste
+
+CASE=c8h; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; dcontract "$REPO"
+chmod 644 "$REPO/.oute/verify.sh"; git -C "$REPO" add -A; git -C "$REPO" -c user.email=t@t -c user.name=t commit -qm modo
+opn --dark
+check "verify sem 100755: código 8"              [ "$RC" -eq 8 ]
+check "verify sem 100755: item com o caminho e o modo" bash -c 'grep -F -- "(.oute/verify.sh)" <<<"$1" | grep -qF "100644 blob"' _ "$ERR"
+
 # -------- sem --dark: nada muda
 CASE=sem; round "$CASE"
-REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 99 99 99; dgh false
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 99 99 99; dgh false; dalive; dcontract "$REPO"
 opn
 check "sem --dark: abre mesmo com cota e push faltando" [ "$RC" -eq 0 ]
 R="$(nova)"
