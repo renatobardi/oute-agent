@@ -324,9 +324,9 @@ render_prompt() {
 
 # modo dark (ADR-10, #841): confere os pré-requisitos que já dá para ver sem as fatias seguintes. Imprime um item que falta por linha
 # (stdout) e sai 1 se faltar algum; 0 com tudo presente. A fatia (c, #843) acrescenta o auto-aprovador e o contrato de deploy.
-# $1 = raiz do repo alvo
+# $1 = raiz do repo alvo; $2 = id da rodada, já reservado (#854): a batida que vale é a `dark.<id>.alive` desta rodada
 dark_prereqs() {
-  local main="$1" table="${OUTE_SELECT_TABLE:-/opt/oute/select/models.toml}" miss=0 sub js st g u slug perm f t newest=0 out line
+  local main="$1" rid="$2" table="${OUTE_SELECT_TABLE:-/opt/oute/select/models.toml}" miss=0 sub js st g u slug perm f t newest=0 out line
   # (c) cota de todas as assinaturas da tabela abaixo da trava semanal; cota não lida também falta (sem humano para decidir)
   if command -v oute-select >/dev/null 2>&1 && [[ -r "$table" ]]; then
     while IFS= read -r sub; do
@@ -349,16 +349,16 @@ dark_prereqs() {
     perm="$(gh api "repos/$slug" --jq .permissions.push 2>/dev/null)" || perm=""
     [[ "$perm" == true ]] || { printf 'GH_TOKEN: sem permissão de merge (permissions.push) em %s\n' "$slug"; miss=1; }
   fi
-  # (a) auto-aprovador ligado no host (#843): o `oute approve --dark <rodada>` bate o coração em ~/.oute/approve/dark.<rodada>.alive
-  # (o horário, a cada volta do laço, escrito pelo host por docker exec) e some ao parar. O laço do host é por rodada e o id da rodada
-  # nasce depois deste confere: aqui basta algum laço vivo; o que a rodada aceita é decidido no host, pelo hash (scripts/oute).
-  for f in "$HOME"/.oute/approve/dark.*.alive; do
-    [[ -f "$f" ]] || continue
+  # (a) auto-aprovador ligado no host (#843, #854): o `oute approve --dark <rodada>` bate o coração em ~/.oute/approve/dark.<rodada>.alive
+  # (o horário, a cada volta do laço, escrito pelo host por docker exec) e some ao parar. O id da rodada é reservado antes deste
+  # confere, então só vale a batida da própria rodada; a de outra rodada não satisfaz. O que a rodada aceita é decidido no host, pelo hash.
+  f="$HOME/.oute/approve/dark.$rid.alive"
+  if [[ -f "$f" ]]; then
     t="$(tr -cd '0-9' < "$f" | head -c 12)"
-    [[ -n "$t" ]] && (( t > newest )) && newest="$t"
-  done
+    [[ -n "$t" ]] && newest="$t"
+  fi
   if (( newest == 0 )) || (( $(date +%s) - newest > ${OUTE_DARK_ALIVE_MAX:-60} )); then
-    printf 'auto-aprovador: nenhum laço "oute approve --dark <rodada>" vivo no host (sem batida em %s nos últimos %ss)\n' "~/.oute/approve/dark.*.alive" "${OUTE_DARK_ALIVE_MAX:-60}"; miss=1
+    printf 'auto-aprovador: nenhum laço "oute approve --dark %s" vivo no host (sem batida em %s nos últimos %ss)\n' "$rid" "~/.oute/approve/dark.$rid.alive" "${OUTE_DARK_ALIVE_MAX:-60}"; miss=1
   fi
   # (b) contrato de deploy do repo alvo: .oute/deploy.toml com os três scripts 100755 e host, sem segredo (oute deploy-contract check)
   if command -v oute-deploy-contract >/dev/null 2>&1; then
@@ -440,7 +440,7 @@ dark_spawn_gate() {
 
 cmd_start() {
   [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>] [--subscription <assinatura>] [--dark [--budget <usd>]]"
-  local repo max=3 label="" workers="" prefer="" subscr="" dark=0 dark_texto="" budget="" dphase=plan miss main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
+  local repo max=3 label="" workers="" prefer="" subscr="" dark=0 dark_texto="" budget="" dphase=plan miss main name id="" prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -475,21 +475,25 @@ cmd_start() {
       echo "oute-swarm: modo dark recusa o oute-agent como alvo (código 7): oute down/up mata a sessão que pediu (ADR-10, self-restart); use um repo que não seja o oute-agent" >&2
       exit 7
     fi
-    if ! miss="$(dark_prereqs "$main")"; then
-      printf 'oute-swarm: modo dark: pré-requisito faltando em %s (código 8, ADR-10):\n' "$name" >&2
+    # (#854) o id nasce antes dos pré-requisitos: o laço vivo conferido é o desta rodada. Recusa libera o id (rmdir: só some pasta vazia)
+    id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
+    if ! miss="$(dark_prereqs "$main" "$id")"; then
+      rmdir "$STATE_ROOT/$id" 2>/dev/null || true
+      printf 'oute-swarm: modo dark: pré-requisito faltando em %s (código 8, ADR-10; rodada conferida: %s, liberada):\n' "$name" "$id" >&2
       sed 's/^/  - /' <<<"$miss" >&2
       exit 8
     fi
     # teto de custo (#844): --budget, ou o padrão de config/swarm.toml; sem nenhum dos dois não abre (sem humano para frear)
     [[ -n "$budget" ]] || budget="$(dark_budget_config)"
     if ! budget_valid "$budget"; then
+      rmdir "$STATE_ROOT/$id" 2>/dev/null || true   # libera o id reservado (#854)
       echo "oute-swarm: modo dark sem teto de custo válido: use --budget <usd> ou dark_budget_usd em config/swarm.toml (${budget:-sem valor})" >&2
       exit 1
     fi
     dark_texto=" Rodada: modo dark, ADR-10."
     dphase=arch   # o juiz abre na linha de raciocínio (ADR-10, #842); o dispatcher de hoje abre em plan (#219)
   fi
-  id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
+  [[ -n "$id" ]] || id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"   # o dark já reservou (#854)
   # o juiz lê o dark.md (renderizado só aqui, abaixo) antes de qualquer etapa; vai no {{DARK}} do núcleo, sem tocar no swarm.md (#753)
   [[ -z "$dark_texto" ]] || dark_texto+=" Você é o juiz: leia \`~/.oute/swarm/$id/prompt/dark.md\` inteiro antes de qualquer etapa; ele vale sobre as regras de pergunta ao Bardi."
   space="$(herdr_space)"

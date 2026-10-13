@@ -37,9 +37,22 @@ dark_repo() {
   return 0
 }
 
-# dalive [<segundos atrás>]: a batida do laço `oute approve --dark` do host, como o container a vê (~/.oute/approve/dark.<rodada>.alive);
-# sem argumento, agora. O dark_prereqs aceita batida de até 60 s.
+# dalive [<segundos atrás>]: a batida do laço `oute approve --dark` da PRÓPRIA rodada que o teste vai abrir (#854), como o container a vê
+# (~/.oute/approve/dark.<rodada>.alive). O id nasce da data (swarm-<MMDD>-<HHMM>): grava o do minuto atual e o do seguinte, para a virada
+# do minuto entre a gravação e a abertura não deixar a batida sem dono. Sem argumento, agora. O dark_prereqs aceita batida de até 60 s.
 dalive() {
+  local ago="${1:-0}" t m1 m2
+  mkdir -p "$H/.oute/approve"
+  t="$(date +%s)"
+  m1="$(date -d "@$t" +%m%d-%H%M 2>/dev/null || date -r "$t" +%m%d-%H%M)"
+  m2="$(date -d "@$((t + 60))" +%m%d-%H%M 2>/dev/null || date -r "$((t + 60))" +%m%d-%H%M)"
+  printf '%s\n' "$((t - ago))" > "$H/.oute/approve/dark.swarm-$m1.alive"
+  printf '%s\n' "$((t - ago))" > "$H/.oute/approve/dark.swarm-$m2.alive"
+  return 0
+}
+
+# dalive_outra [<segundos atrás>]: a batida de OUTRA rodada (swarm-x), que não pode satisfazer o pré-requisito da rodada que abre
+dalive_outra() {
   local ago="${1:-0}"
   mkdir -p "$H/.oute/approve"
   date +%s | awk -v a="$ago" '{print $1 - a}' > "$H/.oute/approve/dark.swarm-x.alive"
