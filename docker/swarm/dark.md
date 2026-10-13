@@ -6,7 +6,7 @@ Esta rodada abriu com `--dark`. Você, o dispatcher, decide no lugar do Bardi os
 - **Merge (§3):** só com `oute-swarm premerge` em 0 **e** auditoria com ação `merge como está`; as condições de `merge.md` valem todas.
   - `ajustar antes do merge`: `tell` à sessão com os achados; audite o head novo.
   - `não fazer merge`: abandone a issue (feche a aba pela regra de PR abandonado) e registre o motivo na etapa `merge --pr <n>`.
-  - `perguntar ao autor`, achado de segurança que não classifica e qualquer ação no host: não decida pelo Bardi nem pare a rodada; trate como `não fazer merge` da issue e registre.
-- **Lições (§4.1):** escolha as lições que valem e abra você as issues `kaizen`, uma por lição, com a busca por issue aberta antes. A escolha e o motivo vão na etapa `kaizen`.
+  - `perguntar ao autor`, `decisão do Bardi`, achado de segurança que não classifica, conflito fora do registro compartilhado, release e qualquer ação no host: não decida pelo Bardi nem pare a rodada; trate como `não fazer merge` da issue e registre o motivo.
+- **Lições (§4.1):** escolha as lições que valem e abra você as issues `kaizen`, uma por destino, com todas as lições dele (§4.2), com a busca por issue aberta antes. A escolha e o motivo vão na etapa `kaizen`.
 - **Fechamento (§4.3):** publique o resumo pelos passos 1 a 5, sem o passo 6, e feche a rodada. Liste no resumo cada merge feito por autorização do dark e cada issue abandonada com o motivo.
 - **Fica humano, mesmo no dark:** `.github/workflows/`, segredos do vault, ai-memory, sudoers do host e release do `oute-agent`. Item que precise disso vira issue com o motivo, não ação sua.
