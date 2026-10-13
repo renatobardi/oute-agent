@@ -97,12 +97,14 @@ oute_mac = {**oute, "host.name": "oute-mac"}
 task1 = {"oute.task.id": S1, "oute.task.repo": "oute-agent", "oute.task.slug": "207-tela", "oute.task.agent": "claude",
          "oute.swarm.round": RND, "oute.swarm.session": "207-tela",
          # escolha do seletor no opened (ADR-02, #219; catálogo do ADR-04)
-         "oute.task.phase": "build", "oute.task.origin": "label", "oute.task.model": "claude-sonnet-5-5"}
+         "oute.task.phase": "build", "oute.task.origin": "label", "oute.task.model": "claude-sonnet-5-5",
+         # como a sessão abriu (#825; catálogo do ADR-04)
+         "oute.task.abertura": "aba"}
 task2 = {"oute.task.id": S2, "oute.task.repo": "lab", "oute.task.slug": "ajuste", "oute.task.agent": "codex",
          # sessão avulsa sem label: a fase veio do Jev, com a confiança (ADR-02, #257)
          "oute.task.phase": "ops", "oute.task.origin": "jev", "oute.task.confidence": 0.87,
-         # abriu no Codex porque o Claude estava no teto de cota (#598, #621)
-         "oute.task.reserve": "cota", "oute.task.reserve_from": "claude"}
+         # abriu no Codex porque o Claude estava no teto de cota (#598, #621); abertura sem tela (#825)
+         "oute.task.reserve": "cota", "oute.task.reserve_from": "claude", "oute.task.abertura": "sem-tela"}
 logs = {"resourceLogs": [
   rl(oute, [
     ev(D1 - 3 * 86400, "oute.swarm.round.opened", "ev-r1", {"oute.swarm.round": RND, "oute.swarm.repo": "oute-agent",
@@ -255,13 +257,18 @@ check "sessão: ponto âmbar nos 2 eventos de Gate e só neles" bash -c '[ "$(gr
 S2P="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2")"
 check "sessão sem evento de Gate: nenhum ponto âmbar" bash -c '! grep -q "ponto gate" <<<"$1" && grep -q "<ol class=\"tempo\">" <<<"$1"' _ "$S2P"
 check "sessão: Badges do cabeçalho (estado, rodada · worker, issue, fase aidlc:*)" bash -c 'grep -q "<span class=\"badge\">.*aberta</span>" "$1" && grep -qE "badge contorno\">.*rodada [^<]+ · worker 207-tela</span>" "$1" && grep -qE "badge contorno\">.*issue #207</span>" "$1" && grep -qE "badge contorno\">.*aidlc:build</span>" "$1"' _ "$TMP/s1.html"
+check "sessão: Badge de como abriu (#825): aba"          bash -c 'grep -qE "badge contorno\">.*>aba</span>" "$1"' _ "$TMP/s1.html"
+check "sessão: como abriu no resumo (#825): aba do herdr" jqe '.text | test("Como abriu aba do herdr")' <<<"$RS"
 check "sessão avulsa: a fase vem do evento de abertura (aidlc:ops) e o Badge é standalone" bash -c 'grep -qE "badge contorno\">.*aidlc:ops</span>" <<<"$1" && grep -q "badge contorno\">standalone</span>" <<<"$1"' _ "$S2P"
 check "sessão sem a fase no evento: sem Badge aidlc" bash -c '! grep -q "aidlc:" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
+check "sessão sem abertura no evento: sem linha nem Badge (#825)" bash -c '! grep -q "<dt>Como abriu</dt>" <<<"$1" && ! grep -qF ">aba</span>" <<<"$1" && ! grep -qF ">terminal</span>" <<<"$1" && ! grep -qF ">sem-tela</span>" <<<"$1"' _ "$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
 check "sessão: 4 StatTiles (conversas, chamadas, custo, p95), fora do dl do resumo" bash -c '[ "$(grep -o "<div class=\"tile\">" "$1" | wc -l)" = 4 ] && [ "$(grep -o "<dl class=\"resumo\"" "$1" | wc -l)" = 1 ]' _ "$TMP/s1.html"
 S2H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data | jq -c '.[] | select(has("resumo-sessao"))')"
 check "sessão avulsa: a origem jev e a confiança aparecem no oute.task.opened (#257)" jqe '[.[] | select(.log) | .text | select(test("oute\\.task\\.opened"))][0] | test("\"oute.task.origin\": \"jev\"") and test("\"oute.task.confidence\": 0.87") and test("\"oute.task.phase\": \"ops\"")' <<<"$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S2" | data)"
 check "sessão com reserva: o resumo diz de qual assinatura para qual, e por quê (#621)" jqe '.text | test("Reserva abriu em codex no lugar de claude \\(cota\\)")' <<<"$S2H"
 check "sessão com reserva: Badge no cabeçalho"         bash -c 'grep -qE "badge contorno\">.*reserva: claude → codex</span>" <<<"$1"' _ "$S2P"
+check "sessão sem tela: Badge de como abriu (#825)"    bash -c 'grep -qE "badge contorno\">.*>sem-tela</span>" <<<"$1"' _ "$S2P"
+check "sessão sem tela: como abriu no resumo (#825)"   jqe '.text | test("Como abriu sem tela")' <<<"$S2H"
 check "sessão sem reserva: nem linha nem Badge"        bash -c '! grep -q "reserva:" "$1" && ! grep -q "<dt>Reserva</dt>" "$1"' _ "$TMP/s1.html"
 check "sessão removida: estado com o motivo e a hora"  jqe '.text | test("Estado removida \\(pr-mergeado\\)") and test("Removida em \\(UTC\\) 2025-09-27 19:20:00") and test("Rodada sessão avulsa")' <<<"$S2H"
 S4H="$(studio_page "${C[@]}" "$STUDIO_URL/sessao?id=$S4")"
@@ -315,7 +322,7 @@ from studio_asgi import TOKEN, Broken, Odd, get
 con = duckdb.connect(sys.argv[1], read_only=True)
 D1 = 1759000000 * 10**9
 DAY = 86400 * 10**9
-S1 = "oute-agent-207-tela-20250927190000"
+S1, S2 = "oute-agent-207-tela-20250927190000", "lab-ajuste-20250927191000"
 none = cost.PriceTable()
 
 r = sessions.listing(con, D1 - DAY, D1 + DAY, none, limit=1)
@@ -352,6 +359,13 @@ check("fase: atributo ausente, JSON inválido ou que não é objeto = None",
       sessions._phase(None) is None and sessions._phase("{}") is None and sessions._phase("{\"x\":") is None
       and sessions._phase("[1]") is None and sessions._phase("{\"oute.task.phase\": 3}") is None
       and sessions._phase("{\"oute.task.phase\": \"ops\"}") == "ops")
+check("sessão: como abriu sai do oute.task.opened (#825)",
+      sessions.detail(con, S1, none)["abertura"] == "aba" and sessions.detail(con, S2, none)["abertura"] == "sem-tela")
+check("abertura: atributo ausente, JSON inválido ou valor fora do catálogo = None",
+      sessions._abertura(None) is None and sessions._abertura("{}") is None and sessions._abertura("{\"x\":") is None
+      and sessions._abertura("[1]") is None and sessions._abertura("{\"oute.task.abertura\": 3}") is None
+      and sessions._abertura("{\"oute.task.abertura\": \"janela\"}") is None
+      and sessions._abertura("{\"oute.task.abertura\": \"terminal\"}") == "terminal")
 
 # a regra de custo é a do #203: a chave `session` do aggregate dá os números da tela
 g = usage.aggregate(con, 0, 2**62, none, ("session",))
@@ -407,7 +421,7 @@ check("SurrealDB com resposta inesperada: 200 com aviso", status == 200 and "dat
 PY
 grep -v '^Traceback\|^  \|^RuntimeError\|^TypeError\|^IndexError\|^$\|tela: .* falhou' "$TMP/py.out" || true
 check_py "$TMP/py.out"
-check "lógica em Python: os 26 casos rodaram"          test "$((n_ok + n_fail))" = 26
+check "lógica em Python: os 28 casos rodaram"          test "$((n_ok + n_fail))" = 28
 
 # ---------------------------------------------------------------- 7. imagem
 PKG="$ROOT/docker/agent-studio/agent_studio"

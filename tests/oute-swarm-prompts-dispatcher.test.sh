@@ -198,6 +198,8 @@ check "fechamento: reprovado ou sem-revisor deixa o texto fechado (#507)" grep -
 check "fechamento: na aba só decisão, opções e link (#507)" grep -qF '**Na aba, só isto:** a linha de decisão, as opções numeradas e o link `https://agent-studio.oute.pro/rodada?id='"$(nova)"'`' "$D"
 check "fechamento: nunca cola o resumo na aba (#507)"    grep -qF 'nunca cole o resumo na aba no lugar da página' "$D"
 check "fechamento: Claude usa run_in_background, Codex nohup com saída em arquivo (#507)" bash -c 'grep -qF "em segundo plano (\`run_in_background\`): chama outro modelo" "$1" && ! grep -qF "nohup oute-swarm step review" "$1" && grep -qF "@@CX@@(\`nohup oute-swarm step review … > ~/.oute/swarm/{{ID}}/etapas/review.out 2>&1 &\`" "$2"' _ "$D" "$ST/pagina.md"
+# resumo de fechamento: a sessão sem issue marcada como sem issue (#825)
+check "fechamento: sessão sem issue aparece como sem issue no resumo (#825)" grep -qF 'Sessão sem issue (#825): `sem issue` → PR → estado' "$ST/fechamento.md"
 # triagem, pedido de merge e kaizen na página da rodada (#508)
 check "triagem: vai ao arquivo da etapa, não à aba (#508)" grep -qF '**A triagem vai para a página da rodada, não para a aba (#508).**' "$D"
 check "triagem: arquivo triagem.r1.md da rodada (#508)" grep -qF '`~/.oute/swarm/'"$(nova)"'/etapas/triagem.r1.md`' "$D"

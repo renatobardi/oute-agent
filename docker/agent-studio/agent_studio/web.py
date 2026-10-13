@@ -793,7 +793,8 @@ def mount(app, store, auth, config, tel, window, surreal=None):
         if failed:
             return failed
         # sessão aberta que ainda não tem conversa nem evento no DuckDB pode existir só no SurrealDB
-        data = data or {"session": sess_mod.blank(task_id), "events": [], "events_truncated": False, "phase": None, "reserve": None}
+        data = data or {"session": sess_mod.blank(task_id), "events": [], "events_truncated": False,
+                        "phase": None, "reserve": None, "abertura": None}
         state = await with_state([data["session"]])
         if data["session"]["start_ns"] is None and not data["session"]["state"]:
             return error(request, 404, "Sessão não encontrada.")
