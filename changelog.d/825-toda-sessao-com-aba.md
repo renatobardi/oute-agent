@@ -1,2 +1,0 @@
-### Changed
-- **Toda sessão abre com aba** (#825). Sem terminal, o `oute-task` abre a sessão numa aba do herdr e volta com 0 (o agente roda na aba); dentro de uma rodada ele recusa e manda usar `oute-swarm spawn`, que agora aceita sessão sem número de issue (`spawn <slug>`) e a põe na rodada. `oute-task --here` roda no terminal atual. `oute-task list` marca `[sem aba]`, e o `oute.task.opened` diz como a sessão abriu (`abertura`: aba, terminal ou sem-tela). **Precisa de release** (o `oute-task`, o `oute-swarm` e o `oute-emit` vão na imagem).

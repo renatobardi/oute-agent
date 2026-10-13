@@ -1,2 +1,0 @@
-### Fixed
-- **Coluna de spans do papel subagente conta só chamadas ao modelo** (#832). A regra de span do papel `subagente` no agent-studio passou a exigir o nome `claude_code.llm_request`: antes, o span `claude_code.tool` de `SubagentHandback` (que leva `agent_id`) entrava no papel pela coluna de spans (2 spans no papel com 1 chamada de modelo; achado da auditoria do PR #860). `calls` e custo não mudam. **Precisa de release** (o agent-studio vai na imagem).
