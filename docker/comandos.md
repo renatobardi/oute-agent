@@ -144,6 +144,8 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
       `watch <rodada>` que digita os eventos no campo do dispatcher (`watch --deliver`), Claude ou Codex (#761). Com `--agent codex` o dispatcher abre no Codex.
       O modelo de cada sessão sai da fase da issue (oute-select); o dispatcher abre na fase plan.
       --subscription <assinatura> (#678): as sessões abrem nessa assinatura (`zai` = claude na Z.ai, sem leitura de imagem); o dispatcher segue no claude.
+      --dark (#841, ADR-10, fatia a): grava dark=1 no meta e põe "modo dark, ADR-10" no prompt. Recusa o oute-agent como alvo (código 7) e pré-requisito
+      faltando (código 8; lista um item por linha: cota de 7 dias de cada assinatura abaixo da trava e GH_TOKEN com push no repo). Só abre a porta: nada do dark roda ainda.
       Merge só quando você pedir.
   oute-swarm spawn <n>-<slug> "instrução" [--agent claude|codex] [--model <id>] [--force] [--repo R] [--kaizen] [--prefer <assinatura>] [--subscription <assinatura>]
       (o dispatcher usa) abre a aba #n com oute-task; recusa passar do --max (abas abertas).

@@ -2,6 +2,8 @@
 # oute-swarm — várias sessões de agente em paralelo, uma por issue, coordenadas por uma sessão do Claude.
 #
 #   oute-swarm <repo> [--max N] [--label L]         abre o dispatcher (worktree própria) com o prompt padrão.
+#              [--dark]                             --dark (ADR-10, #841): grava dark=1 no meta e põe "modo dark, ADR-10" no prompt; recusa o
+#                                                   oute-agent (código 7) e pré-requisito faltando (código 8, um item por linha)
 #              [--agent claude|codex]               --agent: agente do dispatcher e das sessões da rodada (sem ele: claude no
 #                                                   dispatcher e o seletor nas sessões). Com codex, o watch roda numa aba própria
 #                                                   e digita os eventos no campo do dispatcher parado (#213)
@@ -301,19 +303,49 @@ herdr_space() {
 }
 
 # renderiza um trecho do prompt do dispatcher (o núcleo swarm.md e cada etapa de swarm/, #753) com os valores da rodada.
-# Lê as variáveis do cmd_start que a chama (drop, keep, name, main, max, label, id, wtext, workers, nome_texto)
+# Lê as variáveis do cmd_start que a chama (drop, keep, name, main, max, label, id, wtext, workers, nome_texto, dark_texto)
 render_prompt() {
   local src="$1"
   sed -e "s|@@$drop@@[^@]*@@/$drop@@||g" -e "s|@@/\?$keep@@||g" -e '/^- $/d' "$src" \
     | sed -e "s|{{REPO}}|$name|g" -e "s|{{REPO_PATH}}|$main|g" -e "s|{{MAX}}|$max|g" \
         -e "s|{{LABEL}}|${label:-(nenhum)}|g" -e "s|{{ID}}|$id|g" -e "s|{{WORKERS}}|$wtext|g" \
-        -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|$nome_texto|g"
+        -e "s|{{SELECT_AGENT}}|${workers:+ --agent $workers}|g" -e "s|{{NOME_TEXTO}}|$nome_texto|g" -e "s|{{DARK}}|$dark_texto|g"
   return $?
 }
 
+# modo dark (ADR-10, #841): confere os pré-requisitos que já dá para ver sem as fatias seguintes. Imprime um item que falta por linha
+# (stdout) e sai 1 se faltar algum; 0 com tudo presente. A fatia (c) acrescenta aqui o auto-aprovador e o contrato de deploy.
+# $1 = raiz do repo alvo
+dark_prereqs() {
+  local main="$1" table="${OUTE_SELECT_TABLE:-/opt/oute/select/models.toml}" miss=0 sub js st g u slug perm
+  # (c) cota de todas as assinaturas da tabela abaixo da trava semanal; cota não lida também falta (sem humano para decidir)
+  if command -v oute-select >/dev/null 2>&1 && [[ -r "$table" ]]; then
+    while IFS= read -r sub; do
+      js="$(oute-select --weekly-guard "$sub" 2>/dev/null)" || js=""
+      IFS='|' read -r st g u < <(jq -r '[.status, .guard_pct, .used_pct] | map(. // "" | tostring) | join("|")' <<<"$js" 2>/dev/null) || st=""
+      case "$st" in
+        ok|none) ;;
+        over) printf 'cota: a assinatura %s está em %s%% da janela de 7 dias, na trava de %s%%\n' "$sub" "$u" "$g"; miss=1 ;;
+        *) printf 'cota: não li a janela de 7 dias da assinatura %s\n' "$sub"; miss=1 ;;
+      esac
+    done < <(sed -n 's/^name *= *"\([a-z][a-z0-9-]*\)".*/\1/p' "$table")
+  else
+    printf 'cota: sem oute-select ou sem a tabela de assinaturas (%s)\n' "$table"; miss=1
+  fi
+  # (d) GH_TOKEN com merge no repo: permissions.push do repositório que o remoto origin aponta
+  slug="$(git -C "$main" remote get-url origin 2>/dev/null | sed -E 's#^(.*[:/])([^/:]+/[^/]+)$#\2#; s#\.git$##')" || slug=""
+  if [[ ! "$slug" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    printf 'GH_TOKEN: não achei o dono/repo do remoto origin de %s\n' "$main"; miss=1
+  else
+    perm="$(gh api "repos/$slug" --jq .permissions.push 2>/dev/null)" || perm=""
+    [[ "$perm" == true ]] || { printf 'GH_TOKEN: sem permissão de merge (permissions.push) em %s\n' "$slug"; miss=1; }
+  fi
+  return "$miss"
+}
+
 cmd_start() {
-  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>] [--subscription <assinatura>]"
-  local repo max=3 label="" workers="" prefer="" subscr="" main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
+  [[ $# -ge 1 ]] || die "uso: oute-swarm <repo> [--max N] [--label L] [--agent claude|codex] [--prefer <assinatura>] [--subscription <assinatura>] [--dark]"
+  local repo max=3 label="" workers="" prefer="" subscr="" dark=0 dark_texto="" miss main name id prompt wtext dagent=claude drop keep wout wpane wtab wcmd space rname others rlabel
   repo="$1"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -322,6 +354,7 @@ cmd_start() {
       --agent) workers="${2:?}"; shift 2 ;;
       --prefer) prefer="${2:?}"; check_prefer "$prefer"; shift 2 ;;
       --subscription) subscr="${2:?}"; check_subscription "$subscr"; shift 2 ;;
+      --dark) dark=1; shift ;;
       *) die "opção desconhecida: $1" ;;
     esac
   done
@@ -338,13 +371,26 @@ cmd_start() {
   [[ -f "$LIB/swarm.md" ]] || die "prompt ausente: $LIB/swarm.md"
   [[ -d "$LIB/swarm" ]] || die "etapas do prompt ausentes: $LIB/swarm/"
   main="$(resolve_repo "$repo")"; name="$(basename "$main")"
+  if (( dark )); then
+    # modo dark (ADR-10, #841): recusa antes de reservar a rodada, sem deixar pasta nem aba
+    if [[ "$name" == oute-agent ]]; then
+      echo "oute-swarm: modo dark recusa o oute-agent como alvo (código 7): oute down/up mata a sessão que pediu (ADR-10, self-restart); use um repo que não seja o oute-agent" >&2
+      exit 7
+    fi
+    if ! miss="$(dark_prereqs "$main")"; then
+      printf 'oute-swarm: modo dark: pré-requisito faltando em %s (código 8, ADR-10):\n' "$name" >&2
+      sed 's/^/  - /' <<<"$miss" >&2
+      exit 8
+    fi
+    dark_texto=" Rodada: modo dark, ADR-10."
+  fi
   id="$(reserve_round_id)" || die "não consegui reservar o id da rodada em $STATE_ROOT"
   space="$(herdr_space)"
   # agent = o do dispatcher (oute.agent dos eventos da rodada): claude, ou o do --agent quando é codex (#213);
   # workers = o das sessões, só com --agent (#212): sem ele, a rodada não tem padrão e o seletor decide em cada spawn
   # (#219). dispatcher_pane = o pane do dispatcher, onde o watch --deliver digita (#761: em todo dispatcher)
   printf 'repo=%s\nmax=%s\nlabel=%s\nstarted=%s\nagent=%s\n%s%s' "$main" "$max" "$label" "$(date -u +%FT%TZ)" "$dagent" \
-    "${workers:+workers=$workers$'\n'}${prefer:+prefer=$prefer$'\n'}${subscr:+subscription=$subscr$'\n'}" "$(printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
+    "${workers:+workers=$workers$'\n'}${prefer:+prefer=$prefer$'\n'}${subscr:+subscription=$subscr$'\n'}${dark_texto:+dark=1$'\n'}" "$(printf 'dispatcher_pane=%s\n' "$HERDR_PANE_ID")" > "$STATE_ROOT/$id/meta"
   [[ -z "$space" ]] || meta_add "$STATE_ROOT/$id" "space=$space"
   set_round_name_locked "$id"
   rname="$(meta_get "$STATE_ROOT/$id" name)"; rlabel="$(round_label "$STATE_ROOT/$id")"
