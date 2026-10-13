@@ -96,6 +96,35 @@ opn --dark
 check "batida de 300 s atrás: código 8"          [ "$RC" -eq 8 ]
 check "batida velha: item do auto-aprovador"     bash -c 'grep -qF -- "- auto-aprovador: nenhum laço" <<<"$1"' _ "$ERR"
 
+# -------- #854: o id é reservado antes dos pré-requisitos; só a batida da própria rodada vale; o código 8 libera o id
+CASE=c8o; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dcontract "$REPO"; dalive_outra
+opn --dark
+check "batida de outra rodada: código 8"          [ "$RC" -eq 8 ]
+check "batida de outra rodada: item do auto-aprovador"  bash -c 'grep -qF -- "- auto-aprovador: nenhum laço" <<<"$1"' _ "$ERR"
+check "batida de outra rodada: só esse item"      [ "$(grep -c '^  - ' <<<"$ERR")" -eq 1 ]
+check "batida de outra rodada: o aviso cita a batida da própria rodada" bash -c 'grep -qE "dark\.swarm-[0-9]{4}-[0-9]{4}\.alive" <<<"$1"' _ "$ERR"
+check "código 8: id liberado, nenhuma pasta nova nem oute-task" so_teste
+
+CASE=c8p; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dcontract "$REPO"; dalive_outra; dalive
+opn --dark
+check "batida da própria rodada (e de outra): abre"   [ "$RC" -eq 0 ]
+check "própria rodada: a pasta reservada virou a rodada (uma só nova)" bash -c '[ "$(ls "$1/.oute/swarm" | grep -vc "^swarm-test$")" -eq 1 ]' _ "$H"
+check "própria rodada: a rodada tem o meta com dark=1"  bash -c 'grep -qx "dark=1" "$1/.oute/swarm/$2/meta"' _ "$H" "$(nova)"
+
+CASE=c8q; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 96 10 10; dgh true; dcontract "$REPO"; dalive
+opn --dark
+check "cota na trava com batida própria: código 8"  [ "$RC" -eq 8 ]
+check "cota na trava: id liberado, sem pasta nem oute-task" so_teste
+
+CASE=c8r; round "$CASE"
+REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dcontract "$REPO"; dalive
+OUTE_SWARM_CONFIG=/nonexistent opn --dark
+check "sem teto de custo válido: código 1"          [ "$RC" -eq 1 ]
+check "sem teto de custo: id liberado, sem pasta nem oute-task" so_teste
+
 CASE=c8g; round "$CASE"
 REPO="$TMP/$CASE/projeto"; dark_repo "$REPO"; dq 10 10 10; dgh true; dalive; ln -sf "$ROOT/scripts/deploy-contract" "$BIN/oute-deploy-contract"
 opn --dark
