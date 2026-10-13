@@ -864,9 +864,9 @@ cmd_answered() {
 # então esta linha é o aviso: o agent-studio mostra na rodada (oute.swarm.round.subagent) e o watch avisa. Grava só o motivo;
 # modelo e custo vêm da telemetria
 cmd_subagente() {
-  local text state arg
+  local arg="${1:-}"
+  local text state
   [[ $# -eq 1 ]] || die 'uso: oute-swarm subagente "<para quê>"'
-  arg="$1"
   text="$(linha_texto "$arg")"
   [[ -n "$text" ]] || die "motivo vazio"
   state="$(ask_dir)"
