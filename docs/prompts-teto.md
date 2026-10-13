@@ -12,6 +12,7 @@ Todo turno de toda sessão paga o texto destes arquivos, então eles não cresce
 | `docker/swarm/acompanhamento.md` | 16300 | dispatcher, o tempo todo |
 | `docker/swarm/auditoria.md` | 7400 | dispatcher, ao auditar e pedir merge |
 | `docker/swarm/casos.md` | 8100 | dispatcher, depois do merge e casos especiais |
+| `docker/swarm/dark.md` | 2600 | dispatcher da rodada `--dark`, o juiz (só nela, #842) |
 | `docker/swarm/fechamento.md` | 6900 | dispatcher, fechamento final |
 | `docker/swarm/kaizen.md` | 5800 | dispatcher, retrospectiva e issues kaizen |
 | `docker/swarm/merge.md` | 7800 | dispatcher, ao executar o merge |

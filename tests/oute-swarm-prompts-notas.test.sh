@@ -68,6 +68,8 @@ check "haiku: notas conferem o texto do subagente contra os fatos (#481)" grep -
 check "haiku: notas dizem como saber o próprio modelo (#481)"     grep -qF '**Own model:** read the model id in the session context' "$N"
 check "haiku: notas tratam id desconhecido como Haiku (#481)"     grep -qF 'No id: treat as Haiku' "$N"
 check "haiku: notas sem subagente publicam e avisam na primeira linha (#481)" grep -qF 'say on its first line that it came from Haiku and was not reviewed by Sonnet' "$N"
+# 845 (L4): a lista da regra #481 (texto que decide ou arrisca para o Bardi) tem "channel script"; o #838 tirou o item e nenhum teste pegou
+check "haiku: notas mantêm 'channel script' na lista da regra #481 (#845, L4)" grep -qF 'PR body, report, proposal, channel script, summary with options' "$N"
 # 832. quem abre subagente diz na aba, numa linha, para quê (regra curta; o dispatcher grava também no log, em auditoria.md)
 check "subagente: notas pedem a linha na aba antes de abrir (#832)"     grep -qF '`subagente: <what for, why>`' "$N"
 check "subagente: swarm-worker pede a linha na aba antes de abrir (#832)" grep -qF '`subagente: <para quê e por quê>`' "$W"

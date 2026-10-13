@@ -1546,7 +1546,7 @@ dark_cleanup() {
   return 0
 }
 approve_dark() {
-  local round="${1:-}" lock pid st repo seen="" ids id rc poll="${OUTE_DARK_POLL:-3}" announced=""
+  local round="${1:-}" lock old pid st repo seen="" ids id rc poll="${OUTE_DARK_POLL:-3}" announced=""
   [[ "$round" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "oute: rodada inválida para --dark: $(printf '%s' "$round" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
   mkdir -p "$approve_dir"; chmod 700 "$approve_dir"
@@ -1557,7 +1557,8 @@ approve_dark() {
       echo "oute: já há um 'oute approve --dark $round' rodando (pid ${pid:-?}, $lock)" >&2; return 1
     fi
     # lock de um laço que morreu: renomear é atômico, só um dos starts concorrentes leva o velho embora
-    if mv "$lock" "$lock.velho.$$" 2>/dev/null; then rm -rf "${lock:?}.velho.$$"; fi
+    old="$lock.velho.$$"
+    if mv "$lock" "$old" 2>/dev/null; then rm -rf "${old:?}"; fi
   elif [[ -e "$lock" ]]; then
     rm -f "${lock:?}"   # lock em arquivo, de antes de ser diretório
   fi

@@ -1,0 +1,2 @@
+### Changed
+- **Prompt do worker do swarm: lint do diff antes do PR, regressão no head final e restrição do dispatcher citada** (#845). O worker roda `tests/diff-lint.test.sh` com `origin/main` presente antes de abrir o PR; a regressão dos agentes roda depois do último commit que muda o prompt, e o corpo cita o head dela; a restrição de escopo que o dispatcher põe por conta própria vem na instrução como `restrição do dispatcher` e o PR cita essa origem. **Precisa de release** (o arquivo `docker/swarm-worker.md` vai na imagem).

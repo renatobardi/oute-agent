@@ -57,7 +57,7 @@ check "check sem caminho: uso, código 2"                [ "$RC" -eq 2 ]
 
 # segredo: valor que parece token no contrato, sem mostrá-lo
 # valores gerados a cada execução (nada literal que pareça credencial no arquivo)
-rnd() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$1"; return 0; }
+rnd() { local n="$1"; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$n"; return 0; }
 TOK="ghp_Aa1$(rnd 30)"
 repo s1; printf 'host = "%s"\n' "$TOK" > "$TMP/s1/.oute/deploy.toml.novo"
 printf '# contrato\ndeploy = ".oute/deploy.sh"\nverify = ".oute/verify.sh"\nrollback = ".oute/rollback.sh"\nhost = "%s"\n' "$TOK" > "$TMP/s1/.oute/deploy.toml"; rm -f "${TMP:?}/s1/.oute/deploy.toml.novo"

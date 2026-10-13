@@ -226,13 +226,14 @@ check "claude: o prompt = swarm.md sem os trechos do Codex" [ "$(cat "$FAKE/oute
 CASE=etapas-claude; round "$CASE"
 opn --max 2
 nr="$(nova)"; PD="$H/.oute/swarm/$nr/prompt"
-check "etapas: uma por arquivo de docker/swarm/, na pasta prompt/ da rodada" [ "$(ls "$PD")" == "$(ls "$ROOT/docker/swarm")" ]
+# o dark.md (#842) só é renderizado na rodada --dark (tests/oute-swarm-dark.test.sh) e o núcleo não o cita: o {{DARK}} é que manda lê-lo
+check "etapas: uma por arquivo de docker/swarm/ (menos o dark.md), na pasta prompt/ da rodada" [ "$(ls "$PD")" == "$(ls "$ROOT/docker/swarm" | grep -vx dark.md)" ]
 check "etapas: sem placeholder nem marcador de agente em nenhuma" bash -c '[ -z "$(cat "$1"/*.md | grep -oE "@@/?(CL|CX)@@|[{][{][A-Z_]+[}][}]")" ]' _ "$PD"
 check "etapas: o id da rodada entra no texto da etapa"  grep -qF "~/.oute/swarm/$nr/log" "$PD/acompanhamento.md"
 expected="$(sed -e '/^- @@CX@@/d' -e 's/@@CX@@[^@]*@@\/CX@@//g' -e 's/@@\/\?CL@@//g' "$ROOT/docker/swarm/pagina.md" | sed -e "s|{{ID}}|$nr|g")"
 check "etapas: claude, a etapa é o arquivo sem os trechos do Codex" [ "$(cat "$PD/pagina.md")" == "$expected" ]
 check "etapas: o prompt entregue é só o núcleo, sem texto de etapa" bash -c '! grep -qF "## 1. Triagem" "$1" && grep -qF "## Etapas: o texto é dividido em trechos" "$1"' _ "$FAKE/oute-task.last"
-check "etapas: o núcleo cita cada arquivo de etapa, e cada citado existe" bash -c 'for f in "$2"/*.md; do grep -qF "\`$(basename "$f")\`" "$1" || exit 1; done; for c in $(grep -o "\`[a-z]*\.md\`" "$1" | tr -d "\`" | sort -u); do [ "$c" == swarm.md ] || [ -e "$2/$c" ] || exit 1; done' _ "$ROOT/docker/swarm.md" "$ROOT/docker/swarm"
+check "etapas: o núcleo cita cada arquivo de etapa, e cada citado existe" bash -c 'for f in "$2"/*.md; do [ "$(basename "$f")" == dark.md ] || grep -qF "\`$(basename "$f")\`" "$1" || exit 1; done; for c in $(grep -o "\`[a-z]*\.md\`" "$1" | tr -d "\`" | sort -u); do [ "$c" == swarm.md ] || [ -e "$2/$c" ] || exit 1; done' _ "$ROOT/docker/swarm.md" "$ROOT/docker/swarm"
 check "etapas: a imagem copia docker/swarm/ para o lugar que o oute-swarm lê" grep -qxF 'COPY docker/swarm/ /usr/local/lib/oute/swarm/' "$ROOT/docker/Dockerfile"
 CASE=etapas-codex; round "$CASE"
 opn --max 2 --agent codex
