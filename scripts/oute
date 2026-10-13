@@ -1160,13 +1160,13 @@ approve_one() {
   ctr sh -c 'head -c 65536 "$HOME/outbox/$1.sh"' _ "$id" > "$src" || { echo "não consegui ler $id" >&2; return 1; }
   title="$(sed -n 's/^# titulo: //p' "$src" | head -1 | LC_ALL=C tr -d '\000-\037\177' | cut -c1-120)"; as="$(sed -n 's/^# como: //p' "$src" | head -1)"
   [[ "$as" == root ]] || as=user
+  sha="$( (shasum -a 256 "$src" 2>/dev/null || sha256sum "$src") | cut -c1-12)"   # do arquivo do pedido: o que a página do studio exibe (#735)
   exe="$src"
   if [[ -n "$dark_round" ]]; then
     # #843 (ADR-10): o que roda é o corpo que passou no hash, nunca o arquivo do container inteiro (o cabeçalho é dele)
     dark_gate "$id" "$src" "$dark_round" || return $?
     exe="$src.body"; as=user; approver="human-dark"; title="[dark $dark_round] $title"
   fi
-  sha="$( (shasum -a 256 "$exe" 2>/dev/null || sha256sum "$exe") | cut -c1-12)"
   printf '\n\033[1m━━━ pedido %s ━━━\033[0m\n' "$id"
   printf 'título: %s\n' "$title"
   if [[ "$as" == root ]]; then printf 'roda como: \033[1;31mROOT (sudo)\033[0m no host %s\n' "$OUTE_HOST"
