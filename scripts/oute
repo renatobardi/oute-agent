@@ -1465,6 +1465,7 @@ approve_suggest() {
 # do humano que lê o nome; o `oute-agent` é recusado. O laço só executa pedido cujo corpo (fim de linha final normalizado) é um
 # dos três scripts confirmados. Falhou qualquer conferência: o pedido fica na fila manual.
 DARK_REPO=""; DARK_OWNER=""; DARK_HASHES=""; DARK_WHY=""; DARK_COMMIT=""; DARK_NOTED=""
+DARK_SRC=""; DARK_TIP=""; DARK_CHASHES=""; DARK_MCOMMIT=""; DARK_MPR=""; DARK_MHASHES=""
 # dark_note <id> <motivo>: avisa uma vez por pedido e motivo (o laço olha o mesmo pedido a cada volta)
 dark_note() {
   local id="$1" why="$2" key
@@ -1488,11 +1489,11 @@ hgit() {
   GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 git "$@" </dev/null
   return $?
 }
-# lê, pelo host, a ponta do ramo padrão de $DARK_OWNER/$DARK_REPO no GitHub e põe em DARK_COMMIT o commit e em DARK_HASHES uma
-# linha "<sha256> <chave>" por script do contrato daquele commit. Devolve 1 com o motivo em DARK_WHY (nada é aprovado).
-dark_contract() {
-  local name="$DARK_REPO" owner url src commit toml parsed k p mode h hashes=""
-  DARK_HASHES=""; DARK_COMMIT=""
+# prepara o clone do host de $DARK_OWNER/$DARK_REPO e busca a ponta do ramo padrão (profundidade $1, 1 por padrão): põe o clone
+# em DARK_SRC e o commit da ponta em DARK_TIP. Devolve 1 com o motivo em DARK_WHY.
+dark_fetch_tip() {
+  local depth="${1:-1}" name="$DARK_REPO" owner url src commit
+  DARK_SRC=""; DARK_TIP=""
   owner="$(dark_owner)"
   [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || { DARK_WHY="não sei o dono do remoto deste host (clone do oute-agent sem origin do GitHub)"; return 1; }
   DARK_OWNER="$owner"
@@ -1503,22 +1504,66 @@ dark_contract() {
     mkdir -p "$approve_dir/dark-src"; chmod 700 "$approve_dir/dark-src"
     hgit init -q --bare "$src" >/dev/null 2>&1 || { DARK_WHY="não criei o clone do host em $src"; return 1; }
   fi
-  hgit -C "$src" fetch -q --no-tags --depth 1 "$url" HEAD >/dev/null 2>&1 \
+  hgit -C "$src" fetch -q --no-tags --depth "$depth" "$url" HEAD >/dev/null 2>&1 \
     || { DARK_WHY="git fetch de $owner/$name falhou no host (sem rede ou sem credencial)"; return 1; }
   commit="$(hgit -C "$src" rev-parse --verify -q 'FETCH_HEAD^{commit}' 2>/dev/null)" || commit=""
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { DARK_WHY="não achei a ponta do ramo padrão de $owner/$name"; return 1; }
+  DARK_SRC="$src"; DARK_TIP="$commit"
+  return 0
+}
+# lê o contrato do commit $1 do clone DARK_SRC (já buscado): grava em DARK_CHASHES uma linha "<sha256> <chave> <caminho>" por
+# script. Devolve 1 com o motivo em DARK_WHY (nada é aprovado).
+dark_read_contract() {
+  local commit="$1" src="$DARK_SRC" toml parsed k p mode h hashes=""
+  DARK_CHASHES=""
   toml="$(hgit -C "$src" cat-file blob "$commit:.oute/deploy.toml" 2>/dev/null)" \
-    || { DARK_WHY="sem .oute/deploy.toml na ponta ${commit:0:12} de $owner/$name"; return 1; }
+    || { DARK_WHY="sem .oute/deploy.toml no commit ${commit:0:12} de $DARK_OWNER/$DARK_REPO"; return 1; }
   parsed="$(printf '%s\n' "$toml" | "$ROOT/scripts/deploy-contract" parse 2>&1)" || { DARK_WHY="contrato inválido: $(tr '\n' ';' <<<"$parsed" | cut -c1-200)"; return 1; }
   for k in deploy verify rollback; do
     p="$(sed -n "s/^$k=//p" <<<"$parsed")"
     mode="$(hgit -C "$src" ls-tree "$commit" -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
-    [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob na ponta ${commit:0:12}"; return 1; }
+    [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob no commit ${commit:0:12}"; return 1; }
     h="$(hgit -C "$src" cat-file blob "$commit:$p" 2>/dev/null | norm_body | sha256_stdin)"
-    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) na ponta ${commit:0:12}"; return 1; }
+    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) no commit ${commit:0:12}"; return 1; }
     hashes="$hashes$h $k $p"$'\n'
   done
-  DARK_HASHES="$hashes"; DARK_COMMIT="$commit"
+  DARK_CHASHES="$hashes"
+  return 0
+}
+# âncora: lê, pelo host, a ponta do ramo padrão e põe em DARK_COMMIT o commit (o que o humano confirma) e em DARK_HASHES os
+# hashes do contrato dele (só para mostrar; quem vale na execução é o commit de merge da rodada, dark_round_contract).
+dark_contract() {
+  DARK_HASHES=""; DARK_COMMIT=""
+  dark_fetch_tip 1 || return 1
+  dark_read_contract "$DARK_TIP" || return 1
+  DARK_HASHES="$DARK_CHASHES"; DARK_COMMIT="$DARK_TIP"
+  return 0
+}
+# commit de merge da rodada (critério 2 da #843): $1 = números dos PRs que o container diz ter mergeado (só indicação). O host
+# busca a ponta (100 commits), percorre o primeiro pai da ponta até a âncora DARK_COMMIT (inclusive) e pega o mais novo cujo
+# assunto é `... (#n)` ou `Merge pull request #n ...` com n na lista; lê o contrato do MESMO commit. Põe em DARK_MCOMMIT,
+# DARK_MPR e DARK_MHASHES; devolve 1 com o motivo em DARK_WHY (falha fechada: nenhum hash vale).
+dark_round_contract() {
+  local prs=" $(tr '\n' ' ' <<<"$1") " c subj n hit="" seen_anchor=0
+  local re_squash='\(#([0-9]{1,9})\)$' re_merge='^Merge pull request #([0-9]{1,9}) '
+  DARK_MCOMMIT=""; DARK_MPR=""; DARK_MHASHES=""
+  [[ "$prs" =~ [0-9] ]] || { DARK_WHY="a rodada ainda não tem PR mergeado"; return 1; }
+  dark_fetch_tip 100 || return 1
+  while IFS= read -r c; do
+    [[ "$c" =~ ^[0-9a-f]{40}$ ]] || continue
+    if [[ -z "$hit" ]]; then
+      subj="$(hgit -C "$DARK_SRC" log -1 --format=%s "$c" 2>/dev/null)"
+      n=""
+      if [[ "$subj" =~ $re_squash ]]; then n="${BASH_REMATCH[1]}"
+      elif [[ "$subj" =~ $re_merge ]]; then n="${BASH_REMATCH[1]}"; fi
+      if [[ -n "$n" && "$prs" == *" $n "* ]]; then hit="$c"; DARK_MPR="$n"; fi
+    fi
+    if [[ "$c" == "$DARK_COMMIT" ]]; then seen_anchor=1; break; fi
+  done < <(hgit -C "$DARK_SRC" rev-list --first-parent -n 100 "$DARK_TIP" 2>/dev/null)
+  (( seen_anchor )) || { DARK_WHY="o commit confirmado ${DARK_COMMIT:0:12} não está nos últimos 100 do ramo padrão (reinicie o laço)"; return 1; }
+  [[ -n "$hit" ]] || { DARK_WHY="nenhum commit do ramo padrão depois do confirmado é de um PR da rodada (#$(tr -s ' ' ',' <<<"${prs# }" | sed 's/,$//'))"; return 1; }
+  dark_read_contract "$hit" || return 1
+  DARK_MCOMMIT="$hit"; DARK_MHASHES="$DARK_CHASHES"
   return 0
 }
 # âncora do contrato (ato humano): lê o contrato do repo $1, mostra repo, commit e hashes e pede a confirmação. 0 = confirmado e
@@ -1536,8 +1581,9 @@ dark_anchor() {
   while IFS=' ' read -r h k p; do
     [[ -z "$h" ]] || printf '%-9s %s  %s\n' "$k" "$h" "$p"
   done <<<"$DARK_HASHES"
-  echo "Daqui em diante o laço executa, sem perguntar, o pedido da rodada cujo script tem um destes hashes."
-  echo "Contrato novo exige reiniciar o laço e confirmar de novo."
+  echo "Daqui em diante o laço executa, sem perguntar, o pedido da rodada cujo script tem o hash de um dos três scripts do contrato"
+  echo "no commit de merge de um PR da rodada (o mais novo do ramo padrão depois deste commit); o host o acha sozinho no GitHub."
+  echo "Os hashes acima são só os da ponta de hoje. Troca de repo ou de ponto de partida exige reiniciar o laço e confirmar de novo."
   read -r -p "confirmar este contrato? [s]im / [N]ão: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""
   case "$ans" in
     s|S|sim) return 0 ;;
@@ -1566,10 +1612,12 @@ dark_gate() {
   LC_ALL=C awk 'f {print} /^$/ && !f {f=1}' "$f" | norm_body > "$f.body"
   [[ -s "$f.body" && "$(wc -c < "$f.body" | tr -d ' ')" -gt 1 ]] || { dark_note "$id" "pedido sem corpo"; return 3; }
   [[ -n "$DARK_HASHES" ]] || { dark_note "$id" "contrato ainda não confirmado"; return 3; }
+  # critério 2 (#843): vale o contrato do commit de merge do PR da rodada, não o da âncora
+  [[ -n "$DARK_MHASHES" ]] || { dark_note "$id" "sem contrato no commit de merge da rodada: ${DARK_MWHY:-ainda não lido}"; return 3; }
   h="$(sha256_stdin < "$f.body")"
-  k="$(awk -v h="$h" '$1 == h {print $2; exit}' <<<"$DARK_HASHES")"
-  [[ -n "$k" ]] || { dark_note "$id" "o hash do script (${h:0:12}) não é de nenhum script do contrato"; return 3; }
-  echo "dark: $id é o script '$k' do contrato (sha256 ${h:0:12})"
+  k="$(awk -v h="$h" '$1 == h {print $2; exit}' <<<"$DARK_MHASHES")"
+  [[ -n "$k" ]] || { dark_note "$id" "o hash do script (${h:0:12}) não é de nenhum script do contrato no commit de merge ${DARK_MCOMMIT:0:12} (PR #$DARK_MPR)"; return 3; }
+  echo "dark: $id é o script '$k' do contrato no commit de merge ${DARK_MCOMMIT:0:12} (PR #$DARK_MPR, sha256 ${h:0:12})"
   return 0
 }
 # estado da rodada no container numa ida só: bate o coração (~/.oute/approve/dark.<rodada>.alive, que o dark_prereqs do oute-swarm
@@ -1578,17 +1626,18 @@ dark_state() {
   local round="$1"
   ctr env DARK_N="$round" sh -c 'n="$DARK_N"; r="$HOME/.oute/swarm/$n"; mkdir -p "$HOME/.oute/approve"; date +%s > "$HOME/.oute/approve/dark.$n.alive"
     [ -f "$r/fechada" ] && echo fechada; [ -f "$r/dark.stop" ] && echo parada
-    if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi; true' </dev/null
+    if [ -f "$r/meta" ]; then echo meta; sed -n "s/^repo=/repo=/p; s/^dark=/dark=/p" "$r/meta"; fi
+    sed -n "s/^.* watch \[pr\] PR #\([0-9][0-9]\{0,8\}\) mergeado.*$/pr=\1/p" "$r/log" 2>/dev/null; true' </dev/null
   return $?
 }
-DARK_LOCK=""; DARK_ROUND_NOW=""
+DARK_LOCK=""; DARK_ROUND_NOW=""; DARK_PRS="-"; DARK_MWHY=""
 dark_cleanup() {
   [[ -z "$DARK_LOCK" ]] || rm -rf "${DARK_LOCK:?}"
   if [[ -n "$DARK_ROUND_NOW" ]]; then ctr env DARK_N="$DARK_ROUND_NOW" sh -c 'rm -f "${HOME:?}/.oute/approve/dark.${DARK_N:?}.alive"' </dev/null >/dev/null 2>&1 || true; fi
   return 0
 }
 approve_dark() {
-  local round="${1:-}" want="${2:-}" lock old pid pid2 st repo mname seen="" ids id rc poll="${OUTE_DARK_POLL:-3}" announced="" arc=0
+  local round="${1:-}" want="${2:-}" lock old pid pid2 st repo mname seen="" ids id rc poll="${OUTE_DARK_POLL:-3}" announced="" arc=0 prs mretry=0 mfail=0 h k p
   [[ "$round" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "oute: rodada inválida para --dark: $(printf '%s' "$round" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
   if [[ -n "$want" ]]; then   # repo pelo comando: confere antes de tocar no lock, no container ou na rede
     if [[ ! "$want" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || "$want" == *..* ]]; then echo "oute: repo inválido para --dark: $(printf '%s' "$want" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; fi
@@ -1619,7 +1668,7 @@ approve_dark() {
   DARK_LOCK="$lock"; DARK_ROUND_NOW="$round"
   trap dark_cleanup EXIT
   trap 'dark_cleanup; trap - EXIT; exit 130' INT TERM
-  DARK_REPO=""; DARK_HASHES=""; DARK_COMMIT=""
+  DARK_REPO=""; DARK_HASHES=""; DARK_COMMIT=""; DARK_PRS="-"; DARK_MHASHES=""; DARK_MWHY=""
   if [[ -n "$want" ]]; then
     dark_anchor "$want" || { arc=$?; dark_cleanup; DARK_LOCK=""; DARK_ROUND_NOW=""; trap - EXIT INT TERM; return "$arc"; }
   fi
@@ -1650,6 +1699,20 @@ approve_dark() {
           approve_flush
           approve_snapshot
           ids="$(approve_pending)"
+          # critério 2 (#843): o commit de merge da rodada. O container só indica os PRs; o host acha o commit no GitHub.
+          # Relê quando o conjunto de PRs muda, ou (a cada 30 s) enquanto a leitura anterior falhou; pedido já avisado volta a ser avaliado.
+          prs="$(sed -n 's/^pr=//p' <<<"$st" | grep -E '^[0-9]{1,9}$' | sort -un | tr '\n' ' ')" || prs=""
+          if [[ -n "$ids" ]] && { [[ "$prs" != "$DARK_PRS" ]] || { (( mfail )) && (( SECONDS >= mretry )); }; }; then
+            DARK_PRS="$prs"; seen=""; mfail=0
+            if dark_round_contract "$prs"; then
+              DARK_MWHY=""
+              echo "dark: contrato da rodada lido do commit de merge $DARK_MCOMMIT (PR #$DARK_MPR de ${prs% })"
+              while IFS=' ' read -r h k p; do [[ -z "$h" ]] || printf 'dark:   %-9s %s  %s\n' "$k" "$h" "$p"; done <<<"$DARK_MHASHES"
+            else
+              DARK_MWHY="$DARK_WHY"; DARK_MHASHES=""; DARK_MCOMMIT=""; DARK_MPR=""
+              [[ -z "$prs" ]] || { mfail=1; mretry=$((SECONDS + 30)); }
+            fi
+          fi
           for id in $ids; do
             [[ " $seen " == *" $id "* ]] && continue   # já avisado: o contrato é fixo, não adianta olhar de novo
             rc=0; approve_one "$id" "$round" || rc=$?
