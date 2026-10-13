@@ -1,13 +1,13 @@
-# ADR-10 — Modo dark do oute-swarm (rascunho)
+# ADR-10 — Modo dark do oute-swarm
 
-Status: **rascunho** · 2026-10-12 · issue #839 (fase `intent`; este ADR fecha com o gate de `arch` do Bardi)
+Status: aceito · 2026-10-12 · issue #839 · gate de `arch` do Bardi na conversa de 2026-10-12 ("fecha o ADR e abre o PR"); os três pontos abertos fecharam pela recomendação do autor, abaixo
 
 ## Contexto
 A rodada do `oute-swarm` cobre `plan` → `build` → `qa` → `learn` e para em quatro gates do Bardi: ok da triagem, merge, aplicar no host e escolha das lições (`docker/swarm.md`, "Fases do AI-DLC"). O ADR-07 diz que agente nenhum fecha fase com gate sem o ok explícito. O ADR-01 diz que o container não tem privilégio no host: o agente propõe (`oute-propose`) e o humano roda `oute approve`.
 
 O Bardi quer uma rodada que vai da issue pronta ao deploy verificado sem pergunta (#839). Decisões dele na conversa de 2026-10-12: entrada = issue `ready`; alvo = repos do `/workspace` que não são o `oute-agent`; juiz Opus nos ex-gates, workers pela tabela de fase; ops manual vira pré-requisito da abertura; freios mantidos.
 
-## Decisão (proposta)
+## Decisão
 
 | Tema | Decisão | Motivo |
 |---|---|---|
@@ -26,7 +26,12 @@ O Bardi quer uma rodada que vai da issue pronta ao deploy verificado sem pergunt
 - **Tudo em Opus.** Mais caro e sem ganho medido no `build` (ADR-02, adendo #615 e #409 usam Sonnet no código). Decisão 3 do Bardi.
 - **`oute-agent` como alvo desde já.** Exige continuação no host depois do `oute down/up`. Fica para a 2ª entrega.
 
-## Em aberto (decide no gate de `arch`)
-1. Formato do contrato: `.oute/deploy.toml` ou seção no `AGENTS.md` do repo alvo.
-2. Onde o auto-aprovador roda quando o repo alvo deploya em outro host (o `oute approve` roda no host do container).
-3. Fonte do custo para o `--budget`: agent-studio (ADR-08) ou soma do `oute-quota`.
+## Pontos que o gate fechou (recomendação do autor, aceita pelo Bardi)
+1. **Contrato de deploy:** arquivo `.oute/deploy.toml` no repo alvo, não seção do `AGENTS.md`. Motivo: o auto-aprovador compara hash de script, e um arquivo próprio é lido sem parser de markdown.
+2. **Deploy em outro host:** o auto-aprovador roda sempre no host do container (`oute approve` roda nele, ADR-01). O script `deploy` do contrato embute o `ssh`/`docker context` que o alvo exige, como a regra de scripts de ops do Bardi já pede. O auto-aprovador não ganha acesso novo a host nenhum.
+3. **Fonte do custo do `--budget`:** o agent-studio (`GET /v1/usage`, filtrado pela rodada), credencial de leitura. Motivo: é a fonte de consumo do ADR-08 e já soma as três assinaturas; o `oute-quota` dá só percentual de janela, não USD.
+
+## Consequências
+- Entrega em fatias, cada uma issue própria sob a #839: (a) `--dark` com pré-requisitos e recusas; (b) juiz e autorização gravada na abertura; (c) `oute approve --dark` e contrato de deploy; (d) `--budget`, rollback e `stop`. Nada do dark roda antes de (c) existir.
+- `AGENTS.md` ganha a linha do modo dark na tabela do AI-DLC quando a fatia (a) entrar.
+- Este ADR revê o ADR-07 só para rodada `--dark`: fora dela, os gates seguem como estão.
