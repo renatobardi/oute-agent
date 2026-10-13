@@ -1,0 +1,6 @@
+# Padrões do oute-swarm (#844, ADR-10). Lido pelo `oute-swarm` na abertura; montado só leitura no `agent` em
+# /opt/oute/swarm.toml. Mudança entra com `git pull` + `oute down/up`, sem release.
+
+# Teto de custo da rodada do modo dark, em USD, quando a abertura não traz `--budget`. O spawn recusa (código 9) com o custo da
+# rodada, lido do agent-studio (`GET /v1/usage?rodada=`), nesse valor ou acima. Valor inicial decidido pelo Bardi na #844.
+dark_budget_usd = 1000

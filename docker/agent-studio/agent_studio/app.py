@@ -9,6 +9,8 @@ consulta agregada de uso (`GET /v1/usage`, ADR-08 §9, #203), os alertas do pipe
 - Corpo que não é OTLP JSON = 400 (permanente: reenviar não mudaria nada).
 - Com SurrealDB: o estado derivado é gravado antes do COMMIT do DuckDB; SurrealDB fora = 503 e nada no DuckDB.
 - `GET /v1/usage`: só leitura, credencial de leitura; janela inválida = 400; leitura que falha = 500.
+  Com `rodada=<id>` (#844) devolve só o total da rodada do swarm (`rodada`, `totals`), sem janela = o máximo do ADR-08; id fora de
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` = 400. É o custo que o `--budget` do modo dark confere (`oute-swarm spawn`).
 - `GET /v1/alerts`: só leitura, credencial de leitura; `at` inválido = 400; leitura que falha = 500.
 - `GET /v1/plans` (#746): só leitura, credencial de leitura; plano de cada assinatura e histórico, ou o valor no dia (`day=`, `subscription=`); leitura que falha = 500.
 - `GET /v1/prices`: só leitura, credencial de leitura; preço vigente e histórico por modelo (#339); leitura que falha = 500.
@@ -31,6 +33,7 @@ import gzip
 import json
 import logging
 import os
+import re
 import time
 import zlib
 from datetime import datetime, timezone
@@ -277,8 +280,17 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         if not auth.reader(request):
             tel.warn("unauthorized", "recusado: token ausente ou errado (usage)")
             return JSONResponse({"message": "unauthorized"}, status_code=401)
+        args = request.query_params
+        rodada = args.get("rodada")   # #844: o total de uma rodada do swarm (o custo que o --budget do modo dark confere)
+        if rodada is not None and not _ROUND_ID.fullmatch(rodada):
+            return JSONResponse({"message": "rodada inválida: use o id da rodada (letras, dígitos, ponto, hífen e sublinhado)"},
+                                status_code=400)
         try:
-            from_ns, to_ns = _window(request.query_params)
+            # sem janela na consulta, a rodada vale desde o começo (o máximo do ADR-08), não as últimas 24 h
+            if rodada is not None and not {"from", "to", "hours"} & set(args):
+                from_ns, to_ns = _window({"hours": str(MAX_HOURS)})
+            else:
+                from_ns, to_ns = _window(args)
         except ValueError as e:
             return JSONResponse({"message": str(e)}, status_code=400)
         try:
@@ -286,7 +298,10 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
         except ValueError as e:
             return JSONResponse({"message": str(e)}, status_code=400)
         try:
-            result = await run_in_threadpool(store.usage, from_ns, to_ns, config.prices, zone)
+            if rodada is not None:
+                result = await run_in_threadpool(store.usage_round, from_ns, to_ns, config.prices, rodada, zone)
+            else:
+                result = await run_in_threadpool(store.usage, from_ns, to_ns, config.prices, zone)
         except Exception as e:  # noqa: BLE001 — leitura que falhou: 500, a causa só no stderr
             tel.warn("usage-failed", "consulta de uso falhou, respondi 500: %s", type(e).__name__, level=logging.ERROR)
             detail.exception("consulta de uso falhou")
@@ -443,6 +458,7 @@ def create_app(store, token, surreal=None, tel=None, on_shutdown=None, config=No
 
 
 MAX_HOURS = web.MAX_HOURS
+_ROUND_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")   # o id da rodada do swarm (#844)
 
 
 def _parse_time(value, name):
