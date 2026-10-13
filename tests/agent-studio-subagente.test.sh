@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Testes do subagente visível no agent-studio (#832): a chamada de subagente (span com `query_source_safe` `agent.…` ou `agent_id`; log
-# `api_request` com `query_source` `agent:…`) vira o papel `subagente` no Uso e no `GET /v1/usage` sem mudar o custo, a página da
-# conversa mostra quantas chamadas e quanto custo vieram de subagente, e a página da rodada lista os eventos `oute.swarm.round.subagent`.
+# Testes do subagente visível no agent-studio (#832): a chamada de subagente (span `claude_code.llm_request` com `query_source_safe`
+# `agent.…` ou `agent_id`; log `api_request` com `query_source` `agent:…`) vira o papel `subagente` no Uso e no `GET /v1/usage` sem mudar
+# o custo, a página da conversa mostra quantas chamadas e quanto custo vieram de subagente, e a página da rodada lista os eventos
+# `oute.swarm.round.subagent`. Só o span da chamada ao modelo conta (#860): o `claude_code.tool` de `SubagentHandback` leva `agent_id`
+# e fica no papel da sessão.
 # Sem Docker. Horas fixas de 2026-11-01, com folga dos limites da janela.
 # Uso: tests/agent-studio-subagente.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
@@ -41,6 +43,8 @@ call("c-1", 2, 0.20, {"query_source_safe": "agent.builtin.general-purpose", "age
 call("c-1", 3, 0.30, {"agent_id": "ag-2"})
 db.span(ts(f"{D}10:04:00"), 1, model="claude-sonnet-5", conv="c-1", input=1000, output=100, attrs={"request_id": "rq-log", "query_source_safe": "sdk"})
 db.log(ts(f"{D}10:04:30"), "api_request", {"request_id": "rq-log", "cost_usd": "0.4", "query_source": "agent:builtin:general-purpose"}, conv="c-1")
+# c-1: o handback do subagente (span `claude_code.tool` com o `agent_id` dele, como medido no #860): não é chamada ao modelo
+db.span(ts(f"{D}10:05:00"), 1, name="claude_code.tool", conv="c-1", attrs={"tool_name": "SubagentHandback", "agent_id": "ag-1"})
 # c-2: sem subagente; o log da chamada principal (`query_source` sdk) não a torna subagente
 db.span(ts(f"{D}11:00:00"), 1, model="claude-sonnet-5", conv="c-2", input=1000, output=100, attrs={"request_id": "rq-main", "query_source_safe": "sdk"})
 db.log(ts(f"{D}11:00:30"), "api_request", {"request_id": "rq-main", "cost_usd": "0.5", "query_source": "sdk"}, conv="c-2")
@@ -67,6 +71,11 @@ check("o total de chamadas e de custo não muda com o papel", u["totals"]["calls
 check("by_role_model e by_role_phase também trazem o subagente", any(r["role"] == "subagente" for r in u["by_role_model"])
       and any(r["role"] == "subagente" for r in u["by_role_phase"]))
 check("c) o log com query_source agent: conta como subagente; o de query_source sdk não", usd(roles["standalone"]) == 0.1 + 0.5)
+check("f) o span claude_code.tool de SubagentHandback (com agent_id) não entra no papel subagente: 2 spans, só as chamadas (#860)",
+      roles["subagente"]["spans"] == 2)
+check("f) o handback fica no papel da sessão (standalone: 4 spans — 2 chamadas da c-1, o handback e a da c-2)",
+      roles["standalone"]["spans"] == 4)
+check("f) nenhum span sai da soma: o total de spans fecha com by_role", u["totals"]["spans"] == sum(r["spans"] for r in u["by_role"]) == 6)
 
 c1 = CV.detail(st.con, "c-1", cfg.prices)["conversation"]["subagents"]
 c2 = CV.detail(st.con, "c-2", cfg.prices)["conversation"]["subagents"]
@@ -93,7 +102,7 @@ C=(-H "Authorization: Bearer $STUDIO_TOKEN")
 page() { local path="$1"; studio_page "${C[@]}" "$STUDIO_URL$path"; return $?; }
 
 OUT="$(curl -s "${C[@]}" "$STUDIO_URL/v1/usage?from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z")"
-check "/v1/usage: by_role tem subagente com 3 chamadas e mantém os campos de sempre" jqe '[.by_role[] | select(.role == "subagente")][0] | .calls == 3 and (.cost | has("real_usd")) and has("tokens")' <<<"$OUT"
+check "/v1/usage: by_role tem subagente com 3 chamadas, 2 spans, e mantém os campos de sempre" jqe '[.by_role[] | select(.role == "subagente")][0] | .calls == 3 and .spans == 2 and (.cost | has("real_usd")) and has("tokens")' <<<"$OUT"
 OUT="$(page "/uso?de=2026-11-01T00:00&ate=2026-11-02T00:00")"
 check "/uso: a tabela de papéis mostra a linha subagente" has '<td[^>]*>subagente</td>'
 OUT="$(page "/conversa?id=c-1")"
