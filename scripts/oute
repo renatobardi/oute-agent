@@ -1091,11 +1091,27 @@ doctor() {
   ctr oute-doctor "$@" </dev/null || rc=$?
   return "$rc"
 }
+# marca de execução cujo dono morreu (a sessão caiu no meio do script): o pedido não volta à fila sozinho (rodar de novo um script
+# que parou no meio é pior que esperar), e o aviso diz onde conferir
+approve_running_stale() {
+  local id="$1" pid
+  pid="$(head -1 "$approve_dir/runs/$id.running/pid" 2>/dev/null | tr -cd '0-9')"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "aviso: o pedido $id ficou marcado em execução por um 'oute approve' que não existe mais; confira $approve_dir/runs/$id.out e, se não rodou, remova $approve_dir/runs/$id.running para voltar à fila" >&2
+  fi
+  return 0
+}
 approve_pending() {
   local id
   for id in $(ctr sh -c 'ls -1 "$HOME"/outbox/*.sh 2>/dev/null' | sed 's|.*/||; s|\.sh$||' | grep -E '^[0-9]{8}-[0-9]{6}-[a-z0-9-]+$' || true); do
     # já decidido, resultado ainda não entregue (#210): nunca mostra (nem roda) de novo
-    compgen -G "$approve_dir/runs/$id.*.result" >/dev/null || echo "$id"
+    compgen -G "$approve_dir/runs/$id.*.result" >/dev/null && continue
+    # #843: em execução agora (marca criada antes de rodar): `oute approve --watch` e o laço dark não repetem o pedido
+    if [[ -d "$approve_dir/runs/$id.running" ]]; then
+      approve_running_stale "$id"
+      continue
+    fi
+    echo "$id"
   done
 }
 # #815: a lista dos pedidos que estão na outbox do host agora vai ao agent-studio (oute.canal.snapshot). Sai a cada
@@ -1178,6 +1194,13 @@ approve_one() {
   else read -r -p "executar? [s]im / [N]ão agora / [r]ecusar: " ans <"${OUTE_APPROVE_TTY:-/dev/tty}" || ans=""; fi
   case "$ans" in
     s|S|sim)
+      # marca ANTES de rodar (mkdir é atômico): o segundo `oute approve` que chegar ao mesmo pedido enquanto este roda desiste
+      mkdir "$approve_dir/runs/$id.running" 2>/dev/null || {
+        echo "pedido $id já está em execução em outro 'oute approve'; nada feito" >&2
+        [[ -z "$dark_round" ]] || return 3   # no laço dark, 3 = fica na fila; fora dele não derruba o `oute` (set -e)
+        return 0
+      }
+      printf '%s\n' "$$" > "$approve_dir/runs/$id.running/pid"
       echo "── executando…"
       # set +e: script do agente que falha não pode derrubar o `oute` (pipefail + set -e) antes de devolver o resultado
       set +e
@@ -1197,6 +1220,7 @@ approve_one() {
         [[ -z "$approver" ]] || printf '# aprovador: %s\n' "$approver"
         printf '# sha256: %s\n# duracao: %s s\n# saida: %s bytes\n\n' "$sha" "$dur" "$size"; tail -c 262144 "$out"; } > "$res"
       printf '%s\t%s\t%s\t%s\texec\trc=%s\t%s\n' "$(date -u +%FT%TZ)" "$OUTE_HOST" "$id" "$sha" "$rc" "$title" >> "$approve_dir/approve.log"
+      rm -rf "${approve_dir:?}/runs/${id:?}.running"   # o resultado já está no host (acima): a marca de execução cumpriu o papel
       approve_deliver "$res" || true ;;
     r|R)
       res="$approve_dir/runs/$id.rejected.result"
@@ -1414,18 +1438,20 @@ approve_suggest() {
 }
 # --- modo dark (#843, ADR-10): `oute approve --dark <rodada>`. A fronteira de confiança é o HASH do script, não o texto do agente:
 # o laço só executa pedido cujo corpo é, byte a byte (fim de linha final normalizado), um dos três scripts (deploy, verify,
-# rollback) do contrato `.oute/deploy.toml` no commit da ponta do ramo padrão do `origin` do repo da rodada, lido depois de um
-# `git fetch` e sempre pelo git (`cat-file blob <commit>:<caminho>`), nunca pela árvore de trabalho. Falhou qualquer conferência: o pedido
-# fica na fila manual (nada roda). O estado do repo vive no container (agent-writable); por isso o `origin` precisa ser do mesmo dono do
-# clone do oute-agent deste host (OUTE_DARK_OWNER), e o commit vem do remoto, não de ref local.
-DARK_REPO=""; DARK_HASHES=""; DARK_WHY=""; DARK_CONTRACT_AT=0; DARK_NOTED=""
+# rollback) do contrato `.oute/deploy.toml` na ponta do ramo padrão do repo no GitHub. A fonte é lida FORA do container, pelo
+# host: um clone só do host (`$approve_dir/dark-src/<dono>-<repo>.git`, bare) que o próprio host busca em
+# https://github.com/<dono>/<repo>.git (`git fetch --depth 1 <url> HEAD`: a ponta é a que o GitHub diz, não a de ref do container).
+# Nada do clone do container (refs, config, objetos) entra na conta; do meta da rodada só o NOME do repo (um nível em /workspace),
+# e o dono é o do clone do oute-agent deste host (OUTE_DARK_OWNER). Falhou qualquer conferência: o pedido fica na fila manual.
+DARK_REPO=""; DARK_HASHES=""; DARK_WHY=""; DARK_CONTRACT_AT=0; DARK_COMMIT=""; DARK_NOTED=""
 # dark_note <id> <motivo>: avisa uma vez por pedido e motivo (o laço olha o mesmo pedido a cada volta)
 dark_note() {
   local id="$1" why="$2" key
   key="$id|$why"
   case "$DARK_NOTED" in *"$key"*) return 0 ;; esac
   DARK_NOTED="$DARK_NOTED$key"$'\n'
-  echo "dark: $id fica na fila manual: $why" >&2
+  if [[ "$id" == contrato ]]; then echo "dark: contrato indisponível ($why); nenhum pedido roda agora" >&2
+  else echo "dark: $id fica na fila manual: $why" >&2; fi
   return 0
 }
 sha256_stdin() { (shasum -a 256 2>/dev/null || sha256sum) | cut -d' ' -f1; return 0; }
@@ -1436,44 +1462,46 @@ dark_owner() {
   git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]([^/]+)/.*$#\1#' | head -1
   return 0
 }
-# git do container para ler o contrato (#843, achado da auditoria): binário por caminho absoluto (não o do PATH do agente), sem
-# objetos substituídos (refs/replace mudaria o conteúdo de um commit que o remoto não mudou) e com a configuração do repo que o
-# agente escreve neutralizada (proxy, TLS, fsmonitor, hooks, ssh). Não elimina a confiança no container: ver docs (ADR-10, residual).
-dgit() {
-  ctr env GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 "${OUTE_DARK_GIT:-/usr/bin/git}" \
-    -c http.sslVerify=true -c http.proxy= -c core.gitProxy= -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.sshCommand=ssh \
-    -C "$DARK_REPO" "$@" </dev/null
+# git do clone do host (fonte do contrato): sem terminal interativo e sem pedir senha
+hgit() {
+  GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 git "$@" </dev/null
   return $?
 }
-# resolve o contrato da ponta do ramo padrão do repo $DARK_REPO e põe em DARK_HASHES uma linha "<sha256> <chave>" por script.
-# Devolve 1 com o motivo em DARK_WHY (nada é aprovado). Reaproveita o resultado por OUTE_DARK_CONTRACT_TTL s (padrão 20).
+# põe em DARK_COMMIT a ponta do ramo padrão do GitHub e em DARK_HASHES uma linha "<sha256> <chave>" por script do contrato daquele
+# commit. Com $1 = force busca de novo; sem, reaproveita por OUTE_DARK_CONTRACT_TTL s (padrão 5). Ponta que mudou refaz os hashes;
+# a mesma ponta só renova o prazo. Devolve 1 com o motivo em DARK_WHY (nada é aprovado).
 dark_contract() {
-  local repo="$DARK_REPO" now owner url ref commit toml parsed k p mode h
+  local force="${1:-}" now owner name url src commit toml parsed k p mode h hashes=""
   now="$(date +%s)"
-  if [[ -n "$DARK_HASHES" ]] && (( now - DARK_CONTRACT_AT < ${OUTE_DARK_CONTRACT_TTL:-20} )); then return 0; fi
-  DARK_HASHES=""
+  if [[ -z "$force" && -n "$DARK_HASHES" ]] && (( now - DARK_CONTRACT_AT < ${OUTE_DARK_CONTRACT_TTL:-5} )); then return 0; fi
   owner="$(dark_owner)"
   [[ "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || { DARK_WHY="não sei o dono do remoto deste host (clone do oute-agent sem origin do GitHub)"; return 1; }
-  url="$(dgit remote get-url origin 2>/dev/null)" || { DARK_WHY="repo $repo sem remoto origin"; return 1; }
-  [[ "$url" =~ ^(git@github\.com:|https://github\.com/|ssh://git@github\.com/)$owner/[A-Za-z0-9._-]+(\.git)?/?$ ]] \
-    || { DARK_WHY="origin de $repo não é github.com/$owner/…"; return 1; }
-  dgit fetch -q origin >/dev/null 2>&1 \
-    || { DARK_WHY="git fetch origin falhou em $repo (sem rede ou sem credencial)"; return 1; }
-  ref="$(dgit symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)" || ref=refs/remotes/origin/main
-  commit="$(dgit rev-parse --verify -q "$ref^{commit}" 2>/dev/null)" || commit=""
-  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { DARK_WHY="não achei o commit de $ref em $repo"; return 1; }
-  toml="$(dgit cat-file blob "$commit:.oute/deploy.toml" 2>/dev/null)" \
-    || { DARK_WHY="sem .oute/deploy.toml no commit ${commit:0:12}"; return 1; }
+  name="${DARK_REPO##*/}"
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$name" != *..* ]] || { DARK_WHY="nome de repo inválido no meta da rodada"; return 1; }
+  url="${OUTE_DARK_GIT_BASE:-https://github.com}/$owner/$name.git"
+  src="$approve_dir/dark-src/$owner-$name.git"
+  if [[ ! -d "$src" ]]; then
+    mkdir -p "$approve_dir/dark-src"; chmod 700 "$approve_dir/dark-src"
+    hgit init -q --bare "$src" >/dev/null 2>&1 || { DARK_WHY="não criei o clone do host em $src"; return 1; }
+  fi
+  hgit -C "$src" fetch -q --no-tags --depth 1 "$url" HEAD >/dev/null 2>&1 \
+    || { DARK_WHY="git fetch de $owner/$name falhou no host (sem rede ou sem credencial)"; DARK_HASHES=""; return 1; }
+  commit="$(hgit -C "$src" rev-parse --verify -q 'FETCH_HEAD^{commit}' 2>/dev/null)" || commit=""
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { DARK_WHY="não achei a ponta do ramo padrão de $owner/$name"; DARK_HASHES=""; return 1; }
+  if [[ "$commit" == "$DARK_COMMIT" && -n "$DARK_HASHES" ]]; then DARK_CONTRACT_AT="$now"; return 0; fi   # mesma ponta
+  DARK_HASHES=""; DARK_COMMIT=""
+  toml="$(hgit -C "$src" cat-file blob "$commit:.oute/deploy.toml" 2>/dev/null)" \
+    || { DARK_WHY="sem .oute/deploy.toml na ponta ${commit:0:12} de $owner/$name"; return 1; }
   parsed="$(printf '%s\n' "$toml" | "$ROOT/scripts/deploy-contract" parse 2>&1)" || { DARK_WHY="contrato inválido: $(tr '\n' ';' <<<"$parsed" | cut -c1-200)"; return 1; }
   for k in deploy verify rollback; do
     p="$(sed -n "s/^$k=//p" <<<"$parsed")"
-    mode="$(dgit ls-tree "$commit" -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
-    [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob no commit ${commit:0:12}"; DARK_HASHES=""; return 1; }
-    h="$(dgit cat-file blob "$commit:$p" 2>/dev/null | norm_body | sha256_stdin)"
-    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) no commit ${commit:0:12}"; DARK_HASHES=""; return 1; }
-    DARK_HASHES="$DARK_HASHES$h $k"$'\n'
+    mode="$(hgit -C "$src" ls-tree "$commit" -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
+    [[ "$mode" == "100755 blob" ]] || { DARK_WHY="$k ($p) não é 100755 blob na ponta ${commit:0:12}"; return 1; }
+    h="$(hgit -C "$src" cat-file blob "$commit:$p" 2>/dev/null | norm_body | sha256_stdin)"
+    [[ "$h" =~ ^[0-9a-f]{64}$ ]] || { DARK_WHY="não li $k ($p) na ponta ${commit:0:12}"; return 1; }
+    hashes="$hashes$h $k"$'\n'
   done
-  DARK_CONTRACT_AT="$now"
+  DARK_HASHES="$hashes"; DARK_COMMIT="$commit"; DARK_CONTRACT_AT="$now"
   return 0
 }
 # dark_gate <id> <cópia no host> <rodada>: 0 = pode rodar (grava <cópia>.body com o corpo verificado); 3 = fica na fila;
@@ -1495,7 +1523,7 @@ dark_gate() {
   fi
   LC_ALL=C awk 'f {print} /^$/ && !f {f=1}' "$f" | norm_body > "$f.body"
   [[ -s "$f.body" && "$(wc -c < "$f.body" | tr -d ' ')" -gt 1 ]] || { dark_note "$id" "pedido sem corpo"; return 3; }
-  dark_contract || { dark_note "$id" "$DARK_WHY"; return 4; }
+  dark_contract force || { dark_note "$id" "$DARK_WHY"; return 4; }   # ponta lida de novo logo antes de rodar
   h="$(sha256_stdin < "$f.body")"
   k="$(awk -v h="$h" '$1 == h {print $2; exit}' <<<"$DARK_HASHES")"
   [[ -n "$k" ]] || { dark_note "$id" "o hash do script (${h:0:12}) não é de nenhum script do contrato"; return 3; }
@@ -1513,7 +1541,7 @@ dark_state() {
 }
 DARK_LOCK=""; DARK_ROUND_NOW=""
 dark_cleanup() {
-  [[ -z "$DARK_LOCK" ]] || rm -f "${DARK_LOCK:?}"
+  [[ -z "$DARK_LOCK" ]] || rm -rf "${DARK_LOCK:?}"
   if [[ -n "$DARK_ROUND_NOW" ]]; then ctr env DARK_N="$DARK_ROUND_NOW" sh -c 'rm -f "${HOME:?}/.oute/approve/dark.${DARK_N:?}.alive"' </dev/null >/dev/null 2>&1 || true; fi
   return 0
 }
@@ -1522,18 +1550,21 @@ approve_dark() {
   [[ "$round" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || { echo "oute: rodada inválida para --dark: $(printf '%s' "$round" | LC_ALL=C tr -d '\000-\037\177' | cut -c1-80)" >&2; approve_usage; return 2; }
   docker ps -q -f name="^${AGENT_CTR}\$" -f status=running | grep -q . || die "container $AGENT_CTR não está rodando"
   mkdir -p "$approve_dir"; chmod 700 "$approve_dir"
-  lock="$approve_dir/dark.$round.lock"
-  if [[ -f "$lock" ]]; then
-    pid="$(head -1 "$lock" 2>/dev/null | tr -cd '0-9')"
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      echo "oute: já há um 'oute approve --dark $round' rodando (pid $pid, $lock)" >&2; return 1
+  lock="$approve_dir/dark.$round.lock"   # diretório: mkdir é atômico, dois starts juntos não passam os dois
+  if [[ -d "$lock" ]]; then
+    pid="$(head -1 "$lock/pid" 2>/dev/null | tr -cd '0-9')"
+    if [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null; then
+      echo "oute: já há um 'oute approve --dark $round' rodando (pid ${pid:-?}, $lock)" >&2; return 1
     fi
-    rm -f "${lock:?}"   # lock de um laço que morreu
+    # lock de um laço que morreu: renomear é atômico, só um dos starts concorrentes leva o velho embora
+    if mv "$lock" "$lock.velho.$$" 2>/dev/null; then rm -rf "${lock:?}.velho.$$"; fi
+  elif [[ -e "$lock" ]]; then
+    rm -f "${lock:?}"   # lock em arquivo, de antes de ser diretório
   fi
-  # noclobber: dois starts juntos não passam os dois
-  if ! ( set -o noclobber; printf '%s\n' "$$" > "$lock" ) 2>/dev/null; then
+  if ! mkdir "$lock" 2>/dev/null; then
     echo "oute: outro 'oute approve --dark $round' acabou de começar ($lock)" >&2; return 1
   fi
+  printf '%s\n' "$$" > "$lock/pid"
   DARK_LOCK="$lock"; DARK_ROUND_NOW="$round"
   trap dark_cleanup EXIT
   trap 'dark_cleanup; trap - EXIT; exit 130' INT TERM
@@ -1556,12 +1587,14 @@ approve_dark() {
         approve_flush
         approve_snapshot
         ids="$(approve_pending)"
+        # a ponta do contrato entra na marca do pedido visto: contrato que muda reabre os pedidos que estavam na fila
+        if [[ -n "$ids" ]] && ! dark_contract; then dark_note contrato "$DARK_WHY"; ids=""; fi
         for id in $ids; do
-          [[ " $seen " == *" $id "* ]] && continue   # decidido ou já avisado: não repete a cada volta
+          [[ " $seen " == *" $id@$DARK_COMMIT "* ]] && continue   # decidido ou já avisado nesta ponta: não repete a cada volta
           rc=0; approve_one "$id" "$round" || rc=$?
           trap dark_cleanup EXIT   # o approve_one mexe no trap de EXIT
           # 3 = ficou na fila (o motivo saiu em stderr, uma vez); outro código = erro de leitura: tenta de novo na próxima volta
-          if (( rc == 3 )); then seen="$seen $id"; fi
+          if (( rc == 3 )); then seen="$seen $id@$DARK_COMMIT"; fi
         done
       else
         echo "dark: o meta da rodada $round traz um repo fora de ${OUTE_DARK_WORKSPACE:-/workspace}/<nome>; nada executado" >&2

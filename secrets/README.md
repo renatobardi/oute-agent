@@ -38,9 +38,9 @@ Transição: sem a pasta `oute-services`, o `oute up` sobe, tira do `agent.env` 
 ### Segredo no pedido e no contrato de deploy do modo dark (#843, ADR-10)
 
 O `oute approve --dark` executa sem humano o script do contrato `.oute/deploy.toml` do repo alvo (`deploy`, `verify`, `rollback`, `host`). A regra: **nenhum valor de segredo no contrato, nos três scripts nem no pedido**; o script lê do ambiente do host ou do vault (como já vale para qualquer script do canal). `oute deploy-contract check <repo-path>` (e o `dark_prereqs` do `oute-swarm --dark`) recusa o contrato quando uma linha:
-- tem prefixo de token conhecido (`ghp_`, `github_pat_`, `xox…-`, `sk-…`, `AKIA…`, `eyJ…`, bloco `PRIVATE KEY`);
-- atribui literal longo a variável de nome `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*` ou `*PRIVATE_KEY*` (`${VAR}` e `$(…)` passam);
-- traz, depois de `=`, uma palavra de 24 ou mais caracteres com maiúscula, minúscula e dígito.
+- tem prefixo de token conhecido (`ghp_`, `github_pat_`, `xox…-`, `sk-…`, `sk_live_`, `npm_`, `hf_`, `shpat_`, `SG.`, `AKIA…`, `eyJ…`, bloco `PRIVATE KEY`), `Bearer <token>` ou usuário:senha em URL (`https://u:s@host`);
+- atribui literal longo a variável de nome com `TOKEN`, `SECRET`, `PASSWORD`, `PASS`, `KEY`, `AUTH` ou `CRED` (`${VAR}`, `$(…)` e caminho começando em `/` passam);
+- traz, depois de `=`, uma palavra de 24 ou mais caracteres com maiúscula, minúscula e dígito (base64 com `/` e `+` inclusive), ou 32 ou mais caracteres hexadecimais (um commit de 40 hex também cai aqui: passe-o pelo ambiente).
 
 É heurística por texto: pega o descuido, não o segredo disfarçado. A mensagem de recusa nunca repete o valor. O contrato só aceita as quatro chaves, para não sobrar campo onde um valor se esconda.
 

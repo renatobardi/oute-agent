@@ -2,7 +2,8 @@
 # Testes do `oute approve --dark <rodada>` (#843, ADR-10): o laço do host que executa, sem perguntar, só o pedido da rodada cujo
 # script tem o hash de um dos três scripts do contrato `.oute/deploy.toml` na ponta do ramo padrão do origin.
 # Bash puro, sem Docker nem rede: `docker` falso (o container "existe" enquanto $F_UP existir; `docker exec` roda o comando
-# local com HOME=$F_CTR_HOME) e o remoto é um repo bare local, que o `git fetch` enxerga no lugar do GitHub (só durante o fetch).
+# local com HOME=$F_CTR_HOME) e o remoto é um repo bare local, que o `git fetch` do HOST enxerga no lugar do GitHub (insteadOf).
+# O contrato é lido pelo host, fora do container (ajuste 1 da auditoria): o clone do "container" ($WORK) não entra na conta.
 # Uso: tests/oute-approve-dark.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 # credenciais reais nunca chegam ao scripts/oute daqui
@@ -25,11 +26,6 @@ case "$1" in
   ps)   up && echo abc123; exit 0 ;;
   exec) shift; [[ "$1" == -i ]] && shift; shift
         up || { echo "Error response from daemon: No such container: oute-agent" >&2; exit 1; }
-        for a in "$@"; do
-          if [[ "$a" == fetch ]]; then   # o "GitHub" do teste: o repo bare local, só para o fetch
-            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$F_REMOTE.insteadOf" GIT_CONFIG_VALUE_0="https://github.com/testowner/proj.git"
-          fi
-        done
         HOME="$F_CTR_HOME" exec "$@" ;;
   *)    exit 9 ;;
 esac
@@ -42,16 +38,18 @@ chmod +x "$BIN/docker" "$BIN/oute-emit"
 
 export PATH="$BIN:$PATH" OUTE_HOST=teste OUTE_INSTANCE=teste
 export F_UP="$TMP/up" F_CTR_HOME="$TMP/ctr" F_EMITS="$TMP/emits" F_RUNS="$TMP/runs" F_REMOTE="$TMP/remote.git"
+# o "GitHub" do teste: o repo bare local (vale para o git do host; o do container nem é chamado)
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$F_REMOTE.insteadOf" GIT_CONFIG_VALUE_0="https://github.com/testowner/proj.git"
 export OUTE_DARK_WORKSPACE="$TMP" OUTE_DARK_OWNER=testowner OUTE_DARK_POLL=0.2 OUTE_DARK_CONTRACT_TTL=0
 G=(git -c user.email=t@t -c user.name=t)
-WORK="$TMP/work"   # o repo "do container": /workspace/proj
+WORK="$TMP/proj"   # o repo "do container": /workspace/proj
 
 # script do contrato: grava uma linha em $F_RUNS com o nome dele
 script_of() { local n="$1"; printf '#!/usr/bin/env bash\nset -euo pipefail\necho "%s" >> "$F_RUNS"\necho "feito %s"\n' "$n" "$n"; return 0; }
 # contrato novo no remoto e clone do container; $1 = o que o deploy.sh imprime (muda o hash)
 mk_repo() {
   local seed="$TMP/seed" deploy="${1:-deploy}"
-  rm -rf "${TMP:?}/seed" "${TMP:?}/remote.git" "${TMP:?}/work"
+  rm -rf "${TMP:?}/seed" "${TMP:?}/remote.git" "${TMP:?}/proj"
   git init -q "$seed" -b main && mkdir -p "$seed/.oute"
   script_of "$deploy" > "$seed/.oute/deploy.sh"; script_of verify > "$seed/.oute/verify.sh"; script_of rollback > "$seed/.oute/rollback.sh"
   chmod 755 "$seed"/.oute/*.sh
@@ -123,7 +121,8 @@ check "hash igual: pedido movido para outbox/done"           test -f "$F_CTR_HOM
 check "hash igual: approve.log registra exec rc=0 com a rodada no título" grep -q "$id.*exec.rc=0.*\[dark swarm-t1\]" "$TMP/host/.oute/approve/approve.log"
 check "hash igual: evento canal emitido"                     grep -qx "canal $id" "$F_EMITS"
 check "hash igual: o coração da rodada está no container"    test -s "$F_CTR_HOME/.oute/approve/dark.swarm-t1.alive"
-check "hash igual: o lock do host tem o pid do laço"         grep -qx "$PID" "$TMP/host/.oute/approve/dark.swarm-t1.lock"
+check "hash igual: o lock do host é um diretório com o pid do laço" grep -qx "$PID" "$TMP/host/.oute/approve/dark.swarm-t1.lock/pid"
+check "hash igual: a marca de execução saiu depois do resultado"  test ! -e "$runs_dir/$id.running"
 # --- 4. lock duplo: a segunda recusa, a primeira segue
 HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark swarm-t1 > "$TMP/dark2.log" 2>&1; rc2=$?
 check "lock duplo: a segunda recusa com código 1"            test "$rc2" = 1
@@ -197,15 +196,36 @@ check "commit só local: não passa"                           grep -q "$id fica
 check "commit só local: nada rodou"                          test "$(ran evil)" = 0
 stop_ swarm-t8b
 
-# --- 9. origin de outro dono: fica na fila
-mk_repo; reset; mk_round swarm-t9; id=20261012-010109-outro-dono
-git -C "$WORK" remote set-url origin "https://github.com/intruso/proj.git"
-propose "$id" swarm-t9 <<<"$D_OK"
+# --- 9. o clone do container não é fonte: refs e config plantados nele não mudam o contrato lido pelo host (ajuste 1 da auditoria)
+mk_repo; reset; mk_round swarm-t9; id=20261012-010109-clone-plantado
+git -C "$WORK" checkout -q -b plantado
+script_of evil > "$WORK/.oute/deploy.sh"; "${G[@]}" -C "$WORK" commit -qam "contrato plantado"
+mkdir -p "$WORK/.git/refs/remotes/origin"; git -C "$WORK" symbolic-ref refs/remotes/origin/HEAD refs/heads/plantado
+git -C "$WORK" update-ref refs/remotes/origin/main "$(git -C "$WORK" rev-parse plantado)"
+git -C "$WORK" config remote.origin.fetch '+refs/heads/plantado:refs/remotes/origin/main'
+git -C "$WORK" config remote.origin.url "$WORK"
+propose "$id" swarm-t9 <<<"$(script_of evil)"
 start swarm-t9
 until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
-check "outro dono: o motivo cita o dono esperado"            grep -q "origin de $WORK não é github.com/testowner/" "$TMP/dark.log"
-check "outro dono: nada rodou"                               test "$(ran deploy)" = 0
+check "clone plantado (origin/HEAD, fetch, url): o script plantado não passa" grep -q "$id fica na fila manual: o hash do script" "$TMP/dark.log"
+check "clone plantado: nada rodou"                           test "$(ran evil)" = 0
 stop_ swarm-t9
+# ... e o contrato de verdade, do remoto, segue valendo com o mesmo clone plantado
+reset; mk_round swarm-t9b; id=20261012-010109-clone-plantado-ok
+propose "$id" swarm-t9b <<<"$D_OK"
+start swarm-t9b
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "clone plantado: o script do remoto roda"              test "$(ran deploy)" = 1
+stop_ swarm-t9b
+# dono sem esse repo: o fetch do host falha e nada roda
+mk_repo; reset; mk_round swarm-t9c; id=20261012-010109-outro-dono
+propose "$id" swarm-t9c <<<"$D_OK"
+HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" OUTE_DARK_OWNER=intruso "$OUTE" approve --dark swarm-t9c > "$TMP/dark.log" 2>&1 &
+PID=$!; LOOPS="$LOOPS $PID"
+until_ 15 grep -q "contrato indisponível" "$TMP/dark.log"
+check "dono sem o repo: fetch do host falha e avisa"         grep -q "git fetch de intruso/proj falhou" "$TMP/dark.log"
+check "dono sem o repo: nada rodou"                          test "$(ran deploy)" = 0
+stop_ swarm-t9c
 
 # --- 10. rodada aberta sem --dark: o laço não executa nada
 mk_repo; reset; mk_round swarm-t10 nodark; id=20261012-010110-sem-dark
@@ -235,10 +255,10 @@ check "dark.stop: avisa que parou"                           grep -q 'rodada swa
 
 # --- 13. lock velho (pid morto) não trava a rodada
 mk_repo; reset; mk_round swarm-t13
-mkdir -p "$TMP/host/.oute/approve"; echo 999999 > "$TMP/host/.oute/approve/dark.swarm-t13.lock"
+mkdir -p "$TMP/host/.oute/approve/dark.swarm-t13.lock"; echo 999999 > "$TMP/host/.oute/approve/dark.swarm-t13.lock/pid"
 start swarm-t13
 until_ 10 test -s "$F_CTR_HOME/.oute/approve/dark.swarm-t13.alive"
-check "lock de pid morto: o laço assume"                     grep -qx "$PID" "$TMP/host/.oute/approve/dark.swarm-t13.lock"
+check "lock de pid morto: o laço assume"                     grep -qx "$PID" "$TMP/host/.oute/approve/dark.swarm-t13.lock/pid"
 stop_ swarm-t13
 
 # --- 13b. repo do meta fora de /workspace/<nome>: o laço não executa nada
@@ -261,6 +281,54 @@ start swarm-t13c
 until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
 check "refs/replace: o script trocado por replace não passa"  test "$(ran evil)" = 0
 stop_ swarm-t13c
+
+# publica no remoto um deploy.sh novo (o contrato muda) e devolve
+push_contract() {
+  local body="$1"
+  printf '%s\n' "$body" > "$TMP/seed/.oute/deploy.sh"
+  "${G[@]}" -C "$TMP/seed" commit -qam "contrato novo" && git -C "$TMP/seed" push -q "$F_REMOTE" main
+  return 0
+}
+# --- 15. a ponta do contrato muda com o laço de pé (ajuste 4): o pedido que estava na fila passa, sem reiniciar o laço
+mk_repo; reset; mk_round swarm-t15; id=20261012-010115-ponta-muda
+NOVO="$(script_of deploy-v2)"
+propose "$id" swarm-t15 <<<"$NOVO"
+start swarm-t15
+until_ 15 grep -q "fica na fila manual" "$TMP/dark.log"
+check "ponta muda: antes, o hash novo fica na fila"          test "$(ran deploy-v2)" = 0
+push_contract "$NOVO"
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "ponta muda: depois do push o mesmo pedido roda"       test "$(ran deploy-v2)" = 1
+check "ponta muda: rodou uma vez só"                         test "$(ran deploy-v2)" = 1
+# ... e o contrário: o contrato volta atrás e o pedido seguinte com o hash velho deixa de passar
+id2=20261012-010116-ponta-volta
+push_contract "$(script_of deploy)"
+propose "$id2" swarm-t15 <<<"$NOVO"
+until_ 15 grep -q "$id2 fica na fila manual" "$TMP/dark.log"
+check "ponta muda de novo: o hash que saiu do contrato não passa" test "$(ran deploy-v2)" = 1
+stop_ swarm-t15
+
+# --- 16. pedido marcado em execução antes de rodar (ajuste 5): outro `oute approve` não repete, o laço não repete
+mk_repo; reset; mk_round swarm-t16; id=20261012-010117-lento
+LENTO="$(script_of lento; echo 'sleep 3')"
+push_contract "$LENTO"
+propose "$id" swarm-t16 <<<"$LENTO"
+start swarm-t16
+until_ 15 test -d "$runs_dir/$id.running"
+check "em execução: a marca existe com o pid do laço"        grep -qx "$PID" "$runs_dir/$id.running/pid"
+out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve "$id" 2>&1)"
+check "em execução: o approve avulso não vê o pedido pendente" grep -q "não está pendente" <<<"$out"
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "em execução: rodou uma vez só"                        test "$(ran lento)" = 1
+check "em execução: a marca saiu com o resultado"            until_ 5 test ! -e "$runs_dir/$id.running"
+stop_ swarm-t16
+# marca de um processo que morreu: o pedido não volta à fila e o aviso diz onde olhar
+reset; mk_round swarm-t16b; id=20261012-010118-marca-velha
+mkdir -p "$runs_dir/$id.running"; echo 999999 > "$runs_dir/$id.running/pid"
+propose "$id" swarm-t16b <<<"$LENTO"
+out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve 2>&1)"
+check "marca velha: não executa e avisa onde conferir"       bash -c '! grep -q "executando" <<<"$1" && grep -q "ficou marcado em execução" <<<"$1"' _ "$out"
+check "marca velha: nada rodou"                              test "$(ran lento)" = 0
 
 # --- 14. argumento ruim: sai antes de qualquer docker
 out="$(HOME="$TMP/host" OUTE_HOME="$TMP/host/.oute" "$OUTE" approve --dark 'x;rm' 2>&1)"; rc=$?

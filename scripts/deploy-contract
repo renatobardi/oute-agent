@@ -17,10 +17,13 @@
 # Roda no bash 3.2 do macOS e no do container: sem mapfile, timeout nem ${var,,}.
 set -euo pipefail
 
+MSG_SEGREDO="parece segredo (valor não mostrado); segredo vem do ambiente do host ou do vault, nunca do contrato"
 # prefixos de token conhecidos e blocos de chave; a mensagem nunca repete o valor
-SECRET_PREFIX='(ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|xox[abprs]-|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{8}|AIza[0-9A-Za-z_-]{10}|eyJ[A-Za-z0-9_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY)'
+SECRET_PREFIX='(ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|xox[abprs]-|sk-[A-Za-z0-9]|sk_(live|test)_|rk_(live|test)_|npm_[A-Za-z0-9]{10}|hf_[A-Za-z0-9]{10}|shp(at|ss|ca|pa)_[A-Za-z0-9]|SG\.[A-Za-z0-9_-]{10}|AKIA[0-9A-Z]{8}|AIza[0-9A-Za-z_-]{10}|eyJ[A-Za-z0-9_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY)'
+# `Bearer <token>` e credencial na URL (`https://usuario:senha@host`)
+SECRET_AUTH='([Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{16,}|://[^/[:space:]@:]+:[^/[:space:]@]+@)'
 # variável de nome sensível recebendo literal longo (`TOKEN=abc…`, `export API_KEY="abc…"`); `$(…)`, `${…}` e `$VAR` não casam
-SECRET_ASSIGN='(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9+_.=-]{16,}'
+SECRET_ASSIGN='(TOKEN|SECRET|PASSWORD|PASSWD|PASS|API_?KEY|PRIVATE_?KEY|KEY|AUTH|CRED(ENTIAL)?S?)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9+_.=-][A-Za-z0-9+/_.=-]{15,}'
 
 # `chave = "valor"` com comentário opcional depois (em variável: o bash 3.2 e o 4+ tratam a aspa do padrão igual)
 LINE_RE='^[[:space:]]*([a-z]+)[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*(#.*)?$'
@@ -29,14 +32,17 @@ LINE_RE='^[[:space:]]*([a-z]+)[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*(#.*
 looks_secret() {
   local text="$1" line
   grep -Eq "$SECRET_PREFIX" <<<"$text" && return 0
+  grep -Eq "$SECRET_AUTH" <<<"$text" && return 0
   grep -Eiq "$SECRET_ASSIGN" <<<"$text" && return 0
-  # valor entre aspas longo, de uma palavra só, com maiúscula, minúscula e dígito (cara de token); caminho e nome de host não casam
+  # valor longo de uma palavra só, depois de `=`: com maiúscula, minúscula e dígito (cara de token, base64 com `/` e `+` inclusive) ou
+  # só hexadecimal de 32 ou mais (token hex); caminho, nome de host e `sha256:<hex>` (tem `:`) não casam
   while IFS= read -r line; do
     case "$line" in *=*) ;; *) continue ;; esac
     line="${line#*=}"
     line="$(printf '%s' "$line" | tr -d ' "'"'")"
-    [[ "$line" =~ ^[A-Za-z0-9+_=-]{24,}$ ]] || continue
+    [[ "$line" =~ ^[A-Za-z0-9+/_=-]{24,}$ ]] || continue
     [[ "$line" =~ [A-Z] && "$line" =~ [a-z] && "$line" =~ [0-9] ]] && return 0
+    [[ "$line" =~ ^[0-9a-fA-F]{32,}$ ]] && return 0
   done <<<"$text"
   return 1
 }
@@ -53,7 +59,7 @@ cmd_parse() {
   local text n=0 line key val deploy="" verify="" rollback="" host="" rc=0
   text="$(cat)"
   if looks_secret "$text"; then
-    echo "contrato: alguma linha parece segredo (valor não mostrado); segredo vem do ambiente do host ou do vault, nunca do contrato" >&2
+    echo "contrato: alguma linha $MSG_SEGREDO" >&2
     return 1
   fi
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -73,7 +79,7 @@ cmd_parse() {
   done <<<"$text"
   local k v
   for k in deploy verify rollback; do
-    eval "v=\${$k}"
+    v="${!k}"
     if [[ -z "$v" ]]; then echo "contrato: falta '$k'" >&2; rc=1
     elif ! safe_path "$v"; then echo "contrato: '$k' não é um caminho relativo seguro do repo (sem '..', sem '/' na frente)" >&2; rc=1; fi
   done
@@ -88,7 +94,7 @@ cmd_check() {
   local repo="${1:-}" toml parsed k p mode rc=0 body
   [[ -n "$repo" && -d "$repo" ]] || { echo "contrato: repo '$repo' não existe" >&2; return 1; }
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || { echo "contrato: '$repo' não é um repo git" >&2; return 1; }
-  toml="$(git -C "$repo" show "HEAD:.oute/deploy.toml" 2>/dev/null)" \
+  toml="$(git -C "$repo" cat-file blob "HEAD:.oute/deploy.toml" 2>/dev/null)" \
     || { echo "contrato: .oute/deploy.toml não existe no HEAD de $repo (commitado)" >&2; return 1; }
   parsed="$(printf '%s\n' "$toml" | cmd_parse)" || return 1
   for k in deploy verify rollback; do
@@ -96,11 +102,13 @@ cmd_check() {
     mode="$(git -C "$repo" ls-tree HEAD -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
     if [[ -z "$mode" ]]; then echo "contrato: '$k' ($p) não existe no HEAD" >&2; rc=1; continue; fi
     if [[ "$mode" != "100755 blob" ]]; then echo "contrato: '$k' ($p) tem modo/tipo '$mode'; precisa de 100755 blob" >&2; rc=1; continue; fi
-    body="$(git -C "$repo" show "HEAD:$p" 2>/dev/null)" || { echo "contrato: não consegui ler '$k' ($p)" >&2; rc=1; continue; }
-    if looks_secret "$body"; then echo "contrato: '$k' ($p) tem linha que parece segredo (valor não mostrado)" >&2; rc=1; fi
+    body="$(git -C "$repo" cat-file blob "HEAD:$p" 2>/dev/null)" || { echo "contrato: não consegui ler '$k' ($p)" >&2; rc=1; continue; }
+    if looks_secret "$body"; then echo "contrato: '$k' ($p) tem linha que $MSG_SEGREDO" >&2; rc=1; fi
   done
   (( rc == 0 )) || return 1
   printf 'contrato ok: %s\n' "$(tr '\n' ' ' <<<"$parsed" | sed 's/ *$//')"
+  # o laço do host (`oute approve --dark`) não lê este clone: lê a ponta do ramo padrão no GitHub, buscada pelo host
+  echo "aviso: conferi só o HEAD de $repo (clone local); o laço do host lê a ponta do ramo padrão no GitHub, depois do merge" >&2
   return 0
 }
 
