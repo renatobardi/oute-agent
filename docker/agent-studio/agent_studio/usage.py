@@ -12,7 +12,7 @@ LLM do ai-memory). Nunca `desconhecida` nem `interativa`; a chamada nunca some d
 """
 from . import phase as phase_mod, rateio, repo as repo_mod, subscription as sub_mod, tz as tz_mod
 from .tabela import Col, Table, usage_cols
-from .cost import (LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
+from .cost import (CLAUDE_CALL_SPAN, LOG_SEVERITY_ERROR, MODEL_CALL_PARAMS, MODEL_CALL_SQL, SPAN_STATUS_ERROR,
                    SUBSCRIPTION_EXPR, SUBSCRIPTION_SQL, estimate_cost_usd, window_spans_with_cost)
 
 DAY_NS = 86_400_000_000_000
@@ -91,10 +91,12 @@ _SESSION_INFO = (
 # e sem sessão de worker: o mesmo sinal do `phase.py`; vale antes da sessão, porque a chamada pode levar o `oute.task.id` do dispatcher
 _REVIEWER = ("json_extract_string(t.resource_attributes, '$.\"oute.swarm.step\"') IS NOT NULL AND t.oute_swarm_round IS NOT NULL "
              "AND json_extract_string(t.resource_attributes, '$.\"oute.swarm.session\"') IS NULL")
-# a chamada de subagente (#832): o span leva `query_source_safe` `agent.…` ou `agent_id` (a da sessão principal, nenhum dos dois); o log
-# `api_request`, `query_source` `agent:…`. Vale antes de qualquer outro papel; a conta de custo e o rateio não mudam
-_SUB_SPAN = ("(COALESCE(json_extract_string(t.attributes, '$.query_source_safe'), '') LIKE 'agent.%' "
-             "OR json_extract_string(t.attributes, '$.agent_id') IS NOT NULL)")
+# a chamada de subagente (#832): o span `claude_code.llm_request` leva `query_source_safe` `agent.…` ou `agent_id` (a da sessão
+# principal, nenhum dos dois); o log `api_request`, `query_source` `agent:…`. O nome do span faz parte da regra (#860): só a chamada
+# ao modelo conta — o `claude_code.tool` de `SubagentHandback` também leva `agent_id` e não é chamada. Vale antes de qualquer outro
+# papel; a conta de custo e o rateio não mudam
+_SUB_SPAN = (f"(t.name = '{CLAUDE_CALL_SPAN}' AND (COALESCE(json_extract_string(t.attributes, '$.query_source_safe'), '') LIKE 'agent.%' "
+             "OR json_extract_string(t.attributes, '$.agent_id') IS NOT NULL))")
 _SUB_LOG = "COALESCE(json_extract_string(t.attributes, '$.query_source'), '') LIKE 'agent:%'"
 _SUB_COST = f"({_SUB_SPAN} OR COALESCE(t.agent_log, false))"  # subconsulta de `spans_with_cost`: soma o log de mesmo `request_id`
 _SCOPE = ("(SELECT t.*, CASE WHEN @SUB@ THEN 'subagente' "
