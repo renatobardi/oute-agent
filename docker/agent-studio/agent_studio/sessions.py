@@ -189,6 +189,20 @@ def _phase(raw):
     return phase if isinstance(phase, str) and phase else None
 
 
+_ABERTURAS = ("aba", "terminal", "sem-tela")
+
+
+def _abertura(raw):
+    """Como a sessão abriu (#825: `oute.task.abertura` no `oute.task.opened`/`reopened` — `aba` do herdr,
+    `terminal` de quem chamou, `sem-tela`); `None` se o evento não traz um valor conhecido."""
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    abertura = value.get("oute.task.abertura") if isinstance(value, dict) else None
+    return abertura if abertura in _ABERTURAS else None
+
+
 def _reserve(raw):
     """A reserva do `oute.task.opened` (#598, #621): de qual assinatura para qual a sessão abriu e por quê
     (`oute.task.reserve_from`, `oute.task.agent`, `oute.task.reserve`); `None` se o evento não traz reserva."""
@@ -217,13 +231,15 @@ def detail(con, session_id, prices, event_limit=EVENT_LIMIT, paid=False, tz=tz_m
         [session_id, event_limit + 1]))
     truncated = len(events) > event_limit
     events = events[:event_limit]
-    phase, reserve = None, None
+    phase, reserve, abertura = None, None, None
     for e in events:
         phase = phase or _phase(e["attributes"])
+        abertura = abertura or _abertura(e["attributes"])
         if reserve is None and e["event_name"] == "oute.task.opened":
             reserve = _reserve(e["attributes"])
         e["attributes"] = _pretty(e["attributes"])
-    return {"session": sessions[0], "events": events, "events_truncated": truncated, "phase": phase, "reserve": reserve}
+    return {"session": sessions[0], "events": events, "events_truncated": truncated,
+            "phase": phase, "reserve": reserve, "abertura": abertura}
 
 
 def with_state(surreal, sessions):
