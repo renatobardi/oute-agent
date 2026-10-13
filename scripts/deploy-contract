@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# deploy-contract — o contrato de deploy do repo alvo do modo dark (ADR-10, #843): `.oute/deploy.toml`.
+#
+#   deploy-contract check <repo-path>   valida o contrato do HEAD do repo: os três caminhos (deploy, verify, rollback) existem no
+#                                       commit com modo 100755, `host` preenchido, e nenhuma linha parece segredo. Sai 0 (ok) ou 1
+#                                       (um problema por linha em stderr). Aparece como `oute deploy-contract check` no host e como
+#                                       `oute-deploy-contract check` no container (o `dark_prereqs` do oute-swarm chama este).
+#   deploy-contract parse               lê o contrato na entrada padrão e imprime `deploy=…`, `verify=…`, `rollback=…`, `host=…`
+#                                       (o `oute approve --dark` lê o contrato do commit pelo git e passa por aqui). Sai 1 se inválido.
+#
+# Formato (só estas quatro chaves, cada uma uma vez, valor entre aspas duplas; `#` abre comentário):
+#   deploy   = ".oute/deploy.sh"     caminho de script no repo (sem `..`, sem `/` na frente)
+#   verify   = ".oute/verify.sh"
+#   rollback = ".oute/rollback.sh"
+#   host     = "oute-server"         onde roda (rótulo; deploy em outro host: o script embute o ssh)
+# Segredo nenhum no contrato nem nos scripts (secrets/README.md): valor que parece token é recusado sem ser mostrado.
+# Roda no bash 3.2 do macOS e no do container: sem mapfile, timeout nem ${var,,}.
+set -euo pipefail
+
+# prefixos de token conhecidos e blocos de chave; a mensagem nunca repete o valor
+SECRET_PREFIX='(ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|glpat-|xox[abprs]-|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{8}|AIza[0-9A-Za-z_-]{10}|eyJ[A-Za-z0-9_-]{10}|-----BEGIN [A-Z ]*PRIVATE KEY)'
+# variável de nome sensível recebendo literal longo (`TOKEN=abc…`, `export API_KEY="abc…"`); `$(…)`, `${…}` e `$VAR` não casam
+SECRET_ASSIGN='(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9+_.=-]{16,}'
+
+# `chave = "valor"` com comentário opcional depois (em variável: o bash 3.2 e o 4+ tratam a aspa do padrão igual)
+LINE_RE='^[[:space:]]*([a-z]+)[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*(#.*)?$'
+
+# $1 = texto (arquivo); devolve 0 se alguma linha parece segredo
+looks_secret() {
+  local text="$1" line
+  grep -Eq "$SECRET_PREFIX" <<<"$text" && return 0
+  grep -Eiq "$SECRET_ASSIGN" <<<"$text" && return 0
+  # valor entre aspas longo, de uma palavra só, com maiúscula, minúscula e dígito (cara de token); caminho e nome de host não casam
+  while IFS= read -r line; do
+    case "$line" in *=*) ;; *) continue ;; esac
+    line="${line#*=}"
+    line="$(printf '%s' "$line" | tr -d ' "'"'")"
+    [[ "$line" =~ ^[A-Za-z0-9+_=-]{24,}$ ]] || continue
+    [[ "$line" =~ [A-Z] && "$line" =~ [a-z] && "$line" =~ [0-9] ]] && return 0
+  done <<<"$text"
+  return 1
+}
+
+# $1 = caminho no repo; sai 0 se for relativo e sem `..`
+safe_path() {
+  local p="$1"
+  [[ "$p" =~ ^[A-Za-z0-9_.][A-Za-z0-9._/-]*$ ]] || return 1
+  [[ "$p" != */ && "$p" != *//* && "$p" != *..* ]] || return 1
+  return 0
+}
+
+cmd_parse() {
+  local text n=0 line key val deploy="" verify="" rollback="" host="" rc=0
+  text="$(cat)"
+  if looks_secret "$text"; then
+    echo "contrato: alguma linha parece segredo (valor não mostrado); segredo vem do ambiente do host ou do vault, nunca do contrato" >&2
+    return 1
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    [[ -n "${line//[[:space:]]/}" && ! "$line" =~ ^[[:space:]]*# ]] || continue
+    if [[ ! "$line" =~ $LINE_RE ]]; then
+      echo "contrato: linha $n fora do formato 'chave = \"valor\"'" >&2; rc=1; continue
+    fi
+    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
+    case "$key" in
+      deploy)   [[ -z "$deploy" ]]   || { echo "contrato: 'deploy' repetido (linha $n)" >&2; rc=1; }; deploy="$val" ;;
+      verify)   [[ -z "$verify" ]]   || { echo "contrato: 'verify' repetido (linha $n)" >&2; rc=1; }; verify="$val" ;;
+      rollback) [[ -z "$rollback" ]] || { echo "contrato: 'rollback' repetido (linha $n)" >&2; rc=1; }; rollback="$val" ;;
+      host)     [[ -z "$host" ]]     || { echo "contrato: 'host' repetido (linha $n)" >&2; rc=1; }; host="$val" ;;
+      *) echo "contrato: chave '$key' desconhecida (linha $n); só deploy, verify, rollback e host" >&2; rc=1 ;;
+    esac
+  done <<<"$text"
+  local k v
+  for k in deploy verify rollback; do
+    eval "v=\${$k}"
+    if [[ -z "$v" ]]; then echo "contrato: falta '$k'" >&2; rc=1
+    elif ! safe_path "$v"; then echo "contrato: '$k' não é um caminho relativo seguro do repo (sem '..', sem '/' na frente)" >&2; rc=1; fi
+  done
+  if [[ -z "$host" ]]; then echo "contrato: 'host' vazio ou ausente" >&2; rc=1
+  elif [[ ! "$host" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]]; then echo "contrato: 'host' inválido (só [A-Za-z0-9._-], até 63)" >&2; rc=1; fi
+  (( rc == 0 )) || return 1
+  printf 'deploy=%s\nverify=%s\nrollback=%s\nhost=%s\n' "$deploy" "$verify" "$rollback" "$host"
+  return 0
+}
+
+cmd_check() {
+  local repo="${1:-}" toml parsed k p mode rc=0 body
+  [[ -n "$repo" && -d "$repo" ]] || { echo "contrato: repo '$repo' não existe" >&2; return 1; }
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || { echo "contrato: '$repo' não é um repo git" >&2; return 1; }
+  toml="$(git -C "$repo" show "HEAD:.oute/deploy.toml" 2>/dev/null)" \
+    || { echo "contrato: .oute/deploy.toml não existe no HEAD de $repo (commitado)" >&2; return 1; }
+  parsed="$(printf '%s\n' "$toml" | cmd_parse)" || return 1
+  for k in deploy verify rollback; do
+    p="$(sed -n "s/^$k=//p" <<<"$parsed")"
+    mode="$(git -C "$repo" ls-tree HEAD -- "$p" 2>/dev/null | awk '{print $1 " " $2}')"
+    if [[ -z "$mode" ]]; then echo "contrato: '$k' ($p) não existe no HEAD" >&2; rc=1; continue; fi
+    if [[ "$mode" != "100755 blob" ]]; then echo "contrato: '$k' ($p) tem modo/tipo '$mode'; precisa de 100755 blob" >&2; rc=1; continue; fi
+    body="$(git -C "$repo" show "HEAD:$p" 2>/dev/null)" || { echo "contrato: não consegui ler '$k' ($p)" >&2; rc=1; continue; }
+    if looks_secret "$body"; then echo "contrato: '$k' ($p) tem linha que parece segredo (valor não mostrado)" >&2; rc=1; fi
+  done
+  (( rc == 0 )) || return 1
+  printf 'contrato ok: %s\n' "$(tr '\n' ' ' <<<"$parsed" | sed 's/ *$//')"
+  return 0
+}
+
+case "${1:-}" in
+  check) shift; [[ $# -eq 1 ]] || { echo "uso: deploy-contract check <repo-path>" >&2; exit 2; }; cmd_check "$1" ;;
+  parse) [[ $# -eq 1 ]] || { echo "uso: deploy-contract parse < deploy.toml" >&2; exit 2; }; cmd_parse ;;
+  *) echo "uso: deploy-contract check <repo-path> | parse" >&2; exit 2 ;;
+esac

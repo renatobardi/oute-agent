@@ -36,3 +36,24 @@ dark_repo() {
   git -C "$dir" remote add origin "git@github.com:renatobardi/$(basename "$dir").git" 2>/dev/null || true
   return 0
 }
+
+# dalive [<segundos atrás>]: a batida do laço `oute approve --dark` do host, como o container a vê (~/.oute/approve/dark.<rodada>.alive);
+# sem argumento, agora. O dark_prereqs aceita batida de até 60 s.
+dalive() {
+  local ago="${1:-0}"
+  mkdir -p "$H/.oute/approve"
+  date +%s | awk -v a="$ago" '{print $1 - a}' > "$H/.oute/approve/dark.swarm-x.alive"
+  return 0
+}
+
+# dcontract <repo>: contrato de deploy válido commitado no repo (três scripts 100755, host) e o oute-deploy-contract real no PATH
+dcontract() {
+  local dir="$1"
+  ln -sf "$ROOT/scripts/deploy-contract" "$BIN/oute-deploy-contract"
+  mkdir -p "$dir/.oute"
+  printf '#!/bin/sh\necho %s\n' deploy > "$dir/.oute/deploy.sh"; printf '#!/bin/sh\necho %s\n' verify > "$dir/.oute/verify.sh"
+  printf '#!/bin/sh\necho %s\n' rollback > "$dir/.oute/rollback.sh"; chmod 755 "$dir"/.oute/*.sh
+  printf 'deploy = ".oute/deploy.sh"\nverify = ".oute/verify.sh"\nrollback = ".oute/rollback.sh"\nhost = "oute-server"\n' > "$dir/.oute/deploy.toml"
+  git -C "$dir" add -A && git -C "$dir" -c user.email=t@t -c user.name=t commit -qm contrato
+  return 0
+}
