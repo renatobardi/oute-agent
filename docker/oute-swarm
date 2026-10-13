@@ -44,7 +44,7 @@
 #   oute-swarm step dir ciclo --cycle <dono/repo#n> (#509) pasta do resumo do ciclo, para a sessão avulsa (learn-insights,
 #                                                   iter-roadmap): `step review|publish ciclo --cycle …` sem rodada nem dispatcher
 #   oute-swarm stop <rodada>                        (#844, ADR-10) kill switch do modo dark: close --all --yes, marca `fechada`, grava `dark.stop` (o laço do
-#                                                   `oute approve --dark` sai), tira o lock e a batida do auto-aprovador e emite oute.swarm.round.closed.
+#                                                   `oute approve --dark` sai); o laço do host sai e remove o próprio lock, e a batida do container sai; emite oute.swarm.round.closed.
 #                                                   Idempotente; o spawn da rodada parada recusa com código 9
 #   oute-swarm dark-parada deploy                   (usado pelo juiz, #844) o verify do deploy falhou e o rollback já rodou: grava dark_parada=deploy
 #                                                   no meta; o spawn recusa com código 9 (o juiz fecha a rodada)
@@ -1076,7 +1076,7 @@ cmd_close() {
   (( ! closed )) || echo "depois: oute-task clean  (e cancele os handoffs órfãos)"
 }
 
-# oute-swarm stop <rodada> (#844, ADR-10): o kill switch do modo dark. Primeiro grava `dark.stop` e tira o lock e a batida do
+# oute-swarm stop <rodada> (#844, ADR-10): o kill switch do modo dark. Primeiro grava `dark.stop` (o laço do host sai e remove o próprio lock) e tira a batida do
 # auto-aprovador (o laço do `oute approve --dark` vê `dark.stop` ou `fechada` e sai; o spawn recusa), depois `close --all --yes`
 # (que marca `fechada` e escreve a linha `rodada fechada`, de onde o oute-emit tira o oute.swarm.round.closed). Idempotente:
 # rodada já fechada não fecha de novo nem repete o evento. Sai 1 se alguma aba não fechou (rode de novo).
@@ -1088,9 +1088,9 @@ cmd_stop() {
   touch "$sdir/spawned" "$sdir/closed"
   [[ -f "$sdir/dark.stop" ]] || date -u +%FT%TZ > "$sdir/dark.stop"
   approve="${HOME:?}/.oute/approve"
-  rm -rf "${approve:?}/dark.$rodada.lock"
-  rm -f "${approve:?}/dark.$rodada.alive"
-  echo "auto-aprovador da rodada $rodada desligado (dark.stop gravado; lock e batida removidos)"
+  rm -rf "${approve:?}/dark.${rodada:?}.lock"
+  rm -f "${approve:?}/dark.${rodada:?}.alive"
+  echo "auto-aprovador da rodada $rodada desligado (dark.stop gravado; o laço do host sai e remove o próprio lock)"
   if [[ -f "$sdir/fechada" ]]; then
     echo "rodada $rodada já fechada"
     return 0
