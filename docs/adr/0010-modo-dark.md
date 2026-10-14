@@ -35,3 +35,8 @@ O Bardi quer uma rodada que vai da issue pronta ao deploy verificado sem pergunt
 - Entrega em fatias, cada uma issue própria sob a #839: (a) `--dark` com pré-requisitos e recusas; (b) juiz e autorização gravada na abertura; (c) `oute approve --dark` e contrato de deploy; (d) `--budget`, rollback e `stop`. Nada do dark roda antes de (c) existir.
 - `AGENTS.md` ganha a linha do modo dark na tabela do AI-DLC quando a fatia (a) entrar.
 - Este ADR revê o ADR-07 só para rodada `--dark`: fora dela, os gates seguem como estão.
+
+## Riscos aceitos (#843, critério 2; Bardi aprovou o desenho A no PR #864)
+- **A âncora é piso, não lista de hashes.** O humano confirma repo e ponta na partida; na execução valem os três hashes do commit de merge de um PR da rodada, achado pelo host no GitHub depois da âncora. O PR da rodada pode trocar o script do `deploy` e ele roda sem humano: é o desenho deste ADR.
+- **O número do PR vem do `log` da rodada, no container.** O host não o confirma por fonte própria (sem `gh` com credencial no host). Um agente que escreve `watch [pr] PR #n mergeado` escolhe *qual* commit mergeado depois da âncora vale, não o conteúdo: nenhum script novo entra, mas uma versão anterior ou desencontrada de `deploy`, `verify` ou `rollback` pode ser reexecutada. Fecha-se com a fonte própria do host quando houver credencial de leitura da API no host.
+- **Merge por rebase** (assunto sem `(#n)`) não é reconhecido: falha fechada.

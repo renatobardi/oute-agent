@@ -1460,10 +1460,11 @@ approve_suggest() {
 # --- modo dark (#843, ADR-10): `oute approve --dark <rodada> [<repo>]`. A fronteira de confiança é o HASH do script, e a âncora do
 # contrato é um ATO HUMANO: na partida do laço o host busca a ponta do ramo padrão do repo no GitHub (clone só do host,
 # `$approve_dir/dark-src/`, fora do container), imprime repo, commit e os três hashes (deploy, verify, rollback) e pede a
-# confirmação do Bardi. Esses hashes valem até o laço reiniciar: não há busca nova por pedido, e contrato novo exige reiniciar o
-# laço (e confirmar de novo). O nome do repo vem do comando ou, sem ele, do meta da rodada, mas só vale depois da confirmação
-# do humano que lê o nome; o `oute-agent` é recusado. O laço só executa pedido cujo corpo (fim de linha final normalizado) é um
-# dos três scripts confirmados. Falhou qualquer conferência: o pedido fica na fila manual.
+# confirmação do Bardi. Essa ponta é o PISO: o que vale na execução são os hashes do commit de merge de um PR da rodada, achado
+# pelo host depois dela (dark_round_contract; reler quando a lista de PRs da rodada muda). Troca de repo ou de ponto de partida
+# exige reiniciar o laço (e confirmar de novo). O nome do repo vem do comando ou, sem ele, do meta da rodada, mas só vale depois
+# da confirmação do humano que lê o nome; o `oute-agent` é recusado. O laço só executa pedido cujo corpo (fim de linha final
+# normalizado) é um dos três scripts desse commit. Falhou qualquer conferência: o pedido fica na fila manual.
 DARK_REPO=""; DARK_OWNER=""; DARK_HASHES=""; DARK_WHY=""; DARK_COMMIT=""; DARK_NOTED=""
 DARK_SRC=""; DARK_TIP=""; DARK_CHASHES=""; DARK_MCOMMIT=""; DARK_MPR=""; DARK_MHASHES=""
 # dark_note <id> <motivo>: avisa uma vez por pedido e motivo (o laço olha o mesmo pedido a cada volta)
