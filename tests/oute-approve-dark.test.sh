@@ -54,11 +54,23 @@ mk_repo() {
   script_of "$deploy" > "$seed/.oute/deploy.sh"; script_of verify > "$seed/.oute/verify.sh"; script_of rollback > "$seed/.oute/rollback.sh"
   chmod 755 "$seed"/.oute/*.sh
   printf 'deploy = ".oute/deploy.sh"\nverify = ".oute/verify.sh"\nrollback = ".oute/rollback.sh"\nhost = "oute-server"\n' > "$seed/.oute/deploy.toml"
-  "${G[@]}" -C "$seed" add -A && "${G[@]}" -C "$seed" commit -qm contrato
+  "${G[@]}" -C "$seed" add -A && "${G[@]}" -C "$seed" commit -qm "contrato (#1)"
   git init -q --bare "$F_REMOTE" -b main
   git -C "$seed" push -q "$F_REMOTE" main
   git clone -q "$F_REMOTE" "$WORK"
   git -C "$WORK" remote set-url origin "https://github.com/testowner/proj.git"
+  return 0
+}
+# not_alive <pid>: o processo saiu (uma definição só do teste que o laço repete)
+not_alive() {
+  local pid="$1"
+  ! kill -0 "$pid" 2>/dev/null
+  return $?
+}
+# logpr <rodada> <pr>: a linha que o watch do oute-swarm grava no log da rodada quando o PR é mergeado (a fonte da lista de PRs)
+logpr() {
+  local r="$1" n="$2"
+  printf '2026-10-13T00:00:00Z watch [pr] PR #%s mergeado (issue #843)\n' "$n" >> "$F_CTR_HOME/.oute/swarm/$r/log"
   return 0
 }
 # round <rodada> [dark|nodark]: meta da rodada no container
@@ -66,6 +78,7 @@ mk_round() {
   local r="$1" dark="${2:-dark}"
   mkdir -p "$F_CTR_HOME/.oute/swarm/$r"
   { printf 'repo=%s\nmax=3\n' "$WORK"; [[ "$dark" != dark ]] || printf 'dark=1\n'; } > "$F_CTR_HOME/.oute/swarm/$r/meta"
+  logpr "$r" 1   # o PR #1 (o commit do mk_repo) é o que a rodada mergeou
   return 0
 }
 reset() {
@@ -99,7 +112,7 @@ until_() {
 stop_() {
   local r="$1"
   : > "$F_CTR_HOME/.oute/swarm/$r/fechada"
-  until_ 15 bash -c '! kill -0 "$1" 2>/dev/null' _ "$PID" || { kill "$PID" 2>/dev/null; RC=124; return 0; }
+  until_ 15 not_alive "$PID" || { kill "$PID" 2>/dev/null; RC=124; return 0; }
   wait "$PID"; RC=$?
   return 0
 }
@@ -248,8 +261,8 @@ mk_repo; reset; mk_round swarm-t12
 start swarm-t12
 until_ 10 test -s "$F_CTR_HOME/.oute/approve/dark.swarm-t12.alive"
 : > "$F_CTR_HOME/.oute/swarm/swarm-t12/dark.stop"
-until_ 15 bash -c '! kill -0 "$1" 2>/dev/null' _ "$PID"
-check "dark.stop: o laço saiu"                               bash -c '! kill -0 "$1" 2>/dev/null' _ "$PID"
+until_ 15 not_alive "$PID"
+check "dark.stop: o laço saiu"                               not_alive "$PID"
 check "dark.stop: avisa que parou"                           grep -q 'rodada swarm-t12 parada; laço encerrado' "$TMP/dark.log"
 
 # --- 13. lock velho (pid morto) não trava a rodada
@@ -281,29 +294,129 @@ until_ 15 grep -q "$FILA" "$TMP/dark.log"
 check "refs/replace: o script trocado por replace não passa"  test "$(ran evil)" = 0
 stop_ swarm-t13c
 
-# publica no remoto um deploy.sh novo (o contrato muda) e devolve
+# publica no remoto um deploy.sh novo, como o merge do PR #<pr> (assunto "... (#<pr>)"); com <rodada>, o log dela passa a listar o PR
 push_contract() {
-  local body="$1"
+  local body="$1" pr="${2:-2}" r="${3:-}" subj="${4:-contrato novo (#${2:-2})}"
   printf '%s\n' "$body" > "$TMP/seed/.oute/deploy.sh"
-  "${G[@]}" -C "$TMP/seed" commit -qam "contrato novo" && git -C "$TMP/seed" push -q "$F_REMOTE" main
+  "${G[@]}" -C "$TMP/seed" commit -qam "$subj" && git -C "$TMP/seed" push -q "$F_REMOTE" main
+  [[ -z "$r" ]] || logpr "$r" "$pr"
   return 0
 }
-# --- 15. contrato novo exige reiniciar o laço (âncora humana, sem busca por pedido)
+# --- 15. o merge de um PR da rodada troca o contrato com o laço de pé: vale o do commit de merge, sem reiniciar (critério 2)
 mk_repo; reset; mk_round swarm-t15; id=20261012-010115-ponta-muda
 NOVO="$(script_of deploy-v2)"
 propose "$id" swarm-t15 <<<"$NOVO"
 start swarm-t15
 until_ 15 grep -q "$FILA" "$TMP/dark.log"
 check "confirmação: o laço mostrou repo, commit e hashes"    bash -c 'grep -q "proj" <<<"$1" && grep -qE "commit: [0-9a-f]{40}" <<<"$1" && grep -q "^deploy " <<<"$1" && grep -q "^rollback " <<<"$1"' _ "$(cat "$TMP/dark.log")"
-push_contract "$NOVO"
-sleep 1.5
-check "contrato muda com o laço de pé: o pedido segue na fila (sem busca nova)" test "$(ran deploy-v2)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
-stop_ swarm-t15
-rm -f "${F_CTR_HOME:?}/.oute/swarm/swarm-t15/fechada"
-start swarm-t15
+check "antes do merge: o script novo fica na fila"           test "$(ran deploy-v2)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
+push_contract "$NOVO" 2 swarm-t15
 until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
-check "laço reiniciado: contrato novo confirmado, o pedido roda uma vez" test "$(ran deploy-v2)" = 1
+check "depois do merge do PR da rodada: o pedido roda uma vez, sem reiniciar o laço" test "$(ran deploy-v2)" = 1
+check "o laço imprime o commit de merge e o PR"              grep -qE "contrato da rodada lido do commit de merge [0-9a-f]{40} \(PR #2" "$TMP/dark.log"
 stop_ swarm-t15
+
+# --- 15a. o script da âncora deixa de valer depois que o merge da rodada troca o contrato
+mk_repo; reset; mk_round swarm-t15a; id=20261012-010130-script-antigo
+push_contract "$NOVO" 2 swarm-t15a
+propose "$id" swarm-t15a <<<"$D_OK"
+DARKREPO=proj start swarm-t15a
+until_ 15 grep -q "$FILA" "$TMP/dark.log"
+check "script do commit antigo: fica na fila com o PR e o commit de merge" grep -qE "$id $FILA: o hash do script .* commit de merge [0-9a-f]{12} \(PR #2\)" "$TMP/dark.log"
+check "script do commit antigo: nada rodou"                  test "$(ran deploy)" = 0
+stop_ swarm-t15a
+
+# --- 15d. a ponta andou com PR de OUTRA origem: vale o commit de merge da rodada, não a ponta
+mk_repo; reset; mk_round swarm-t15g; id1=20261012-010131-na-ponta; id2=20261012-010132-no-merge
+start swarm-t15g   # a âncora é a ponta de hoje; os PRs abaixo entram depois da confirmação
+until_ 15 grep -q "laço ligado para a rodada swarm-t15g" "$TMP/dark.log"
+push_contract "$(script_of deploy-rodada)" 2 swarm-t15g     # PR #2 da rodada (o log lista)
+push_contract "$(script_of deploy-alheio)" 3                 # PR #3 de fora: a rodada não o lista
+propose "$id1" swarm-t15g <<<"$(script_of deploy-alheio)"
+propose "$id2" swarm-t15g <<<"$(script_of deploy-rodada)"
+until_ 15 test -s "$F_CTR_HOME/inbox/$id2.out"
+until_ 5 grep -q "$id1 $FILA" "$TMP/dark.log"
+check "ponta adiante: roda o script do commit de merge da rodada" test "$(ran deploy-rodada)" = 1
+check "ponta adiante: o script que só existe na ponta (PR de fora) fica na fila" bash -c 'test "$1" = 0 && grep -q "$2 $3" "$4"' _ "$(ran deploy-alheio)" "$id1" "$FILA" "$TMP/dark.log"
+stop_ swarm-t15g
+
+# --- 15e. PR que a rodada não lista (container indica só o #1; o #2 mergeou por fora): nenhum hash do #2 vale
+mk_repo; reset; mk_round swarm-t15h; id=20261012-010133-pr-fora
+push_contract "$(script_of deploy-fora)" 2
+propose "$id" swarm-t15h <<<"$(script_of deploy-fora)"
+start swarm-t15h
+until_ 15 grep -q "$id $FILA" "$TMP/dark.log"
+check "PR fora da lista da rodada: fica na fila"             test "$(ran deploy-fora)" = 0 -a ! -e "$F_CTR_HOME/inbox/$id.out"
+stop_ swarm-t15h
+
+# --- 15f. rodada sem PR mergeado: nada vale, nem o script da âncora
+mk_repo; reset; mk_round swarm-t15i; id=20261012-010134-sem-merge
+: > "$F_CTR_HOME/.oute/swarm/swarm-t15i/log"
+propose "$id" swarm-t15i <<<"$D_OK"
+start swarm-t15i
+until_ 15 grep -q "$id $FILA" "$TMP/dark.log"
+check "sem PR mergeado: fica na fila, com o motivo"          grep -q "$id $FILA: sem contrato no commit de merge da rodada: a rodada ainda não tem PR mergeado" "$TMP/dark.log"
+check "sem PR mergeado: nada rodou"                          test "$(ran deploy)" = 0
+stop_ swarm-t15i
+
+# --- 15g. contrato inválido no commit de merge (script sem modo 100755): falha fechada, com o motivo
+mk_repo; reset; mk_round swarm-t15j; id=20261012-010135-merge-sem-x
+git -C "$TMP/seed" update-index --chmod=-x .oute/deploy.sh
+"${G[@]}" -C "$TMP/seed" commit -qm "sem exec (#2)" && git -C "$TMP/seed" push -q "$F_REMOTE" main
+logpr swarm-t15j 2
+propose "$id" swarm-t15j <<<"$D_OK"
+start swarm-t15j
+until_ 15 grep -q "$id $FILA" "$TMP/dark.log"
+check "merge sem 100755: avisa o motivo e nada roda"         bash -c 'grep -q "não é 100755 blob no commit" "$1" && test "$2" = 0' _ "$TMP/dark.log" "$(ran deploy)"
+stop_ swarm-t15j
+
+# --- 15h. a âncora some do histórico (ramo reescrito no GitHub depois da confirmação): falha fechada
+mk_repo; reset; mk_round swarm-t15k; id=20261012-010136-historia-reescrita
+start swarm-t15k
+until_ 15 grep -q "contrato de deploy do modo dark" "$TMP/dark.log"
+until_ 10 test -s "$F_CTR_HOME/.oute/approve/dark.swarm-t15k.alive"
+git -C "$TMP/seed" checkout -q --orphan alt && script_of deploy > "$TMP/seed/.oute/deploy.sh"
+"${G[@]}" -C "$TMP/seed" commit -qam "outra história (#2)" && git -C "$TMP/seed" push -q -f "$F_REMOTE" alt:main
+logpr swarm-t15k 2
+propose "$id" swarm-t15k <<<"$D_OK"
+until_ 15 grep -q "$id $FILA" "$TMP/dark.log"
+check "âncora fora do histórico: fica na fila e manda reiniciar" grep -q "não está nos últimos 100 do ramo padrão (reinicie o laço)" "$TMP/dark.log"
+check "âncora fora do histórico: nada rodou"                 test "$(ran deploy)" = 0
+stop_ swarm-t15k
+
+# --- 15i. merge por "Merge pull request #n" (merge commit): o assunto também identifica o PR da rodada
+mk_repo; reset; mk_round swarm-t15l; id=20261012-010138-merge-commit
+start swarm-t15l
+until_ 15 grep -q "laço ligado para a rodada swarm-t15l" "$TMP/dark.log"
+push_contract "$(script_of deploy-mc)" 2 swarm-t15l "Merge pull request #2 from fulano/feat-x"
+propose "$id" swarm-t15l <<<"$(script_of deploy-mc)"
+until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
+check "Merge pull request #n: o script do commit roda"       test "$(ran deploy-mc)" = 1
+stop_ swarm-t15l
+
+# --- 15j. merge por rebase (assunto original, sem "(#n)"): não identifica o PR, falha fechada
+mk_repo; reset; mk_round swarm-t15m; id=20261012-010139-rebase
+start swarm-t15m
+until_ 15 grep -q "laço ligado para a rodada swarm-t15m" "$TMP/dark.log"
+push_contract "$(script_of deploy-rb)" 2 swarm-t15m "ajusta o deploy"
+propose "$id" swarm-t15m <<<"$(script_of deploy-rb)"
+until_ 15 grep -q "$id $FILA" "$TMP/dark.log"
+check "rebase: o commit sem (#n) não vale; fica o da âncora e o script novo fica na fila" grep -q "$id $FILA: o hash do script" "$TMP/dark.log"
+check "rebase: nada rodou"                                   test "$(ran deploy-rb)" = 0
+stop_ swarm-t15m
+
+# --- 15k. janela de 100 commits: a âncora fica para trás (101 commits depois dela) e o laço falha fechado
+mk_repo; reset; mk_round swarm-t15n; id=20261012-010140-janela
+start swarm-t15n
+until_ 15 grep -q "laço ligado para a rodada swarm-t15n" "$TMP/dark.log"
+push_contract "$(script_of deploy-janela)" 2 swarm-t15n
+i=0; while [[ $i -lt 100 ]]; do "${G[@]}" -C "$TMP/seed" commit -q --allow-empty -m "ruído $i"; i=$((i + 1)); done
+git -C "$TMP/seed" push -q "$F_REMOTE" main
+propose "$id" swarm-t15n <<<"$(script_of deploy-janela)"
+until_ 20 grep -q "$id $FILA" "$TMP/dark.log"
+check "101 commits depois da âncora: fica na fila e manda reiniciar" grep -q "não está nos últimos 100 do ramo padrão" "$TMP/dark.log"
+check "101 commits depois da âncora: nada rodou"             test "$(ran deploy-janela)" = 0
+stop_ swarm-t15n
 
 # --- 15b. sem confirmação do humano o laço nem liga
 mk_repo; reset; mk_round swarm-t15c; id=20261012-010119-sem-confirmar
@@ -339,7 +452,7 @@ stop_ swarm-t15f
 # --- 16. pedido marcado em execução antes de rodar (ajuste 5): outro `oute approve` não repete, o laço não repete
 mk_repo; reset; mk_round swarm-t16; id=20261012-010117-lento
 LENTO="$(script_of lento; echo 'sleep 3')"
-push_contract "$LENTO"
+push_contract "$LENTO" 2 swarm-t16
 propose "$id" swarm-t16 <<<"$LENTO"
 start swarm-t16
 until_ 15 test -d "$runs_dir/$id.running"
@@ -375,7 +488,7 @@ check "humano revendo: o laço usa arquivo próprio"           test -f "$runs_di
 # o arquivo mostrado muda embaixo do humano (outra sessão): o `s` não executa
 printf '#!/usr/bin/env bash\necho trocado >> "$F_RUNS"\n' >> "$runs_dir/$id.sh"
 echo s > "$FIFO"
-until_ 10 bash -c '! kill -0 "$1" 2>/dev/null' _ "$HPID"
+until_ 10 not_alive "$HPID"
 check "sha mudou depois de mostrado: aborta e nada roda"     grep -q "mudou depois de mostrado" "$TMP/humano.log"
 check "sha mudou depois de mostrado: nada executou"          test "$(ran trocado)" = 0 -a "$(ran reescrito)" = 0
 stop_ swarm-t17
@@ -389,7 +502,7 @@ until_ 10 grep -q "executar?" "$TMP/humano2.log"
 start swarm-t18
 until_ 15 test -s "$F_CTR_HOME/inbox/$id.out"
 echo s > "$FIFO"
-until_ 10 bash -c '! kill -0 "$1" 2>/dev/null' _ "$HPID"
+until_ 10 not_alive "$HPID"
 check "já executado pelo laço: o humano diz que já foi decidido" grep -q "já foi decidido" "$TMP/humano2.log"
 check "já executado pelo laço: rodou uma vez só"             test "$(ran deploy)" = 1
 stop_ swarm-t18
