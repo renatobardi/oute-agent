@@ -64,7 +64,7 @@ sw spawn 539-rmvariavel "$WORKER_INSTR"
 P="$STATE/539-rmvariavel.prompt"
 check "worker 539: código 0, com o prompt da sessão"  bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker 539: regra do rm vale no comando da aba (#539)" grep -qF 'e no comando que você roda na aba (#358, #539)' "$P"
-check "worker 539: confere antes de rodar o comando, não só antes do PR (#539)" grep -qF 'Confira antes de rodar o comando, não só antes do PR, para não disparar o prompt de permissão.' "$P"
+check "worker 539: confere antes de rodar o comando, não só antes do PR (#539)" grep -qF 'Confira antes de rodar o comando, não só antes do PR. Custo: a sessão fica parada e o prompt nega sozinho' "$P"
 check "worker 539: o exemplo do rm protegido está na regra (#539)" grep -qF 'Ex.: `rm -f "${FAKE:?}"/*.json`' "$P"
 check "worker 539: sem placeholder no prompt"         [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
@@ -186,9 +186,11 @@ check "worker antes do PR: custo do prompt de permissão (#578)" grep -qF 'o pro
 check "worker antes do PR: arquivo novo vazio e símbolo sem definição (#578)" grep -qF 'Nenhum arquivo novo está vazio (`git diff --stat`, 0 linhas num arquivo novo).' "$P"
 check "worker antes do PR: definição no diff, por git grep (#578)" grep -qF 'tem definição no diff (`git grep` do nome).' "$P"
 check "worker antes do PR: suíte inteira quando muda compose, esquema ou apoio de teste (#578)" grep -qF 'roda a suíte inteira (`tests/*.test.sh`, `xargs -P` até o `nproc`' "$P"
+check "worker antes do PR: regra de tests/ só em repo com tests/ (#865)" grep -qF 'Em repo com `tests/` (#865)' "$P"
+check "worker antes do PR: sem tests/, gates do AGENTS.md da base (#865)" grep -qF 'Sem `tests/`, siga os gates do `AGENTS.md` da base, sem citar regra de outro repo no corpo.' "$P"
 check "worker antes do PR: testes que citam o termo alterado (#578)" grep -qF '`git grep -l <termo> tests/`' "$P"
 check "worker antes do PR: só arquivos da issue (#578)" grep -qF '`git diff --name-only origin/main...HEAD` só lista arquivos da própria issue; arquivo de runtime ou binário sai do PR.' "$P"
-check "worker antes do PR: arquivo apagado ou revertido (#578)" grep -qF '`git diff origin/main --stat` não mostra arquivo apagado ou revertido que a issue não pediu.' "$P"
+check "worker antes do PR: arquivo apagado ou revertido (#578)" grep -qF '`git diff origin/main --stat` não mostra apagado ou revertido que a issue não pediu.' "$P"
 check "worker antes do PR: sem placeholder no prompt"      [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 guarda_check
 guarda_stop
