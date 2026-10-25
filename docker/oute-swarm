@@ -2137,7 +2137,8 @@ estado_write() {
 }
 
 # oute-swarm estado [--autorizacao "<texto>"]: grava o estado.md da rodada. --autorizacao registra a autorização permanente de
-# merge que o Bardi deu (uma linha, até 300 caracteres), a única coisa do estado que não está em outro lugar do disco
+# merge que o Bardi deu (uma linha, até 300 caracteres; acima disso recusa em vez de cortar, #865), a única coisa do estado que
+# não está em outro lugar do disco
 cmd_estado() {
   local state auth="" have_auth=0 opt val
   while [[ $# -gt 0 ]]; do
@@ -2149,7 +2150,8 @@ cmd_estado() {
   done
   state="$(ask_dir)"
   if (( have_auth )); then
-    auth="$(printf '%s' "$auth" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]' | cut -c1-300)"
+    auth="$(printf '%s' "$auth" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]')"
+    (( ${#auth} <= 300 )) || die "--autorizacao: ${#auth} caracteres, acima do máximo de 300; não gravado"
     printf '%s\n' "$auth" > "$state/autorizacao"
   fi
   estado_write "$state"

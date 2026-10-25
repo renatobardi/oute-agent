@@ -57,8 +57,12 @@ check "autorização: código 0"                            [ "$RC" -eq 0 ]
 check "autorização: vai ao estado numa linha só"         bash -c 'grep -A1 "^## Autorização" <<<"$1" | grep -qxF "merge dos PRs da rodada, pelo Bardi, em 2026-10-09"' _ "$(est)"
 sw estado
 check "autorização: o estado seguinte a mantém"          bash -c 'grep -A1 "^## Autorização" <<<"$1" | grep -qF "pelo Bardi"' _ "$(est)"
-sw estado --autorizacao "$(printf 'x%.0s' $(seq 1 400))"
-check "autorização: corta em 300 caracteres"             [ "$(wc -c < "$STATE/autorizacao" | tr -d ' ')" -eq 301 ]
+sw estado --autorizacao "$(printf 'y%.0s' $(seq 1 300))"
+check "autorização: 300 caracteres gravam inteiros"      [ "$RC" -eq 0 -a "$(wc -c < "$STATE/autorizacao" | tr -d ' ')" -eq 301 ]
+sw estado --autorizacao "$(printf 'x%.0s' $(seq 1 301))"
+check "autorização: acima de 300 recusa, código 1"       [ "$RC" -eq 1 ]
+check "autorização: a recusa diz o máximo de 300"        grep -qF 'máximo de 300' <<<"$ERR"
+check "autorização: recusada não sobrescreve a gravada"  grep -qxF "$(printf 'y%.0s' $(seq 1 300))" "$STATE/autorizacao"
 sw estado --nada
 check "estado: opção desconhecida, código 1"             [ "$RC" -eq 1 ]
 
