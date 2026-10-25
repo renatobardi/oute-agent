@@ -284,6 +284,8 @@ check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" 
 
 # 772. auditoria delegada a subagente: ele devolve o texto, o dispatcher publica com oute-refcheck
 check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente não publica: devolve o texto" "devolve o texto do relatório" "**você** o publica" "oute-swarm pr-comment <n> --body-file <arquivo>" "quebrada ou nao-abre não comenta"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "865: §3: delegação leva a escala da skill e o dispatcher confere a ação recomendada" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "leve a escala da skill" "no mínimo BLOCKING" "dúvida de segurança não resolvida" "divergência" "Confira a ação recomendada contra ela antes de publicar (#865)"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "865: §3: link do pr-comment só com código 0, sem tell citando link vazio" grep -qF 'use o link só com código 0: saída não-0 deixa a variável vazia, sem `tell` citando o link' "$D"
 check "772: §3: o pr-comment roda o oute-refcheck antes de comentar" grep -qF "roda o \`oute-refcheck\` antes" "$D"
 check "772: §3: recusa da escrita ao subagente, a publicação fica com o dispatcher" grep -qF 'Se a escrita for recusada ao subagente, a publicação é sua' "$D"
 check "832: §3: antes de delegar, o dispatcher grava oute-swarm subagente na rodada" grep -qF 'grave `oute-swarm subagente "<para quê>"`' "$D"

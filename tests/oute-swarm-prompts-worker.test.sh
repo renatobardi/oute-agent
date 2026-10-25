@@ -186,6 +186,8 @@ check "worker antes do PR: custo do prompt de permissão (#578)" grep -qF 'o pro
 check "worker antes do PR: arquivo novo vazio e símbolo sem definição (#578)" grep -qF 'Nenhum arquivo novo está vazio (`git diff --stat`, 0 linhas num arquivo novo).' "$P"
 check "worker antes do PR: definição no diff, por git grep (#578)" grep -qF 'tem definição no diff (`git grep` do nome).' "$P"
 check "worker antes do PR: suíte inteira quando muda compose, esquema ou apoio de teste (#578)" grep -qF 'roda a suíte inteira (`tests/*.test.sh`, `xargs -P` até o `nproc`' "$P"
+check "worker antes do PR: regra de tests/ só em repo com tests/ (#865)" grep -qF 'Em repo com `tests/` (#865)' "$P"
+check "worker antes do PR: sem tests/, gates do AGENTS.md da base (#865)" grep -qF 'Sem `tests/`, siga os gates do `AGENTS.md` da base, sem citar regra de outro repo no corpo.' "$P"
 check "worker antes do PR: testes que citam o termo alterado (#578)" grep -qF '`git grep -l <termo> tests/`' "$P"
 check "worker antes do PR: só arquivos da issue (#578)" grep -qF '`git diff --name-only origin/main...HEAD` só lista arquivos da própria issue; arquivo de runtime ou binário sai do PR.' "$P"
 check "worker antes do PR: arquivo apagado ou revertido (#578)" grep -qF '`git diff origin/main --stat` não mostra apagado ou revertido que a issue não pediu.' "$P"
