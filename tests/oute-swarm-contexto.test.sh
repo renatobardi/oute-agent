@@ -13,6 +13,8 @@ guarda_start "$TMP/guarda"
 rcv_stop   # sem receptor neste arquivo: porta fechada, nenhum evento alcança o coletor (a guarda, sem receptor, não vê nada, #815)
 . "$ROOT/tests/lib/swarm.sh"
 unset HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID OUTE_SWARM_RESTART_MERGES
+CLEAR="/clear"
+RULE="──────────────────"
 
 # merges <n>: n linhas de PR mergeado no log, como o watch grava
 merges() { local n="$1" i; for i in $(seq 1 "$n"); do echo "2026-10-09T10:0$i:00Z watch [pr] PR #$i mergeado (issue #$((i + 20)))" >> "$STATE/log"; done; return 0; }
@@ -72,7 +74,7 @@ printf '2026-10-09T09:00:00Z pergunta 2. ajustar o #9?\n2026-10-09T09:05:00Z res
 hold
 wd
 check "5 merges: código 0"                               [ "$RC" -eq 0 ]
-check "5 merges: o /clear é a primeira digitação"        [ "$(typed | sed -n 1p)" == "/clear" ]
+check "5 merges: o /clear é a primeira digitação"        [ "$(typed | sed -n 1p)" == "$CLEAR" ]
 check "5 merges: o [contexto] é a segunda, com o prefixo do watch" grep -qE '^\[watch swarm-test\] 1 evento\(s\): [0-9]{2}:[0-9]{2} \[contexto\] contexto reiniciado depois de 5 merge\(s\)' <<<"$(typed | sed -n 2p)"
 check "5 merges: manda reler o prompt.md e o estado.md"  bash -c 'l="$(sed -n 2p "$1")"; grep -qF "$2/prompt.md" <<<"$l" && grep -qF "$2/estado.md" <<<"$l"' _ "$FAKE/typed.log" "$STATE"
 check "5 merges: manda reler também o trecho da etapa, em prompt/ (#753)" bash -c 'grep -qF "$2/prompt/" <<<"$(sed -n 2p "$1")"' _ "$FAKE/typed.log" "$STATE"
@@ -94,12 +96,12 @@ wd
 check "2 merges depois do reinício: nada digitado"       [ "$(texts)" -eq 0 ]
 CASE=n5c; rd "$CASE" 10; echo 5 > "$STATE/reinicio.n"
 wd
-check "5 merges depois do reinício: reinicia de novo"    [ "$(typed | sed -n 1p)" == "/clear" -a "$(cat "$STATE/reinicio.n")" == 10 ]
+check "5 merges depois do reinício: reinicia de novo"    [ "$(typed | sed -n 1p)" == "$CLEAR" -a "$(cat "$STATE/reinicio.n")" == 10 ]
 
 # ---------------------------------------------------------------- 4. N configurável e desligável
 CASE=n3; rd "$CASE" 4; hold
 OUTE_SWARM_RESTART_MERGES=3 wd
-check "N=3 com 4 merges: reinicia"                       [ "$(typed | sed -n 1p)" == "/clear" ]
+check "N=3 com 4 merges: reinicia"                       [ "$(typed | sed -n 1p)" == "$CLEAR" ]
 check "N=3: a mensagem diz 4 merges"                     grep -qF 'depois de 4 merge(s)' <<<"$(typed | sed -n 2p)"
 CASE=n3b; rd "$CASE" 4
 wd
@@ -125,9 +127,9 @@ check "rodada sem prompt.md (anterior à #752): não reinicia" [ "$(texts)" -eq 
 CASE=fila; rd "$CASE" 5; echo "10:00 [pr] PR #1 aberto" > "$STATE/watch.queue"
 hold
 wd
-check "evento na fila: o evento sai primeiro e o /clear só na passada seguinte" bash -c 'grep -qF "[pr] PR #1 aberto" <<<"$(sed -n 1p "$1")" && [ "$(sed -n 2p "$1")" == "/clear" ]' _ "$FAKE/typed.log"
+check "evento na fila: o evento sai primeiro e o /clear só na passada seguinte" bash -c 'grep -qF "[pr] PR #1 aberto" <<<"$(sed -n 1p "$1")" && [ "$(sed -n 2p "$1")" == "$2" ]' _ "$FAKE/typed.log" "$CLEAR"
 CASE=falha-digita; rd "$CASE" 5
-printf '%s\n' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"   # a tela não mostra o que foi digitado
+printf '%s\n' "$RULE" '❯ ' "$RULE" > "$FAKE/pane-style"   # a tela não mostra o que foi digitado
 hold
 wd
 check "/clear que não ficou no campo: sem Enter e sem reinicio.n" [ "$(enters)" -eq 0 -a ! -e "$STATE/reinicio.n" ]
@@ -157,11 +159,11 @@ wd
 check "aba que o herdr não lista: nada digitado"         [ "$(texts)" -eq 0 ]
 CASE=pane-nome; rd "$CASE" 5; echo '{"result":{"tabs":[]}}' > "$FAKE/tabs.json"; dtab "Mighty_Badger · swarm-test"
 wd
-check "rótulo com o nome da rodada e o id: reinicia"     [ "$(typed | sed -n 1p)" == "/clear" ]
+check "rótulo com o nome da rodada e o id: reinicia"     [ "$(typed | sed -n 1p)" == "$CLEAR" ]
 
 # ---------------------------------------------------------------- 9. teto de tentativas
 CASE=teto; rd "$CASE" 5
-printf '%s\n' '──────────────────' '❯ ' '──────────────────' > "$FAKE/pane-style"   # a tela não mostra o que foi digitado
+printf '%s\n' "$RULE" '❯ ' "$RULE" > "$FAKE/pane-style"   # a tela não mostra o que foi digitado
 hold
 wd; wd; wd
 check "teto: três falhas seguidas contadas"              [ "$(cat "$STATE/reinicio.falhas")" == 3 ]
