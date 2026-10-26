@@ -18,7 +18,7 @@ set -uo pipefail
 HOST="https://sonarcloud.io"
 JSON=0; MODE=""; PR=""
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; return 0; }
 die2() { printf 'oute-sonar: %s\n' "$*" >&2; exit 2; }
 die4() { printf 'oute-sonar: %s\n' "$*" >&2; exit 4; }
 
