@@ -203,6 +203,27 @@ git -C "$REPO" remote set-url origin https://github.com/acme/demo; run main
 check "origin https sem .git" log_has 'project=acme_demo'
 git -C "$REPO" remote set-url origin git@github.com:acme/demo.git
 
+echo "# 5b. project: existe (0), 404 = não existe (5), outra falha (4), sem token (3)"
+fixtures; fx api_components_show <<'J'
+{"component":{"key":"acme_demo"}}
+J
+run project; check "project: existe -> 0" rc_is 0
+check "project: texto" has 'existe no SonarCloud'
+check "project: consulta components/show do projeto" log_has 'api/components/show?component=acme_demo'
+check "project: não consulta o gate nem os PRs" bash -c '! grep -q "qualitygates\|pull_requests" "$1"' _ "$FAKE/curl.log"
+RUN_ENV=(OUTE_SONAR_ORG=minha-org); run project
+check "project: organização na consulta" log_has 'organization=minha-org'
+RUN_ENV=()
+fixtures; run project
+check "project: 404 -> 5" rc_is 5
+check "project: texto" has 'não existe no SonarCloud'
+fixtures; echo 500 > "$FAKE/api_components_show.code"; run project
+check "project: HTTP 500 -> 4, não 5" rc_is 4
+fixtures; RUN_TOKEN=-; run project
+check "project: sem token -> 3, sem chamada" rc_nocall 3
+RUN_TOKEN="$TOK"
+run project 7; check "project com argumento: uso, 2" rc_nocall 2
+
 echo "# 6. só GET em https://sonarcloud.io"
 fixtures; run pr 7
 check "houve chamadas" bash -c '[ -s "$1" ]' _ "$FAKE/curl.log"

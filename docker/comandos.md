@@ -209,9 +209,11 @@ Regra: uma sessão de agente = uma worktree + um branch. O checkout principal
                                     linha, mensagem), o commit analisado e, para issue FALSE-POSITIVE/WONTFIX e
                                     hotspot revisado, quem mudou o status e quando
   oute-sonar [--json] main          o mesmo na branch principal
+  oute-sonar project                the project exists on SonarCloud? 0 yes, 5 no (HTTP 404), 4 other failure
+                                    (used by `oute-swarm premerge` to waive the SonarCloud check for a repo with no project)
   Só leitura: só GET em https://sonarcloud.io. Projeto: OUTE_SONAR_PROJECT ou <dono>_<repo> do remoto origin;
   organização: OUTE_SONAR_ORG. Token: SONAR_TOKEN (item `sonar` do vault, pelo agent_env). Saída: 0 gate aprovado,
-  1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise.
+  1 gate reprovado, 2 uso, 3 sem SONAR_TOKEN, 4 falha de rede/API ou PR sem análise, 5 project: sem projeto.
 
 ## CONTAINER — conferência de referências (oute-refcheck, #485)
   oute-refcheck [arquivo]           confere, num texto (arquivo ou stdin), cada #N, SHA, arquivo:linha[@sha] e link de
