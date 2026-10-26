@@ -200,9 +200,10 @@ COPY docker/oute-guard-kill docker/codex-kill.rules /usr/local/lib/oute/
 # trava do `git` no checkout principal de /workspace/<repo>: checkout, switch, commit, merge e rebase recusados (#651)
 COPY docker/shims/git /usr/local/lib/oute/shims/git
 # `pi` continua como shim só para responder que o Pi saiu do stack (#217), mesmo com o binário antigo em ~/.local/bin
-RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh git && chmod 755 /usr/local/lib/oute/oute-guard-kill \
-    && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
+WORKDIR /usr/local/lib/oute/shims
+RUN chmod 755 oute-agent-shim gh git && chmod 755 /usr/local/lib/oute/oute-guard-kill \
+    && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done \
+    && chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
       /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression \
       /usr/local/bin/oute-shot /usr/local/bin/oute-refcheck /usr/local/bin/oute-swarm /usr/local/bin/oute /usr/local/bin/oute-doctor
