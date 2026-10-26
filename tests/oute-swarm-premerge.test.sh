@@ -37,6 +37,19 @@ prv() {
 rcout() { local rc="$1" txt="$2"; [[ "$RC" -eq "$rc" ]] && grep -qF -- "$txt" <<<"$OUT"; return $?; }
 rcerr() { local rc="$1" txt="$2"; [[ "$RC" -eq "$rc" ]] && grep -qF -- "$txt" <<<"$ERR"; return $?; }
 GREEN='[{"name":"test","conclusion":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"SUCCESS"}]'
+NOSONAR='[{"name":"test","conclusion":"SUCCESS"}]'
+# oute-sonar falso: `project` answers by $FAKE/sonar-project (exists | absent = exit 5 | token = 3 | net = 4); no file = exists
+cat > "$BIN/oute-sonar" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE/sonar.log"
+case "$(cat "$FAKE/sonar-project" 2>/dev/null || echo exists)" in
+  absent) exit 5 ;;
+  token) exit 3 ;;
+  net) exit 4 ;;
+  *) exit 0 ;;
+esac
+SH
+chmod +x "$BIN/oute-sonar"
 
 # 1. tudo em ordem: código 0 e uma linha que diz head, base e CI
 CASE=ok; pm "$CASE"; prv 12 OPEN "$HEAD1" MERGEABLE "$GREEN"
@@ -90,6 +103,38 @@ check "sem SonarCloud: código 4 (verde sem ele não vale)" rcout 4 "pendente: s
 prv 12 OPEN "$HEAD1" MERGEABLE '[]'
 sw premerge 12 --head "$HEAD1" --base "$BASE"
 check "sem checks: código 4"                             rcout 4 "pendente: sem checks"
+
+# 4b. sem o check do SonarCloud: passa só se o repo não tem projeto no SonarCloud (oute-sonar project = 5)
+CASE=sonar; pm "$CASE"
+echo absent > "$FAKE/sonar-project"
+prv 12 OPEN "$HEAD1" MERGEABLE "$NOSONAR"; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "sem projeto no SonarCloud: código 0"              [ "$RC" -eq 0 ]
+check "sem projeto: a linha diz o repo e o CI verde"     grep -qF "CI verde (no SonarCloud project for this repo), aberto e sem conflito" <<<"$OUT"
+check "sem projeto: perguntou ao oute-sonar project"     grep -qx 'project' "$FAKE/sonar.log"
+echo exists > "$FAKE/sonar-project"
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "projeto existe e o check falta: código 4"         rcout 4 "pendente: sem o SonarCloud Code Analysis"
+echo net > "$FAKE/sonar-project"
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "oute-sonar sem resposta (4): código 4"            rcout 4 "pendente: sem o SonarCloud Code Analysis"
+echo token > "$FAKE/sonar-project"
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "oute-sonar sem token (3): código 4"               rcout 4 "pendente: sem o SonarCloud Code Analysis"
+echo absent > "$FAKE/sonar-project"; : > "$FAKE/sonar.log"
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","conclusion":"FAILURE"}]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "sem projeto, outro check falhou: código 4"        rcout 4 "falhou: test"
+check "sem projeto, outro check falhou: nem consulta"    [ ! -s "$FAKE/sonar.log" ]
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","status":"IN_PROGRESS"}]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "sem projeto, outro check pendente: código 4"      rcout 4 "pendente: test"
+prv 12 OPEN "$HEAD1" MERGEABLE '[]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "sem projeto, sem checks: código 4"                rcout 4 "pendente: sem checks"
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","conclusion":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"NEUTRAL"}]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "check presente e não verde, projeto sem: código 4" rcout 4 "CI não verde (pendente: SonarCloud Code Analysis)"
+check "check presente: não consulta o oute-sonar"        [ ! -s "$FAKE/sonar.log" ]
 
 # 5. estado do PR: 5 (fechado, mergeado, em conflito), e vale antes do head
 CASE=estado; pm "$CASE"
