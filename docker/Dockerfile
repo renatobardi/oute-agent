@@ -67,11 +67,11 @@ RUN --mount=type=cache,target=/root/.npm \
 #   partir desta cópia (`claude install`).
 # - CODEX_INSTALLER_SHA256: `digest` do asset install.sh da release rust-v<versão> do openai/codex. O oute-agents-install
 #   baixa esse instalador e confere antes de rodar.
-ARG CLAUDE_CODE_VERSION=2.1.296
-ARG CLAUDE_CODE_SHA256_ARM64=f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa
-ARG CLAUDE_CODE_SHA256_AMD64=24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de
-ARG CODEX_VERSION=0.159.2
-ARG CODEX_INSTALLER_SHA256=150e3cf675682efeaac115aa3747add3f27887896d04ce6d0b56478d8b428bf6
+ARG CLAUDE_CODE_VERSION=2.1.310
+ARG CLAUDE_CODE_SHA256_ARM64=9c64d9a7442436b65fcd7cc02c1aa0051bb5a7041e7788576ed3b5f29c447d54
+ARG CLAUDE_CODE_SHA256_AMD64=b73676430af12f97316a798b8371f81d640f90a58bdcb8f3ce56a835bb47df56
+ARG CODEX_VERSION=0.164.0
+ARG CODEX_INSTALLER_SHA256=95d14ccaba915e52a3f0cc590638ca5ac510086ff6a23dc9ac9f77e957403a93
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
