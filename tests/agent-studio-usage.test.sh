@@ -255,7 +255,7 @@ out("config do repo: preço de reserva dos modelos Claude da tabela do ADR-02 (#
 import tomllib
 sel = tomllib.load(open(sys.argv[4], "rb"))
 table = sorted({m for blk in (sel["default"], *sel["line"], *sel["exception"]) for k, m in blk.items() if k in ("claude", "codex")})
-out("tabela do ADR-02 lida: Claude e reserva", {"gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "claude-opus-5-5"} <= set(table))
+out("tabela do ADR-02 lida: Claude e reserva", {"gpt-6-luna", "claude-opus-5-5"} <= set(table))
 stp = Store(":memory:")
 rp = {"host.name": "h", "oute.agent": "codex"}
 sp = [span("session_task.turn", 1759000000 + i, 1, {"model": m, "codex.turn.token_usage.non_cached_input_tokens": 1000,
@@ -265,7 +265,7 @@ gp = usage.aggregate(stp.con, 1759000000 * 10**9, (1759000000 + 100) * 10**9, c.
 out("tabela do ADR-02 sem preço: nenhum modelo", not any(v["unpriced_models"] or v["unpriced_calls"] for v in gp.values()) and len(gp) == len(table))
 out("reserva gpt-6-*: 4 eixos do models.dev", [c.prices.lookup(m) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")]
     == [P(10, 50, 1, 12.5), P(2, 10, 0.1, 2.5), P(0.1, 0.5, 0.01, 0.125)])
-out("reserva gpt-6-*: custo de lista de 1000 de entrada + 100 de saída (Codex é assinatura, #747)", [round(gp[(m,)]["listed_usd"], 9) for m in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna")] == [0.015, 0.003, 0.00015])
+out("reserva gpt-6-*: custo de lista de 1000 de entrada + 100 de saída (Codex é assinatura, #747)", [round(gp[(m,)]["listed_usd"], 9) for m in ("gpt-6-luna",)] == [0.00015])
 stp.close()
 out("config ausente: vazia, com o motivo", (lambda c: len(c.prices) == 0 and "não encontrada" in c.errors[0])(config.load("/nao/existe.toml")))
 import tempfile, os

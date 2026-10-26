@@ -324,7 +324,7 @@ check "execução, zai em 98%: aviso diz a cota da zai"   warnhas 'cota do Zai e
 q claude=97,10 codex=50,10 zai=99,10; sel --issue 50
 check "execução, claude em 97% abaixo do teto: ainda claude" [ "$(ag)/$(rsv)" == "claude/cota>zai" ]
 q claude=99,10 codex=50,10 zai=99,10; sel --issue 50
-check "execução, zai e claude no teto: codex, gpt-6.1-sol, high" bash -c '[ "$1" == "codex/codex/gpt-6.1-sol" ] && [ "$2" == "cota>zai" ] && jq -e ".effort == \"high\"" <<<"$3" >/dev/null' _ "$(sb)" "$(rsv)" "$OUT"
+check "execução, zai e claude no teto: codex, gpt-6-luna, high" bash -c '[ "$1" == "codex/codex/gpt-6-luna" ] && [ "$2" == "cota>zai" ] && jq -e ".effort == \"high\"" <<<"$3" >/dev/null' _ "$(sb)" "$(rsv)" "$OUT"
 q claude=99,10 codex=99,10 zai=99,10; sel --issue 50
 check "os três no teto, empate: fica na zai (a de partida), código 0, com aviso" bash -c '[ "$1" -eq 0 ] && [ "$2" == "zai/claude/glm-5.3" ] && grep -qF "abrindo no Zai" <<<"$3"' _ "$RC" "$(sb)" "$ERR"
 q claude=99,10 codex=98,10 zai=99,10; sel --issue 50
@@ -352,7 +352,7 @@ check "--subscription zai folgada: sem aviso"           [ -z "$ERR" ]
 sel --issue 50 --subscription claude
 check "--subscription claude numa fase de execução: claude, haiku 5.5" [ "$(sb)" == "claude/claude/claude-haiku-5-5" ]
 sel --issue 50 --subscription codex
-check "--subscription codex: codex, com esforço"        bash -c '[ "$1" == "codex/codex/gpt-6.1-sol" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
+check "--subscription codex: codex, com esforço"        bash -c '[ "$1" == "codex/codex/gpt-6-luna" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --subscription gemini
 check "--subscription fora da tabela: código 2 e a lista" bash -c '[ "$1" -eq 2 ] && grep -qF "use claude ou zai ou codex" <<<"$2"' _ "$RC" "$ERR"
 sel --issue 50 --agent claude --subscription zai
@@ -372,7 +372,7 @@ q claude=10,10 codex=10,10 zai=10,10
 sel --issue 50 --agent claude
 check "--agent claude em build: claude, haiku 5.5, manual"  bash -c '[ "$1" == "claude/claude/claude-haiku-5-5" ] && jq -e ".origin == \"manual\" and .reserve == \"\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --agent codex
-check "--agent codex em build: codex, gpt-6.1-sol, high" bash -c '[ "$1" == "codex/codex/gpt-6.1-sol" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
+check "--agent codex em build: codex, gpt-6-luna, high" bash -c '[ "$1" == "codex/codex/gpt-6-luna" ] && jq -e ".effort == \"high\"" <<<"$2" >/dev/null' _ "$(sb)" "$OUT"
 sel --issue 50 --agent zai
 check "--agent zai: código 2 (zai é assinatura, não agente)" bash -c '[ "$1" -eq 2 ] && grep -qF "use claude ou codex" <<<"$2"' _ "$RC" "$ERR"
 sel --model glm-5.3

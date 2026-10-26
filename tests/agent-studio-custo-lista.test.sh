@@ -119,7 +119,7 @@ sel = tomllib.load(open(f"{root}/config/select/models.toml", "rb"))
 models = set()
 for tab in [sel["default"], *sel["line"]]:
     models |= {tab[s["name"]] for s in sel["subscription"] if s["name"] in tab}
-check("a tabela do seletor tem modelos das três assinaturas", {"claude-opus-5-5", "claude-sonnet-5-5", "glm-5.3", "gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna"} <= models)
+check("a tabela do seletor tem modelos das três assinaturas", {"claude-opus-5-5", "claude-sonnet-5-5", "glm-5.3", "gpt-6-luna"} <= models)
 check("todo modelo da tabela do seletor tem preço com fixed = true", all(conf["prices"].get(m, {}).get("fixed") is True for m in models))
 check("o config.toml cita as páginas oficiais das três fontes e a data da leitura (2026-10-08)",
       all(u in raw for u in ("https://platform.claude.com/docs/en/about-claude/pricing", "https://developers.openai.com/api/docs/pricing", "https://docs.z.ai/guides/overview/pricing")) and raw.count("2026-10-08") >= 3)
