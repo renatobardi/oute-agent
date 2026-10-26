@@ -1,0 +1,2 @@
+### Changed
+- **Tabela do seletor troca `gpt-6.1-sol` e `gpt-6-astra` por `gpt-5.6-terra` (Codex).** Os dois modelos não existem no catálogo da assinatura atual do Codex (`scripts/models-check` dava `FALTA`). O `gpt-5.6-terra` (esforço `high`, listado no catálogo) ocupa as linhas e exceções que usavam os dois; o revisor de `gpt-5.6-terra` é o Opus, como era o de `gpt-6.1-sol`. Sem release: `config/` entra com `git pull` + `oute down/up`.
