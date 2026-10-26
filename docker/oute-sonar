@@ -4,9 +4,11 @@
 #
 # uso:  oute-sonar [--json] pr <n>     o PR <n> do projeto
 #       oute-sonar [--json] main       a branch principal
+#       oute-sonar project             whether the project exists on SonarCloud (a 404 = no project)
 # ambiente: SONAR_TOKEN (obrigatório; vem do agent_env), OUTE_SONAR_PROJECT (padrão: <dono>_<repo> do remoto origin),
 #           OUTE_SONAR_ORG (opcional; organização)
-# saída: 0 gate aprovado | 1 gate reprovado | 2 uso | 3 sem SONAR_TOKEN | 4 falha de rede/API ou PR sem análise
+# saída: 0 gate aprovado (project: projeto existe) | 1 gate reprovado | 2 uso | 3 sem SONAR_TOKEN | 4 falha de rede/API ou PR sem análise
+#        | 5 project: o projeto não existe no SonarCloud
 #
 # O token só vai ao curl por um arquivo de configuração lido do stdin (`-K -`): nunca no argv. O xtrace é desligado
 # antes de ler o token. O texto que vem do SonarCloud (mensagem, regra) é dado: sai sem caracteres de controle.
@@ -16,7 +18,7 @@ set -uo pipefail
 HOST="https://sonarcloud.io"
 JSON=0; MODE=""; PR=""
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; return 0; }
 die2() { printf 'oute-sonar: %s\n' "$*" >&2; exit 2; }
 die4() { printf 'oute-sonar: %s\n' "$*" >&2; exit 4; }
 
@@ -27,11 +29,12 @@ while [[ $# -gt 0 ]]; do
     pr) [[ -z "$MODE" ]] || die2 "modo repetido"; MODE=pr; shift
         [[ $# -gt 0 ]] || die2 "uso: oute-sonar pr <n>"; PR="$1" ;;
     main) [[ -z "$MODE" ]] || die2 "modo repetido"; MODE=main ;;
-    *) die2 "argumento desconhecido: uso: oute-sonar [--json] pr <n> | main" ;;
+    project) [[ -z "$MODE" ]] || die2 "modo repetido"; MODE=project ;;
+    *) die2 "argumento desconhecido: uso: oute-sonar [--json] pr <n> | main | project" ;;
   esac
   shift
 done
-[[ -n "$MODE" ]] || die2 "uso: oute-sonar [--json] pr <n> | main"
+[[ -n "$MODE" ]] || die2 "uso: oute-sonar [--json] pr <n> | main | project"
 if [[ "$MODE" = pr ]] && ! [[ "$PR" =~ ^[0-9]+$ ]]; then die2 "<n> só com dígitos"; fi
 
 # projeto: OUTE_SONAR_PROJECT, ou <dono>_<repo> do remoto origin
@@ -64,6 +67,7 @@ api() {
     | curl -sS -K - --proto '=https' --max-time 30 -o "$TMP/body" -w '%{http_code}' "$HOST/$path${query:+?$query}" 2>/dev/null)"
   rc=$?
   [[ $rc -eq 0 ]] || die4 "falha de rede em /$path (curl $rc)"
+  if [[ "$code" = 404 && "${NOT_FOUND_OK:-0}" = 1 ]]; then return 5; fi   # `project`: 404 = the project does not exist
   [[ "$code" = 200 ]] || die4 "/$path respondeu HTTP $code"
   BODY="$(cat "$TMP/body")"
   jq -e . >/dev/null 2>&1 <<<"$BODY" || die4 "/$path não devolveu JSON"
@@ -85,6 +89,14 @@ paged() {
 
 if [[ "$MODE" = pr ]]; then SCOPE="pullRequest=$PR"; else SCOPE=""; fi
 PKEY="projectKey=$PROJECT${ORG:+&organization=$ORG}"
+
+# project: the key exists on SonarCloud. Exit 0 = yes; 5 = the API answered 404 (no such project); any other failure exits 4
+if [[ "$MODE" = project ]]; then
+  if NOT_FOUND_OK=1 api api/components/show "component=$PROJECT${ORG:+&organization=$ORG}"; then
+    echo "projeto $PROJECT: existe no SonarCloud"; exit 0
+  fi
+  echo "projeto $PROJECT: não existe no SonarCloud"; exit 5
+fi
 
 # commit analisado (e data): lista de PRs ou de branches do projeto; PR sem análise não está na lista
 if [[ "$MODE" = pr ]]; then

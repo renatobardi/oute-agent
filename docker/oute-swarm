@@ -64,7 +64,7 @@
 #                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
 #   oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]   (usado pelo dispatcher, #752) conferência de antes do merge,
 #                                                   sem modelo: PR aberto e sem conflito, head = o auditado, base = a ensaiada, CI verde (só SUCCESS; pulado e neutro não contam) com
-#                                                   o SonarCloud Code Analysis. Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
+#                                                   o SonarCloud Code Analysis (waived only when the repo has no SonarCloud project). Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
 #   oute-swarm pr-comment <pr> --body-file <arquivo>  (usado pelo dispatcher, #829) confere as referências do texto com o
 #                                                   oute-refcheck e só então comenta o PR (gh pr comment); imprime a URL do
 #                                                   comentário. Saída 1: quebrada ou nao-abre, não comentou; 3 só não conferidas,
@@ -2162,8 +2162,10 @@ cmd_estado() {
 # oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
 # um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
 # mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
+# Repo without a SonarCloud project (`oute-sonar project` exits 5, a 404) needs no SonarCloud check: the rest of the CI still must pass.
+# A missing check with a project present, or any other answer from oute-sonar, still refuses with 4.
 cmd_premerge() {
-  local pr="" head="" base="" repo="" main round info st cur_head bref mg ci cur_base a v
+  local pr="" head="" base="" repo="" main round info st cur_head bref mg ci cur_base a v sonar sonar_rc
   while [[ $# -gt 0 ]]; do
     a="$1"; v="${2:-}"
     case "$a" in
@@ -2211,8 +2213,14 @@ cmd_premerge() {
       elif any($c[]; .r == "pending") then "pendente: " + ([$c[] | select(.r == "pending") | .n] | join(", "))
       elif all($c[]; .n != "SonarCloud Code Analysis") then "pendente: sem o SonarCloud Code Analysis"
       else "pass" end' <<<"$info")"
+  sonar="com SonarCloud"
+  if [[ "$ci" == "pendente: sem o SonarCloud Code Analysis" ]]; then
+    # no SonarCloud check: only a repo with no SonarCloud project (oute-sonar project, exit 5) passes without it
+    sonar_rc=0; (cd "$main" && oute-sonar project >/dev/null 2>&1) || sonar_rc=$?
+    if [[ "$sonar_rc" -eq 5 ]]; then ci=pass; sonar="(no SonarCloud project for this repo)"; fi
+  fi
   if [[ "$ci" != pass ]]; then echo "premerge #$pr: recusado, CI não verde ($ci)"; return 4; fi
-  echo "premerge #$pr: ok, head ${cur_head:0:7}, base ${cur_base:0:7} em $bref, CI verde com SonarCloud, aberto e sem conflito"
+  echo "premerge #$pr: ok, head ${cur_head:0:7}, base ${cur_base:0:7} em $bref, CI verde $sonar, aberto e sem conflito"
   return 0
 }
 
