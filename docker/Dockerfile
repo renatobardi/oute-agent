@@ -67,11 +67,11 @@ RUN --mount=type=cache,target=/root/.npm \
 #   partir desta cópia (`claude install`).
 # - CODEX_INSTALLER_SHA256: `digest` do asset install.sh da release rust-v<versão> do openai/codex. O oute-agents-install
 #   baixa esse instalador e confere antes de rodar.
-ARG CLAUDE_CODE_VERSION=2.1.296
-ARG CLAUDE_CODE_SHA256_ARM64=f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa
-ARG CLAUDE_CODE_SHA256_AMD64=24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de
-ARG CODEX_VERSION=0.159.2
-ARG CODEX_INSTALLER_SHA256=150e3cf675682efeaac115aa3747add3f27887896d04ce6d0b56478d8b428bf6
+ARG CLAUDE_CODE_VERSION=2.1.310
+ARG CLAUDE_CODE_SHA256_ARM64=9c64d9a7442436b65fcd7cc02c1aa0051bb5a7041e7788576ed3b5f29c447d54
+ARG CLAUDE_CODE_SHA256_AMD64=b73676430af12f97316a798b8371f81d640f90a58bdcb8f3ce56a835bb47df56
+ARG CODEX_VERSION=0.164.0
+ARG CODEX_INSTALLER_SHA256=95d14ccaba915e52a3f0cc590638ca5ac510086ff6a23dc9ac9f77e957403a93
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g --prefix /opt/oute/agents --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
@@ -200,9 +200,10 @@ COPY docker/oute-guard-kill docker/codex-kill.rules /usr/local/lib/oute/
 # trava do `git` no checkout principal de /workspace/<repo>: checkout, switch, commit, merge e rebase recusados (#651)
 COPY docker/shims/git /usr/local/lib/oute/shims/git
 # `pi` continua como shim só para responder que o Pi saiu do stack (#217), mesmo com o binário antigo em ~/.local/bin
-RUN cd /usr/local/lib/oute/shims && chmod 755 oute-agent-shim gh git && chmod 755 /usr/local/lib/oute/oute-guard-kill \
-    && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done
-RUN chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
+WORKDIR /usr/local/lib/oute/shims
+RUN chmod 755 oute-agent-shim gh git && chmod 755 /usr/local/lib/oute/oute-guard-kill \
+    && for a in claude codex pi; do ln -sf oute-agent-shim "$a"; done \
+    && chmod +x /usr/local/lib/oute/addons-link /usr/local/bin/entrypoint.sh /usr/local/bin/oute-secrets \
       /usr/local/bin/oute-propose /usr/local/bin/oute-inbox /usr/local/bin/oute-emit /usr/local/bin/oute-agents-install \
       /usr/local/bin/oute-task /usr/local/bin/oute-select /usr/local/bin/oute-sonar /usr/local/bin/oute-quota /usr/local/bin/oute-regression \
       /usr/local/bin/oute-shot /usr/local/bin/oute-refcheck /usr/local/bin/oute-swarm /usr/local/bin/oute /usr/local/bin/oute-doctor
