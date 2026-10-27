@@ -12,12 +12,12 @@ To run on the host as its user or **sudo/root**:
    # comandos
    SH
    ```
-   Prints request `id`. `--root` = sudo; without it, host user.
+   Prints request `id`; `--root` = sudo.
 2. User reads whole script, approves/rejects on host with `oute approve`.
 3. Wait for and read the result (output + exit code): `oute-inbox --wait <id>`. Exit 3 = pending/expired.
 
-Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` before each step, no secrets in text, nothing interactive. Read state first (via `ssh oute-server`); propose only what is needed.
-**Summary and warning in the script (#480).** Every script opens with a `# RESUMO` comment block, in this order: what it does, which host, what it changes, what it does **not** touch, whether it restarts anything. Before each step that **removes, recreates, stops or cannot be undone**: a line `# CUIDADO: <o que o passo faz>. <o que se perde>.` (command first, risk after; "não se desfaz" when so). Warning states the real effect: no exaggeration, no reassurance. Write "não toca em X" only if the script guarantees it (e.g. a check before the step). Both blocks are comments: script runs the same without them. Example:
+Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` before each step, no secrets in text, nothing interactive. Read state first (`ssh oute-server`); propose only what's needed.
+**Summary and warning in the script (#480).** Every script opens with a `# RESUMO` comment block, in this order: what it does, which host, what it changes, what it does **not** touch, whether it restarts anything. Before each step that **removes, recreates, stops or cannot be undone**, a line `# CUIDADO: <o que o passo faz>. <o que se perde>.` (command first, risk after; "não se desfaz" when so). Warning states the real effect: no exaggeration, no reassurance. Write "não toca em X" only if the script guarantees it (e.g. a prior check). Both blocks are comments. Example:
    ```bash
    set -euo pipefail
    # RESUMO
@@ -28,9 +28,9 @@ Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` befo
    echo "2/2: remove o volume"
    docker volume rm oute-x
    ```
-Request that **removes, recreates or stops** a host resource (volume, container, file, service): before that step, the script itself lists what depends on it and **stops without changing anything** if a dependent is unexpected; or is preceded by a rehearsal request (`--dry-run`/read-only).
-Pending request **obsolete** (previous failed, plan changed): tell the user to **reject it before** proposing the replacement; replacement's title says it **replaces** the old one (e.g. "substitui <id>: …").
-**Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`, lists pending requests) and open rounds (`oute-swarm busy`, lists issues with a session open in another round). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
+Request that **removes, recreates or stops** a host resource, or that **calls the app API or needs an earlier step** (tag before deploy): the script lists the dependents first and **stops without changing anything** if one is unexpected, or a read-only rehearsal request comes first; for API or earlier step it checks the env tools (`command -v curl`), the route prefix (`/api/v1`), the ids and that the tag exists. No `| head` or `grep -m1` under `pipefail` (rc=141).
+Pending request **obsolete** (failed, plan changed): tell the user to **reject it before** proposing the replacement, titled as **replacing** the old one (e.g. "substitui <id>: …").
+**Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`) and open rounds (`oute-swarm busy`). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
 
 **Permanent** oute-server config change: `lab` repo flow (issue → inventory → script → PR). The channel is for diagnosis, one-off adjustments, and deploying an already merged PR.
 
