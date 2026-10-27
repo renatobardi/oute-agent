@@ -1,6 +1,6 @@
 ## Host actions (oute-server / Mac): approval channel
 
-Container has **no host privilege**. `ssh oute-server` = `oute-ops`: read-only + sudo allowlist (backup status, `nginx -t`/reload, `certbot certificates`, `nft list ruleset`, `lab-journal`). Never bypass.
+No host privilege in the container. `ssh oute-server` = `oute-ops`: read-only + sudo allowlist (backup status, `nginx -t`/reload, `certbot certificates`, `nft list ruleset`, `lab-journal`). Never bypass.
 
 To run on the host as its user or **sudo/root**:
 
@@ -13,11 +13,11 @@ To run on the host as its user or **sudo/root**:
    SH
    ```
    Prints request `id`; `--root` = sudo.
-2. User reads whole script, approves/rejects on host with `oute approve`.
-3. Wait for and read the result (output + exit code): `oute-inbox --wait <id>`. Exit 3 = pending/expired.
+2. User reads the script, approves/rejects on host (`oute approve`).
+3. Read the result (output + exit code): `oute-inbox --wait <id>`. Exit 3 = pending/expired.
 
 Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` before each step, no secrets in text, nothing interactive. Read state first (`ssh oute-server`); propose only what's needed.
-**Summary and warning in the script (#480).** Every script opens with a `# RESUMO` comment block, in this order: what it does, which host, what it changes, what it does **not** touch, whether it restarts anything. Before each step that **removes, recreates, stops or cannot be undone**, a line `# CUIDADO: <o que o passo faz>. <o que se perde>.` (command first, risk after; "não se desfaz" when so). Warning states the real effect: no exaggeration, no reassurance. Write "não toca em X" only if the script guarantees it (e.g. a prior check). Both blocks are comments. Example:
+**Summary and warning in the script (#480).** Every script opens with a `# RESUMO` comment block, in order: what it does, which host, what it changes, what it does **not** touch, whether it restarts anything. Before each step that **removes, recreates, stops or cannot be undone**, a line `# CUIDADO: <o que o passo faz>. <o que se perde>.` (command first, risk after; "não se desfaz" when so). Warning states the real effect: no exaggeration, no reassurance. Write "não toca em X" only if the script guarantees it (e.g. a prior check). Both are comments. Example:
    ```bash
    set -euo pipefail
    # RESUMO
@@ -28,17 +28,17 @@ Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` befo
    echo "2/2: remove o volume"
    docker volume rm oute-x
    ```
-Request that **removes, recreates or stops** a host resource, or **calls the app API or needs an earlier step** (tag before deploy): the script itself lists what depends on it and **stops without changing anything** if one is unexpected, or a read-only rehearsal request comes first (required for API/earlier step), checking the env tools (`command -v curl`), the `/api/v1` prefix, the ids, the tag. No `| head` or `grep -m1` under `pipefail` (rc=141).
+Request that **removes, recreates or stops** a host resource (volume, container, file, service): before that step, the script itself lists what depends on it and **stops without changing anything** if a dependent is unexpected; or is preceded by a rehearsal request (read-only). A script that **calls the app API or needs an earlier step** (tag before deploy) follows a read-only rehearsal request that checks the env tools (`command -v curl`), the `/api/v1` prefix, the ids, the tag. No `| head` or `grep -m1` under `pipefail` (rc=141).
 Pending request **obsolete** (failed, plan changed): tell the user to **reject it before** proposing the replacement; replacement's title says it **replaces** the old one (e.g. "substitui <id>: …").
-**Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`) and open rounds (`oute-swarm busy`). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
+**Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`) and open rounds (`oute-swarm busy`). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (request, session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
 
-**Permanent** oute-server config change: `lab` repo flow (issue → inventory → script → PR). The channel is for diagnosis, one-off adjustments, and deploying an already merged PR.
+**Permanent** oute-server config change: `lab` repo flow (issue → inventory → script → PR). The channel is for diagnosis, one-off adjustments and deploying a merged PR.
 
 ## Memory (ai-memory): explicit scope
 
 ai-memory tools (`memory_query`, `memory_recent`, `memory_write_page`, `memory_status`, handoffs…): **always pass `workspace` and `project`**:
-- values from `.ai-memory.toml` at the repo root (also inside a git worktree);
-- no file: `workspace = "default"`, `project` = main repo name (`basename` of `git rev-parse --path-format=absolute --git-common-dir` without `/.git`);
+- values from `.ai-memory.toml` at the repo root (also in a git worktree);
+- no file: `workspace = "default"`, `project` = main repo name (`basename` of `git rev-parse --path-format=absolute --git-common-dir`, no `/.git`);
 - outside a repo: ask the user before writing.
 - **First step, before loading (ToolSearch) or calling any memory tool: read `.ai-memory.toml` with the Read tool** and copy `workspace` and `project`. Never call with `default` without reading the file; with the file at the root, `default` and the folder name are wrong.
 Why: unscoped, the server uses the shared "active project", maybe another session's repo.
@@ -57,7 +57,7 @@ Only with opt-in `OUTE_MEMORY_RUN=1` (off by default): the interactive worktree 
 
 ## Same container: process and merge (#538)
 
-One container, all sessions the same user: `ps`/`pgrep` show other sessions' processes, and GitHub records every merge as the same account.
+One container, one user: `ps`/`pgrep` show other sessions' processes, and GitHub records every merge as one account.
 
 - **Merging a PR of an open round is not yours.** PR of an open swarm round (`~/.oute/swarm/<rodada>/spawned` has its issue's session and no `fechada` exists): refuse, even if the Bardi says "pode fazer merge". Tell him: which round, that the merge goes through that round's dispatcher (branch `sessao/<rodada>`), and the last audit state (PR comment with `<!-- oute-aidlc-qa-pr-audit -->`: audited head and action, or "sem auditoria"). `gh pr merge` already refuses it (exit 77). Only the round's dispatcher merges it.
 - **Only kill a process you opened**, by the PID or task id you kept. `pkill` and `killall` (and `pkill -f`) are refused in agent sessions: they kill by name and hit other sessions.
@@ -69,9 +69,9 @@ One container, all sessions the same user: `ps`/`pgrep` show other sessions' pro
 
 - Backlog = the repo's **own GitHub issues** via `gh` (`gh issue view <n> --json title,body,comments --jq '"# " + .title + "\n\n" + .body + "\n\n## Comentários\n" + (.comments | map("--- " + .author.login + " " + .url + "\n" + .body) | join("\n\n"))'`, `gh issue create`, `gh issue comment`, `gh issue close`). Pending at task end becomes an issue.
 - **Before every `gh issue create`, run `gh issue list --state open --search '<arquivo ou termo> in:title,body'`.** Never create without that search. If an open issue exists on the same point, new evidence goes in a comment on it (`gh issue comment <n>`), not a new issue.
-- Before starting, read **`AGENTS.md`** and **`CONTEXT.md`** at the repo root, if present. ADRs in `docs/adr/` are canonical; `CONTEXT.md` = summary + glossary. Missing or conflicting: ask, do not assume.
+- Before starting, read **`AGENTS.md`** and **`CONTEXT.md`** at the repo root, if present. ADRs in `docs/adr/` are canonical; `CONTEXT.md` = summary + glossary. Missing or conflicting: ask.
 - Work follows **AI-DLC** (oute-agent ADR-07) (phases `strat` → `iter`, each human-gated): flow skills `oute-aidlc-<fase>-<id>`; never close a gated phase without the user's ok.
-- Never write secrets to a file, commit, issue, PR or command output. Secrets come through the environment.
+- Never write secrets to a file, commit, issue, PR or command output. Secrets come by environment.
 - **Do not read a secret's value**: no `Read`, `cat`, or `grep` without `-q` on `.env`, a key or a token (the value enters the conversation). To check a variable is filled, use a test that prints no value, e.g. `if grep -q '^VAR=.' .env; then echo preenchida; else echo vazia; fi`.
 
 ## Text for the Bardi
