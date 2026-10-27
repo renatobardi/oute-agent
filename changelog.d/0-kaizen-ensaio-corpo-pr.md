@@ -1,2 +1,0 @@
-### Changed
-- **Kaizen swarm-1024-0625: ensaio antes de script de API e corpo do PR por último** (sem issue). `docker/agent-notes.md`: script que chama a API do app ou depende de passo anterior vem depois de um pedido de ensaio só de leitura; `head`/`grep -m1` sob `pipefail` é proibido. `docker/swarm-worker.md`: o corpo do PR sai de uma lista de critérios, por último, e cada número cita o comando. **Precisa de release** (os dois arquivos vão na imagem).
