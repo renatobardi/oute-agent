@@ -28,8 +28,8 @@ Script: bash, `set -euo pipefail`, idempotent, one goal per request, `echo` befo
    echo "2/2: remove o volume"
    docker volume rm oute-x
    ```
-Request that **removes, recreates or stops** a host resource, or that **calls the app API or needs an earlier step** (tag before deploy): the script lists the dependents first and **stops without changing anything** if one is unexpected, or a read-only rehearsal request comes first; for API or earlier step it checks the env tools (`command -v curl`), the route prefix (`/api/v1`), the ids and that the tag exists. No `| head` or `grep -m1` under `pipefail` (rc=141).
-Pending request **obsolete** (failed, plan changed): tell the user to **reject it before** proposing the replacement, titled as **replacing** the old one (e.g. "substitui <id>: …").
+Request that **removes, recreates or stops** a host resource, or **calls the app API or needs an earlier step** (tag before deploy): the script itself lists what depends on it and **stops without changing anything** if one is unexpected, or a read-only rehearsal request comes first (required for API/earlier step), checking the env tools (`command -v curl`), the `/api/v1` prefix, the ids, the tag. No `| head` or `grep -m1` under `pipefail` (rc=141).
+Pending request **obsolete** (failed, plan changed): tell the user to **reject it before** proposing the replacement; replacement's title says it **replaces** the old one (e.g. "substitui <id>: …").
 **Release, deploy, deploy verification: read the queue first (#650).** Before proposing a release, deploy or deploy verification, read the channel queue (`oute-inbox`) and open rounds (`oute-swarm busy`). If **another session** has a pending release or deploy request, do not propose another: tell the Bardi (which request, which session) and wait. A deploy request states in `# RESUMO` which rounds are open and which sessions go down with `oute down`/`up`.
 
 **Permanent** oute-server config change: `lab` repo flow (issue → inventory → script → PR). The channel is for diagnosis, one-off adjustments, and deploying an already merged PR.
