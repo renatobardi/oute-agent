@@ -65,8 +65,17 @@ check "ok: SUCCESS por state conta como verde"          [ "$RC" -eq 0 ]
 for c in NEUTRAL SKIPPED; do
   prv 12 OPEN "$HEAD1" MERGEABLE "[{\"name\":\"test\",\"conclusion\":\"SUCCESS\"},{\"name\":\"SonarCloud Code Analysis\",\"conclusion\":\"$c\"}]"
   sw premerge 12 --head "$HEAD1" --base "$BASE"
-  check "$c não é verde: código 4 e o nome do check"      rcout 4 "CI não verde (pendente: SonarCloud Code Analysis)"
+  check "SonarCloud $c: código 4 e o pulou (não é verde)"  rcout 4 "CI não verde (pulou: SonarCloud Code Analysis)"
 done
+# check de revisor externo pulado não bloqueia (CodeRabbit SKIPPED, kaizen swarm-1027-0802): ok com o pulou na linha;
+# check pendente de outro vem antes do pulou na classificação
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","conclusion":"SUCCESS"},{"name":"CodeRabbit","conclusion":"SKIPPED"},{"name":"SonarCloud Code Analysis","conclusion":"SUCCESS"}]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "check externo pulado: código 0"                    [ "$RC" -eq 0 ]
+check "check externo pulado: o pulou sai na linha"        grep -qF "CI verde com SonarCloud (pulou: CodeRabbit), aberto e sem conflito" <<<"$OUT"
+prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","conclusion":"SUCCESS"},{"name":"CodeRabbit","conclusion":"SKIPPED"},{"name":"outro","status":"IN_PROGRESS"},{"name":"SonarCloud Code Analysis","conclusion":"SUCCESS"}]'
+sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "check pendente vence o pulado: código 4"           rcout 4 "CI não verde (pendente: outro)"
 prv 12 OPEN "$HEAD1" UNKNOWN "$GREEN"
 sw premerge 12 --head "$HEAD1" --base "$BASE"
 check "mergeable UNKNOWN: código 5, não é sem conflito" rcout 5 "mergeable UNKNOWN"
@@ -133,7 +142,7 @@ sw premerge 12 --head "$HEAD1" --base "$BASE"
 check "sem projeto, sem checks: código 4"                rcout 4 "pendente: sem checks"
 prv 12 OPEN "$HEAD1" MERGEABLE '[{"name":"test","conclusion":"SUCCESS"},{"name":"SonarCloud Code Analysis","conclusion":"NEUTRAL"}]'
 sw premerge 12 --head "$HEAD1" --base "$BASE"
-check "check presente e não verde, projeto sem: código 4" rcout 4 "CI não verde (pendente: SonarCloud Code Analysis)"
+check "check presente e não verde, projeto sem: código 4" rcout 4 "CI não verde (pulou: SonarCloud Code Analysis)"
 check "check presente: não consulta o oute-sonar"        [ ! -s "$FAKE/sonar.log" ]
 
 # 5. estado do PR: 5 (fechado, mergeado, em conflito), e vale antes do head
