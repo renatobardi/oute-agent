@@ -354,6 +354,54 @@ check "canal: sessão da rodada leva (da rodada)"          logged "[canal] pedid
 check "canal: sessão de fora leva (alheio)"               logged "[canal] pedido pendente b-alheio: ajuste do deploy (agente claude, user) (alheio) — aprovação no host: oute watch"
 check "canal: pedido antigo sem o campo fica como era"    logged "[canal] pedido pendente c-antigo: ajuste #7 sem o campo (agente claude, user) — aprovação no host: oute watch"
 
+# 873. [canal] resultado: rc 0 sai para pedido da rodada (pelo # rodada: ou # sessao: do .sh, já movido para done/ ou
+# rejected/) e não sai para alheio; rc≠0 e recusa seguem saindo para todo pedido. res() cria o .out no inbox e o .sh em
+# <outbox>/<done|rejected>/, como o approve entrega no container
+CASE=resultado-zero; round "$CASE"
+cat > "$FAKE/on-sleep-1" <<'SH'
+res() {
+  local id="$1" rc="$2" extra="$3" pasta="$4"
+  printf '# id: %s\n# rc: %s\n# como: user\n# aprovado: 2026-06-01T00:01:00Z por t@h\n# sha256: x\n# duracao: 1 s\n# saida: 2 bytes\n\nok\n' "$id" "$rc" > "$OUTE_INBOX/$id.out"
+  mkdir -p "$OUTE_OUTBOX/$pasta"
+  printf '# oute-propose\n# titulo: t\n# como: user\n# agente: claude\n# criado: 2026-06-01T00:00:00Z\n%s\necho x\n' "$extra" > "$OUTE_OUTBOX/$pasta/$id.sh"
+  return 0
+}
+res d-zero 0 "# rodada: swarm-test" done
+res e-alheio 0 "# rodada: swarm-outra" done
+res f-sem-campo 0 "" rejected
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "rc 0: pedido da rodada sai, uma vez"               logged "[canal] resultado d-zero: rc=0 (oute-inbox d-zero)"
+check "rc 0: pedido de outra rodada não sai"              bash -c '! grep -qF "[canal] resultado e-alheio" <<<"$1"' _ "$(log_events)"
+check "rc 0: sem cabeçalho de rodada não sai"             bash -c '! grep -qF "[canal] resultado f-sem-campo" <<<"$1"' _ "$(log_events)"
+check "rc 0: log = stdout"                                [ "$(log_events)" == "$(out_events)" ]
+watch
+check "rc 0: não repete depois do reinício"               [ "$(count "[canal] resultado d-zero: rc=0 (oute-inbox d-zero)")" -eq 1 ]
+
+# rc≠0 e recusa de pedido alheio ou sem .sh continuam saindo; rc 0 de sessão da rodada (spawned) também sai
+CASE=resultado-outros; round "$CASE"
+cat > "$FAKE/on-sleep-1" <<'SH'
+res() {
+  local id="$1" rc="$2" extra="$3" pasta="$4"
+  printf '# id: %s\n# rc: %s\n# como: user\n# aprovado: 2026-06-01T00:01:00Z por t@h\n# sha256: x\n# duracao: 1 s\n# saida: 2 bytes\n\nok\n' "$id" "$rc" > "$OUTE_INBOX/$id.out"
+  mkdir -p "$OUTE_OUTBOX/$pasta"
+  printf '# oute-propose\n# titulo: t\n# como: user\n# agente: claude\n# criado: 2026-06-01T00:00:00Z\n%s\necho x\n' "$extra" > "$OUTE_OUTBOX/$pasta/$id.sh"
+  return 0
+}
+res g-erro 2 "# rodada: swarm-outra" done
+res h-recusa 126 "" rejected
+printf '# id: h-recusa\n# rc: 126\n# recusado: 2026-06-01T00:00:30Z por t@h\n# sha256: x\n\nrecusado pelo usuário; nada foi executado.\n' > "$OUTE_INBOX/h-recusa.out"
+res i-sessao 0 "# sessao: 7-foo" done
+printf '# id: j-sem-sh\n# rc: 1\n\nfalhou\n' > "$OUTE_INBOX/j-sem-sh.out"
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "rc≠0: pedido de outra rodada sai como antes"       logged "[canal] resultado g-erro: rc=2 (oute-inbox g-erro)"
+check "recusa: sai como antes"                            logged "[canal] pedido h-recusa recusado no host"
+check "rc 0: sessão da rodada (spawned) sai"              logged "[canal] resultado i-sessao: rc=0 (oute-inbox i-sessao)"
+check "rc≠0: sem o .sh também sai"                        logged "[canal] resultado j-sem-sh: rc=1 (oute-inbox j-sem-sh)"
+
 # 766. pendência parada (#766, da #767): PR aberto, CI vermelho ou sessão `done` sem PR, 30 minutos (OUTE_WATCH_STALL_S, padrão
 # 1800 s) sem mudar, saem numa linha `[pendencia]`; sem pendência, nada. O relógio é o arquivo OUTE_WATCH_CLOCK (epoch)
 pend_events() {
@@ -373,19 +421,31 @@ hook() {
 }
 T0=1800000000
 
-# PR aberto sem mudança: nada aos 28 min, uma linha aos 31, sem repetir aos 36, de novo aos 62 (a cada 30 min no máximo)
+# PR aberto sem mudança: nada aos 28 min, uma linha aos 31, nada aos 36 nem aos 62, de novo aos 152 (repete a cada 2 h
+# no máximo, OUTE_WATCH_PEND_REPEAT_S; antes repetia a cada 30 min e a mesma linha saiu 58 vezes, kaizen swarm-1027-0802)
 CASE=pendparada; round "$CASE"
 FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
 clock "$T0"
-hook 1 $((T0 + 1680)); hook 2 $((T0 + 1860)); hook 3 $((T0 + 2160)); hook 4 $((T0 + 3720))
-echo : > "$FAKE/on-sleep-5"
+hook 1 $((T0 + 1680)); hook 2 $((T0 + 1860)); hook 3 $((T0 + 2160)); hook 4 $((T0 + 3720)); hook 5 $((T0 + 9120))
+echo : > "$FAKE/on-sleep-6"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "pendência: código 0"                              [ "$RC" -eq 0 ]
-check "pendência: PR aberto parado sai duas vezes, 30 min depois da primeira" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto"$'\n'"[pendencia] 1 parada(s) há 62 min ou mais, sem mudança: PR #12 aberto" ]
+check "pendência: PR aberto parado sai aos 31 min e só 2 h depois" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: PR #12 aberto"$'\n'"[pendencia] 1 parada(s) há 152 min ou mais, sem mudança: PR #12 aberto" ]
 check "pendência: a linha vai ao stdout, igual ao log"    [ "$(log_events)" == "$(out_events)" ]
 clock $((T0 + 3800)); echo : > "$FAKE/on-sleep-1"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
-check "pendência: reinício dentro dos 30 min não repete (estado em disco)" [ "$(pend_events | wc -l | tr -d ' ')" -eq 2 ]
+check "pendência: reinício dentro das 2 h não repete (estado em disco)" [ "$(pend_events | wc -l | tr -d ' ')" -eq 2 ]
+
+# o intervalo de repetição vem de OUTE_WATCH_PEND_REPEAT_S: com 1800 repete aos 62 min; valor inválido volta às 2 h
+CASE=pendrepete; round "$CASE"
+FAKE="$FAKE" "$BIN/fake-pr" "$A" OPEN
+clock "$T0"
+hook 1 $((T0 + 1860)); hook 2 $((T0 + 3720)); hook 3 $((T0 + 3721))
+echo : > "$FAKE/on-sleep-4"
+OUTE_WATCH_PEND_REPEAT_S=1800 OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "repetição: com 1800 s, a linha dos 62 min sai"     [ "$(pend_events | sed -n 2p)" == "[pendencia] 1 parada(s) há 62 min ou mais, sem mudança: PR #12 aberto" ]
+OUTE_WATCH_PEND_REPEAT_S=abc OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "repetição: valor inválido volta ao padrão de 2 h"  [ "$(pend_events | wc -l | tr -d ' ')" -eq 2 ]
 
 # mudança zera o relógio: o CI fica vermelho aos 33 min; só 30 min depois dessa mudança a pendência sai, com o check
 CASE=pendmuda; round "$CASE"

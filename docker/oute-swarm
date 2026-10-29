@@ -1167,6 +1167,19 @@ w_ask_mark() {
   return 0
 }
 
+# resultado é de pedido da rodada (#873): o <id>.sh (no outbox ou já em done/ ou rejected/, para onde o approve o move ao
+# decidir) traz `# rodada:` dela ou `# sessao:` de sessão do spawned. Sem achar o arquivo ou sem os campos: não é dela
+w_res_nosso() {
+  local id="$1" f s
+  for f in "$W_OUTBOX/$id.sh" "$W_OUTBOX"/*/"$id.sh"; do
+    [[ -f "$f" ]] || continue
+    [[ "$(w_hdr "$f" rodada)" == "$(basename "$W_STATE")" ]] && return 0
+    s="$(w_hdr "$f" sessao)"
+    if [[ -n "$s" ]] && awk -v s="$s" '$1 == s { f = 1 } END { exit !f }' "$W_STATE/spawned" 2>/dev/null; then return 0; fi
+  done
+  return 1
+}
+
 # sessão parada por cota esgotada (#759): a tela do pane (as últimas linhas) traz o erro do fornecedor. Claude e Codex:
 # "usage limit reached", "5-hour limit reached"; zai: "API Error: Request rejected (429) · Weekly/Monthly Limit Exhausted".
 # Só o texto da tela é lido (nada é digitado). Pane que não lê, ou sem o erro, não gera nada. $1 = pane
@@ -1374,9 +1387,12 @@ w_diff() {
       sub)
         if [[ -z "$old" && -n "$new" ]]; then w_ev subagente "subagente: $new"; fi ;;
       res)
-        [[ -n "$new" && "$new" != 0 ]] || continue
-        if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
-        else w_ev canal "resultado $a: rc=$new (oute-inbox $a)"; fi ;;
+        # rc≠0 (e recusa) sai sempre; rc 0 só de pedido da rodada (#873): verde de pedido alheio não diz nada a ela
+        [[ -n "$new" ]] || continue
+        if [[ "$new" != 0 ]] || w_res_nosso "$a"; then
+          if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
+          else w_ev canal "resultado $a: rc=$new (oute-inbox $a)"; fi
+        fi ;;
       falha)
         if [[ -n "$new" ]]; then w_ev aviso "$a falhou nesta passada; mantendo o último estado conhecido"
         else w_ev aviso "$a respondendo de novo"; fi ;;
@@ -1417,8 +1433,9 @@ w_check_merged_issues() {
 # pendência parada (#766, da #767): PR aberto, CI vermelho em PR aberto ou sessão `done` sem PR que ficam 30 minutos sem
 # mudar (OUTE_WATCH_STALL_S, em segundos, padrão 1800). Sem modelo: o dispatcher não acorda para conferir, e o `watch` entrega
 # uma linha só, `[pendencia]`, com tudo o que está parado. O estado de cada pendência é `pend|<id>` = `<estado>|<desde, epoch>`;
-# mudou o estado, o relógio recomeça. A linha se repete a cada STALL_S enquanto houver pendência parada (`pendemit`); a
-# 1ª passada da rodada não emite. Sem pendência, ou nenhuma parada o bastante, nada sai.
+# mudou o estado, o relógio recomeça. A linha sai uma vez e volta no máximo a cada 2 h (OUTE_WATCH_PEND_REPEAT_S, padrão 7200;
+# kaizen swarm-1027-0802: a cada 30 min repetiu 58 vezes no log) enquanto houver pendência parada (`pendemit`); a 1ª passada
+# da rodada não emite. Sem pendência, ou nenhuma parada o bastante, nada sai.
 # OUTE_WATCH_CLOCK (arquivo com um epoch): relógio dos testes
 w_now() {
   local f="${OUTE_WATCH_CLOCK:-}" t=""
@@ -1447,9 +1464,10 @@ w_pergunta_cita() {
   return $?
 }
 w_stalled() {
-  local quiet="$1" stall="${OUTE_WATCH_STALL_S:-1800}" now k id st old since last pr slug iid has desc="" n=0 oldest=0 age ask rr
+  local quiet="$1" stall="${OUTE_WATCH_STALL_S:-1800}" rep="${OUTE_WATCH_PEND_REPEAT_S:-7200}" now k id st old since last pr slug iid has desc="" n=0 oldest=0 age ask rr
   local -A cur=() refs=()
   [[ "$stall" =~ ^[0-9]+$ ]] || stall=1800
+  [[ "$rep" =~ ^[0-9]+$ ]] || rep=7200
   now="$(w_now)"
   for k in "${!W_CUR[@]}"; do
     case "$k" in
@@ -1484,7 +1502,7 @@ w_stalled() {
       (( age <= oldest )) || oldest="$age"
     fi
   done < <(printf '%s\n' "${!cur[@]}" | sort)
-  if (( ! quiet && n > 0 && now - last >= stall )); then
+  if (( ! quiet && n > 0 && now - last >= rep )); then
     w_ev pendencia "$n parada(s) há $((oldest / 60)) min ou mais, sem mudança: $desc"
     W_CUR[pendemit]="$now"
   fi
@@ -2162,6 +2180,8 @@ cmd_estado() {
 # oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
 # um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
 # mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
+# Check SKIPPED/NEUTRAL não é pendente (kaizen swarm-1027-0802: CodeRabbit em SKIPPED travou como "pendente"): de revisor externo
+# não bloqueia e sai na linha do ok como `pulou: <check>`; o do SonarCloud, pulado ou ausente, recusa com 4.
 # Repo without a SonarCloud project (`oute-sonar project` exits 5, a 404) needs no SonarCloud check: the rest of the CI still must pass.
 # A missing check with a project present, or any other answer from oute-sonar, still refuses with 4.
 cmd_premerge() {
@@ -2206,21 +2226,23 @@ cmd_premerge() {
   ci="$(jq -r '
     def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
            | if test("^SUCCESS$") then "pass"
-             elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail" else "pending" end;
+             elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail"
+             elif test("^(SKIPPED|NEUTRAL)$") then "skip" else "pending" end;
     [(.statusCheckRollup // [])[] | {n: (.name // .context // "?"), r: r}] as $c
     | if ($c | length) == 0 then "pendente: sem checks"
       elif any($c[]; .r == "fail") then "falhou: " + ([$c[] | select(.r == "fail") | .n] | join(", "))
       elif any($c[]; .r == "pending") then "pendente: " + ([$c[] | select(.r == "pending") | .n] | join(", "))
+      elif any($c[]; .n == "SonarCloud Code Analysis" and .r == "skip") then "pulou: SonarCloud Code Analysis"
       elif all($c[]; .n != "SonarCloud Code Analysis") then "pendente: sem o SonarCloud Code Analysis"
-      else "pass" end' <<<"$info")"
+      else "pass" + ([$c[] | select(.r == "skip") | .n] | if length == 0 then "" else " (pulou: " + join(", ") + ")" end) end' <<<"$info")"
   sonar="com SonarCloud"
   if [[ "$ci" == "pendente: sem o SonarCloud Code Analysis" ]]; then
     # no SonarCloud check: only a repo with no SonarCloud project (oute-sonar project, exit 5) passes without it
     sonar_rc=0; (cd "$main" && oute-sonar project >/dev/null 2>&1) || sonar_rc=$?
     if [[ "$sonar_rc" -eq 5 ]]; then ci=pass; sonar="(no SonarCloud project for this repo)"; fi
   fi
-  if [[ "$ci" != pass ]]; then echo "premerge #$pr: recusado, CI não verde ($ci)"; return 4; fi
-  echo "premerge #$pr: ok, head ${cur_head:0:7}, base ${cur_base:0:7} em $bref, CI verde $sonar, aberto e sem conflito"
+  if [[ "$ci" != pass* ]]; then echo "premerge #$pr: recusado, CI não verde ($ci)"; return 4; fi
+  echo "premerge #$pr: ok, head ${cur_head:0:7}, base ${cur_base:0:7} em $bref, CI verde $sonar${ci#pass}, aberto e sem conflito"
   return 0
 }
 
