@@ -2180,7 +2180,7 @@ cmd_estado() {
 # oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
 # um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
 # mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
-# Check SKIPPED/NEUTRAL não é pendente (kaizen swarm-1027-0802: CodeRabbit em SKIPPED travou como "pendente"): de revisor externo
+# Check SKIPPED/NEUTRAL não é pendente (kaizen swarm-1027-0802: CodeRabbit em SKIPPED travou como "pendente"): qualquer um fora o SonarCloud
 # não bloqueia e sai na linha do ok como `pulou: <check>`; o do SonarCloud, pulado ou ausente, recusa com 4.
 # Repo without a SonarCloud project (`oute-sonar project` exits 5, a 404) needs no SonarCloud check: the rest of the CI still must pass.
 # A missing check with a project present, or any other answer from oute-sonar, still refuses with 4.
