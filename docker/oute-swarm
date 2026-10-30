@@ -1213,14 +1213,20 @@ w_session_branches() {
   local state="$1"
   local main="$2"
   local repo="$3"
-  local wts
-  wts="$(awk -v m="$main" -v r="$repo" -v b="$(basename "$repo")" -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1}
-        ($6 == "" ? m : $6) == r && !($1 in c) {split($1, a, "-"); print b "-" $1 "\t" a[1]}' "$state/spawned" 2>/dev/null)" || wts=""
-  { git -C "$repo" worktree list --porcelain 2>/dev/null || true; } | awk -v wl="$wts" '
-    BEGIN {n = split(wl, L, "\n"); for (i = 1; i <= n; i++) {split(L[i], f, "\t"); if (f[1] != "") id[f[1]] = f[2]}}
-    /^worktree / {p = $0; sub(/.*\//, "", p)}
-    /^branch / {b = $0; sub(/^branch refs\/heads\//, "", b); if (p in id) print b "\t" id[p]}' \
-    | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {(.[0]): .[1]}) | add // {}'
+  local slug rrepo line wt="" br="" out='{}'
+  local -A want=()
+  while read -r slug _ _ _ _ rrepo _; do
+    [[ -n "$slug" && "${rrepo:-$main}" == "$repo" ]] || continue
+    is_closed "$state" "$slug" || want[$(basename "$repo")-$slug]="${slug%%-*}"
+  done < <(cat "$state/spawned" 2>/dev/null)
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line##*/}" ;;
+      "branch refs/heads/"*) br="${line#branch refs/heads/}"
+                             [[ -z "${want[$wt]:-}" ]] || out="$(jq -c --arg b "$br" --arg n "${want[$wt]}" '. + {($b): $n}' <<<"$out")" ;;
+    esac
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null || true)
+  printf '%s' "$out"
   return 0
 }
 
