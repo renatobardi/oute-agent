@@ -1210,7 +1210,10 @@ w_quota_reset() {
 # worktree (<repo>-<slug>) de cada sessão ainda aberta no <repo>, qualquer que seja o nome dele. O PR da sessão que mudou de issue no
 # meio do caminho (branch `fix/153-…` na sessão `125-…`) não leva o número da sessão no nome: sem isto o watch nunca o vê. Sem worktree: `{}`
 w_session_branches() {
-  local state="$1" main="$2" repo="$3" wts
+  local state="$1"
+  local main="$2"
+  local repo="$3"
+  local wts
   wts="$(awk -v m="$main" -v r="$repo" -v b="$(basename "$repo")" -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1}
         ($6 == "" ? m : $6) == r && !($1 in c) {split($1, a, "-"); print b "-" $1 "\t" a[1]}' "$state/spawned" 2>/dev/null)" || wts=""
   { git -C "$repo" worktree list --porcelain 2>/dev/null || true; } | awk -v wl="$wts" '
