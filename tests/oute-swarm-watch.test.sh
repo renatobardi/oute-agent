@@ -609,6 +609,46 @@ rel_religar
 check "religar: watch.pid de processo morto religa a rodada" [ "$OUT" == "watch religado: swarm-test" ]
 for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
 
+# kaizen swarm-1029-2126, lição 1: PR no branch da worktree da sessão cujo nome não leva o número da issue dela (sessão `125-…` abriu
+# `fix/153-…`, PR #154 do hanko): o watch registra `[pr]` e `[ci]` dele. Antes só via branch com o número de uma issue da rodada. O PR de
+# branch sem número (bot) segue fora
+# brsess <branch>: worktree da sessão 7-foo no branch dado
+brsess() {
+  local branch="$1"
+  git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  git -C "$REPO" worktree add -q -b "$branch" "$TMP/$CASE/repo-7-foo"
+  return 0
+}
+# brsess_prs <branch do PR da sessão> <arquivo>: grava em <arquivo> o PR #31 nesse branch, com CI vermelho, e um PR #40 de branch sem número (bot)
+brsess_prs() {
+  local branch="$1" out="$2"
+  jq -n --arg b "$branch" '[{number: 31, headRefName: $b, headRefOid: "ccccccc", state: "OPEN", mergeable: "MERGEABLE",
+      createdAt: "2026-06-01T00:00:00Z", url: "https://github.com/x/y/pull/31",
+      statusCheckRollup: [{name: "test", conclusion: "FAILURE", completedAt: "2026-06-01T00:05:00Z"}]},
+    {number: 40, headRefName: "dependabot/npm/x", state: "OPEN", createdAt: "2026-06-01T00:00:00Z", url: "https://github.com/x/y/pull/40", statusCheckRollup: []}]' > "$out"
+  return 0
+}
+# a 1ª passada é a linha de base: o PR aparece só na 2ª (gancho do sleep)
+CASE=brsess-aberto; round "$CASE"
+brsess fix/153-outra-issue
+echo '[]' > "$FAKE/prs-repo.json"
+brsess_prs fix/153-outra-issue "$TMP/$CASE/prs.json"
+printf 'cp "%s" "$FAKE/prs-repo.json"\n' "$TMP/$CASE/prs.json" > "$FAKE/on-sleep-1"
+watch
+check "branch da sessão: código 0"                        [ "$RC" -eq 0 ]
+check "branch da sessão: o PR aberto sai, na issue da sessão" logged "[pr] PR #31 aberto (issue #7) https://github.com/x/y/pull/31"
+check "branch da sessão: o CI vermelho sai"               logged "[ci] PR #31 · test: fail"
+check "branch da sessão: o PR do bot não entra"           bash -c '! grep -qF "#40" <<<"$1"' _ "$(log_events)"
+check "branch da sessão: sem aviso de gh falhou"          bash -c '! grep -qF "[aviso]" <<<"$1"' _ "$(log_events)"
+
+CASE=brsess-semworktree; round "$CASE"
+echo '[]' > "$FAKE/prs-repo.json"
+brsess_prs fix/153-outra-issue "$TMP/$CASE/prs.json"
+printf 'cp "%s" "$FAKE/prs-repo.json"\n' "$TMP/$CASE/prs.json" > "$FAKE/on-sleep-1"
+watch
+check "sem worktree da sessão: o PR de outra issue não entra" bash -c '! grep -qF "#31" <<<"$1"' _ "$(log_events)"
+check "sem worktree da sessão: o PR do bot não derruba a passada" bash -c '! grep -qF "[aviso]" <<<"$1"' _ "$(log_events)"
+
 guarda_check
 guarda_stop
 check_end

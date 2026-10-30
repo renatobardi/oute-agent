@@ -1206,9 +1206,24 @@ w_quota_reset() {
   return 0
 }
 
+# w_session_branches <pasta da rodada> <repo da rodada> <repo>: JSON `{"<branch>": "<número da issue da sessão>"}` com o branch atual da
+# worktree (<repo>-<slug>) de cada sessão ainda aberta no <repo>, qualquer que seja o nome dele. O PR da sessão que mudou de issue no
+# meio do caminho (branch `fix/153-…` na sessão `125-…`) não leva o número da sessão no nome: sem isto o watch nunca o vê. Sem worktree: `{}`
+w_session_branches() {
+  local state="$1" main="$2" repo="$3" wts
+  wts="$(awk -v m="$main" -v r="$repo" -v b="$(basename "$repo")" -v cf="$state/closed" 'BEGIN {while ((getline l < cf) > 0) c[l] = 1}
+        ($6 == "" ? m : $6) == r && !($1 in c) {split($1, a, "-"); print b "-" $1 "\t" a[1]}' "$state/spawned" 2>/dev/null)" || wts=""
+  { git -C "$repo" worktree list --porcelain 2>/dev/null || true; } | awk -v wl="$wts" '
+    BEGIN {n = split(wl, L, "\n"); for (i = 1; i <= n; i++) {split(L[i], f, "\t"); if (f[1] != "") id[f[1]] = f[2]}}
+    /^worktree / {p = $0; sub(/.*\//, "", p)}
+    /^branch / {b = $0; sub(/^branch refs\/heads\//, "", b); if (p in id) print b "\t" id[p]}' \
+    | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {(.[0]): .[1]}) | add // {}'
+  return 0
+}
+
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
-  local gh_ok=1 oid old cur k pend seen
+  local gh_ok=1 oid old cur k pend seen brs
   local -A prst=() prrepo=()
   W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
@@ -1243,15 +1258,16 @@ w_snapshot() {
           | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
     seen="$(for k in "${!W_PREV[@]}"; do [[ "$k" == "pr|"* ]] || continue; k="${k#pr|}"; echo "${k%%|*}"; done \
             | jq -Rsc 'split("\n") | map(select(. != ""))')" || { gh_ok=0; break; }
+    brs="$(w_session_branches "$state" "$main" "$repo")" || brs='{}'
     if res="$(cd "$repo" && gh pr list --state all --limit 100 --json number,headRefName,headRefOid,state,mergeable,createdAt,url,statusCheckRollup 2>/dev/null)" \
-       && res="$(jq -r --arg since "$since" --argjson ns "$ns" --argjson seen "$seen" --arg pf "$(w_pfx "$repo" "$main")" '
+       && res="$(jq -r --arg since "$since" --argjson ns "$ns" --argjson seen "$seen" --argjson brs "$brs" --arg pf "$(w_pfx "$repo" "$main")" '
           def r: (.conclusion // "" | if . == "" then null else . end) // (.state // "") | ascii_upcase
                  | if test("^(SUCCESS|NEUTRAL|SKIPPED)$") then "pass"
                    elif test("^(FAILURE|ERROR|TIMED_OUT|CANCELLED|ACTION_REQUIRED|STARTUP_FAILURE|STALE)$") then "fail"
                    else "pending" end;
           .[] | select((.createdAt // "") >= $since) | . as $p
-          | ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) as $n
-          | select(any($ns[]; . == $n) or any($seen[]; . == "\($pf)\($p.number)"))
+          | ($brs[$p.headRefName] // (try ($p.headRefName | split("/") | last | capture("^(?<n>[0-9]+)-").n) catch "")) as $n
+          | select($n != "" and (any($ns[]; . == $n) or any($seen[]; . == "\($pf)\($p.number)") or ($brs[$p.headRefName] != null)))
           | "pr\t\($pf)\($p.number)\t\($pf)\($n)\t\($p.state)\t\($p.mergeable // "UNKNOWN")\t\($p.url)\t\($p.headRefOid // "")",
             ([$p.statusCheckRollup[]? | {name: ((.name // .context // "?") | gsub("[\t\n|]"; " ")),
                                            t: (.completedAt // .startedAt // ""), r: r}]

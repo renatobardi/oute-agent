@@ -8,7 +8,8 @@ Referências conferidas:
   SHA (7 a 40 hex)         commit que existe (git cat-file)
   arquivo:linha[-linha]    o arquivo e a linha existem em algum dos refs (padrão: HEAD e origin/main)
   arquivo:linha@sha        o arquivo e a linha existem nesse commit
-                           sem pasta (`rotas.py:66`): procurado também entre os arquivos do diff dos PRs citados no texto (#661)
+                           arquivo que o diff de um PR citado no texto cria ou amplia: caminho e linha valem no head do PR (#661);
+                           sem pasta (`rotas.py:66`), casa pelo fim do nome entre os arquivos do diff
   link de comentário       https://github.com/<dono>/<repo>/(issues|pull)/N#issuecomment-ID responde 200
   hash precedido de `sha256`  é hash de arquivo, não commit: não é conferido (#661)
   /tmp/… e …/scratchpad/…  caminho que o Bardi não abre: sempre `nao-abre`
@@ -20,6 +21,7 @@ Ambiente: OUTE_REFCHECK_REPO (padrão: <dono>/<repo> do remoto origin), OUTE_REF
 Só leitura: só `gh api` (GET) e `git cat-file`/`git show`.
 LIMITE: confere que a referência EXISTE, não que ela SUSTENTA a frase. Isso é do revisor."""
 import os, re, subprocess, sys
+from urllib.parse import quote
 
 DOC = __doc__
 
@@ -96,21 +98,35 @@ def cited_prs(txt, repo):
     return list(dict.fromkeys(found))
 
 
-def check_short_path(path, first, last, prs, cache, refs, timeout):
-    """Caminho sem pasta que não existe nos refs: procura entre os arquivos do diff dos PRs citados."""
+def pr_file_at_head(owner_repo, n, name, head, timeout):
+    """Texto do arquivo no head do PR: git local se o commit está aqui, senão a API de conteúdo (raw). None = não leu."""
+    rc, out, _ = sh(["git", "show", f"{head}:{name}"], timeout)
+    if rc == 0:
+        return out
+    rc, out, _ = sh(["gh", "api", "-H", "Accept: application/vnd.github.raw",
+                     f"repos/{owner_repo}/contents/{quote(name)}?ref={head}"], timeout)
+    return out if rc == 0 else None
+
+
+def check_pr_file(path, first, last, prs, cache, timeout):
+    """Arquivo que o diff de um PR citado cria ou amplia: caminho e linha valem na versão do head do PR (kaizen swarm-1029-2126).
+    Caminho sem pasta casa pelo fim do nome. Devolve None se nenhum PR citado muda o arquivo."""
     for owner_repo, n in prs:
         if (owner_repo, n) not in cache:
-            st, out = gh_get(f"repos/{owner_repo}/pulls/{n}/files", ".[].filename", timeout, True)
-            cache[(owner_repo, n)] = out.splitlines() if st == "ok" else []
-        for name in cache[(owner_repo, n)]:
-            if name != path and not name.endswith("/" + path):
+            st, out = gh_get(f"repos/{owner_repo}/pulls/{n}/files", '.[] | select(.status != "removed") | .filename', timeout, True)
+            hst, head = gh_get(f"repos/{owner_repo}/pulls/{n}", ".head.sha", timeout)
+            cache[(owner_repo, n)] = (out.splitlines() if st == "ok" else [], head if hst == "ok" else "")
+        names, head = cache[(owner_repo, n)]
+        for name in names:
+            if name != path and not ("/" not in path and name.endswith("/" + path)):
                 continue
-            st, why = check_file_line(name, first, last, None, refs, timeout)
-            if st == "ok":
-                return "ok", f"{name} em {why}"
-            if why.startswith("arquivo tem"):
-                return "quebrada", f"{name}: {why}"
-            return "ok", f"{name} no diff do PR {owner_repo}#{n} (linha não conferida)"
+            text = pr_file_at_head(owner_repo, n, name, head, timeout) if head else None
+            if text is None:
+                return "ok", f"{name} no diff do PR {owner_repo}#{n} (linha não conferida)"
+            total = len(text.splitlines())
+            if first >= 1 and max(first, last) <= total:
+                return "ok", f"{name} no head {head[:7]} do PR {owner_repo}#{n}"
+            return "quebrada", f"{name}: arquivo tem {total} linhas no head {head[:7]} do PR {owner_repo}#{n}"
     return None
 
 
@@ -141,8 +157,8 @@ def scan(txt, repo, refs, timeout):
         if path.startswith("/tmp/") or "/scratchpad/" in path:
             continue
         st, why = check_file_line(path, a, b, sha, refs, timeout)
-        if st != "ok" and "/" not in path and not sha:
-            alt = check_short_path(path, a, b, prs, pr_cache, refs, timeout)
+        if st != "ok" and not sha:
+            alt = check_pr_file(path, a, b, prs, pr_cache, timeout)
             if alt:
                 add("arquivo:linha", m.group(0).strip("`"), alt)
                 continue
