@@ -261,6 +261,10 @@ check "752: §3: os códigos de saída do premerge estão no prompt e só o 0 li
 check "752: §3: base que mudou manda repetir o ensaio antes de perguntar de novo" grep -qF 'base nova: repita o ensaio antes de perguntar de novo' "$D"
 check "752: §3: o merge só vem depois do premerge" bash -c 'c=$(grep -n "oute-swarm premerge <pr>" "$1" | head -n1 | cut -d: -f1); m=$(grep -n "gh pr merge <n> --squash --match-head-commit" "$1" | head -n1 | cut -d: -f1); [ -n "$c" ] && [ -n "$m" ] && [ "$c" -le "$m" ]' _ "$D"
 check "752: §3: o exemplo antigo de comparar a base à mão saiu do prompt" bash -c '! grep -qF "base_ensaiada=" "$1"' _ "$D"
+# 875. plano B da auditoria alinhado ao premerge: pendente e falha não contam; pulado só de revisor externo, com o SonarCloud pass
+check "875: §3: plano B: pendente e falha não contam como CI verde" grep -qF 'CI verde no head (pendente e falha não contam' "$D"
+check "875: §3: plano B: pulado conta só de revisor externo, ex.: CodeRabbit, com SonarCloud pass" grep -qF 'pulado só de revisor externo, ex.: CodeRabbit, com SonarCloud pass' "$D"
+check "875: §3: a regra do pulado fica só no plano B da auditoria" so_em 'pulado só de revisor externo' auditoria.md
 # 752. aviso sem modelo, regra do acompanhamento, contexto curto
 check "752/776: §3: os canais do aviso sem modelo estão escritos (tray para pergunta, merge, bloqueio e CI; watch também)" bash -c 'l="$(grep -F "Aviso sem modelo e quando a sessão de acompanhamento é necessária (#752)" "$1")"; for t in "oute-swarm ask" "tray" "oute.swarm.watch.pr" "aviso da rodada (bloco \`attention\` do \`GET /v1/tray\`, #776)" "o clique abre a página da rodada"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "752: §3: diz quando a conversa de modelo é necessária e quando o aviso basta" bash -c 'l="$(grep -F "Aviso sem modelo e quando a sessão" "$1")"; grep -qF "só é **necessária** quando a próxima ação pede juízo" <<<"$l" && grep -qF "É **suficiente o aviso sem modelo**" <<<"$l" && grep -qF "Recomendação do autor, não decisão do Bardi." <<<"$l"' _ "$D"
