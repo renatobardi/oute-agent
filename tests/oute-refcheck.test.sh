@@ -35,11 +35,14 @@ case "$path" in
   repos/*/*/pulls/*/files)
     n="${path%/files}"; n="${n##*/}"; [ -s "$FAKE/pr-$n.files" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
     cat "$FAKE/pr-$n.files" ;;
+  repos/*/*/pulls/*)
+    n="${path##*/}"; [ -s "$FAKE/pr-$n.head" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    cat "$FAKE/pr-$n.head" ;;
   *) echo "gh falso: caminho $path" >&2; exit 1 ;;
 esac
 GH
 chmod +x "$BIN/gh"
-printf '10\n20\n' > "$FAKE/issues"; printf '555 10\n' > "$FAKE/comments"
+printf '10\n20\n30\n' > "$FAKE/issues"; printf '555 10\n' > "$FAKE/comments"
 
 git -C "$REPO" init -q -b main
 printf 'a\nb\nc\n' > "$REPO/um.txt"; mkdir "$REPO/docker"; printf 'x\ny\n' > "$REPO/docker/oute-x"
@@ -133,6 +136,24 @@ run "ver https://github.com/o/r/pull/10#issuecomment-555 e rotas.py:66"
 check "PR citado por link de comentário também vale" has '^ok.arquivo:linha.rotas.py:66'
 run "PR #10: ver docker/outro.py:66"
 check "caminho com pasta não usa o diff: quebrada" has '^quebrada.arquivo:linha.docker/outro.py:66'
+# arquivo que o PR amplia ou cria: caminho e linha valem no head do PR (kaizen swarm-1029-2126)
+mkdir -p "$REPO/db"; printf 'q1\nq2\nq3\n' > "$REPO/db/q.sql"
+git -C "$REPO" add -A; git -C "$REPO" -c user.name=t -c user.email=t@t commit -qm base-q
+git -C "$REPO" checkout -q -b pr-30
+printf 'q4\nq5\nq6\nq7\nq8\n' >> "$REPO/db/q.sql"; printf 'n1\nn2\nn3\n' > "$REPO/db/novo.sql"
+git -C "$REPO" add -A; git -C "$REPO" -c user.name=t -c user.email=t@t commit -qm head-pr
+git -C "$REPO" rev-parse HEAD > "$FAKE/pr-30.head"
+git -C "$REPO" checkout -q main
+printf 'db/q.sql\ndb/novo.sql\n' > "$FAKE/pr-30.files"
+run "PR #30: db/q.sql:6-8 e db/novo.sql:2-3"
+check "arquivo que o PR amplia: a linha do head vale (ok)" has '^ok.arquivo:linha.db/q.sql:6-8.db/q.sql no head'
+check "arquivo que o PR cria: o caminho vale (ok)" has '^ok.arquivo:linha.db/novo.sql:2-3.db/novo.sql no head'
+check "arquivo do PR: sem quebrada e saída 0" [ "$RCODE" = 0 ]
+run "PR #30: db/q.sql:9 e db/novo.sql:4"
+check "linha além do head do PR: quebrada, com as linhas do head" has '^quebrada.arquivo:linha.db/q.sql:9.db/q.sql: arquivo tem 8 linhas no head'
+check "arquivo criado, linha além do head: quebrada" has '^quebrada.arquivo:linha.db/novo.sql:4.db/novo.sql: arquivo tem 3 linhas no head'
+run "db/q.sql:6 e db/novo.sql:2 sem PR citado"
+check "sem PR citado, a versão do head não vale: quebrada nos dois" bash -c '[ "$(grep -c "^quebrada" <<<"$1")" = 2 ]' _ "$OUT"
 run "sha256 3100e775 do arquivo e commit $FAKESHA"
 check "hash precedido de sha256 não é conferido; commit inexistente segue quebrada" bash -c '! grep -q "3100e775" <<<"$1" && grep -q "^quebrada.sha.$2" <<<"$1"' _ "$OUT" "$FAKESHA"
 run "sha256: 3100e775…"

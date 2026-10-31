@@ -122,12 +122,12 @@ sw spawn 540-sonar "$WORKER_INSTR"
 P="$STATE/540-sonar.prompt"
 check "worker sonar: código 0, com o prompt da sessão" bash -c "$WORKER_PROMPT_CHECK" _ "$RC" "$P"
 check "worker sonar: confere diff contra SonarCloud antes do PR (#540)" grep -qF 'confira o diff contra a lista do SonarCloud do `AGENTS.md`' "$P"
-check "worker sonar: cita a seção Validar antes do PR (#540)" grep -qF 'seção "Validar antes do PR"' "$P"
+check "worker sonar: o PRONTO só vale com o gate OK no head, pelo oute-sonar (kaizen swarm-1029-2126)" grep -qF 'o gate do SonarCloud OK no head (`oute-sonar pr <n> --json`; ERROR ou pendente não vale)' "$P"
 check "worker sonar: lista função de shell nova com local (#540)" grep -qF 'função de shell nova com `local` e `return`' "$P"
 check "worker sonar: lista sem http literal em arquivo novo (#540)" bash -c "grep -qF 'sem \`'\"$SCHEME\"'://\` literal em arquivo novo' \"\$1\"" _ "$P"
 check "worker sonar: lista sem regex com quantificador aninhado (#540)" grep -qF 'sem regex com quantificador aninhado' "$P"
 check "worker sonar: lista sem colchete aninhado (#540)" grep -qF 'sem `[x]` aninhado' "$P"
-check "worker sonar: corrija antes de esperar o gate (#540)" grep -qF 'Corrija o que encontrar em vez de esperar o gate reprovado' "$P"
+check "worker sonar: corrija o que encontrar no diff (#540)" grep -qF 'sem `[x]` aninhado. Corrija o que encontrar.' "$P"
 check "worker sonar: sem placeholder no prompt" [ -z "$(grep -o "$NO_PLACEHOLDER_REGEX" "$P")" ]
 
 # qa-pr-audit: decisão do Bardi no topo e forma curta (#482)
