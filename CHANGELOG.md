@@ -4,6 +4,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.11] - 2026-10-31
+
+### Changed
+- **Prompts do swarm** (lições 3 e 4). O `PRONTO` do worker só vale com o gate do SonarCloud OK no head (`oute-sonar pr <n> --json`); o `tell` do dispatcher tem até 700 caracteres contando o prefixo, com o detalhe em comentário do PR. **Precisa de release** (`docker/swarm-worker.md` e `docker/swarm/acompanhamento.md` vão na imagem).
+
+A lição 1 (o `watch` não ver o PR de um branch da sessão sem o número da issue) foi entregue pelo #876 e saiu deste PR.
+- **PR audit dispatches the workflow a criterion names** (#874, lesson 1). `oute-aidlc-qa-pr-audit` runs `gh workflow run --ref <branch>` before recommending `merge como está` when a criterion is "a workflow does X", and asks the Bardi first if the dispatch has an external effect. **Needs a release** (the skill is copied into the image).
+
+### Fixed
+- **`oute-refcheck` confere `arquivo:linha` de arquivo que um PR citado cria ou amplia no head do PR** (lição 2). Antes dava `arquivo tem 116 linhas` ou `arquivo não existe` para o que só existe no PR. **Precisa de release** (`docker/oute-refcheck` vai na imagem).
+- **`oute-swarm watch` no longer reports `sem PR` for a session whose branch has an open PR** (#874, lesson 3). The PR is looked up on the branch of the session worktree, so a session with a sub-item id (`1b-…`) or a renamed branch is matched too; the event reads `(PR #n open)` and the `done sem PR` pending line is not repeated. **Needs a release** (`docker/oute-swarm` is copied into the image).
+
 ## [0.8.10] - 2026-10-29
 
 ### Changed
