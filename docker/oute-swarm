@@ -1206,16 +1206,34 @@ w_quota_reset() {
   return 0
 }
 
+# w_branch_pr <repo> <slug>: the open PR on the branch of the session worktree (<repo>-<slug>, whatever the branch was renamed to), as
+# its number. 0 and the number: found; 1: none (no worktree, detached, or no open PR); 2: gh did not answer (#874, lesson 3). The branch
+# comes from the worktree, not from the issue number in its name: a session with a sub-item id (`1b-…`) has a PR on `fix/1-…`.
+w_branch_pr() {
+  local repo="$1"
+  local slug="$2"
+  local wt br res
+  wt="$(basename "$repo")-$slug"
+  br="$(git -C "$repo" worktree list --porcelain 2>/dev/null | awk -v w="$wt" '
+        /^worktree / { p = $0; sub(/.*\//, "", p); on = (p == w) } on && /^branch / { sub(/^branch refs\/heads\//, ""); print; exit }')" || br=""
+  [[ -n "$br" ]] || return 1
+  res="$(cd "$repo" && gh pr list --head "$br" --state open --json number,headRefName,state 2>/dev/null)" || return 2
+  res="$(jq -r --arg b "$br" '[.[] | select(.headRefName == $b and .state == "OPEN") | .number] | first // empty' <<<"$res" 2>/dev/null)" || return 2
+  [[ -n "$res" ]] || return 1
+  printf '%s' "$res"
+  return 0
+}
+
 w_snapshot() {
   local state="$1" main="$2" since="$3" slug _p _a _ts tab repo label tabs kind num n st mg url name res all ns f id rc
-  local gh_ok=1 oid old cur k pend seen
-  local -A prst=() prrepo=()
+  local gh_ok=1 oid old cur k pend seen bn brc
+  local -A prst=() prrepo=() srepo=()
   W_CUR=(); W_IID=()
   # abas e sessões: relidas do estado da rodada a cada passada (spawn/close depois de iniciado entram sozinhos)
   if tabs="$(herdr tab list 2>/dev/null)" && jq -e .result >/dev/null 2>&1 <<<"$tabs"; then
     while read -r slug _p _a _ts tab repo _ ssub; do
       [[ -n "$slug" ]] || continue
-      W_IID[$slug]="$(w_pfx "${repo:-$main}" "$main")${slug%%-*}"
+      W_IID[$slug]="$(w_pfx "${repo:-$main}" "$main")${slug%%-*}"; srepo[$slug]="${repo:-$main}"
       if is_closed "$state" "$slug"; then W_CUR["tab|$slug"]=closed; continue; fi
       label="$(w_label "$slug")"
       # a aba pelo id gravado no spawn (se ainda tem o label) ou pelo label (ids mudam no restore do herdr)
@@ -1314,8 +1332,20 @@ w_snapshot() {
         W_CUR["falha|gh"]=1   # fica em observação e é lido de novo na próxima passada
       fi
     done
+    # sessão parada sem PR achado pelo número da issue: o PR aberto do branch dela ainda conta, e ela não vira `sem PR` (#874, lição 3)
+    for k in "${!W_CUR[@]}"; do
+      [[ "$k" == "agent|"* && "${W_CUR[$k]}" =~ ^(idle|done|blocked)$ ]] || continue
+      slug="${k#agent|}"; seen=0
+      for bn in "${!W_CUR[@]}"; do [[ "$bn" == "pr|"*"|${W_IID[$slug]:-${slug%%-*}}" ]] && seen=1; done
+      (( ! seen )) || continue
+      brc=0; bn="$(w_branch_pr "${srepo[$slug]}" "$slug")" || brc=$?
+      case "$brc" in
+        0) W_CUR["brpr|$slug"]="$(w_pfx "${srepo[$slug]}" "$main")$bn" ;;
+        2) [[ -z "${W_PREV[brpr|$slug]:-}" ]] || W_CUR["brpr|$slug"]="${W_PREV[brpr|$slug]}"; W_CUR["falha|gh"]=1 ;;
+      esac
+    done
   else
-    w_keep "pr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; w_keep "falha|"; W_CUR["falha|gh"]=1
+    w_keep "pr|"; w_keep "brpr|"; w_keep "url|"; w_keep "merge|"; w_keep "merged|"; w_keep "ci|"; w_keep "head|"; w_keep "oldhead|"; w_keep "oldci|"; w_keep "falha|"; W_CUR["falha|gh"]=1
   fi
   # #832: cada linha `subagente` do log é uma chave `sub|<número da linha>`; o log só cresce, então o número não muda entre passadas
   while IFS=$'\t' read -r n t; do W_CUR["sub|$n"]="$t"; done < <(awk '$2 == "subagente" { sub(/^[^ ]+ subagente /, ""); print NR "\t" $0 }' "$W_STATE/log" 2>/dev/null || true)
@@ -1352,6 +1382,7 @@ w_diff() {
           [[ "$t" == "pr|"*"|${W_IID[$slug]:-${slug%%-*}}" ]] || continue
           num="${t#pr|}"; num="${num%%|*}"; pr="${pr:+$pr, }PR $(w_ref "$num") ${W_CUR[$t],,}"
         done
+        [[ -n "$pr" || -z "${W_CUR[brpr|$slug]:-}" ]] || pr="PR $(w_ref "${W_CUR[brpr|$slug]}") open"
         case "$new" in
           idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new (${pr:-sem PR})" ;;
           working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)"; fi ;;
@@ -1483,6 +1514,7 @@ w_stalled() {
         [[ "${W_CUR[$k]}" == done && "${W_CUR[tab|${k#agent|}]:-}" == open ]] || continue
         slug="${k#agent|}"; iid="${W_IID[$slug]:-${slug%%-*}}"; has=0
         for id in "${!W_CUR[@]}"; do [[ "$id" == "pr|"*"|$iid" ]] && has=1; done
+        [[ -z "${W_CUR[brpr|$slug]:-}" ]] || has=1   # PR aberto no branch da sessão (#874)
         (( has )) || { cur["sessao|$slug"]="$(w_label "$slug"): done sem PR"; refs["sessao|$slug"]="$(w_ref "$iid")"; } ;;
     esac
   done
