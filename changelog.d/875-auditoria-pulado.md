@@ -1,0 +1,2 @@
+### Changed
+- **Plano B da auditoria aceita check pulado de revisor externo (#875)**. No §3 (`docker/swarm/auditoria.md`), CI verde no head passou a contar check pulado só de revisor externo (ex.: CodeRabbit) e com o SonarCloud pass, como o `oute-swarm premerge` e o `docker/swarm/merge.md` já fazem; pendente e falha continuam sem contar. **Precisa de release** (o `docker/swarm/auditoria.md` vai na imagem).
