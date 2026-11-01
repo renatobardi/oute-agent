@@ -1,0 +1,2 @@
+### Fixed
+- **Rótulo GMT do agent-studio segue a janela mostrada (#883)**. Os cabeçalhos com o fuso (`GMT-3`, `GMT-4`) passaram a usar o instante do início do período da tela, e não o dia de hoje: a janela de julho de 2025 em Nova York sai com `GMT-4` mesmo depois da virada do horário de verão. Antes, o teste `tests/agent-studio-periodo.test.sh` (caso "outro fuso") falhava em todo PR a partir de 2026-11-01. **Precisa de release** (o `docker/agent-studio/agent_studio/web.py` vai na imagem).
