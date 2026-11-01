@@ -88,6 +88,22 @@ wd
 check "campo livre depois: entrega o evento guardado"    [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 ]
 check "campo livre depois: um adiamento no log"          [ "$(grep -cF 'entrega adiada: campo do dispatcher com texto' <<<"$(dlog)")" -eq 1 ]
 check "campo livre depois: e a entrega no log"           grep -qF 'watch entrega ok: 1 evento(s)' <<<"$(dlog)"
+# 4e. pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825): com o dispatcher parado e o campo livre, o evento não é
+# entregue enquanto não houver `resposta` no log, e a razão (`watch entrega adiada: pergunta pendente`) vai ao log uma
+# vez; registrada a resposta, a fila sai na passada seguinte
+CASE=dlv-pergunta; dround "$CASE"
+echo "$(date -u +%FT%TZ) pergunta mergear o PR #12? 1 sim 2 não" >> "$STATE/log"
+echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
+cat > "$FAKE/on-sleep-2" <<'SH'
+cp "$FAKE/herdr.log" "$FAKE/herdr.durante" 2>/dev/null || : > "$FAKE/herdr.durante"
+echo "$(date -u +%FT%TZ) resposta" >> "$STATE/log"
+SH
+echo : > "$FAKE/on-sleep-3"
+wd
+check "pergunta pendente: nada digitado antes da resposta" bash -c '! grep -q "^pane send-text" "$1"' _ "$FAKE/herdr.durante"
+check "pergunta pendente: razão no log, uma vez"          [ "$(grep -cF 'watch entrega adiada: pergunta pendente (1 evento(s) na fila)' <<<"$(dlog)")" -eq 1 ]
+check "pergunta respondida: a fila sai depois"            [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 -a "$(qlen)" -eq 0 ]
+check "pergunta respondida: entrega ok no log"            grep -qF 'watch entrega ok: 1 evento(s)' <<<"$(dlog)"
 
 # ---------------------------------------------------------------- 5. campo que não fica com a mensagem exata: sem Enter
 CASE=dlv-nao-bate; dround "$CASE"

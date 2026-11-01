@@ -1543,7 +1543,8 @@ w_stalled() {
 
 # entrega ao dispatcher (#213, watch --deliver): os eventos da fila (watch.queue) saem juntos, numa mensagem só, digitados
 # no campo do dispatcher (o pane do meta). Só com ele parado (idle/done), com o campo achado e vazio (nunca por cima do
-# que o Bardi está digitando, nem às cegas num diálogo). Qualquer outra situação adia: a fila fica e a próxima passada
+# que o Bardi está digitando, nem às cegas num diálogo) e sem pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825:
+# a resposta dele precisa chegar à conversa que perguntou). Qualquer outra situação adia: a fila fica e a próxima passada
 # tenta de novo. Cada motivo de adiamento vai ao log uma vez, até a situação mudar.
 w_dlv_wait() {
   local why="$1"
@@ -1557,6 +1558,10 @@ w_dlv_wait() {
 w_deliver() {
   local q="$W_STATE/watch.queue" pane agents agent st line body="" n=0 text sf field
   if [[ ! -s "$q" ]]; then W_DLV_WHY=""; return 0; fi
+  # pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825): adia a entrega e grava a razão. Vem do log da rodada
+  # (`pergunta` sem `resposta`), não da tela do dispatcher, então o motivo aparece no log mesmo se o estado do pane
+  # não explicar a parada (como na rodada swarm-1031-1825, em que eventos ficaram 9h27 na fila sem linha de entrega)
+  [[ -z "$(pergunta_pendente "$W_STATE")" ]] || { w_dlv_wait "pergunta pendente"; return 0; }
   pane="$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)"
   agents="$(herdr agent list 2>&1)" || { w_dlv_wait "herdr agent list falhou"; return 0; }
   read -r agent st < <(jq -r --arg p "$pane" '[.. | objects | select(.pane_id? == $p and has("agent_status"))][0] | "\(.agent // "-") \(.agent_status // "-")"' <<<"$agents" 2>/dev/null || echo "- -")
