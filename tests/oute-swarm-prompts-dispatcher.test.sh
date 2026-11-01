@@ -270,9 +270,9 @@ check "752/776: §3: os canais do aviso sem modelo estão escritos (tray para pe
 check "752: §3: diz quando a conversa de modelo é necessária e quando o aviso basta" bash -c 'l="$(grep -F "Aviso sem modelo e quando a sessão" "$1")"; grep -qF "só é **necessária** quando a próxima ação pede juízo" <<<"$l" && grep -qF "É **suficiente o aviso sem modelo**" <<<"$l" && grep -qF "Recomendação do autor, não decisão do Bardi." <<<"$l"' _ "$D"
 check "752: §3: contexto curto: lê prompt.md e estado.md, não repete a pergunta e grava a autorização" bash -c 'l="$(grep -F "Contexto curto (#752)" "$1")"; for t in "OUTE_SWARM_RESTART_MERGES" "prompt.md" "estado.md" "**não se repete**" "oute-swarm estado --autorizacao"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "752: §3: a autorização permanente é gravada no disco ao ser dada" grep -qF 'Gravar no disco (#752):' "$D"
-check "587: §4.3 passo 3: fontes incluem o comentário de relatório publicado, com o número" grep -qF 'o texto do comentário de relatório que você acabou de publicar, com o número do comentário' "$D"
-check "587: §4.3 passo 3: fontes incluem os trechos de prompt ou regra citados" grep -qF 'os trechos do prompt (`docker/swarm.md`, `docker/swarm-worker.md`) ou da regra do repo (`AGENTS.md`, `docs/pt-controlado.md`) que o texto cita' "$D"
-check "587: §4.3 passo 3: não diz mais só o que veio do GitHub" bash -c '! grep -qF "só o que veio do GitHub, e passe" "$1"' _ "$D"
+check "587: §4.3 passo 1: fontes incluem o comentário de relatório publicado, com o número" grep -qF 'o texto do comentário de relatório que você acabou de publicar, com o número do comentário' "$D"
+check "587: §4.3 passo 1: fontes incluem os trechos de prompt ou regra citados" grep -qF 'os trechos do prompt (`docker/swarm.md`, `docker/swarm-worker.md`) ou da regra do repo (`AGENTS.md`, `docs/pt-controlado.md`) que o texto cita' "$D"
+check "587: §4.3 passo 1: não diz mais só o que veio do GitHub" bash -c '! grep -qF "só o que veio do GitHub, e passe" "$1"' _ "$D"
 # 742. trava semanal: o código 5 do spawn para as aberturas e vira BLOQUEADO com a pergunta numerada
 check "742: §2: spawn com código 5 é a trava semanal, com o weekly_guard_pct da assinatura" grep -qF '**Trava semanal (#742):** o `oute-swarm spawn` recusa com **código 5**' "$D"
 check "742: §2: janela de 7 dias no valor ou acima, hoje 95 em claude, zai e codex" grep -qF 'janela de 7 dias da assinatura escolhida está no `weekly_guard_pct` dela (`config/select/models.toml`; hoje 95 em `claude`, `zai` e `codex`) ou acima' "$D"
@@ -281,10 +281,14 @@ check "742: §2: BLOQUEADO com as três opções numeradas" bash -c 'for t in "1
 check "742: §2: cota não lida só avisa, e --force é só do Bardi" bash -c 'grep -qF "Cota não lida não trava: o \`spawn\` abre e avisa em stderr" "$1" && grep -qF "Nunca use \`--force\` por conta própria: é só do Bardi" "$1"' _ "$D"
 check "742: §2: a recomendação vem rotulada" grep -qF 'sua recomendação, rotulada "recomendação do autor", é a 1' "$D"
 # 771. fontes do revisor: arquivo de fatos locais, SHA de 12 caracteres, sem URL de job
-check "771: §4.3 passo 3: grava arquivo de fatos com a saída de cada comando local citado" bash -c 'l="$(grep -F "Fatos locais e filtro de segredo (#771)" "$1")"; for t in "grave em um arquivo de fatos a saída de cada comando local" "oute-select" "oute-quota" "oute-swarm busy"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
-check "771: §4.3 passo 3: SHA de 12 caracteres, por causa do filtro de segredo" grep -qF 'use SHA de **12 caracteres** (`git rev-parse --short=12`)' "$D"
-check "771: §4.3 passo 3: tira a URL de job do Actions das fontes" grep -qF 'Tire das fontes a URL de job do Actions' "$D"
-check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" bash -c 'l="$(grep -F "Fontes para o revisor (#771)" "$1")"; grep -qF "arquivo de fatos" <<<"$l" && grep -qF "§4.3, passo 3" <<<"$l"' _ "$D"
+check "771: §4.3 passo 1: grava arquivo de fatos com a saída de cada comando local citado" bash -c 'l="$(grep -F "Fatos locais e filtro de segredo (#771)" "$1")"; for t in "grave em um arquivo de fatos a saída de cada comando local" "oute-select" "oute-quota" "oute-swarm busy"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "771: §4.3 passo 1: SHA de 12 caracteres, por causa do filtro de segredo" grep -qF 'use SHA de **12 caracteres** (`git rev-parse --short=12`)' "$D"
+check "771: §4.3 passo 1: tira a URL de job do Actions das fontes" grep -qF 'Tire das fontes a URL de job do Actions' "$D"
+check "771: §1: fontes da triagem levam o arquivo de fatos e remetem ao §4.3" bash -c 'l="$(grep -F "Fontes para o revisor (#771)" "$1")"; grep -qF "arquivo de fatos" <<<"$l" && grep -qF "§4.3, passo 1" <<<"$l"' _ "$D"
+# 881. fontes do revisor montadas antes do texto da etapa; cada afirmação leva fonte ou "não verificado"
+check "881: §4.3: o passo 1 é o arquivo de fontes, antes do texto (passo 2)" bash -c 'f="$(grep -n "^  1\. \*\*Fontes antes do texto" "$1" | head -n1 | cut -d: -f1)"; t="$(grep -n "^  2\. \*\*Escreva o arquivo" "$1" | head -n1 | cut -d: -f1)"; [ -n "$f" ] && [ -n "$t" ] && [ "$f" -lt "$t" ]' _ "$ST/pagina.md"
+check "881: §4.3 passo 1: manda gravar as fontes antes de escrever o texto" grep -qF 'Antes de escrever o texto da etapa, grave num arquivo de fontes' "$ST/pagina.md"
+check "881: §4.3 passo 2: cada afirmação leva fonte do passo 1 ou a marca não verificado" grep -qF 'Cada afirmação do texto leva uma fonte do arquivo de fontes do passo 1 ou a marca `não verificado`' "$ST/pagina.md"
 
 # 772. auditoria delegada a subagente: ele devolve o texto, o dispatcher publica com oute-refcheck
 check "772: §3: subagente de auditoria devolve o texto do relatório e o dispatcher o publica" bash -c 'l="$(grep -F "Auditoria delegada a subagente (#772)" "$1")"; for t in "o subagente não publica: devolve o texto" "devolve o texto do relatório" "**você** o publica" "oute-swarm pr-comment <n> --body-file <arquivo>" "quebrada ou nao-abre não comenta"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
@@ -308,6 +312,9 @@ check "766: §3: ação coberta por regra do prompt se executa sem pergunta" bas
 check "767: §3: o registro da espera diz o que, de quem e desde quando, no log da rodada" bash -c 'l="$(grep -F "**Registro da espera (#766, #767).**" "$1")"; for t in "o que espera, de quem e desde quando" ">> ~/.oute/swarm/" "espera: " "sem registrar isso" "nasce desse registro"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: a conferência periódica é do watch, sem modelo, a cada 30 minutos" bash -c 'l="$(grep -F "**Pendência parada (#766, #767):**" "$1")"; for t in "é do \`oute-swarm watch\`, sem modelo" "30 minutos sem mudar" "[pendencia]" "Sem pendência parada, ele não emite nada" "não acorda sozinha para conferir"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[aviso]`, `[pendencia]` (abaixo)' "$D"
+# 879 (kaizen swarm-1031-1825): pergunta pendente adia a entrega com a razão no log; qualquer mensagem do Bardi manda ler o fim do log
+check "879: §3: pergunta pendente ao Bardi adia a entrega, com a razão no log" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "campo em uso ou pergunta pendente ao Bardi" "razão no log: \`watch entrega adiada: …\`"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "879: §3: ao receber qualquer mensagem do Bardi, lê o fim do log antes de responder" grep -qF '**Ao receber qualquer mensagem do Bardi, leia o fim do log antes de responder.**' "$D"
 guarda_check
 guarda_stop
 check_end

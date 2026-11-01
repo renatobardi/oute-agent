@@ -1,0 +1,2 @@
+### Changed
+- **Fontes do revisor montadas antes do texto da etapa (#881)**. No §4.3 (`docker/swarm/pagina.md`), o passo 1 passou a ser gravar o arquivo de fontes, antes de escrever o texto (passo 2); cada afirmação do texto leva uma fonte do arquivo de fontes ou a marca `não verificado`. A remissão do §1 (`docker/swarm/triagem.md`) passou a apontar o passo 1. Para caber no teto, as três frases repetidas de "fato fora das fontes volta como achado" fundiram-se em uma. **Precisa de release** (o `docker/swarm/pagina.md` e o `docker/swarm/triagem.md` vão na imagem).
