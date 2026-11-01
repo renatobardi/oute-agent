@@ -312,6 +312,9 @@ check "766: §3: ação coberta por regra do prompt se executa sem pergunta" bas
 check "767: §3: o registro da espera diz o que, de quem e desde quando, no log da rodada" bash -c 'l="$(grep -F "**Registro da espera (#766, #767).**" "$1")"; for t in "o que espera, de quem e desde quando" ">> ~/.oute/swarm/" "espera: " "sem registrar isso" "nasce desse registro"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: a conferência periódica é do watch, sem modelo, a cada 30 minutos" bash -c 'l="$(grep -F "**Pendência parada (#766, #767):**" "$1")"; for t in "é do \`oute-swarm watch\`, sem modelo" "30 minutos sem mudar" "[pendencia]" "Sem pendência parada, ele não emite nada" "não acorda sozinha para conferir"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[aviso]`, `[pendencia]` (abaixo)' "$D"
+# 879 (kaizen swarm-1031-1825): pergunta pendente adia a entrega com a razão no log; qualquer mensagem do Bardi manda ler o fim do log
+check "879: §3: pergunta pendente ao Bardi adia a entrega, com a razão no log" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "campo em uso ou pergunta pendente ao Bardi" "razão no log: \`watch entrega adiada: …\`"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "879: §3: ao receber qualquer mensagem do Bardi, lê o fim do log antes de responder" grep -qF '**Ao receber qualquer mensagem do Bardi, leia o fim do log antes de responder.**' "$D"
 guarda_check
 guarda_stop
 check_end
