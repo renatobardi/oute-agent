@@ -26,11 +26,12 @@ pm() {
   HEAD1=aaaaaaa1111111111111111111111111111111aa
   return 0
 }
-# prv <pr> <estado> <head> <mergeable> <checks json>: o `gh pr view` falso do PR
+# prv <pr> <estado> <head> <mergeable> <checks json> [mergeStateStatus]: o `gh pr view` falso do PR
+# (mergeStateStatus padrão CLEAN = PR em dia com a base, #880)
 prv() {
-  local pr="$1" estado="$2" cabeca="$3" mergeavel="$4" checks="$5"
-  jq -n --arg s "$estado" --arg h "$cabeca" --arg m "$mergeavel" --argjson c "$checks" \
-    '{state: $s, headRefOid: $h, baseRefName: "main", mergeable: $m, statusCheckRollup: $c}' > "$FAKE/prview-$pr.json"
+  local pr="$1" estado="$2" cabeca="$3" mergeavel="$4" checks="$5" mss="${6:-CLEAN}"
+  jq -n --arg s "$estado" --arg h "$cabeca" --arg m "$mergeavel" --arg st "$mss" --argjson c "$checks" \
+    '{state: $s, headRefOid: $h, baseRefName: "main", mergeable: $m, mergeStateStatus: $st, statusCheckRollup: $c}' > "$FAKE/prview-$pr.json"
   return 0
 }
 # rcout <código> <texto>: o código de saída do último `sw` e o texto na saída (rcerr: no stderr), sem regex
@@ -97,6 +98,17 @@ check "base: código 3"                                   [ "$RC" -eq 3 ]
 check "base: a linha diz ensaiada e atual"               grep -qF "recusado, base mudou (ensaiada ${BASE:0:7}, atual ${NEWBASE:0:7} em main)" <<<"$OUT"
 sw premerge 12 --head "$HEAD1" --base "$NEWBASE"
 check "base: com a base nova no comando, passa"          [ "$RC" -eq 0 ]
+
+# 3b. PR atrás da base (mergeStateStatus BEHIND, #880): código 7, antes do head; PR em dia (CLEAN) segue 0
+CASE=behind; pm "$CASE"
+prv 12 OPEN "$HEAD1" MERGEABLE "$GREEN" BEHIND; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "BEHIND: código 7 e a linha diz atualizar o branch"  rcout 7 "recusado, PR atrás da base (BEHIND): atualize o branch com a base"
+prv 12 OPEN "$HEAD1" MERGEABLE "$GREEN" CLEAN; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "PR em dia (CLEAN): código 0"                        [ "$RC" -eq 0 ]
+prv 12 OPEN bbbbbbb2222222222222222222222222222222bb MERGEABLE "$GREEN" BEHIND; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "BEHIND vem antes do head: código 7"                 rcout 7 "recusado, PR atrás da base"
+prv 12 OPEN "$HEAD1" UNKNOWN "$GREEN" BEHIND; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "BEHIND com mergeable UNKNOWN: código 5"             rcout 5 "mergeable UNKNOWN"
 
 # 4. CI não verde: 4, em cada forma
 CASE=ci; pm "$CASE"
