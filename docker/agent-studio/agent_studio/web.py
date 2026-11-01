@@ -144,8 +144,17 @@ def _env(zone=tz_mod.UTC):
     env.globals["repo_none"] = repo_mod.NONE  # o valor de "sem repositório" no filtro (#528)
     env.globals["subscriptions"] = cost_mod.SUBSCRIPTIONS  # as opções do filtro de assinatura (#679)
     env.globals["sub_param"] = sub_mod.PARAM
-    env.globals["tzl"] = lambda: tz_mod.label(zone)  # rótulo do fuso nos cabeçalhos (`GMT-3`); vale para o dia de hoje
+    env.globals["tzl"] = _tzl_in(zone)
     return env
+
+
+def _tzl_in(zone):
+    """Rótulo do fuso nos cabeçalhos (`GMT-3`), no instante do início da janela mostrada (`from_ns`, #883): a data em
+    que a página é aberta não muda o rótulo. Sem janela na tela, o rótulo é o de hoje."""
+    @jinja2.pass_context
+    def tzl(ctx):
+        return tz_mod.label(zone, ctx.get("from_ns"))
+    return tzl
 
 
 def cost_mode(q):
