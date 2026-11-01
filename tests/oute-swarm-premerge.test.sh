@@ -109,6 +109,8 @@ prv 12 OPEN bbbbbbb2222222222222222222222222222222bb MERGEABLE "$GREEN" BEHIND; 
 check "BEHIND vem antes do head: código 7"                 rcout 7 "recusado, PR atrás da base"
 prv 12 OPEN "$HEAD1" UNKNOWN "$GREEN" BEHIND; sw premerge 12 --head "$HEAD1" --base "$BASE"
 check "BEHIND com mergeable UNKNOWN: código 5"             rcout 5 "mergeable UNKNOWN"
+prv 12 OPEN "$HEAD1" MERGEABLE "$GREEN" UNKNOWN; sw premerge 12 --head "$HEAD1" --base "$BASE"
+check "mergeStateStatus UNKNOWN (sem valor): não recusa por BEHIND, código 0" [ "$RC" -eq 0 ]
 
 # 4. CI não verde: 4, em cada forma
 CASE=ci; pm "$CASE"
