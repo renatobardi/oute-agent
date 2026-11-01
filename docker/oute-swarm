@@ -1215,10 +1215,10 @@ w_branch_pr() {
   local wt br res
   wt="$(basename "$repo")-$slug"
   br="$(git -C "$repo" worktree list --porcelain 2>/dev/null | awk -v w="$wt" '
-        /^worktree / { p = $0; sub(/.*\//, "", p); on = (p == w) } on && /^branch / { sub(/^branch refs\/heads\//, ""); print; exit }')" || br=""
+        /^worktree / { p = $0; sub(/.*\//, "", p); on = (p == w) } on && !f && /^branch / { sub(/^branch refs\/heads\//, ""); print; f = 1 }')" || br=""
   [[ -n "$br" ]] || return 1
-  res="$(cd "$repo" && gh pr list --head "$br" --state open --json number,headRefName,state 2>/dev/null)" || return 2
-  res="$(jq -r --arg b "$br" '[.[] | select(.headRefName == $b and .state == "OPEN") | .number] | first // empty' <<<"$res" 2>/dev/null)" || return 2
+  res="$(cd "$repo" && gh pr list --head "$br" --state open --json number,headRefName,state,isCrossRepository 2>/dev/null)" || return 2
+  res="$(jq -r --arg b "$br" '[.[] | select(.headRefName == $b and .state == "OPEN" and .isCrossRepository != true) | .number] | first // empty' <<<"$res" 2>/dev/null)" || return 2
   [[ -n "$res" ]] || return 1
   printf '%s' "$res"
   return 0
@@ -1341,7 +1341,9 @@ w_snapshot() {
       brc=0; bn="$(w_branch_pr "${srepo[$slug]}" "$slug")" || brc=$?
       case "$brc" in
         0) W_CUR["brpr|$slug"]="$(w_pfx "${srepo[$slug]}" "$main")$bn" ;;
-        2) [[ -z "${W_PREV[brpr|$slug]:-}" ]] || W_CUR["brpr|$slug"]="${W_PREV[brpr|$slug]}"; W_CUR["falha|gh"]=1 ;;
+        2) # gh did not answer: keep the earlier answer and the earlier session state, so the change is read again next pass
+           [[ -z "${W_PREV[brpr|$slug]:-}" ]] || W_CUR["brpr|$slug"]="${W_PREV[brpr|$slug]}"
+           W_CUR["agent|$slug"]="${W_PREV[agent|$slug]:-}"; W_CUR["falha|gh"]=1 ;;
       esac
     done
   else
