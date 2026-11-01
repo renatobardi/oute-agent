@@ -154,8 +154,29 @@ st, ny = get(app2, "/uso", "de=2025-07-01T00:00&ate=2025-07-01T12:00")
 check("outro fuso: a janela mostrada é a digitada, com o rótulo do fuso", st == 200 and "2025-07-01 00:00:00 a 2025-07-01 12:00:00 · GMT-4" in ny)
 st, ny2 = get(app2, "/", "de=2025-07-01T00:00&ate=2025-07-01T12:00")
 check("outro fuso: o link leva o UTC certo (04:00Z a 16:00Z)", 'from=2025-07-01T04%3A00%3A00Z&amp;to=2025-07-01T16%3A00%3A00Z' in ny2)
+
+# #883: o rótulo segue o instante da janela, não o dia de hoje. Relógio fixado em janeiro (Nova York em GMT-5): a janela
+# de julho segue com GMT-4, e a janela de hoje, com GMT-5
+from agent_studio import tz as TZ_mod
+_real_dt = TZ_mod.datetime
+
+
+class Janeiro(_real_dt):
+    @classmethod
+    def now(cls, tz=None):
+        return _real_dt(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+
+TZ_mod.datetime = Janeiro
+try:
+    st, ny3 = get(app2, "/uso", "de=2025-07-01T00:00&ate=2025-07-01T12:00")
+    check("#883: com o relógio em janeiro, a janela de julho segue GMT-4", st == 200 and "2025-07-01 00:00:00 a 2025-07-01 12:00:00 · GMT-4" in ny3)
+    st, ny4 = get(app2, "/uso", "de=2026-01-15T00:00&ate=2026-01-15T12:00")
+    check("#883: a janela de janeiro sai com GMT-5", st == 200 and "2026-01-15 00:00:00 a 2026-01-15 12:00:00 · GMT-5" in ny4)
+finally:
+    TZ_mod.datetime = _real_dt
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 53
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 55
 check_end
