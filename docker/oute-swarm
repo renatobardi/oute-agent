@@ -31,6 +31,7 @@
 #                                                   2º envio à sessão que voltou ocupada, sem [sessao] parada no log depois: recusado (#786)
 #                                                   campo com texto (o rascunho do Bardi): nada digitado, mensagem NÃO entregue, código 7;
 #                                                   o --force não pula essa checagem (#713)
+#                                                   o watch avisa [tell] da recusa até um tell ok da sessão entrar no log (#884)
 #   oute-swarm ask "<pergunta curta>"               (usado pelo dispatcher) a rodada parou esperando uma decisão do Bardi:
 #                                                   grava `pergunta` no log e emite oute.swarm.round.asked (#386)
 #   oute-swarm answered                             o Bardi respondeu: grava `resposta` e emite oute.swarm.round.answered
@@ -894,6 +895,19 @@ tell_busy_loop() {
   return $?
 }
 
+# #884: slugs cujo último `tell` registrado foi recusado por campo de entrada ocupado (rascunho do Bardi, código 7) e não
+# tem `tell ... ok` depois. $1 = pasta da rodada. Uma slug por linha
+tell_campo_pendente() {
+  local state="$1"
+  [[ -f "$state/log" ]] || return 0
+  awk -F'\t' '
+    { l = $0; sub(/\t.*/, "", l); split(l, f, " ") }
+    f[2] == "tell" && f[4] == "ok" { pend[f[3]] = 0 }
+    f[2] == "tell" && f[4] == "recusado:" && index(l, "o campo de entrada de ") && index(l, " tem texto (") { pend[f[3]] = 1 }
+    END { for (s in pend) if (pend[s]) print s }' "$state/log"
+  return 0
+}
+
 cmd_tell() {
   local force=0 wait=0 timeout="" want="" msg="" have=0 state line slug spane tab label panes pane="" agents st agent text
   local rc=1 start poll waited=0 tag="" sf
@@ -1349,6 +1363,8 @@ w_snapshot() {
   fi
   # #832: cada linha `subagente` do log é uma chave `sub|<número da linha>`; o log só cresce, então o número não muda entre passadas
   while IFS=$'\t' read -r n t; do W_CUR["sub|$n"]="$t"; done < <(awk '$2 == "subagente" { sub(/^[^ ]+ subagente /, ""); print NR "\t" $0 }' "$W_STATE/log" 2>/dev/null || true)
+  # #884: tell recusado por campo de entrada ocupado (código 7) fica pendente até um `tell ... ok` da sessão entrar no log
+  while IFS= read -r slug; do [[ -z "$slug" ]] || W_CUR["tellpend|$slug"]=1; done < <(tell_campo_pendente "$state")
   # canal de aprovação (de todos os agentes): pedido pendente em ~/outbox e resultado em ~/inbox
   for f in "$W_OUTBOX"/*.sh; do
     [[ -f "$f" ]] || continue
@@ -1415,6 +1431,9 @@ w_diff() {
         [[ "$new" == pending ]] || continue
         f="$W_OUTBOX/$a.sh"
         w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como))$(w_ask_mark "$f") — aprovação no host: oute watch" ;;
+      tellpend)
+        [[ -n "$new" && -z "$old" ]] || continue
+        w_ev tell "tell para $(w_label "$a") não entregue, campo de entrada ocupado (o Bardi digitando?); reenvie quando o campo estiver vazio (oute-swarm tell $a), o aviso sai do watch quando um tell dela entra ok" ;;
       sub)
         if [[ -z "$old" && -n "$new" ]]; then w_ev subagente "subagente: $new"; fi ;;
       res)
@@ -1429,7 +1448,7 @@ w_diff() {
         else w_ev aviso "$a respondendo de novo"; fi ;;
     esac
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
-             | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res sub", o, " "); for (i in o) p[o[i]] = i }
+             | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res sub tellpend", o, " "); for (i in o) p[o[i]] = i }
                           { print (p[$1] ? p[$1] : 9) "\t" $0 }' | sort -s -n -k1,1 | cut -f2-)
   for a in "${!okpr[@]}"; do
     names="" head="${W_CUR[head|$a]:-}"

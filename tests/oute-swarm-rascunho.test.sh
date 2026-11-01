@@ -120,6 +120,44 @@ check "send_field: campo ilegível antes de digitar: código 3"  [ "$SFRC" -eq 3
 check "send_field: campo ilegível: nada digitado, nenhuma tecla" [ "$(texts)" -eq 0 -a "$(teclas)" -eq 0 ]
 rm -f "${FAKE:?}/pane-style"
 
+# ---------------------------------------------------------------- #884: o watch avisa do tell recusado até a entrega
+REC="2026-01-01T00:00:05Z tell 7-foo recusado: o campo de entrada de #7 foo tem texto (o Bardi digitando?)"$'\t'"$MSG"
+EVT="[tell] tell para #7 foo não entregue, campo de entrada ocupado"
+# 9. recusa que entra no log durante o watch: um evento [tell], sem repetir na passada seguinte
+CASE=watch-recusa; round "$CASE"
+cat > "$FAKE/on-sleep-1" <<SH
+printf '%s\n' '$REC' >> "\$STATE/log"
+SH
+echo : > "$FAKE/on-sleep-2"
+watch
+check "watch: código 0"                                  [ "$RC" -eq 0 ]
+check "watch: evento [tell] com a sessão e o motivo"     grep -qF -- "$EVT" <<<"$(log_events)"
+check "watch: o evento sai uma vez só"                   [ "$(log_events | grep -cF -- "$EVT")" -eq 1 ]
+check "watch: stdout = log"                              [ "$(log_events)" == "$(out_events)" ]
+
+# 10. tell ok depois da recusa: o aviso não volta num watch reiniciado
+echo "2026-01-01T00:00:09Z tell 7-foo ok"$'\t'"$MSG" >> "$STATE/log"
+rm -f "${FAKE:?}/on-sleep-1"
+before="$(log_events | grep -cF -- "$EVT")"
+watch
+check "watch: entregue, o aviso não repete"              [ "$(log_events | grep -cF -- "$EVT")" -eq "$before" ]
+
+# 11. recusa já no log antes de o watch começar e depois entregue: nenhum aviso
+CASE=watch-entregue; round "$CASE"
+printf '%s\n' "$REC" "2026-01-01T00:00:09Z tell 7-foo ok"$'\t'"$MSG" > "$STATE/log"
+echo : > "$FAKE/on-sleep-1"
+watch
+check "entregue: nenhum evento [tell]"                   bash -c '! grep -qF "[tell]" <<<"$1"' _ "$(log_events)"
+
+# 12. recusa por sessão ocupada (outro motivo) não vira aviso de campo ocupado
+CASE=watch-ocupada; round "$CASE"
+echo : > "$FAKE/on-sleep-1"
+cat > "$FAKE/on-sleep-1" <<SH
+printf '%s\n' '2026-01-01T00:00:05Z tell 7-foo recusado: sessão #7 foo ocupada (working); tente depois'"\$(printf '\t')x" >> "\$STATE/log"
+SH
+watch
+check "ocupada: nenhum evento [tell]"                    bash -c '! grep -qF "[tell]" <<<"$1"' _ "$(log_events)"
+
 guarda_check
 guarda_stop
 check_end
