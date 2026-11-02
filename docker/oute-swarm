@@ -63,8 +63,9 @@
 #   oute-swarm busy [--repo <repo>]                 (usado pelo dispatcher, #605) issues com sessão aberta em OUTRA rodada do
 #                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
 #   oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]   (usado pelo dispatcher, #752) conferência de antes do merge,
-#                                                   sem modelo: PR aberto e sem conflito, head = o auditado, base = a ensaiada, CI verde (só SUCCESS; pulado e neutro não contam) com
-#                                                   o SonarCloud Code Analysis (waived only when the repo has no SonarCloud project). Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
+#                                                   sem modelo: PR aberto, sem conflito e em dia com a base (BEHIND recusa), head = o auditado, base = a ensaiada, CI verde (só SUCCESS;
+#                                                   pulado e neutro não contam) com o SonarCloud Code Analysis (waived only when the repo has no SonarCloud project). Uma linha; saída 0 ok,
+#                                                   2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git, 7 PR atrás da base (BEHIND)
 #   oute-swarm pr-comment <pr> --body-file <arquivo>  (usado pelo dispatcher, #829) confere as referências do texto com o
 #                                                   oute-refcheck e só então comenta o PR (gh pr comment); imprime a URL do
 #                                                   comentário. Saída 1: quebrada ou nao-abre, não comentou; 3 só não conferidas,
@@ -2216,13 +2217,15 @@ cmd_estado() {
 
 # oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
 # um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
-# mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
+# mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam; 7 PR atrás da base
+# (`mergeStateStatus` BEHIND: o gh pr merge recusaria com "not up to date"; a sessão atualiza o branch, #880).
+# Só leitura (gh pr view, git fetch).
 # Check SKIPPED/NEUTRAL não é pendente (kaizen swarm-1027-0802: CodeRabbit em SKIPPED travou como "pendente"): qualquer um fora o SonarCloud
 # não bloqueia e sai na linha do ok como `pulou: <check>`; o do SonarCloud, pulado ou ausente, recusa com 4.
 # Repo without a SonarCloud project (`oute-sonar project` exits 5, a 404) needs no SonarCloud check: the rest of the CI still must pass.
 # A missing check with a project present, or any other answer from oute-sonar, still refuses with 4.
 cmd_premerge() {
-  local pr="" head="" base="" repo="" main round info st cur_head bref mg ci cur_base a v sonar sonar_rc
+  local pr="" head="" base="" repo="" main round info st cur_head bref mg mss ci cur_base a v sonar sonar_rc
   while [[ $# -gt 0 ]]; do
     a="$1"; v="${2:-}"
     case "$a" in
@@ -2242,14 +2245,17 @@ cmd_premerge() {
     [[ -n "$main" ]] || main="$(main_root "$PWD" || true)"
   fi
   [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher ou passe --repo)"
-  if ! info="$(cd "$main" && gh pr view "$pr" --json state,headRefOid,baseRefName,mergeable,statusCheckRollup 2>/dev/null)" || ! jq -e .state >/dev/null 2>&1 <<<"$info"; then
+  if ! info="$(cd "$main" && gh pr view "$pr" --json state,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup 2>/dev/null)" || ! jq -e .state >/dev/null 2>&1 <<<"$info"; then
     echo "premerge #$pr: sem resposta do gh"; return 6
   fi
   st="$(jq -r .state <<<"$info")"; cur_head="$(jq -r '.headRefOid // ""' <<<"$info")"
   bref="$(jq -r '.baseRefName // ""' <<<"$info")"; mg="$(jq -r '.mergeable // "UNKNOWN"' <<<"$info")"
+  mss="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$info")"
   if [[ "$st" != OPEN ]]; then echo "premerge #$pr: recusado, PR $st (não está aberto)"; return 5; fi
   if [[ "$mg" == CONFLICTING ]]; then echo "premerge #$pr: recusado, PR em conflito com a base"; return 5; fi
   if [[ "$mg" != MERGEABLE ]]; then echo "premerge #$pr: recusado, mergeable $mg (o GitHub ainda não calculou); repita em instantes"; return 5; fi
+  # BEHIND (#880): mergeable em ordem, mas o head está atrás da base; o gh pr merge recusaria depois ("not up to date")
+  if [[ "$mss" == BEHIND ]]; then echo "premerge #$pr: recusado, PR atrás da base (BEHIND): atualize o branch com a base"; return 7; fi
   if [[ -z "$cur_head" || "$cur_head" != "$head"* ]]; then
     echo "premerge #$pr: recusado, head mudou (auditado ${head:0:7}, atual ${cur_head:0:7})"; return 2
   fi

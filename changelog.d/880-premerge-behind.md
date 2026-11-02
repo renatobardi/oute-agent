@@ -1,0 +1,2 @@
+### Changed
+- **premerge recusa PR atrás da base** (#880). O `oute-swarm premerge` lê o `mergeStateStatus` do PR e recusa, com o código novo **7** e a linha "atualize o branch com a base", quando o head está atrás da base (`BEHIND`); até aqui ele devolvia 0 e o `gh pr merge` falhava depois ("not up to date"). PR em dia segue devolvendo 0. **Precisa de release** (`docker/oute-swarm` e `docker/swarm/merge.md` vão na imagem).
