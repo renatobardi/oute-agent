@@ -5,6 +5,8 @@
 # histórico gravado antes da coluna `oute_repo` aparece filtrado do mesmo jeito (migração da subida). Chama o app pelo ASGI
 # (tests/lib/studio_asgi.py) sobre um DuckDB de exemplo; sem servidor, sem rede e sem Docker.
 # As datas ficam depois de 2026-10-06 (o corte do acerto do histórico, #617), para valer a regra normal.
+# O relógio é fixo (#889): com o relógio real, um dia depois do último fato da amostra o alerta host_no_data entra na faixa
+# com a idade em segundos, e duas requisições da mesma página diferem quando a virada de um segundo cai entre elas.
 # Uso: tests/agent-studio-repo.test.sh   (sai != 0 se algum caso falhar)
 set -uo pipefail
 
@@ -40,6 +42,10 @@ ts = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=timezone.utc).timest
 D = "2026-11-01T"
 Q = "from=2026-11-01T00%3A00%3A00Z&to=2026-11-02T00%3A00%3A00Z"
 NONE = "(sem)"
+# 2 dias depois do último fato: fora do `lookback_hours` (24 h), o alerta sai sem idade; dentro das janelas `hours=168`
+NOW = ts("2026-11-03T12:00:00")
+time.time_ns = lambda: NOW
+time.time = lambda: NOW / SEC
 
 # Dois repositórios com fato na janela (alfa, beta), uma conversa sem repositório e um repositório (gama) só fora da janela.
 db = StudioDB(tmp, "r")
@@ -93,6 +99,8 @@ for p in PAGES:
 
 # ---- Todos = os números de hoje (sem o parâmetro e com ele em branco, a mesma página)
 check("Dashboard: Todos = 6 chamadas", calls(get(app, "/", Q)[1]) == 6)
+check("relógio fixo (#889): o host_no_data das páginas comparadas sai sem idade (nada na faixa muda entre duas requisições)",
+      all('data-alerta="host_no_data" data-host="oute-server" data-unit="seconds" data-value=""' in get(app, p, Q)[1] for p in PAGES))
 check("Dashboard: repo em branco = sem o parâmetro (mesma página)", all(get(app, p, Q + "&repo=")[1] == get(app, p, Q)[1] for p in PAGES))
 check("Uso: Todos = 6 chamadas", uso(get(app, "/uso", Q)[1]) == 6)
 check("Conversas: Todos = as 3 conversas da janela", ids(get(app, "/conversas", Q)[1]) == ["c-a1", "c-b1", "c-solta"])
@@ -277,5 +285,5 @@ fresh.close()
 PY
 grep -v '^ok   ' "$TMP/py.out" | grep -v '^FAIL' || true
 check_py_lines <(grep -E '^(ok   |FAIL )' "$TMP/py.out")
-check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 88
+check "o Python rodou todos os casos" test "$(grep -c -E '^(ok   |FAIL )' "$TMP/py.out")" = 89
 check_end
