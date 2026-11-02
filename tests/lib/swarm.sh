@@ -44,7 +44,8 @@ SH
 cat > "$BIN/gh" <<'SH'
 #!/usr/bin/env bash
 case "$1 ${2:-}" in
-  "pr list") cat "$FAKE/prs-$(basename "$PWD").json" 2>/dev/null || echo '[]' ;;
+  "pr list") [[ " $* " != *" --head "* || ! -e "$FAKE/head-fail" ]] || { echo "gh falso: falha pedida em --head" >&2; exit 1; }
+             cat "$FAKE/prs-$(basename "$PWD").json" 2>/dev/null || echo '[]' ;;
   "api graphql") oid=""; for a in "$@"; do [[ "$a" != oid=* ]] || oid="${a#oid=}"; done
                  echo "$(basename "$PWD") $oid" >> "$FAKE/gh.log"
                  [[ ! -e "$FAKE/checks-$oid.fail" ]] || { echo "gh falso: falha pedida" >&2; exit 1; }

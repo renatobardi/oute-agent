@@ -420,6 +420,7 @@ hook() {
   return 0
 }
 T0=1800000000
+TABS_DONE="fake-tabs done"
 
 # PR aberto sem mudança: nada aos 28 min, uma linha aos 31, nada aos 36 nem aos 62, de novo aos 152 (repete a cada 2 h
 # no máximo, OUTE_WATCH_PEND_REPEAT_S; antes repetia a cada 30 min e a mesma linha saiu 58 vezes, kaizen swarm-1027-0802)
@@ -463,7 +464,7 @@ check "muda: sai com o check vermelho, contado da mudança" [ "$(pend_events)" =
 # sessão done sem PR sai; PR mergeado com a sessão done, e sessão working sem PR, não são pendência
 CASE=pendsessao; round "$CASE"
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 2000))
 echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "sessão: done sem PR, parada, sai"                 [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: #7 foo: done sem PR" ]
@@ -471,7 +472,7 @@ check "sessão: done sem PR, parada, sai"                 [ "$(pend_events)" == 
 CASE=pendnada; round "$CASE"
 FAKE="$FAKE" "$BIN/fake-pr" "$A" MERGED
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 9000)); hook 3 $((T0 + 20000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 9000)); hook 3 $((T0 + 20000))
 echo : > "$FAKE/on-sleep-4"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "sem pendência: PR mergeado e sessão done com PR, nada" [ -z "$(pend_events)" ]
@@ -550,9 +551,9 @@ echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "L4 pergunta respondida: a pendência volta a sair, com o relógio de antes" [ "$(pend_events)" == "[pendencia] 1 parada(s) há 35 min ou mais, sem mudança: PR #12 aberto" ]
 
-# 874 (lição 3). Sessão parada cujo branch (na worktree <repo>-<slug>) tem PR aberto: sem `sem PR` e sem a pendência `done sem PR`,
-# mesmo que o nome do branch não leve o número da issue da sessão (o PR entra no evento como `PR #n open`)
-# brpr <estado> <nome do branch>: worktree da sessão 7-foo no branch dado, e o único PR do repo com esse branch no estado dado
+# 874 (lesson 3). A stopped session whose branch (in worktree <repo>-<slug>) has an open PR gets no `sem PR` and no `done sem PR`
+# pending line, even when the branch name does not carry the session's issue number (the event reads `PR #n open`)
+# brpr <state> <branch name>: worktree of session 7-foo on the given branch, and the only PR of the repo with that branch in that state
 brpr() {
   local estado="$1" branch="$2"
   git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
@@ -564,43 +565,56 @@ brpr() {
 CASE=brpr-aberto; round "$CASE"
 brpr OPEN fix/9-outro-nome
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000)); hook 3 $((T0 + 4000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 2000)); hook 3 $((T0 + 4000))
 echo : > "$FAKE/on-sleep-4"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
-check "branch com PR aberto: código 0"                   [ "$RC" -eq 0 ]
-check "branch com PR aberto: o evento da sessão cita o PR" logged "[sessao] #7 foo: done (PR #31 open)"
-check "branch com PR aberto: nenhum 'sem PR' no log"      bash -c '! grep -qF "sem PR" <<<"$1"' _ "$(log_events)"
-check "branch com PR aberto: nenhuma pendência 'done sem PR'" [ -z "$(pend_events)" ]
+check "open PR on branch: code 0"                           [ "$RC" -eq 0 ]
+check "open PR on branch: the session event cites the PR" logged "[sessao] #7 foo: done (PR #31 open)"
+check "open PR on branch: no 'sem PR' in the log"      bash -c '! grep -qF "sem PR" <<<"$1"' _ "$(log_events)"
+check "open PR on branch: no 'done sem PR' pending line" [ -z "$(pend_events)" ]
 
 CASE=brpr-nenhum; round "$CASE"
 brpr OPEN fix/9-outro-nome
 echo '[]' > "$FAKE/prs-repo.json"
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 2000))
 echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
-check "branch sem PR: continua 'sem PR' no evento"        logged "[sessao] #7 foo: done (sem PR)"
-check "branch sem PR: a pendência 'done sem PR' sai"      [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: #7 foo: done sem PR" ]
+check "no PR on branch: the event still says 'sem PR'"        logged "[sessao] #7 foo: done (sem PR)"
+check "no PR on branch: the 'done sem PR' pending line goes out"      [ "$(pend_events)" == "[pendencia] 1 parada(s) há 31 min ou mais, sem mudança: #7 foo: done sem PR" ]
 
 CASE=brpr-fechado; round "$CASE"
 brpr CLOSED fix/9-outro-nome
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 2000))
 echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
-check "branch com PR fechado: continua 'sem PR'"          logged "[sessao] #7 foo: done (sem PR)"
+check "closed PR on branch: still 'sem PR'"          logged "[sessao] #7 foo: done (sem PR)"
+
+# gh fails only on `pr list --head` (rc 2 of w_branch_pr): the first time, the session event does not go out as `sem PR` in that pass,
+# and goes out with the PR when gh answers again (the session state change is read again)
+CASE=brpr-ghfalha; round "$CASE"
+brpr OPEN fix/9-outro-nome
+touch "$FAKE/head-fail"
+clock "$T0"
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 200)) "rm -f \"\${FAKE:?}/head-fail\""
+echo : > "$FAKE/on-sleep-3"
+OUTE_WATCH_CLOCK="$FAKE/clock" watch
+check "gh fails on --head: the gh failure is warned"           logged "[aviso] gh falhou nesta passada; mantendo o último estado conhecido"
+check "gh fails on --head: no false 'sem PR'"         bash -c '! grep -qF "sem PR" <<<"$1"' _ "$(log_events)"
+check "gh fails on --head: the PR shows when gh is back" logged "[sessao] #7 foo: done (PR #31 open)"
 
 CASE=brpr-semworktree; round "$CASE"
 jq -n '[{number: 31, headRefName: "fix/9-outro-nome", state: "OPEN", createdAt: "2026-06-01T00:00:00Z", url: "u", statusCheckRollup: []}]' > "$FAKE/prs-repo.json"
-echo 'fake-tabs done' > "$FAKE/on-sleep-1"
+echo "$TABS_DONE" > "$FAKE/on-sleep-1"
 watch
-check "sem worktree da sessão: continua 'sem PR'"         logged "[sessao] #7 foo: done (sem PR)"
+check "no session worktree: still 'sem PR'"         logged "[sessao] #7 foo: done (sem PR)"
 
 # a sessão `done` sem PR também é item: a pergunta sobre "#7 foo" segura a pendência dela
 CASE=pendsessaopergunta; round "$CASE"
 echo "$(date -u +%FT%TZ) pergunta #7 foo: continuar a sessão? 1 sim 2 não" >> "$STATE/log"
 clock "$T0"
-hook 1 $((T0 + 100)) "fake-tabs done"; hook 2 $((T0 + 2000))
+hook 1 $((T0 + 100)) "$TABS_DONE"; hook 2 $((T0 + 2000))
 echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "L4 sessão com pergunta aberta: nada sai"           [ -z "$(pend_events)" ]
