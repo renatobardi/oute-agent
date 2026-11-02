@@ -4,6 +4,26 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versioname
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-11-02
+
+### Added
+- **Aviso de entrega parada no tray** (#893). Fila do dispatcher parada há 1 h (`OUTE_WATCH_DLV_STALL_S`) gera `[aviso]` sem modelo e o item `delivery` no bloco `attention`.
+
+### Changed
+- **Audit dispatch rule tightened** (#874). `oute-aidlc-qa-pr-audit` dispatches a workflow only when the workflow file and every script/action it runs are byte-equal to the base, asks the Bardi first when the run uses secrets or write permissions, and lists `gh workflow run` and `gh run view` in its command allowlist (auditor only). **Needs a release** (the skill is copied into the image).
+- **Plano B da auditoria aceita check pulado de revisor externo (#875)**. No §3 (`docker/swarm/auditoria.md`), CI verde no head passou a contar check pulado só de revisor externo (ex.: CodeRabbit) e com o SonarCloud pass, como o `oute-swarm premerge` e o `docker/swarm/merge.md` já fazem; pendente e falha continuam sem contar. **Precisa de release** (o `docker/swarm/auditoria.md` vai na imagem).
+- **premerge recusa PR atrás da base** (#880). O `oute-swarm premerge` lê o `mergeStateStatus` do PR e recusa, com o código novo **7** e a linha "atualize o branch com a base", quando o head está atrás da base (`BEHIND`); até aqui ele devolvia 0 e o `gh pr merge` falhava depois ("not up to date"). PR em dia segue devolvendo 0. **Precisa de release** (`docker/oute-swarm` e `docker/swarm/merge.md` vão na imagem).
+- **Fontes do revisor montadas antes do texto da etapa (#881)**. No §4.3 (`docker/swarm/pagina.md`), o passo 1 passou a ser gravar o arquivo de fontes, antes de escrever o texto (passo 2); cada afirmação do texto leva uma fonte do arquivo de fontes ou a marca `não verificado`. A remissão do §1 (`docker/swarm/triagem.md`) passou a apontar o passo 1. Para caber no teto, as três frases repetidas de "fato fora das fontes volta como achado" fundiram-se em uma. **Precisa de release** (o `docker/swarm/pagina.md` e o `docker/swarm/triagem.md` vão na imagem).
+- **Só o que pede ação acorda o dispatcher** (#893). `[sessao] working`, `[canal]` alheio ou sem título, `[subagente]`, `[aba]` de rotina e a volta de `gh` ou `herdr` ficam só no log, para a entrega religada não trazer de volta o gasto de tokens.
+
+### Fixed
+- **`oute-swarm watch` keeps the earlier session state when the branch PR lookup fails** (#874). The `sem PR` event no longer goes out falsely when `gh` does not answer; it is read again on the next pass. Cross-repository PRs are ignored. **Needs a release** (`docker/oute-swarm` is copied into the image).
+- **Watch registra a entrega adiada por pergunta pendente e o dispatcher lê o fim do log (#879)**. Com pergunta pendente ao Bardi (`pergunta` sem `resposta` no log da rodada), o `oute-swarm watch --deliver` não entrega eventos ao dispatcher e grava a razão no log (`watch entrega adiada: pergunta pendente (<n> evento(s) na fila)`), lida do estado da rodada em disco, não da tela do dispatcher; registrada a resposta, a fila sai na passada seguinte. No §3 (`docker/swarm/acompanhamento.md`), a lista do que adia a entrega ganhou a pergunta pendente e nova regra manda o dispatcher ler o fim do log ao receber qualquer mensagem do Bardi. Lição da rodada swarm-1031-1825 (kaizen). **Precisa de release** (o `docker/oute-swarm` e o `docker/swarm/acompanhamento.md` vão na imagem).
+- **Rótulo GMT do agent-studio segue a janela mostrada (#883)**. Os cabeçalhos com o fuso (`GMT-3`, `GMT-4`) passaram a usar o instante do início do período da tela, e não o dia de hoje: a janela de julho de 2025 em Nova York sai com `GMT-4` mesmo depois da virada do horário de verão. Antes, o teste `tests/agent-studio-periodo.test.sh` (caso "outro fuso") falhava em todo PR a partir de 2026-11-01. **Precisa de release** (o `docker/agent-studio/agent_studio/web.py` vai na imagem).
+- **O dispatcher volta a ser acordado depois de reinício do container** (#893). O `religar` do boot sobe o `watch` com `--deliver` nas rodadas com dispatcher e troca o watch vivo sem entrega; antes, todo deploy deixava as rodadas sem nenhum despertador, e elas só andavam quando o Bardi chamava. Pergunta pendente deixa de segurar a entrega da rodada (mantém só o recomeço de contexto). `[pendencia]` passa a cobrir sessão `idle` e `blocked` sem PR. **Precisa de release** (`docker/oute-swarm`, `docker/swarm/acompanhamento.md`, agent-studio).
+- **`tell` não entregue deixa rastro** (#884). Recusa por campo ocupado ou diálogo na tela gera um `[tell]` e entra na `[pendencia]` até outro `tell` entregar.
+- **`oute ssh <cmd> <args>` passa os argumentos ao container** (#895). Antes rodava só `<cmd>`: `oute ssh oute-sonar pr 894` mostrava o uso do `oute-sonar`. Agora os argumentos viram uma linha de shell, como no `ssh` comum (pipe funciona; argumento com espaço ou caractere especial vai citado). Entra com `git pull`, sem release.
+
 ## [0.8.11] - 2026-10-31
 
 ### Changed
