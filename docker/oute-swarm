@@ -55,7 +55,7 @@
 #                                                   mensagem) no campo do dispatcher parado; nunca com ele ocupado nem sem achar
 #                                                   o campo; o resto fica na fila (watch.queue) e tudo vai ao log
 #   oute-swarm religar                              (usado pelo boot do container, docker/entrypoint.sh, #821) um watch por rodada
-#                                                   aberta com sessão (sem fechada), sem --deliver: o dispatcher morreu com o container
+#                                                   aberta com sessão (sem fechada), com --deliver se a rodada tem dispatcher_pane (#893)
 #   oute-swarm list                                 rodadas (nome e id) com as abas abertas + worktrees de tarefa
 #   oute-swarm switch <n>-<slug>                   (usado pelo dispatcher, #759) sessão parada por cota esgotada (linha `[cota]` do watch):
 #                                                   reabre na próxima assinatura da cadeia da issue (oute-select --next-subscription), na
@@ -64,8 +64,9 @@
 #   oute-swarm busy [--repo <repo>]                 (usado pelo dispatcher, #605) issues com sessão aberta em OUTRA rodada do
 #                                                   repo: `<n> <nome> <id> <slug>`, uma por linha; a triagem não as oferece
 #   oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]   (usado pelo dispatcher, #752) conferência de antes do merge,
-#                                                   sem modelo: PR aberto e sem conflito, head = o auditado, base = a ensaiada, CI verde (só SUCCESS; pulado e neutro não contam) com
-#                                                   o SonarCloud Code Analysis (waived only when the repo has no SonarCloud project). Uma linha; saída 0 ok, 2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git
+#                                                   sem modelo: PR aberto, sem conflito e em dia com a base (BEHIND recusa), head = o auditado, base = a ensaiada, CI verde (só SUCCESS;
+#                                                   pulado e neutro não contam) com o SonarCloud Code Analysis (waived only when the repo has no SonarCloud project). Uma linha; saída 0 ok,
+#                                                   2 head, 3 base, 4 CI, 5 estado, 6 sem gh/git, 7 PR atrás da base (BEHIND)
 #   oute-swarm pr-comment <pr> --body-file <arquivo>  (usado pelo dispatcher, #829) confere as referências do texto com o
 #                                                   oute-refcheck e só então comenta o PR (gh pr comment); imprime a URL do
 #                                                   comentário. Saída 1: quebrada ou nao-abre, não comentou; 3 só não conferidas,
@@ -1150,16 +1151,18 @@ W_OLDQ='query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$
     ... on CheckRun{name conclusion startedAt completedAt} ... on StatusContext{context state startedAt: createdAt}}}}}}}}'
 W_INBOX="${OUTE_INBOX:-$HOME/inbox}" W_OUTBOX="${OUTE_OUTBOX:-$HOME/outbox}"
 declare -A W_PREV=() W_CUR=() W_IID=()
-W_DELIVER=0 W_DLV_WHY=""
+W_DELIVER=0 W_DLV_WHY="" W_DLV_SINCE=0 W_DLV_ALARM=0
 W_DLV_MAX=700   # corpo do grupo de eventos; com o prefixo, abaixo dos 800 caracteres que o Claude Code ainda mostra inteiros
 
 # evento: no stdout (monitor do dispatcher) e no log da rodada, com data/hora UTC (linha do tempo da retrospectiva)
+# w_ev <tipo> <texto> [log]: com `log`, o evento fica no log da rodada e não acorda o dispatcher (#893): cada despertar relê o
+# contexto inteiro, e o que não pede ação dele não entra na fila
 w_ev() {
   [[ -n "$2" ]] || return 0
   printf '%s [%s] %s\n' "$(date +%H:%M)" "$1" "$2"
   slog "$W_STATE" "$(date -u +%FT%TZ) watch [$1] $2"
   # --deliver (#213): o evento também entra na fila de entrega ao dispatcher (uma linha, sem controles)
-  if (( W_DELIVER )) && [[ "$1" != rodada ]]; then   # o fechamento da rodada é do próprio dispatcher: não vai à fila
+  if (( W_DELIVER )) && [[ "$1" != rodada && -z "${3:-}" ]]; then   # o fechamento da rodada é do próprio dispatcher: não vai à fila
     printf '%s\n' "$(date +%H:%M) [$1] $(printf '%s' "$2" | tr '\n\r\t' '   ' | tr -d '[:cntrl:]')" >> "$W_STATE/watch.queue"
   fi
   return 0
@@ -1229,12 +1232,23 @@ w_branch_pr() {
   local wt br res
   wt="$(basename "$repo")-$slug"
   br="$(git -C "$repo" worktree list --porcelain 2>/dev/null | awk -v w="$wt" '
-        /^worktree / { p = $0; sub(/.*\//, "", p); on = (p == w) } on && /^branch / { sub(/^branch refs\/heads\//, ""); print; exit }')" || br=""
+        /^worktree / { p = $0; sub(/.*\//, "", p); on = (p == w) } on && !f && /^branch / { sub(/^branch refs\/heads\//, ""); print; f = 1 }')" || br=""
   [[ -n "$br" ]] || return 1
-  res="$(cd "$repo" && gh pr list --head "$br" --state open --json number,headRefName,state 2>/dev/null)" || return 2
-  res="$(jq -r --arg b "$br" '[.[] | select(.headRefName == $b and .state == "OPEN") | .number] | first // empty' <<<"$res" 2>/dev/null)" || return 2
+  res="$(cd "$repo" && gh pr list --head "$br" --state open --json number,headRefName,state,isCrossRepository 2>/dev/null)" || return 2
+  res="$(jq -r --arg b "$br" '[.[] | select(.headRefName == $b and .state == "OPEN" and .isCrossRepository != true) | .number] | first // empty' <<<"$res" 2>/dev/null)" || return 2
   [[ -n "$res" ]] || return 1
   printf '%s' "$res"
+  return 0
+}
+
+# tell_nao_entregue <pasta da rodada>: uma linha por sessão cujo último `tell` foi recusado com a sessão parada (campo com texto,
+# campo fora da tela ou texto que não bateu), sem `tell … ok` depois (#884). `ocupada` fica de fora: o `[sessao]` dela avisa.
+tell_nao_entregue() {
+  local state="$1"
+  awk '{ l = $0; sub(/\t.*/, "", l); split(l, f, " ") }
+    f[2] == "tell" && f[4] == "ok" { delete p[f[3]] }
+    f[2] == "tell" && f[4] == "recusado:" && l ~ /tem texto|não encontrado na tela|não contém exatamente/ { p[f[3]] = 1 }
+    END { for (s in p) print s }' "$state/log" 2>/dev/null || true
   return 0
 }
 
@@ -1355,7 +1369,9 @@ w_snapshot() {
       brc=0; bn="$(w_branch_pr "${srepo[$slug]}" "$slug")" || brc=$?
       case "$brc" in
         0) W_CUR["brpr|$slug"]="$(w_pfx "${srepo[$slug]}" "$main")$bn" ;;
-        2) [[ -z "${W_PREV[brpr|$slug]:-}" ]] || W_CUR["brpr|$slug"]="${W_PREV[brpr|$slug]}"; W_CUR["falha|gh"]=1 ;;
+        2) # gh did not answer: keep the earlier answer and the earlier session state, so the change is read again next pass
+           [[ -z "${W_PREV[brpr|$slug]:-}" ]] || W_CUR["brpr|$slug"]="${W_PREV[brpr|$slug]}"
+           W_CUR["agent|$slug"]="${W_PREV[agent|$slug]:-}"; W_CUR["falha|gh"]=1 ;;
       esac
     done
   else
@@ -1374,10 +1390,14 @@ w_snapshot() {
     [[ -f "$f" ]] || continue
     rc="$(w_hdr "$f" rc)"; W_CUR["res|$(basename "$f" .out)"]="${rc:-?}"
   done
+  # `tell` que não chegou à sessão (#884): a chave fica até outro `tell` entregar ou a aba fechar
+  while read -r slug; do
+    [[ -z "$slug" ]] || is_closed "$state" "$slug" || W_CUR["telln|$slug"]=1
+  done < <(tell_nao_entregue "$state")
 }
 
 w_diff() {
-  local k new old kind a b slug num pr f t head names
+  local k new old kind a b slug num pr f t head names quiet
   local -A okpr=()
   while IFS= read -r k; do
     [[ -n "$k" ]] || continue
@@ -1387,9 +1407,10 @@ w_diff() {
     case "$kind" in
       tab)
         case "$old>$new" in
-          ">open") w_ev aba "$(w_label "$a"): aberta" ;;
-          "closed>open") w_ev aba "$(w_label "$a"): reaberta" ;;
-          "open>closed") w_ev aba "$(w_label "$a"): fechada$(is_closed "$W_STATE" "$a" || echo ' (sumiu do herdr, sem oute-swarm close)')" ;;
+          ">open") w_ev aba "$(w_label "$a"): aberta" log ;;
+          "closed>open") w_ev aba "$(w_label "$a"): reaberta" log ;;
+          "open>closed") if is_closed "$W_STATE" "$a"; then w_ev aba "$(w_label "$a"): fechada" log
+                         else w_ev aba "$(w_label "$a"): fechada (sumiu do herdr, sem oute-swarm close)"; fi ;;
         esac ;;
       agent)
         [[ -n "$new" ]] || continue   # aba fechada: a sessão sai junto (o evento é o da aba)
@@ -1401,7 +1422,7 @@ w_diff() {
         [[ -n "$pr" || -z "${W_CUR[brpr|$slug]:-}" ]] || pr="PR $(w_ref "${W_CUR[brpr|$slug]}") open"
         case "$new" in
           idle|done|blocked) w_ev sessao "$(w_label "$slug"): $new (${pr:-sem PR})" ;;
-          working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)"; fi ;;
+          working) if [[ "$old" =~ ^(idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): working (voltou a trabalhar)" log; fi ;;
           none) if [[ "$old" =~ ^(working|idle|done|blocked)$ ]]; then w_ev sessao "$(w_label "$slug"): sem agente na aba (o agente saiu?)"; fi ;;
         esac ;;
       cota)
@@ -1430,22 +1451,31 @@ w_diff() {
       ask)
         [[ "$new" == pending ]] || continue
         f="$W_OUTBOX/$a.sh"
-        w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como))$(w_ask_mark "$f") — aprovação no host: oute watch" ;;
+        t="$(w_ask_mark "$f")"
+        # pedido alheio, ou sem título (já saiu do outbox): nada a atribuir à rodada, não acorda o dispatcher (#893)
+        quiet=""
+        [[ "$t" != " (alheio)" && -n "$(w_hdr "$f" titulo)" ]] || quiet=log
+        w_ev canal "pedido pendente $a: $(w_hdr "$f" titulo) (agente $(w_hdr "$f" agente), $(w_hdr "$f" como))$t — aprovação no host: oute watch" "$quiet" ;;
       tellpend)
         [[ -n "$new" && -z "$old" ]] || continue
         w_ev tell "tell para $(w_label "$a") não entregue, campo de entrada ocupado (o Bardi digitando?); reenvie quando o campo estiver vazio (oute-swarm tell $a), o aviso sai do watch quando um tell dela entra ok" ;;
       sub)
-        if [[ -z "$old" && -n "$new" ]]; then w_ev subagente "subagente: $new"; fi ;;
+        if [[ -z "$old" && -n "$new" ]]; then w_ev subagente "subagente: $new" log; fi ;;
       res)
-        # rc≠0 (e recusa) sai sempre; rc 0 só de pedido da rodada (#873): verde de pedido alheio não diz nada a ela
+        # rc≠0 (e recusa) vai sempre ao log; rc 0 só de pedido da rodada (#873). O dispatcher só acorda com o da rodada (#893)
         [[ -n "$new" ]] || continue
-        if [[ "$new" != 0 ]] || w_res_nosso "$a"; then
-          if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host"
-          else w_ev canal "resultado $a: rc=$new (oute-inbox $a)"; fi
+        quiet=log
+        ! w_res_nosso "$a" || quiet=""
+        if [[ "$new" != 0 || -z "$quiet" ]]; then
+          if [[ "$new" == 126 ]] && grep -qs '^# recusado:' "$W_INBOX/$a.out"; then w_ev canal "pedido $a recusado no host" "$quiet"
+          else w_ev canal "resultado $a: rc=$new (oute-inbox $a)" "$quiet"; fi
         fi ;;
+      telln)
+        [[ -z "$old" && -n "$new" ]] || continue
+        w_ev tell "$(w_label "$a"): instrução não entregue (campo ocupado ou diálogo na tela); reenvie uma vez com oute-swarm tell" ;;
       falha)
         if [[ -n "$new" ]]; then w_ev aviso "$a falhou nesta passada; mantendo o último estado conhecido"
-        else w_ev aviso "$a respondendo de novo"; fi ;;
+        else w_ev aviso "$a respondendo de novo" log; fi ;;
     esac
   done < <(printf '%s\n' "${!W_CUR[@]}" "${!W_PREV[@]}" | sort -u \
              | awk -F'|' 'BEGIN { split("falha tab agent cota pr ci oldci merge ask res sub tellpend", o, " "); for (i in o) p[o[i]] = i }
@@ -1480,7 +1510,7 @@ w_check_merged_issues() {
   done
 }
 
-# pendência parada (#766, da #767): PR aberto, CI vermelho em PR aberto ou sessão `done` sem PR que ficam 30 minutos sem
+# pendência parada (#766, da #767): PR aberto, CI vermelho em PR aberto, sessão parada sem PR ou `tell` não entregue que ficam 30 minutos sem
 # mudar (OUTE_WATCH_STALL_S, em segundos, padrão 1800). Sem modelo: o dispatcher não acorda para conferir, e o `watch` entrega
 # uma linha só, `[pendencia]`, com tudo o que está parado. O estado de cada pendência é `pend|<id>` = `<estado>|<desde, epoch>`;
 # mudou o estado, o relógio recomeça. A linha sai uma vez e volta no máximo a cada 2 h (OUTE_WATCH_PEND_REPEAT_S, padrão 7200;
@@ -1530,11 +1560,14 @@ w_stalled() {
         [[ "${W_CUR[merge|$pr]:-}" != conflict ]] || st+=", em conflito"
         cur["pr|$pr"]="PR $(w_ref "$pr") $st"; refs["pr|$pr"]="$(w_ref "$pr")" ;;
       agent\|*)
-        [[ "${W_CUR[$k]}" == done && "${W_CUR[tab|${k#agent|}]:-}" == open ]] || continue
+        [[ "${W_CUR[$k]}" =~ ^(idle|done|blocked)$ && "${W_CUR[tab|${k#agent|}]:-}" == open ]] || continue
         slug="${k#agent|}"; iid="${W_IID[$slug]:-${slug%%-*}}"; has=0
         for id in "${!W_CUR[@]}"; do [[ "$id" == "pr|"*"|$iid" ]] && has=1; done
         [[ -z "${W_CUR[brpr|$slug]:-}" ]] || has=1   # PR aberto no branch da sessão (#874)
-        (( has )) || { cur["sessao|$slug"]="$(w_label "$slug"): done sem PR"; refs["sessao|$slug"]="$(w_ref "$iid")"; } ;;
+        (( has )) || { cur["sessao|$slug"]="$(w_label "$slug"): ${W_CUR[$k]} sem PR"; refs["sessao|$slug"]="$(w_ref "$iid")"; } ;;
+      telln\|*)
+        slug="${k#telln|}"; iid="${W_IID[$slug]:-${slug%%-*}}"
+        cur["tell|$slug"]="$(w_label "$slug"): tell não entregue"; refs["tell|$slug"]="$(w_ref "$iid")" ;;
     esac
   done
   last="${W_PREV[pendemit]:-0}"; [[ "$last" =~ ^[0-9]+$ ]] || last=0
@@ -1562,25 +1595,34 @@ w_stalled() {
 
 # entrega ao dispatcher (#213, watch --deliver): os eventos da fila (watch.queue) saem juntos, numa mensagem só, digitados
 # no campo do dispatcher (o pane do meta). Só com ele parado (idle/done), com o campo achado e vazio (nunca por cima do
-# que o Bardi está digitando, nem às cegas num diálogo) e sem pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825:
-# a resposta dele precisa chegar à conversa que perguntou). Qualquer outra situação adia: a fila fica e a próxima passada
-# tenta de novo. Cada motivo de adiamento vai ao log uma vez, até a situação mudar.
+# que o Bardi está digitando, nem às cegas num diálogo). Qualquer outra situação adia: a fila fica e a próxima passada
+# tenta de novo. Cada motivo de adiamento vai ao log uma vez, até a situação mudar. Pergunta pendente ao Bardi não adia
+# (#893): a resposta dele não passa pela fila, e segurar a fila pararia as outras sessões da rodada até ele responder.
+# Fila parada há OUTE_WATCH_DLV_STALL_S (padrão 3600) vira `[aviso]` só no log, que chega ao tray sem modelo (#893).
 w_dlv_wait() {
-  local why="$1"
+  local why="$1" now max
   if [[ "$why" != "$W_DLV_WHY" ]]; then
     slog "$W_STATE" "$(date -u +%FT%TZ) watch entrega adiada: $why ($(wc -l < "$W_STATE/watch.queue" | tr -d ' ') evento(s) na fila)"
     W_DLV_WHY="$why"
   fi
+  now="$(w_now)"; max="${OUTE_WATCH_DLV_STALL_S:-3600}"
+  (( W_DLV_SINCE )) || W_DLV_SINCE="$now"
+  if (( ! W_DLV_ALARM && now - W_DLV_SINCE >= max )); then
+    w_ev aviso "entrega ao dispatcher parada há $(( (now - W_DLV_SINCE) / 60 )) min: $why" log
+    W_DLV_ALARM=1
+  fi
+  return 0
+}
+
+w_dlv_clear() {
+  (( ! W_DLV_ALARM )) || w_ev aviso "entrega ao dispatcher de volta" log
+  W_DLV_WHY=""; W_DLV_SINCE=0; W_DLV_ALARM=0
   return 0
 }
 
 w_deliver() {
   local q="$W_STATE/watch.queue" pane agents agent st line body="" n=0 text sf field
-  if [[ ! -s "$q" ]]; then W_DLV_WHY=""; return 0; fi
-  # pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825): adia a entrega e grava a razão. Vem do log da rodada
-  # (`pergunta` sem `resposta`), não da tela do dispatcher, então o motivo aparece no log mesmo se o estado do pane
-  # não explicar a parada (como na rodada swarm-1031-1825, em que eventos ficaram 9h27 na fila sem linha de entrega)
-  [[ -z "$(pergunta_pendente "$W_STATE")" ]] || { w_dlv_wait "pergunta pendente"; return 0; }
+  if [[ ! -s "$q" ]]; then w_dlv_clear; return 0; fi
   pane="$(sed -n 's/^dispatcher_pane=//p' "$W_STATE/meta" | head -1)"
   agents="$(herdr agent list 2>&1)" || { w_dlv_wait "herdr agent list falhou"; return 0; }
   read -r agent st < <(jq -r --arg p "$pane" '[.. | objects | select(.pane_id? == $p and has("agent_status"))][0] | "\(.agent // "-") \(.agent_status // "-")"' <<<"$agents" 2>/dev/null || echo "- -")
@@ -1604,7 +1646,7 @@ w_deliver() {
   case "$sf" in
     0) slog "$W_STATE" "$(date -u +%FT%TZ) watch entrega ok: $n evento(s) ao dispatcher ($pane)"
        tail -n +"$((n + 1))" "$q" > "$q.tmp" && mv "$q.tmp" "$q"
-       W_DLV_WHY="" ;;
+       w_dlv_clear ;;
     1) w_dlv_wait "send-text falhou em $pane" ;;
     2) w_dlv_wait "send-keys enter falhou em $pane (texto digitado, sem Enter)" ;;
     4) w_dlv_wait "campo do dispatcher com texto (o Bardi digitando?)" ;;
@@ -1703,22 +1745,27 @@ cmd_watch() {
 }
 
 # religar (#821, L3): o container que reinicia leva junto os watches das rodadas abertas (são processos dele), e o boot não os
-# religava. Religa um watch por rodada aberta com sessão (`spawned`, sem `fechada`), sem --deliver: o dispatcher e a aba do
-# watch --deliver também morreram, então os eventos vão só ao log da rodada (e ao bucket, pelo oute-emit). Chamado pelo
+# religava. Religa um watch por rodada aberta com sessão (`spawned`, sem `fechada`). Com `dispatcher_pane` no meta, religa com
+# --deliver (#893): o restore do herdr traz o dispatcher de volta no mesmo pane, e sem a entrega ninguém mais o acorda; se ele
+# não voltou, a fila espera e o `[aviso]` de entrega parada sai. Watch vivo sem entrega é trocado. Chamado pelo
 # docker/entrypoint.sh depois do herdr server. A saída de cada watch vai para <rodada>/watch.out.
 cmd_religar() {
-  local d id pid cmd
+  local d id pid cmd pane
+  local -a args
   for d in "$STATE_ROOT"/*/; do
     d="${d%/}"; id="$(basename "$d")"
     round_open "$d" && [[ -s "$d/spawned" ]] || continue
     # watch vivo da rodada (watch.pid aponta para um `watch --round <id>` em execução): não troca por um sem --deliver (#821, achado 2)
     pid="$(cat "$d/watch.pid" 2>/dev/null || true)"
+    pane="$(sed -n 's/^dispatcher_pane=//p' "$d/meta" | head -1)"
     if [[ "$pid" =~ ^[0-9]+$ ]]; then
       cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
-      if [[ "$cmd" == *"watch --round $id "* ]]; then echo "watch já ativo, sem religar: $id"; continue; fi
+      if [[ "$cmd" == *"watch --round $id "* && ( -z "$pane" || "$cmd" == *" --deliver "* ) ]]; then echo "watch já ativo, sem religar: $id"; continue; fi
     fi
-    "$0" watch --round "$id" </dev/null >>"$d/watch.out" 2>&1 &
-    echo "watch religado: $id"
+    args=()
+    [[ -z "$pane" ]] || args=(--deliver)
+    "$0" watch --round "$id" ${args[@]+"${args[@]}"} </dev/null >>"$d/watch.out" 2>&1 &
+    if [[ -n "$pane" ]]; then echo "watch religado: $id"; else echo "watch religado, sem entrega (rodada sem dispatcher_pane): $id"; fi
   done
   return 0
 }
@@ -2235,13 +2282,15 @@ cmd_estado() {
 
 # oute-swarm premerge <pr> --head <sha> --base <sha> [--repo <repo>]: a conferência de antes do merge, sem modelo. Uma linha e
 # um código: 0 pode fazer merge; 2 head mudou; 3 base mudou; 4 CI não verde (ou sem o SonarCloud Code Analysis); 5 PR fechado,
-# mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam. Só leitura (gh pr view, git fetch).
+# mergeado, em conflito ou com `mergeable` ainda não calculado; 6 o gh ou o git não responderam; 7 PR atrás da base
+# (`mergeStateStatus` BEHIND: o gh pr merge recusaria com "not up to date"; a sessão atualiza o branch, #880).
+# Só leitura (gh pr view, git fetch).
 # Check SKIPPED/NEUTRAL não é pendente (kaizen swarm-1027-0802: CodeRabbit em SKIPPED travou como "pendente"): qualquer um fora o SonarCloud
 # não bloqueia e sai na linha do ok como `pulou: <check>`; o do SonarCloud, pulado ou ausente, recusa com 4.
 # Repo without a SonarCloud project (`oute-sonar project` exits 5, a 404) needs no SonarCloud check: the rest of the CI still must pass.
 # A missing check with a project present, or any other answer from oute-sonar, still refuses with 4.
 cmd_premerge() {
-  local pr="" head="" base="" repo="" main round info st cur_head bref mg ci cur_base a v sonar sonar_rc
+  local pr="" head="" base="" repo="" main round info st cur_head bref mg mss ci cur_base a v sonar sonar_rc
   while [[ $# -gt 0 ]]; do
     a="$1"; v="${2:-}"
     case "$a" in
@@ -2261,14 +2310,17 @@ cmd_premerge() {
     [[ -n "$main" ]] || main="$(main_root "$PWD" || true)"
   fi
   [[ -n "$main" ]] || die "repo não identificado (rode na worktree do dispatcher ou passe --repo)"
-  if ! info="$(cd "$main" && gh pr view "$pr" --json state,headRefOid,baseRefName,mergeable,statusCheckRollup 2>/dev/null)" || ! jq -e .state >/dev/null 2>&1 <<<"$info"; then
+  if ! info="$(cd "$main" && gh pr view "$pr" --json state,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup 2>/dev/null)" || ! jq -e .state >/dev/null 2>&1 <<<"$info"; then
     echo "premerge #$pr: sem resposta do gh"; return 6
   fi
   st="$(jq -r .state <<<"$info")"; cur_head="$(jq -r '.headRefOid // ""' <<<"$info")"
   bref="$(jq -r '.baseRefName // ""' <<<"$info")"; mg="$(jq -r '.mergeable // "UNKNOWN"' <<<"$info")"
+  mss="$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$info")"
   if [[ "$st" != OPEN ]]; then echo "premerge #$pr: recusado, PR $st (não está aberto)"; return 5; fi
   if [[ "$mg" == CONFLICTING ]]; then echo "premerge #$pr: recusado, PR em conflito com a base"; return 5; fi
   if [[ "$mg" != MERGEABLE ]]; then echo "premerge #$pr: recusado, mergeable $mg (o GitHub ainda não calculou); repita em instantes"; return 5; fi
+  # BEHIND (#880): mergeable em ordem, mas o head está atrás da base; o gh pr merge recusaria depois ("not up to date")
+  if [[ "$mss" == BEHIND ]]; then echo "premerge #$pr: recusado, PR atrás da base (BEHIND): atualize o branch com a base"; return 7; fi
   if [[ -z "$cur_head" || "$cur_head" != "$head"* ]]; then
     echo "premerge #$pr: recusado, head mudou (auditado ${head:0:7}, atual ${cur_head:0:7})"; return 2
   fi

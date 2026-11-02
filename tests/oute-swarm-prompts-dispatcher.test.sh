@@ -63,7 +63,7 @@ check "watch: roda sozinho na aba, sem o dispatcher armar nada (#761)" grep -qF 
 check "watch: não o rode e não escreva laço próprio (#761)" grep -qF '**não o rode e não escreva laço próprio**' "$FAKE/oute-task.all"
 check "watch: sem a ferramenta Monitor nem reinício (#761)" bash -c '! grep -qF -e "Monitor" -e "reinicie o mesmo comando" -e "timeout_ms" "$1"' _ "$FAKE/oute-task.all"
 check "watch: mensagem sem evento não repete a pergunta (#267)" grep -qF '**Mensagem sem evento novo não é motivo de pergunta:** não repita a pergunta pendente, as opções numeradas nem o estado da rodada' "$FAKE/oute-task.all"
-check "watch: aba caída, avisa o Bardi em uma linha (#761)" grep -qF 'avise o Bardi **em uma linha**' "$FAKE/oute-task.all"
+check "watch: fila parada chega ao Bardi pelo tray, sem o dispatcher (#893)" grep -qF 'Fila parada há 1 h chega ao Bardi pelo tray' "$FAKE/oute-task.all"
 check "watch: o tell --wait do Claude segue em run_in_background (#364)" grep -qF '`run_in_background`)' "$FAKE/oute-task.all"
 # merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
 check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.all"
@@ -257,7 +257,7 @@ check "587: §2: com reserve cota, confere o oute-quota do agente da reserva ant
 check "587: §2: janela de 5h acima de 80% pergunta ao Bardi antes de abrir, com opções numeradas" grep -qF 'Com a janela de 5h **acima de 80%**, não abra: pergunte ao Bardi, com opções numeradas, antes e não depois' "$D"
 check "587: §2: cota unknown não bloqueia, só avisa" grep -qF 'Cota `unknown` ou leitura que falhou não bloqueia: abra e avise o Bardi' "$D"
 check "587/752: §3: a conferência de antes do merge é o oute-swarm premerge, com o head auditado e a base ensaiada" grep -qF 'oute-swarm premerge <pr> --head <headRefOid auditado> --base <SHA da base ensaiada>' "$D"
-check "752: §3: os códigos de saída do premerge estão no prompt e só o 0 libera o merge" bash -c 'l="$(grep -F "Antes de executar (#752)" "$1")"; for t in "**0** pode fazer merge" "**2** head mudou" "**3** base mudou" "**4** CI não verde" "**5** PR fechado" "**6** o \`gh\` ou o \`git\` não responderam" "Só com o 0, rode \`gh pr merge"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "752: §3: os códigos de saída do premerge estão no prompt e só o 0 libera o merge" bash -c 'l="$(grep -F "Antes de executar (#752)" "$1")"; for t in "**0** pode fazer merge" "**2** head mudou" "**3** base mudou" "**4** CI não verde" "**5** PR fechado" "**6** o \`gh\` ou o \`git\` não responderam" "**7** PR atrás da base (\`BEHIND\`)" "Só com o 0, rode \`gh pr merge"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "752: §3: base que mudou manda repetir o ensaio antes de perguntar de novo" grep -qF 'base nova: repita o ensaio antes de perguntar de novo' "$D"
 check "752: §3: o merge só vem depois do premerge" bash -c 'c=$(grep -n "oute-swarm premerge <pr>" "$1" | head -n1 | cut -d: -f1); m=$(grep -n "gh pr merge <n> --squash --match-head-commit" "$1" | head -n1 | cut -d: -f1); [ -n "$c" ] && [ -n "$m" ] && [ "$c" -le "$m" ]' _ "$D"
 check "752: §3: o exemplo antigo de comparar a base à mão saiu do prompt" bash -c '! grep -qF "base_ensaiada=" "$1"' _ "$D"
@@ -311,9 +311,9 @@ check "766: §3: abas de rodada antiga não são cobertas e seguem com a opção
 check "766: §3: ação coberta por regra do prompt se executa sem pergunta" bash -c 'l="$(grep -F "Ação coberta por regra deste prompt se executa sem pergunta (#766)" "$1")"; for t in "Fechar a aba depois do merge" "de correção de CI ou de conflito" "abrir o elo seguinte" "ecoe numa linha" "fica para a decisão que a regra **reserva** ao Bardi"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: o registro da espera diz o que, de quem e desde quando, no log da rodada" bash -c 'l="$(grep -F "**Registro da espera (#766, #767).**" "$1")"; for t in "o que espera, de quem e desde quando" ">> ~/.oute/swarm/" "espera: " "sem registrar isso" "nasce desse registro"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: a conferência periódica é do watch, sem modelo, a cada 30 minutos" bash -c 'l="$(grep -F "**Pendência parada (#766, #767):**" "$1")"; for t in "é do \`oute-swarm watch\`, sem modelo" "30 minutos sem mudar" "[pendencia]" "Sem pendência parada, ele não emite nada" "não acorda sozinha para conferir"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
-check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[aviso]`, `[pendencia]` (abaixo)' "$D"
-# 879 (kaizen swarm-1031-1825): pergunta pendente adia a entrega com a razão no log; qualquer mensagem do Bardi manda ler o fim do log
-check "879: §3: pergunta pendente ao Bardi adia a entrega, com a razão no log" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "campo em uso ou pergunta pendente ao Bardi" "razão no log: \`watch entrega adiada: …\`"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[pendencia]` (abaixo)' "$D"
+# 893: pergunta pendente não segura a entrega; a razão de adiar vai ao log; qualquer mensagem do Bardi manda ler o fim do log
+check "893: §3: a entrega adiada traz a razão no log e pergunta pendente não adia" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "pergunta pendente não segura a entrega" "razão no log: \`watch entrega adiada: …\`" "ficam só no log"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "879: §3: ao receber qualquer mensagem do Bardi, lê o fim do log antes de responder" grep -qF '**Ao receber qualquer mensagem do Bardi, leia o fim do log antes de responder.**' "$D"
 guarda_check
 guarda_stop
