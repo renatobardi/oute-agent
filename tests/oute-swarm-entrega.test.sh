@@ -39,11 +39,12 @@ hook() {
 }
 pend_events() { log_events | grep -F '[pendencia]' || true; return 0; }
 T0=1800000000
+TABS_IDLE='fake-tabs idle'   # gancho: a aba do worker fica ociosa
 
 # ---------------------------------------------------------------- 1. o religar do boot volta entregando
 # rodada com dispatcher: o watch religado digita no campo dele
 CASE=religar-entrega; dround "$CASE"
-echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
+echo "$TABS_IDLE" > "$FAKE/on-sleep-1"
 rel_religar
 check "religar: anuncia a rodada"                         [ "$OUT" == "watch religado: swarm-test" ]
 check "religar: o watch da rodada termina"                fim_do_watch
@@ -76,7 +77,7 @@ kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
 # ---------------------------------------------------------------- 2. o que não acorda o dispatcher (só no log)
 # sessão que volta a trabalhar não acorda; a que para acorda
 CASE=fila-working; dround "$CASE"; ag working
-echo 'fake-tabs idle' > "$FAKE/on-sleep-1"; echo 'fake-tabs working' > "$FAKE/on-sleep-2"
+echo "$TABS_IDLE" > "$FAKE/on-sleep-1"; echo 'fake-tabs working' > "$FAKE/on-sleep-2"
 wd
 check "working: fica no log"                              grep -qF '[sessao] #7 foo: working (voltou a trabalhar)' "$STATE/log"
 check "working: não entra na fila"                        [ "$(grep -c 'voltou a trabalhar' "$STATE/watch.queue")" -eq 0 ]
@@ -129,7 +130,7 @@ done
 # fila parada por 1 h: uma linha [aviso], só no log; quando sai, a volta também vai ao log
 CASE=alarme; dround "$CASE"; ag working
 clock "$T0"
-hook 1 $((T0 + 60)) "fake-tabs idle"; hook 2 $((T0 + 3000)); hook 3 $((T0 + 3700)); hook 4 $((T0 + 3800)); hook 5 $((T0 + 3900)) 'jq ".result.agents[0].agent_status=\"idle\"" "$FAKE/agents.json" > "$FAKE/a" && mv "$FAKE/a" "$FAKE/agents.json"'
+hook 1 $((T0 + 60)) "$TABS_IDLE"; hook 2 $((T0 + 3000)); hook 3 $((T0 + 3700)); hook 4 $((T0 + 3800)); hook 5 $((T0 + 3900)) 'jq ".result.agents[0].agent_status=\"idle\"" "$FAKE/agents.json" > "$FAKE/a" && mv "$FAKE/a" "$FAKE/agents.json"'
 echo : > "$FAKE/on-sleep-6"
 OUTE_WATCH_CLOCK="$FAKE/clock" wd
 check "alarme: uma linha só, com o motivo"                [ "$(grep -cF 'watch [aviso] entrega ao dispatcher parada há 60 min: dispatcher ocupado (working)' "$STATE/log")" -eq 1 ]
@@ -139,7 +140,7 @@ check "alarme: a volta vai ao log"                        [ "$(grep -cF 'watch [
 # antes de 1 h, nada
 CASE=alarme-cedo; dround "$CASE"; ag working
 clock "$T0"
-hook 1 $((T0 + 60)) "fake-tabs idle"; hook 2 $((T0 + 3000))
+hook 1 $((T0 + 60)) "$TABS_IDLE"; hook 2 $((T0 + 3000))
 echo : > "$FAKE/on-sleep-3"
 OUTE_WATCH_CLOCK="$FAKE/clock" wd
 check "alarme: antes de 1 h, nada"                        [ "$(grep -c 'entrega ao dispatcher' "$STATE/log")" -eq 0 ]
@@ -151,7 +152,7 @@ cat > "$FAKE/on-sleep-1" <<SH
 echo $((T0 + 60)) > "\$FAKE/clock"
 printf '%s tell 7-foo recusado: o campo de entrada de #7 foo tem texto (o Bardi digitando?)\tmsg\n' "\$(date -u +%FT%TZ)" >> "\$STATE/log"
 SH
-hook 2 $((T0 + 120)); hook 3 $((T0 + 2000)) 'fake-tabs idle'; hook 4 $((T0 + 2100))
+hook 2 $((T0 + 120)); hook 3 $((T0 + 2000)) "$TABS_IDLE"; hook 4 $((T0 + 2100))
 echo : > "$FAKE/on-sleep-5"
 OUTE_WATCH_CLOCK="$FAKE/clock" watch
 check "tell recusado: um evento"                          [ "$(log_events | grep -cF '[tell] #7 foo: instrução não entregue')" -eq 1 ]
