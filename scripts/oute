@@ -2004,8 +2004,9 @@ case "${1:-}" in
   status)  "${COMPOSE[@]}" --profile "$STUDIO_PROFILE" --profile "$LLM_PROXY_PROFILE" ps; queue_status_line ;;
   attach)  exec ssh -p "$SSH_PORT" -t "oute@$SSH_HOST" 'herdr attach 2>/dev/null || herdr' ;;
   ssh)     # com comando: -t quando há terminal (CLIs em modo headless podem ler stdin se não for TTY e ficar esperando EOF)
+           # o ssh junta os argumentos com espaço, como linha de shell: a linha vai inteira, citada, ao bash -lc
            if [[ $# -gt 1 ]]; then t=(); [[ -t 0 ]] && t=(-t)
-             exec ssh ${t[@]+"${t[@]}"} -p "$SSH_PORT" "oute@$SSH_HOST" bash -lc "$(printf '%q ' "${@:2}")"
+             exec ssh ${t[@]+"${t[@]}"} -p "$SSH_PORT" "oute@$SSH_HOST" "bash -lc $(printf '%q' "${*:2}")"
            else exec ssh -p "$SSH_PORT" "oute@$SSH_HOST"; fi ;;
   shell)   exec docker exec -it oute-agent bash -l ;;
   sync-shared) mount_shared ;;
