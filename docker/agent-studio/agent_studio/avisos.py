@@ -8,6 +8,7 @@ valendo agora.
   `oute.swarm.session.closed` da sessão, tira o item.
 - `question`: a pergunta pendente do dispatcher (`decisions.pending`); some quando o Bardi responde.
 - `merged`: o PR foi mergeado (`oute.swarm.watch.pr`); fica enquanto a rodada está aberta.
+- `delivery`: o último aviso de entrega da rodada (`oute.swarm.watch.aviso`) diz que a fila do dispatcher parou (#893); a volta tira o item.
 
 Cada item traz o `id` por ocorrência (`rodada|tipo|chave|hora`): o tray avisa uma vez por `id`, e o `id` muda quando o fato volta
 (nova falha de CI depois de verde). O texto vem do tipo, nunca do corpo do evento; só o número do PR e o rótulo da sessão
@@ -20,6 +21,7 @@ from urllib.parse import quote
 from . import alerts as alerts_mod, decisions as decisions_mod, etapas as etapas_mod
 
 WATCH_PR, WATCH_CI, WATCH_SESSION = "oute.swarm.watch.pr", "oute.swarm.watch.ci", "oute.swarm.watch.sessao"
+WATCH_NOTICE = "oute.swarm.watch.aviso"
 SESSION_CLOSED = "oute.swarm.session.closed"
 LIMIT = 50  # itens na resposta (os mais novos); `total` diz quantos há
 
@@ -31,8 +33,8 @@ _CI_LINE = re.compile(r"^PR #(\d{1,9}) · ")
 _SESSION = re.compile(r"^#(\d{1,9}) ([a-z0-9][a-z0-9-]{0,80}): (idle|done|blocked|working|sem agente)\b")
 
 TITLES = {"ci": "CI reprovado no PR #%s", "blocked": "Sessão #%s parada (blocked)", "question": "Pergunta pendente do dispatcher",
-          "merged": "PR #%s mergeado"}
-_ORDER = {"question": 0, "blocked": 1, "ci": 2, "merged": 3}
+          "merged": "PR #%s mergeado", "delivery": "Entrega ao dispatcher parada"}
+_ORDER = {"question": 0, "delivery": 1, "blocked": 2, "ci": 3, "merged": 4}
 
 
 def _item(rnd, kind, key, t, at_ns, name):
@@ -45,6 +47,7 @@ def _item(rnd, kind, key, t, at_ns, name):
 def _round_items(events, rnd, at_ns, name):
     """Os itens de uma rodada, dos eventos dela em ordem de hora. O último fato de cada PR e de cada sessão decide."""
     pr, ci, sess = {}, {}, {}  # n -> (estado, t); n -> (fail?, t); rótulo -> (estado, t)
+    stalled = None  # hora do aviso de entrega parada que ainda vale
     for e in events:
         body, t = e["body"] or "", e["t"]
         if e["event_name"] == WATCH_PR and (m := _PR.match(body)):
@@ -58,7 +61,13 @@ def _round_items(events, rnd, at_ns, name):
             sess[f"{m.group(1)}-{m.group(2)}"] = (m.group(3), t)
         elif e["event_name"] == SESSION_CLOSED and e["slug"]:
             sess[e["slug"]] = ("fechada", t)
+        elif e["event_name"] == WATCH_NOTICE and body.startswith("entrega ao dispatcher parada"):
+            stalled = t
+        elif e["event_name"] == WATCH_NOTICE and body.startswith("entrega ao dispatcher de volta"):
+            stalled = None
     out = []
+    if stalled is not None:
+        out.append(_item(rnd, "delivery", "", stalled, at_ns, name))
     for n, (state, t) in pr.items():
         if state == "mergeado":
             out.append(_item(rnd, "merged", n, t, at_ns, name))
@@ -80,10 +89,10 @@ def pending(con, at_ns, cfg, limit=LIMIT):
         SELECT oute_swarm_round AS round, event_name, body, time_unix_nano AS t,
                json_extract_string(attributes, '$."oute.swarm.session"') AS slug
         FROM logs
-        WHERE event_name IN (?, ?, ?, ?) AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ? AND time_unix_nano >= ?
+        WHERE event_name IN (?, ?, ?, ?, ?) AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ? AND time_unix_nano >= ?
           AND oute_swarm_round NOT IN (SELECT oute_swarm_round FROM logs
                                         WHERE event_name = ? AND oute_swarm_round IS NOT NULL AND time_unix_nano <= ?)
-        ORDER BY t, event_name""", [WATCH_PR, WATCH_CI, WATCH_SESSION, SESSION_CLOSED, at_ns, lo,
+        ORDER BY t, event_name""", [WATCH_PR, WATCH_CI, WATCH_SESSION, WATCH_NOTICE, SESSION_CLOSED, at_ns, lo,
                                     decisions_mod.CLOSED, at_ns])
     by_round = {}
     for e in events:

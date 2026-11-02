@@ -63,7 +63,7 @@ check "watch: roda sozinho na aba, sem o dispatcher armar nada (#761)" grep -qF 
 check "watch: não o rode e não escreva laço próprio (#761)" grep -qF '**não o rode e não escreva laço próprio**' "$FAKE/oute-task.all"
 check "watch: sem a ferramenta Monitor nem reinício (#761)" bash -c '! grep -qF -e "Monitor" -e "reinicie o mesmo comando" -e "timeout_ms" "$1"' _ "$FAKE/oute-task.all"
 check "watch: mensagem sem evento não repete a pergunta (#267)" grep -qF '**Mensagem sem evento novo não é motivo de pergunta:** não repita a pergunta pendente, as opções numeradas nem o estado da rodada' "$FAKE/oute-task.all"
-check "watch: aba caída, avisa o Bardi em uma linha (#761)" grep -qF 'avise o Bardi **em uma linha**' "$FAKE/oute-task.all"
+check "watch: fila parada chega ao Bardi pelo tray, sem o dispatcher (#893)" grep -qF 'Fila parada há 1 h chega ao Bardi pelo tray' "$FAKE/oute-task.all"
 check "watch: o tell --wait do Claude segue em run_in_background (#364)" grep -qF '`run_in_background`)' "$FAKE/oute-task.all"
 # merges em série (#253): o próximo PR é conferido com a base nova antes de cada merge seguinte
 check "merges em série: passo no §3, depois de cada merge" grep -qF -- '- **Merges em série** (opção que mergeia mais de um PR): depois de cada merge e antes do próximo, confira o próximo PR junto com a base nova.' "$FAKE/oute-task.all"
@@ -311,9 +311,9 @@ check "766: §3: abas de rodada antiga não são cobertas e seguem com a opção
 check "766: §3: ação coberta por regra do prompt se executa sem pergunta" bash -c 'l="$(grep -F "Ação coberta por regra deste prompt se executa sem pergunta (#766)" "$1")"; for t in "Fechar a aba depois do merge" "de correção de CI ou de conflito" "abrir o elo seguinte" "ecoe numa linha" "fica para a decisão que a regra **reserva** ao Bardi"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: o registro da espera diz o que, de quem e desde quando, no log da rodada" bash -c 'l="$(grep -F "**Registro da espera (#766, #767).**" "$1")"; for t in "o que espera, de quem e desde quando" ">> ~/.oute/swarm/" "espera: " "sem registrar isso" "nasce desse registro"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "767: §3: a conferência periódica é do watch, sem modelo, a cada 30 minutos" bash -c 'l="$(grep -F "**Pendência parada (#766, #767):**" "$1")"; for t in "é do \`oute-swarm watch\`, sem modelo" "30 minutos sem mudar" "[pendencia]" "Sem pendência parada, ele não emite nada" "não acorda sozinha para conferir"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
-check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[aviso]`, `[pendencia]` (abaixo)' "$D"
-# 879 (kaizen swarm-1031-1825): pergunta pendente adia a entrega com a razão no log; qualquer mensagem do Bardi manda ler o fim do log
-check "879: §3: pergunta pendente ao Bardi adia a entrega, com a razão no log" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "campo em uso ou pergunta pendente ao Bardi" "razão no log: \`watch entrega adiada: …\`"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
+check "767: §3: o tipo [pendencia] está na lista de eventos do watch" grep -qF '`[pendencia]` (abaixo)' "$D"
+# 893: pergunta pendente não segura a entrega; a razão de adiar vai ao log; qualquer mensagem do Bardi manda ler o fim do log
+check "893: §3: a entrega adiada traz a razão no log e pergunta pendente não adia" bash -c 'l="$(grep -F "o \`watch\` não digita" "$1")"; for t in "pergunta pendente não segura a entrega" "razão no log: \`watch entrega adiada: …\`" "ficam só no log"; do grep -qF -e "$t" <<<"$l" || { echo "falta: $t" >&2; exit 1; }; done' _ "$D"
 check "879: §3: ao receber qualquer mensagem do Bardi, lê o fim do log antes de responder" grep -qF '**Ao receber qualquer mensagem do Bardi, leia o fim do log antes de responder.**' "$D"
 guarda_check
 guarda_stop
