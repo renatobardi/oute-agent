@@ -37,7 +37,7 @@ check "done: digita e envia"                             [ "$(texts)" -eq 1 -a "
 # ---------------------------------------------------------------- 2. dispatcher ocupado ou bloqueado: nunca digita
 for st in working blocked unknown; do
   CASE="dlv-$st"; dround "$CASE"; ag "$st"
-  echo 'fake-tabs idle' > "$FAKE/on-sleep-1"; echo 'fake-tabs working' > "$FAKE/on-sleep-2"
+  echo 'fake-tabs idle' > "$FAKE/on-sleep-1"; echo 'fake-tabs blocked' > "$FAKE/on-sleep-2"
   wd
   check "$st: nada digitado nem enviado"                 [ "$(texts)" -eq 0 -a "$(enters)" -eq 0 ]
   check "$st: os eventos esperam na fila (2)"            [ "$(qlen)" -eq 2 ]
@@ -48,14 +48,14 @@ done
 # ---------------------------------------------------------------- 3. eventos pendentes saem juntos, numa mensagem só
 CASE=dlv-grupo; dround "$CASE"; ag working
 echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
-echo 'fake-tabs working' > "$FAKE/on-sleep-2"
+echo 'fake-tabs blocked' > "$FAKE/on-sleep-2"
 cat > "$FAKE/on-sleep-3" <<SH
 jq -n '{result: {agents: [{pane_id: "w1:p0", agent: "claude", agent_status: "idle"}]}}' > "\$FAKE/agents.json"
 SH
 wd
 check "grupo: uma digitação só, com os dois eventos"     [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 ]
 check "grupo: '2 evento(s)' na mensagem"                 grep -qF '[watch swarm-test] 2 evento(s): ' <<<"$(sent)"
-check "grupo: os dois eventos, em ordem, separados por |" grep -qE '\[sessao\] #7 foo: idle \(sem PR\) \| [0-9]{2}:[0-9]{2} \[sessao\] #7 foo: working \(voltou a trabalhar\)$' <<<"$(sent)"
+check "grupo: os dois eventos, em ordem, separados por |" grep -qE '\[sessao\] #7 foo: idle \(sem PR\) \| [0-9]{2}:[0-9]{2} \[sessao\] #7 foo: blocked \(sem PR\)$' <<<"$(sent)"
 check "grupo: o log diz 2 eventos entregues"             grep -qE 'watch entrega ok: 2 evento\(s\)' <<<"$(dlog)"
 check "grupo: adiou enquanto ocupado, uma vez só"        [ "$(grep -cF 'entrega adiada: dispatcher ocupado (working)' <<<"$(dlog)")" -eq 1 ]
 check "grupo: o evento da mensagem não foi digitado antes" [ "$(texts)" -eq 1 ]
@@ -88,22 +88,14 @@ wd
 check "campo livre depois: entrega o evento guardado"    [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 ]
 check "campo livre depois: um adiamento no log"          [ "$(grep -cF 'entrega adiada: campo do dispatcher com texto' <<<"$(dlog)")" -eq 1 ]
 check "campo livre depois: e a entrega no log"           grep -qF 'watch entrega ok: 1 evento(s)' <<<"$(dlog)"
-# 4e. pergunta pendente ao Bardi (#879, kaizen swarm-1031-1825): com o dispatcher parado e o campo livre, o evento não é
-# entregue enquanto não houver `resposta` no log, e a razão (`watch entrega adiada: pergunta pendente`) vai ao log uma
-# vez; registrada a resposta, a fila sai na passada seguinte
+# 4e. pergunta pendente ao Bardi: a entrega segue (#893). A resposta dele não depende da fila, e segurar os eventos deixaria
+# CI vermelho, conflito e merge das outras sessões parados até ele responder
 CASE=dlv-pergunta; dround "$CASE"
 echo "$(date -u +%FT%TZ) pergunta mergear o PR #12? 1 sim 2 não" >> "$STATE/log"
 echo 'fake-tabs idle' > "$FAKE/on-sleep-1"
-cat > "$FAKE/on-sleep-2" <<'SH'
-cp "$FAKE/herdr.log" "$FAKE/herdr.durante" 2>/dev/null || : > "$FAKE/herdr.durante"
-echo "$(date -u +%FT%TZ) resposta" >> "$STATE/log"
-SH
-echo : > "$FAKE/on-sleep-3"
 wd
-check "pergunta pendente: nada digitado antes da resposta" bash -c '! grep -q "^pane send-text" "$1"' _ "$FAKE/herdr.durante"
-check "pergunta pendente: razão no log, uma vez"          [ "$(grep -cF 'watch entrega adiada: pergunta pendente (1 evento(s) na fila)' <<<"$(dlog)")" -eq 1 ]
-check "pergunta respondida: a fila sai depois"            [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 -a "$(qlen)" -eq 0 ]
-check "pergunta respondida: entrega ok no log"            grep -qF 'watch entrega ok: 1 evento(s)' <<<"$(dlog)"
+check "pergunta pendente: o evento é entregue"            [ "$(texts)" -eq 1 -a "$(enters)" -eq 1 -a "$(qlen)" -eq 0 ]
+check "pergunta pendente: sem adiamento no log"           [ "$(grep -cF 'entrega adiada: pergunta pendente' <<<"$(dlog)")" -eq 0 ]
 
 # ---------------------------------------------------------------- 5. campo que não fica com a mensagem exata: sem Enter
 CASE=dlv-nao-bate; dround "$CASE"

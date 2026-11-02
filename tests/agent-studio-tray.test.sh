@@ -115,6 +115,9 @@ logs = {"resourceLogs": [
     watch(NOW - 540, "ev-w10", "sessao", "swarm-1004-1000", "#9 baz: blocked (sem PR)"),
     event(NOW - 530, "oute.swarm.session.closed", "ev-w11", {"oute.swarm.round": "swarm-1004-1000", "oute.swarm.session": "9-baz"}),
     watch(NOW - 520, "ev-w12", "sessao", "swarm-1004-1000", "#10 <b>x: blocked (sem PR)"),
+    watch(NOW - 510, "ev-wd1", "aviso", "swarm-1004-1000", "entrega ao dispatcher parada há 60 min: dispatcher ocupado (working)"),
+    watch(NOW - 505, "ev-wd2", "aviso", "swarm-1004-1000", "entrega ao dispatcher de volta"),
+    watch(NOW - 500, "ev-wd3", "aviso", "swarm-1004-1000", "entrega ao dispatcher parada há 61 min: campo do dispatcher com texto"),
     watch(NOW - 1500, "ev-wb", "ci", "swarm-1004-0900", "PR #20 · test: fail"),
     event(NOW - 510, "oute.swarm.round.asked", "ev-w13", {"oute.swarm.round": "swarm-1004-1000"}, "Posso fazer merge do PR #13?")]),
   rl({"host.name": "oute-velho", "service.name": "oute"},
@@ -190,11 +193,11 @@ check "pedidos: o mesmo link da lista da tela"         grep -qF "href=\"$(jq -r 
 check "pedidos: o script não vem na resposta (só na página)" bash -c '! grep -q "systemctl" "$1"' _ "$TMP/tray.json"
 
 # etapas das rodadas abertas (#508)
-check "atenção: total e campos de cada item"           jqe '.attention | keys == ["rows", "total"] and .total == 5 and (.rows | length == 5) and (.rows | all(keys == ["age_seconds", "at", "id", "key", "kind", "name", "round", "title", "url"]))' <<<"$R"
-check "atenção: pergunta, sessão blocked, CI reprovado e merge; o resto não vale mais" jqe '[.attention.rows[] | .kind + ":" + (.key // "")] | sort == ["blocked:7", "ci:13", "merged:12", "merged:15", "question:"]' <<<"$R"
-check "atenção: títulos fixos por tipo"                jqe '[.attention.rows[].title] | sort == ["CI reprovado no PR #13", "PR #12 mergeado", "PR #15 mergeado", "Pergunta pendente do dispatcher", "Sessão #7 parada (blocked)"]' <<<"$R"
+check "atenção: total e campos de cada item"           jqe '.attention | keys == ["rows", "total"] and .total == 6 and (.rows | length == 6) and (.rows | all(keys == ["age_seconds", "at", "id", "key", "kind", "name", "round", "title", "url"]))' <<<"$R"
+check "atenção: pergunta, sessão blocked, CI reprovado e merge; o resto não vale mais" jqe '[.attention.rows[] | .kind + ":" + (.key // "")] | sort == ["blocked:7", "ci:13", "delivery:", "merged:12", "merged:15", "question:"]' <<<"$R"
+check "atenção: títulos fixos por tipo"                jqe '[.attention.rows[].title] | sort == ["CI reprovado no PR #13", "Entrega ao dispatcher parada", "PR #12 mergeado", "PR #15 mergeado", "Pergunta pendente do dispatcher", "Sessão #7 parada (blocked)"]' <<<"$R"
 check "atenção: nome amigável e link da página da rodada (só da rodada aberta)" jqe '.attention.rows | all(.round == "swarm-1004-1000" and .name == "Brave_Otter" and .url == "/rodada?id=swarm-1004-1000")' <<<"$R"
-check "atenção: id por ocorrência (rodada|tipo|chave|hora)" jqe '.attention.rows | all(.id | test("^swarm-1004-1000\\|(ci|blocked|question|merged)\\|[0-9]*\\|[0-9]+$"))' <<<"$R"
+check "atenção: id por ocorrência (rodada|tipo|chave|hora)" jqe '.attention.rows | all(.id | test("^swarm-1004-1000\\|(ci|blocked|question|merged|delivery)\\|[0-9]*\\|[0-9]+$"))' <<<"$R"
 check "atenção: idade em segundos do fato"             jqe '[.attention.rows[] | select(.kind == "ci") | .age_seconds][0] as $a | $a >= 700 and $a < 1000' <<<"$R"
 check "atenção: o texto do evento e o rótulo estranho nunca chegam" bash -c '! grep -qF -e "<b>" -e "baz" -e "verde" -e "PR #20" <<<"$1"' _ "$(jq -c .attention <<<"$R")"
 check "atenção: a pergunta vem como decisão pendente também" jqe '.decisions.total == 1 and .decisions.pending[0].round == "swarm-1004-1000"' <<<"$R"

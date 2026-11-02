@@ -615,7 +615,7 @@ cp "$STATE/meta" "$SEMSESS/"; : > "$SEMSESS/spawned"
 OUT="$(env -u OUTE_SWARM_ID -u OUTE_SWARM_REPO PATH="$BIN:$PATH" HOME="$H" FAKE="$FAKE" STATE="$STATE" FAKE_WATCH=1 \
        OUTE_INBOX="$TMP/$CASE/inbox" OUTE_OUTBOX="$TMP/$CASE/outbox" "$SWARM" religar 2>"$FAKE/err")"; RC=$?
 check "religar: código 0"                                 [ "$RC" -eq 0 ]
-check "religar: anuncia só a rodada aberta com sessão"     [ "$OUT" == "watch religado: swarm-test" ]
+check "religar: anuncia só a rodada aberta com sessão"     [ "$OUT" == "watch religado, sem entrega (rodada sem dispatcher_pane): swarm-test" ]
 for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
 check "religar: o watch da rodada aberta roda e termina"  logged "[rodada] swarm-test fechada (oute-swarm close --all); watch encerrado"
 check "religar: rodada fechada não ganha watch"           [ ! -e "$FECHADA/watch.out" -a ! -e "$FECHADA/watch.pid" ]
@@ -644,7 +644,7 @@ CASE=religarprefixo; round "$CASE"
 bash -c 'exec -a "oute-swarm watch --round swarm-test-2" sleep 60' </dev/null >/dev/null 2>&1 & LIVE=$!
 echo "$LIVE" > "$STATE/watch.pid"
 rel_religar
-check "religar: id que começa igual não pula a rodada"    [ "$OUT" == "watch religado: swarm-test" ]
+check "religar: id que começa igual não pula a rodada"    [ "$OUT" == "watch religado, sem entrega (rodada sem dispatcher_pane): swarm-test" ]
 kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null || true
 for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
 
@@ -652,7 +652,7 @@ CASE=religarmorto; round "$CASE"
 bash -c 'exit 0' & DEAD=$!; wait "$DEAD" 2>/dev/null || true
 echo "$DEAD" > "$STATE/watch.pid"
 rel_religar
-check "religar: watch.pid de processo morto religa a rodada" [ "$OUT" == "watch religado: swarm-test" ]
+check "religar: watch.pid de processo morto religa a rodada" [ "$OUT" == "watch religado, sem entrega (rodada sem dispatcher_pane): swarm-test" ]
 for _ in $(seq 1 100); do grep -qF 'watch encerrado' "$STATE/log" 2>/dev/null && break; /bin/sleep 0.1; done
 
 guarda_check
