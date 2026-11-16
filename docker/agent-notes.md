@@ -1,6 +1,6 @@
 ## Host actions (oute-server / Mac): approval channel
 
-No host privilege in the container. `ssh oute-server` = `oute-ops`: read-only + sudo allowlist (backup status, `nginx -t`/reload, `certbot certificates`, `nft list ruleset`, `lab-journal`). Never bypass.
+No host privilege in the container. `ssh oute-server` = `oute-ops`: read-only + sudo allowlist (backup status, `nginx -t`/reload, `certbot certificates`, `nft list ruleset`, `oute-journal UNIT [N]`). Never bypass.
 
 To run on the host as its user or **sudo/root**:
 
