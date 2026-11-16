@@ -97,7 +97,7 @@ Só o `agent` expõe porta ao host (bind 127.0.0.1). Logs stdout com rotação (
     - `systemctl reload nginx`;
     - `certbot certificates`;
     - `nft list ruleset`;
-    - o wrapper `lab-journal UNIT [N]`, com units fixas.
+    - o wrapper `oute-journal UNIT [N]`, com units fixas (era `lab-journal` até 2026-11-16, quando o oute-infra-ops assumiu o host).
   - **Deploy no host não entra no sudo:** ele copia conteúdo do repo, que o agente pode editar, e isso equivaleria a root.
   - `/home/ubuntu` (750) e `~/.oute` (700) ficam fechados; os arquivos de backup e as units passaram para root:root.
   - A chave antiga do container foi removida do `ubuntu`, e o sudoers `claude-readonly` também, os dois com backup.
